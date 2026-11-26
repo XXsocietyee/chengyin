@@ -1,14 +1,12 @@
 const app = getApp();
 const { readReducedMotion } = require('../utils/motion-preference.js');
 const storage = { get: key => wx.getStorageSync(key) || null, set: (key, value) => wx.setStorageSync(key, value) };
-let previousSession = null; let sessionEpoch = 0;
+function sessionToken() { return String((typeof app.getAuthorization === 'function' ? app.getAuthorization() : '') || (app.globalData && app.globalData.authorization) || ''); }
 function identity() {
-  const id = app.getUserID();
-  const token = app.getAuthorization();
-  const issued = wx.getStorageSync('authorization_issued_at') || '';
-  const session = JSON.stringify([id, token, issued]);
-  if (session !== previousSession) { previousSession = session; sessionEpoch++; }
-  return id && token && token !== app.DEV_TOKEN ? String(id) + ':' + issued + ':' + sessionEpoch : '';
+  const id = String(app.getUserID() || '');
+  const token = sessionToken();
+  if (!id || !token || token === 'dev-token' || token === app.DEV_TOKEN) return '';
+  return id + ':' + String(wx.getStorageSync('authorization_issued_at') || '') + ':' + token;
 }
 function options(page) {
   const send = app.sendRequest.bind(app);
