@@ -1351,6 +1351,12 @@ public class CommunityPostServiceImpl implements ICommunityPostService {
     @Override
     @Transactional
     public void applyAuditDecision(Long postId, boolean approved) {
+        applyAuditDecision(postId, approved, false);
+    }
+
+    @Override
+    @Transactional
+    public void applyAuditDecision(Long postId, boolean approved, boolean reportLane) {
         CommunityPost post = locked(postId);
         if (approved) requireGuidelineAck(post.getAuthorId(), post.getGuidelineVersionId());
         String action = approved ? CommunityPostLifecyclePolicy.ACTION_APPROVE : CommunityPostLifecyclePolicy.ACTION_REMOVE;
@@ -1359,7 +1365,7 @@ public class CommunityPostServiceImpl implements ICommunityPostService {
         if (mapper.transitionCas(postId, post.getLifecycle(), decision.getLifecycle(), post.getVersion(), approved ? now : null,
                 null, approved ? 1 : 0, approved ? 1 : 0, approved ? 1 : 0, now) != 1) stale();
         mapper.updateMediaReviewState(postId, approved ? "PASS" : "REJECTED", now);
-        if (!approved) recordReviewRejection(post, now);
+        if (!approved) recordReviewRejection(post, now, reportLane);
         if (approved) {
             // 人审通过 → audit_level=2;从待审(CHECKING)放出来的 = 先审后发。从 HIDDEN 复核放回的是先发后审,不改该标记。
             mapper.updateAuditMarks(postId, AUDIT_LEVEL_HUMAN,
@@ -1379,13 +1385,28 @@ public class CommunityPostServiceImpl implements ICommunityPostService {
         }
     }
 
+    @Override
+    @Transactional
+    public void dismissReportWithoutResurrecting(Long postId) {
+        CommunityPost post = locked(postId);
+        String life = post.getLifecycle();
+        if (CommunityPost.LIFECYCLE_DELETED.equals(life) || CommunityPost.LIFECYCLE_HIDDEN.equals(life)) return;
+        if (!CommunityPost.LIFECYCLE_REMOVED.equals(life)) return;
+        Map<String, Object> hit = mapper.selectActiveReportLaneRemoval(postId);
+        if (hit == null || hit.isEmpty()) return;
+        Object id = value(hit, "id");
+        if (!(id instanceof Number)) return;
+        Integer version = integer(value(hit, "version"));
+        Date now = new Date();
+        if (mapper.reverseEnforcement(((Number) id).longValue(), version == null ? 0 : version, now) != 1) return;
+        reconcileEnforcements(postId, now);
+    }
+
     /**
      * 人审驳回落一条 REMOVE 处置(AUDIT-G3-1):作者在「我的处置」里看得到,并能走既有申诉(按处置 id)。
-     * 原实现只把帖子改成 REMOVED,没有处置行,作者无从申诉。previous_lifecycle 是申诉撤销后要恢复到的状态:
-     * 待审(CHECKING)被驳回的,撤销即视为人审通过 → PUBLISHED;已公开/受限的恢复原状;HIDDEN 优先取既有处置基线。
-     * 系统操作人记 0,request_id 由帖子 id + 驳回前版本号构成,同一次驳回重放不会重复建行。
+     * previous_lifecycle 是申诉撤销后要恢复到的状态。举报通道另写 lane=REPORT,无效时只认这一条。
      */
-    private void recordReviewRejection(CommunityPost post, Date now) {
+    private void recordReviewRejection(CommunityPost post, Date now, boolean reportLane) {
         String from = post.getLifecycle();
         String restoreTo = CommunityPost.LIFECYCLE_LIMITED.equals(from) ? CommunityPost.LIFECYCLE_LIMITED
                 : CommunityPost.LIFECYCLE_HIDDEN.equals(from)
@@ -1393,6 +1414,7 @@ public class CommunityPostServiceImpl implements ICommunityPostService {
                 : CommunityPost.LIFECYCLE_PUBLISHED;
         Map<String, Object> evidence = new HashMap<>();
         evidence.put("source", "AUDIT_REVIEW_REJECTED");
+        evidence.put("lane", reportLane ? "REPORT" : "CONTENT");
         evidence.put("postId", post.getId());
         evidence.put("fromLifecycle", from);
         evidence.put("postVersion", post.getVersion());

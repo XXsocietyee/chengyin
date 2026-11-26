@@ -60,6 +60,19 @@ public class AppMediaReferenceGuard {
         return "media-asset:" + asset.get("id");
     }
 
+    /** 内容写入失败时带上字段名，调用方不用再猜是哪一张图。 */
+    public String requireAttachment(Long memberId, String reference, boolean publish, String field) {
+        try {
+            return requireAttachment(memberId, reference, publish);
+        } catch (ServiceException rejected) {
+            String label = field == null || field.isBlank() ? "媒体" : field;
+            String detail = rejected.getMessage();
+            if (detail == null || detail.isBlank()) detail = "媒体来源未经审核，请重新上传";
+            if (detail.startsWith(label + "：")) throw rejected;
+            throw new ServiceException(label + "：" + detail, rejected.getCode() == null ? 422 : rejected.getCode());
+        }
+    }
+
     public void requireMediaType(String reference, String mediaType) {
         if (reference == null || reference.isBlank()) return;
         Map<String, Object> asset = resolve(reference);

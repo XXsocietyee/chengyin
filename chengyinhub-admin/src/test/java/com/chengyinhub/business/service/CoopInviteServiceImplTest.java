@@ -43,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -2332,6 +2333,7 @@ class CoopInviteServiceImplTest {
         c.setToType("merchant"); // 非 club ⇒ resolveInviteeOwner 直接返 toId
         c.setToId(200L);
         when(coopInviteMapper.selectCoopInviteById(1L)).thenReturn(c);
+        when(coopInviteMapper.selectCoopInviteByIdForUpdate(1L)).thenReturn(c);
         when(coopPerkTemplateMapper.selectById(9L)).thenReturn(template(9L, 200L, new BigDecimal("88.00")));
 
         assertEquals(1, svc.attachPerks(1L, 200L, Collections.singletonList(9L)));
@@ -2352,6 +2354,7 @@ class CoopInviteServiceImplTest {
         c.setToType("merchant");
         c.setToId(200L);
         when(coopInviteMapper.selectCoopInviteById(1L)).thenReturn(c);
+        when(coopInviteMapper.selectCoopInviteByIdForUpdate(1L)).thenReturn(c);
         // 模板归属另一个商家 ⇒ 只用自己的模板
         when(coopPerkTemplateMapper.selectById(9L)).thenReturn(template(9L, 999L, new BigDecimal("88.00")));
 
@@ -2366,11 +2369,49 @@ class CoopInviteServiceImplTest {
         legacy.setToType("merchant");
         legacy.setToId(200L);
         when(coopInviteMapper.selectCoopInviteById(1L)).thenReturn(legacy);
+        when(coopInviteMapper.selectCoopInviteByIdForUpdate(1L)).thenReturn(legacy);
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> svc.attachPerks(1L, 200L, Collections.singletonList(9L)));
 
         assertTrue(error.getMessage().contains("仅供查看"));
+        verify(coopPerkMapper, never()).insertCoopPerk(any());
+    }
+
+    @Test
+    void attachPerks_refusesWhenNotAccepted() {
+        CoopInvite pending = inv(1L, 0);
+        when(coopInviteMapper.selectCoopInviteById(1L)).thenReturn(pending);
+        when(coopInviteMapper.selectCoopInviteByIdForUpdate(1L)).thenReturn(pending);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> svc.attachPerks(1L, 200L, Collections.singletonList(9L)));
+
+        assertTrue(error.getMessage().contains("合作状态已变化"));
+        verify(coopPerkMapper, never()).deleteByInviteId(any());
+        verify(coopPerkMapper, never()).insertCoopPerk(any());
+    }
+
+    @Test
+    void attachPerks_locksTopicBeforeInviteAndRefusesFrozenPrice() {
+        CoopInvite accepted = inv(1L, 1);
+        accepted.setTopicId(7L);
+        when(coopInviteMapper.selectCoopInviteById(1L)).thenReturn(accepted);
+        when(coopInviteMapper.selectCoopInviteByIdForUpdate(1L)).thenReturn(accepted);
+        CmsTopic priced = new CmsTopic();
+        priced.setId(7L);
+        priced.setLifecycle(TopicLifecycleState.PRICING.getCode());
+        when(cmsTopicMapper.selectCmsTopicByIdForUpdate(7L)).thenReturn(priced);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> svc.attachPerks(1L, 200L, Collections.singletonList(9L)));
+
+        assertTrue(error.getMessage().contains("阵容已锁定"));
+        org.mockito.InOrder order = inOrder(coopInviteMapper, cmsTopicMapper);
+        order.verify(coopInviteMapper).selectCoopInviteById(1L);
+        order.verify(cmsTopicMapper).selectCmsTopicByIdForUpdate(7L);
+        order.verify(coopInviteMapper).selectCoopInviteByIdForUpdate(1L);
+        verify(coopPerkMapper, never()).deleteByInviteId(any());
         verify(coopPerkMapper, never()).insertCoopPerk(any());
     }
 

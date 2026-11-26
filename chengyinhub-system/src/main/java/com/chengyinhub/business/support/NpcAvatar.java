@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>{@code px1:xxx} —— 小程序内置的预设像素形象，存编码不存图（见 utils/pixel-avatar-data.js）；</li>
  *   <li>{@code /profile/...} —— 老上传通道返回的站内相对路径；</li>
- *   <li>{@code http(s)://...} —— OSS 预签名 URL。</li>
+ *   <li>{@code media-asset:id} —— 已登记的审核附件。任意 http(s) 主机不算合法形态，须走附件守卫。</li>
  * </ul>
  * 其余一律拒:这个字段最终要进 img src，不校验就会变成任意字符串的垃圾场。
  */
@@ -25,12 +25,20 @@ public final class NpcAvatar {
         return avatar != null && PRESET.matcher(avatar).matches();
     }
 
-    /** 预设编码 / 站内相对路径 / http(s) URL 三种形态之一。 */
+    /**
+     * 预设编码、{@code /profile/} 站内路径，或已登记的 media-asset。
+     * 反斜杠先折成斜杠：{@code /\evil.example/a.png} 在图片组件里会变成协议相对的外站主机。
+     */
     public static boolean isAllowed(String avatar) {
         if (avatar == null || avatar.isEmpty()) {
             return false;
         }
-        return isPreset(avatar) || avatar.startsWith("/")
-                || avatar.startsWith("https://") || avatar.startsWith("http://");
+        String normalized = avatar.replace('\\', '/');
+        if (normalized.contains("//") || normalized.contains("://") || normalized.indexOf('@') >= 0
+                || normalized.indexOf(' ') >= 0 || normalized.contains("..")) {
+            return false;
+        }
+        return isPreset(avatar) || avatar.startsWith("/profile/")
+                || avatar.matches("media-asset:[1-9][0-9]{0,18}");
     }
 }

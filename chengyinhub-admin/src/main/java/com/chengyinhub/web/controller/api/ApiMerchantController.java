@@ -846,10 +846,7 @@ public class ApiMerchantController extends BaseController {
     }
 
     /**
-     * 保存门店形象。avatar 两种合法形态:
-     *   px1:xxx   小程序内置的预设像素形象,存编码不存图
-     *   图片 URL   商家上传的照片,已在端上处理成像素画再上传
-     * 其余一律拒 —— 不校验的话这个字段会变成任意字符串的垃圾场,而它最终要进 img src。
+     * 保存门店形象。预设 px1:xxx 直接保存。其余照片必须是当前商家已审核的附件，任意主机拒绝。
      */
     @PostMapping("/npc/save")
     public AjaxResult npcSave(@RequestBody NpcProfile body) {
@@ -883,9 +880,16 @@ public class ApiMerchantController extends BaseController {
         if (knowledge != null && knowledge.length() > NPC_KNOWLEDGE_MAX) {
             return error("店铺知识最多 " + NPC_KNOWLEDGE_MAX + " 个字");
         }
-        boolean preset = com.chengyinhub.business.support.NpcAvatar.isPreset(avatar);
         if (!com.chengyinhub.business.support.NpcAvatar.isAllowed(avatar)) {
             return error("形象格式不支持");
+        }
+        boolean preset = com.chengyinhub.business.support.NpcAvatar.isPreset(avatar);
+        if (!preset) {
+            try {
+                avatar = mediaReferences.requireAttachment(memberId, avatar, true);
+            } catch (ServiceException rejected) {
+                return error(rejected.getMessage() == null ? "形象格式不支持" : rejected.getMessage());
+            }
         }
 
         String secMsg = wxContentSecurityService.checkText(

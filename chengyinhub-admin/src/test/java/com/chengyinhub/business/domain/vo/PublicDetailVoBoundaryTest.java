@@ -137,6 +137,8 @@ class PublicDetailVoBoundaryTest {
         ViewCollaborators collaborator = new ViewCollaborators();
         collaborator.setMemberId(8L);
         collaborator.setMemberNickname("领队");
+        collaborator.setMemberAvatar("avatar.png");
+        collaborator.setMemberRealName("张三");
         collaborator.setMemberPhone("13900000000");
 
         MmsMerchant merchant = new MmsMerchant();
@@ -162,6 +164,10 @@ class PublicDetailVoBoundaryTest {
         String merchantJson = mapper.writeValueAsString(PublicMerchantRegistrationVO.from(registration));
         String memberJson = mapper.writeValueAsString(PublicMemberSummaryVO.from(member));
 
+        assertTrue(collaboratorJson.contains("领队"));
+        assertTrue(collaboratorJson.contains("avatar.png"));
+        assertFalse(collaboratorJson.contains("memberRealName"));
+        assertFalse(collaboratorJson.contains("张三"));
         assertFalse(collaboratorJson.contains("memberPhone"));
         assertFalse(merchantJson.contains("email"));
         assertFalse(merchantJson.contains("questionAnswer"));

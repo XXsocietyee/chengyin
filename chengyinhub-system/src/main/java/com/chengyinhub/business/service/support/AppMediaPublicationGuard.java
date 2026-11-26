@@ -165,29 +165,41 @@ public class AppMediaPublicationGuard {
             String value = (String) properties.getPropertyValue(field);
             if (value == null || value.trim().isEmpty()) continue;
             String safe;
-            if (AppMediaSchema.MEDIA_JSON_FIELDS.contains(field) || "journeyStoryJson".equals(field)) safe = requireJson(owner, value, publish, inherited);
+            if (AppMediaSchema.MEDIA_JSON_FIELDS.contains(field) || "journeyStoryJson".equals(field)) safe = requireJson(owner, value, publish, inherited, field);
             else if (AppMediaSchema.MULTI_MEDIA_FIELDS.contains(field))
-                safe = inheritedAsIs(value, inherited) ? value : references.requireAttachments(actor(owner), value, publish);
-            else safe = requireMedia(owner, value, publish, inherited);
+                safe = inheritedAsIs(value, inherited) ? value : requireNamedAttachments(owner, value, publish, field);
+            else safe = requireMedia(owner, value, publish, inherited, field);
             if (publish && AppMediaSchema.MULTI_MEDIA_FIELDS.contains(field)) requirePublicationReferences(safe);
             properties.setPropertyValue(field, safe);
         }
     }
 
     public String requireMedia(Long owner, String reference, boolean publish) {
-        return requireMedia(owner, reference, publish, Set.of());
+        return requireMedia(owner, reference, publish, Set.of(), null);
     }
 
-    private String requireMedia(Long owner, String reference, boolean publish, Set<String> inherited) {
+    private String requireMedia(Long owner, String reference, boolean publish, Set<String> inherited, String field) {
         if (reference == null || reference.trim().isEmpty()) return reference;
         if (inheritedAsIs(reference, inherited)) return reference;
         if (AppMediaSchema.isBundledMerchantGameAudio(reference)) return reference;
         if (com.chengyinhub.business.support.NpcAvatar.isPreset(reference)) return reference;
         if ((reference.startsWith("/images/") || reference.startsWith("/assets/"))
                 && !reference.contains("..") && !reference.contains("%")) return reference;
-        String safe = references.requireAttachment(actor(owner), reference, publish);
+        String safe = references.requireAttachment(actor(owner), reference, publish, field);
         if (publish) references.requirePublicationDeclaration(safe);
         return safe;
+    }
+
+    private String requireNamedAttachments(Long owner, String referencesText, boolean publish, String field) {
+        try {
+            return references.requireAttachments(actor(owner), referencesText, publish);
+        } catch (ServiceException rejected) {
+            String label = field == null || field.isBlank() ? "媒体" : field;
+            String detail = rejected.getMessage();
+            if (detail == null || detail.isBlank()) detail = "媒体来源未经审核，请重新上传";
+            if (detail.startsWith(label + "：")) throw rejected;
+            throw new ServiceException(label + "：" + detail, rejected.getCode() == null ? 422 : rejected.getCode());
+        }
     }
 
     private boolean inheritedAsIs(String reference, Set<String> inherited) {
@@ -200,16 +212,19 @@ public class AppMediaPublicationGuard {
     }
 
     public String requireJson(Long owner, String value, boolean publish) {
-        return requireJson(owner, value, publish, Set.of());
+        return requireJson(owner, value, publish, Set.of(), null);
     }
 
-    private String requireJson(Long owner, String value, boolean publish, Set<String> inherited) {
+    private String requireJson(Long owner, String value, boolean publish, Set<String> inherited, String field) {
         if (value == null || value.trim().isEmpty()) return value;
         try {
             JsonNode tree = json.readTree(value);
             JsonNode safe = requireTree(owner, tree, "", publish, inherited);
             return safe.equals(tree) ? value : json.writeValueAsString(safe);
-        } catch (IOException invalid) { throw new ServiceException("媒体配置格式不正确", 422); }
+        } catch (IOException invalid) {
+            String label = field == null || field.isBlank() ? "媒体" : field;
+            throw new ServiceException(label + "：媒体配置格式不正确", 422);
+        }
     }
 
     private JsonNode requireTree(Long owner, JsonNode value, String path, boolean publish, Set<String> inherited) {
@@ -221,7 +236,7 @@ public class AppMediaPublicationGuard {
             if (text.matches("media-asset:[1-9][0-9]{0,18}") || albumUrl || AppMediaSchema.MEDIA_FIELDS.contains(field)) {
                 if (text.trim().isEmpty()) return value;
                 if ((text.startsWith("/images/") || text.startsWith("/assets/")) && !text.contains("..") && !text.contains("%")) return value;
-                return json.getNodeFactory().textNode(requireMedia(owner, text, publish, inherited));
+                return json.getNodeFactory().textNode(requireMedia(owner, text, publish, inherited, albumUrl ? "imageUrl" : field));
             }
             // F-L5C-16: no URL review channel exists, so an external link cannot become public (fail-closed).
             if (publish && EXTERNAL_LINK.matcher(text).find()) throw new ServiceException("暂不支持外部链接，请删除后再发布", 422);

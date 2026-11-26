@@ -237,6 +237,48 @@ class CommunityPostAuditLevelTest {
         }
     }
 
+    @Test
+    void reportInvalidDoesNotResurrectAuthorDeletedOrWeChatHiddenPosts() {
+        when(mapper.selectByIdForUpdate(7L)).thenReturn(post("DELETED", 4));
+        service.dismissReportWithoutResurrecting(7L);
+        when(mapper.selectByIdForUpdate(7L)).thenReturn(post("HIDDEN", 4));
+        service.dismissReportWithoutResurrecting(7L);
+
+        verify(mapper, never()).reverseEnforcement(anyLong(), anyInt(), any());
+        verify(mapper, never()).reconcilePostEnforcementCas(anyLong(), anyInt(), anyString(), anyInt(), anyInt(), anyInt(), any());
+    }
+
+    @Test
+    void reportInvalidRestoresOnlyAReportLaneRemoval() {
+        when(mapper.selectByIdForUpdate(7L)).thenReturn(post("REMOVED", 4));
+        Map<String, Object> hit = new HashMap<>();
+        hit.put("id", 70L);
+        hit.put("version", 2);
+        hit.put("previous_lifecycle", "PUBLISHED");
+        when(mapper.selectActiveReportLaneRemoval(7L)).thenReturn(hit);
+        when(mapper.reverseEnforcement(70L, 2, any())).thenReturn(1);
+        when(mapper.selectActivePostEnforcementTypes(eq(7L), any())).thenReturn(Collections.emptyList());
+        when(mapper.selectEnforcementRestoreLifecycle(7L)).thenReturn("PUBLISHED");
+        when(mapper.reconcilePostEnforcementCas(eq(7L), eq(4), eq("PUBLISHED"), eq(1), eq(1), eq(1), any())).thenReturn(1);
+
+        service.dismissReportWithoutResurrecting(7L);
+
+        verify(mapper).reverseEnforcement(eq(70L), eq(2), any());
+        verify(mapper).reconcilePostEnforcementCas(eq(7L), eq(4), eq("PUBLISHED"), eq(1), eq(1), eq(1), any());
+    }
+
+    @Test
+    void reportRejectionStampsTheReportLane() {
+        when(mapper.selectByIdForUpdate(7L)).thenReturn(post("PUBLISHED", 4));
+
+        service.applyAuditDecision(7L, false, true);
+
+        verify(mapper).insertEnforcement(eq(7L), isNull(), eq("REMOVE"), eq("AUDIT_REVIEW_REJECTED"), eq(5L),
+                eq("REVIEW_REJECTED"), org.mockito.ArgumentMatchers.argThat(text ->
+                        text != null && text.contains("lane") && text.contains("REPORT")),
+                eq("PUBLISHED"), eq(0L), any(), isNull(), anyString(), any());
+    }
+
     private void publishWith(SafetyDecision decision, java.util.List<Map<String, Object>> media) {
         when(mapper.selectByIdForUpdate(7L)).thenReturn(post("DRAFT", 3));
         when(mapper.selectMediaForSafety(7L)).thenReturn(media);

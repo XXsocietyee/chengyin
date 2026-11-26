@@ -231,8 +231,8 @@ class AppMediaOutputConfigurationTest {
     }
 
 
-    /** M-1：对象存储缺配置时一张图签不出地址，只让这一项无图，同一响应里其他字段与可签的图照常输出。 */
-    @Test void oneUnsignableImageDegradesToNoImageInsteadOfFailingTheWholeResponse() throws Exception {
+    /** 玩家读路径：已登记媒体签不出地址时保留原引用，不把这一项清空；其余字段照常输出。 */
+    @Test void approvedMediaStaysPresentWhenSigningFails() throws Exception {
         when(guard.visibleUrl(eq("media-asset:60"), isNull()))
                 .thenThrow(new IllegalStateException("对象存储配置缺失: CHENGYIN_OSS_BUCKET_NAME"));
         com.chengyinhub.common.core.domain.AjaxResult result = com.chengyinhub.common.core.domain.AjaxResult.success();
@@ -244,7 +244,7 @@ class AppMediaOutputConfigurationTest {
         assertEquals("测试商家", out.path("data").path("merchantName").asText());
         assertEquals("https://real/upload/approved?signature=stable", out.path("data").path("logo").asText());
         assertEquals("第一项", out.path("data").path("projects").get(0).path("title").asText());
-        assertEquals("", out.path("data").path("projects").get(0).path("imgUrl").asText());
+        assertEquals("media-asset:60", out.path("data").path("projects").get(0).path("imgUrl").asText());
         assertEquals("https://real/upload/approved?signature=stable", out.path("data").path("projects").get(1).path("imgUrl").asText());
     }
 }

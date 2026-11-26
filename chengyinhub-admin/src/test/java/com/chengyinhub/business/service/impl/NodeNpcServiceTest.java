@@ -311,6 +311,12 @@ class NodeNpcServiceTest {
         assertEquals("形象格式不支持",
                 assertThrows(IllegalStateException.class,
                         () -> service.save(ME, NODE, draft("阿福", "javascript:alert(1)", null), OPENID)).getMessage());
+        assertEquals("形象格式不支持",
+                assertThrows(IllegalStateException.class,
+                        () -> service.save(ME, NODE, draft("阿福", "https://evil.example/a.png", null), OPENID)).getMessage());
+        assertEquals("形象格式不支持",
+                assertThrows(IllegalStateException.class,
+                        () -> service.save(ME, NODE, draft("阿福", "/\\evil.example/a.png", null), OPENID)).getMessage());
 
         assertEquals("台词最多 255 个字",
                 assertThrows(IllegalStateException.class,
@@ -342,7 +348,7 @@ class NodeNpcServiceTest {
         }).when(mapper).insertNodeNpc(any(NpcProfile.class));
 
         NpcProfile saved = service.save(ME, NODE,
-                draft("  阿福  ", "https://oss.example.com/a.png", "  欢迎来店里  "), OPENID);
+                draft("  阿福  ", "/profile/upload/a.png", "  欢迎来店里  "), OPENID);
 
         ArgumentCaptor<NpcProfile> cap = ArgumentCaptor.forClass(NpcProfile.class);
         verify(mapper).insertNodeNpc(cap.capture());
@@ -356,7 +362,7 @@ class NodeNpcServiceTest {
         assertEquals("", inserted.getPersona(), "persona NOT NULL,店铺/节点 NPC 不用人设提示词");
         assertEquals(555L, saved.getId(), "返回体要带自增主键,前端才能继续配声音");
         verify(wxSec).submitMediaCheckOne(IWxContentSecurityService.BIZ_TYPE_NODE_NPC, 555L,
-                "https://oss.example.com/a.png", OPENID);
+                "/profile/upload/a.png", OPENID);
     }
 
     @Test
@@ -385,7 +391,7 @@ class NodeNpcServiceTest {
         when(mapper.updateNodeNpc(any(NpcProfile.class))).thenReturn(1);
 
         NpcProfile saved = service.save(ME, NODE,
-                draft("阿福", "https://oss.example.com/b.png", "新台词"), OPENID);
+                draft("阿福", "/profile/upload/b.png", "新台词"), OPENID);
 
         ArgumentCaptor<NpcProfile> cap = ArgumentCaptor.forClass(NpcProfile.class);
         verify(mapper).updateNodeNpc(cap.capture());
@@ -398,7 +404,7 @@ class NodeNpcServiceTest {
         assertEquals(Integer.valueOf(0), saved.getEnabled());
         assertEquals(Integer.valueOf(0), saved.getAuditStatus());
         verify(wxSec).submitMediaCheckOne(IWxContentSecurityService.BIZ_TYPE_NODE_NPC, 555L,
-                "https://oss.example.com/b.png", OPENID);
+                "/profile/upload/b.png", OPENID);
     }
 
     /** 在架的行正常编辑维持先发后审:不写 audit_status/enabled(文本同步送检、图片异步送检)。 */

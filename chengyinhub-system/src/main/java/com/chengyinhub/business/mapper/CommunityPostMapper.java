@@ -288,6 +288,8 @@ public interface CommunityPostMapper {
                            @Param("now") Date now);
     List<String> selectActivePostEnforcementTypes(@Param("postId") Long postId, @Param("now") Date now);
     String selectActiveEnforcementBaseline(@Param("postId") Long postId, @Param("now") Date now);
+
+    Map<String, Object> selectActiveReportLaneRemoval(@Param("postId") Long postId);
     String selectEnforcementRestoreLifecycle(@Param("postId") Long postId);
     List<Long> selectEnforcementBoundaryPostIds(@Param("now") Date now, @Param("limit") int limit);
     int activateDueEnforcements(@Param("postId") Long postId, @Param("now") Date now);

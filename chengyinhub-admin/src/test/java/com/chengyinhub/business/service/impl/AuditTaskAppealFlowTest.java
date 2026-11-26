@@ -115,6 +115,34 @@ class AuditTaskAppealFlowTest {
         assertEquals(Integer.valueOf(0), post.getValue().getDelFlag(), "申诉成立应恢复内容(delFlag=0)");
     }
 
+    @Test
+    void reportDismissRestoresOnlyTheReportLane() {
+        AuditTask report = task(11L, AuditTask.STATUS_PENDING);
+        report.setSourceType("report");
+        when(auditTaskMapper.selectAuditTaskById(11L)).thenReturn(report);
+        stubUpdateRows(1);
+
+        svc.review(11L, 66L, decision(AuditTask.STATUS_APPROVED));
+
+        verify(clubPostService).restoreReportLane(900L);
+        verify(clubPostService, never()).updateClubPost(any());
+    }
+
+    @Test
+    void reportRejectHidesOnlyWhileThePostIsStillUp() {
+        AuditTask report = task(12L, AuditTask.STATUS_PENDING);
+        report.setSourceType("report");
+        when(auditTaskMapper.selectAuditTaskById(12L)).thenReturn(report);
+        stubUpdateRows(1);
+        AuditReviewDTO decision = decision(AuditTask.STATUS_REJECTED);
+        decision.setReasonText("举报成立");
+
+        svc.review(12L, 66L, decision);
+
+        verify(clubPostService).hideByReportLane(900L);
+        verify(clubPostService, never()).deleteClubPostById(anyLong());
+    }
+
     // ---------- 复核终裁:维持违规 → 下架 ----------
 
     @Test

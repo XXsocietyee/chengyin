@@ -38,8 +38,14 @@ public interface ClubPostMapper
                         @Param("expectedVersion") int expectedVersion,
                         @Param("updateTime") Date updateTime);
 
-    /** 软删 */
+    /** 软删，并记成作者/内容安全这条隐藏，避免举报无效把它捞回来。 */
     public int deleteClubPostById(Long id);
+
+    /** 仅当帖子仍在架时，由举报成立把它标成 REPORT 隐藏。 */
+    int hideClubPostByReportLane(Long id);
+
+    /** 只恢复本举报通道藏起来的帖。作者删除和微信下架的行对不上条件。 */
+    int restoreClubPostReportLane(Long id);
 
     /** 点赞数 +delta（原子） */
     public int incrementLikeCount(@Param("id") Long id, @Param("delta") int delta);

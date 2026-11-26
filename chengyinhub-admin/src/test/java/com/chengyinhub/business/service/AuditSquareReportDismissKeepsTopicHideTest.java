@@ -103,6 +103,17 @@ class AuditSquareReportDismissKeepsTopicHideTest {
         verify(squareService, never()).updateUmsCreativeSquare(any());
     }
 
+    @Test
+    void dismissedReportDoesNotResurrectAuthorDeletedPost() {
+        task.setSourceType("report");
+        current.setStatus(0);
+        current.setDelFlag(2);
+        AuditReviewDTO decision = new AuditReviewDTO();
+        decision.setStatus(AuditTask.STATUS_APPROVED);
+        service.review(3L, 8L, decision);
+        verify(squareService, never()).updateUmsCreativeSquare(any());
+    }
+
     /** 门禁/后台送审的安全复核单通过 = 针对内容本身的人工复核,误判可以由它恢复公开。 */
     @Test
     void approvedSafetyReviewStillRestoresTakenDownPost() {

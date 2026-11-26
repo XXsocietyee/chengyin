@@ -83,6 +83,7 @@ class ActivityDeletePayWindowTest {
         a.setMemberId(ME);
         a.setDelFlag(0);
         when(activityMapper.selectCmsActivityById(ACTIVITY)).thenReturn(a);
+        when(activityMapper.selectCmsActivityByIdForUpdate(ACTIVITY)).thenReturn(a);
         when(activityMapper.updateCmsActivity(ArgumentMatchers.any())).thenReturn(1);
     }
 
@@ -116,6 +117,20 @@ class ActivityDeletePayWindowTest {
         assertEquals(500, ((Integer) r.get("code")).intValue(), "有待支付单必须拒删");
         assertTrue(String.valueOf(r.get("msg")).contains("待支付"),
                 "得指明是待支付这道闸拦的。实际:" + r.get("msg"));
+        verify(activityMapper).selectCmsActivityByIdForUpdate(ACTIVITY);
+        verify(activityMapper, never()).updateCmsActivity(any());
+    }
+
+    /** 支付中(payment_status=1)与待支付同一开卖口径，锁行后拒删。 */
+    @Test
+    void payingOrder_cannotDelete() {
+        givenRegistrationRows(1, Collections.singletonList(new CmsRegistration()));
+
+        AjaxResult r = delete();
+
+        assertEquals(500, ((Integer) r.get("code")).intValue(), "支付中必须拒删");
+        assertTrue(String.valueOf(r.get("msg")).contains("待支付"), "实际:" + r.get("msg"));
+        verify(activityMapper).selectCmsActivityByIdForUpdate(ACTIVITY);
         verify(activityMapper, never()).updateCmsActivity(any());
     }
 
@@ -163,6 +178,7 @@ class ActivityDeletePayWindowTest {
         AjaxResult r = delete();
 
         assertEquals(200, ((Integer) r.get("code")).intValue(), "实际:" + r.get("msg"));
+        verify(activityMapper).selectCmsActivityByIdForUpdate(ACTIVITY);
         verify(activityMapper).updateCmsActivity(any());
     }
 

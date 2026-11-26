@@ -129,6 +129,13 @@ class AppMediaPublicationGuardTest {
         verify(templates).selectCmsMemberTemplateById(99L);
         verifyNoInteractions(assets);
     }
+    @Test void unresolvedMediaFailsTheWriteAndNamesTheField() {
+        CmsMemberTemplate current = new CmsMemberTemplate();
+        current.setImgUrl("https://evil.example/a.jpg");
+        ServiceException error = assertThrows(ServiceException.class, () -> guard.requireTemplate(9L, current, true));
+        assertTrue(error.getMessage().contains("imgUrl"));
+        assertEquals("https://evil.example/a.jpg", current.getImgUrl());
+    }
     @Test void staleMediaReferenceCannotBecomePublicJustBecauseTheBusinessReviewIsApproved() {
         CmsMemberTemplate current=new CmsMemberTemplate();current.setStoryImg("https://unregistered/image.jpg");
         assertThrows(ServiceException.class,()->guard.requireTemplate(9L,current,true));

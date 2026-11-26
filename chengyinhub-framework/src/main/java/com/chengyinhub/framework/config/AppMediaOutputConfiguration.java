@@ -163,9 +163,13 @@ public class AppMediaOutputConfiguration {
         try {
             safe = media.visibleUrl(reference, viewer);
         } catch (RuntimeException unresolvable) {
-            // M-1：一张图签不出地址（如对象存储未配置）只让这一项无图，不能让整条响应写 JSON 失败。
-            log.warn("媒体引用无法解析，按无图输出: {} ({})", reference, unresolvable.getMessage());
-            safe = "";
+            if (reference != null && reference.matches("media-asset:[1-9][0-9]{0,18}")) {
+                log.warn("已登记媒体暂时无法签名，保留原引用: {} ({})", reference, unresolvable.getMessage());
+                safe = reference;
+            } else {
+                log.warn("媒体引用无法解析，按无图输出: {} ({})", reference, unresolvable.getMessage());
+                safe = "";
+            }
         }
         if (safe == null) safe = "";
         if (cache != null) {

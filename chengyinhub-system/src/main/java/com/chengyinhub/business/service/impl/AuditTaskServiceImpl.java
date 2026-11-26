@@ -2125,7 +2125,14 @@ public class AuditTaskServiceImpl implements IAuditTaskService {
         }
         try {
             if (AuditTask.BIZ_COMMUNITY_POST.equals(bizType)) {
-                communityPostServiceProvider.getObject().applyAuditDecision(bizId, up);
+                boolean reportLane = SOURCE_REPORT.equals(task.getSourceType());
+                if (up && reportLane) {
+                    communityPostServiceProvider.getObject().dismissReportWithoutResurrecting(bizId);
+                } else if (reportLane) {
+                    communityPostServiceProvider.getObject().applyAuditDecision(bizId, false, true);
+                } else {
+                    communityPostServiceProvider.getObject().applyAuditDecision(bizId, up);
+                }
             } else if (AuditTask.BIZ_COMMUNITY_POST_COMMENT.equals(bizType)) {
                 communityPostServiceProvider.getObject().applyCommentAuditDecision(bizId, up);
             } else if (AuditTask.BIZ_SQUARE.equals(bizType)) {
@@ -2145,6 +2152,10 @@ public class AuditTaskServiceImpl implements IAuditTaskService {
                             bizId, cur.getStatus(), cur.getCheckStatus());
                     return;
                 }
+                if (up && cur != null && Integer.valueOf(2).equals(cur.getDelFlag())) {
+                    logger.info("举报不成立但帖子已被作者删除,保持删除 bizId={}", bizId);
+                    return;
+                }
                 s.setStatus(down ? Integer.valueOf(2) : (topicHidden ? null : Integer.valueOf(1)));
                 s.setCheckStatus(down ? 2 : 1);
                 umsCreativeSquareService.updateUmsCreativeSquare(s);
@@ -2154,8 +2165,12 @@ public class AuditTaskServiceImpl implements IAuditTaskService {
                 c.setStatus(down ? 2 : 1);
                 umsCommentService.updateUmsComment(c);
             } else if (AuditTask.BIZ_CLUB_POST.equals(bizType)) {
-                if (down) {
+                if (down && SOURCE_REPORT.equals(task.getSourceType())) {
+                    clubPostService.hideByReportLane(bizId);
+                } else if (down) {
                     clubPostService.deleteClubPostById(bizId); // del_flag=2 软下架
+                } else if (SOURCE_REPORT.equals(task.getSourceType())) {
+                    clubPostService.restoreReportLane(bizId);
                 } else {
                     ClubPost p = new ClubPost();
                     p.setId(bizId);
