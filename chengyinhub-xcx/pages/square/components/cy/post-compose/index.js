@@ -178,6 +178,8 @@ Component({
       this._composeVisible = !!this.data.show;
       this._submitting = false;
       this._published = false;
+      this._composerDirty = false;
+      this._composerText = '';
       this.setData({
         avatar: app.getAvatar(),
         nickname: app.getNickname(),
@@ -200,7 +202,7 @@ Component({
       // L06-061:切到后台可能被系统回收、detached 不一定执行,先把没发出去的正文存下
       if (this.data.show) this.persist();
       this._composeVisible = false;
-      // L06-062:俱乐部帖接口没有幂等键,切后台不中断在途请求(中断后服务端可能已收下,用户再点就重复发)
+      // L06-062:请求已经离开设备就不中断。回包晚于 hide 也照样收下;重试复用同一个 requestId。
       const pending = this._publishContext;
       if (!(pending && pending.club)) this.cancelPublish();
     },
@@ -265,7 +267,8 @@ Component({
       this._submitting = false;
       if (pending) {
         if (pending.intent && !pending.settled) {
-          publishIntent.settle(wx, 'square:compose', pending.memberId, pending.intent.key, 'unknown');
+          if (pending.club) publishIntent.settle(wx, pending.scope, pending.memberId, pending.intent.key, 'unknown');
+          else publishIntent.settle(wx, 'square:compose', pending.memberId, pending.intent.key, 'unknown');
         }
         if (pending.task && pending.task.abort) pending.task.abort();
       }
@@ -280,21 +283,44 @@ Component({
     },
 
     composeSnapshot() {
-      return JSON.stringify([this.data.content, this.data.picList, this.data.address,
+      return JSON.stringify([this.composerText(), this.data.picList, this.data.address,
         this._lng, this._lat, this.data.selectedActivity]);
+    },
+
+    // 输入过程中的正文留在实例上。data.content 只在恢复、发送、存草稿时写入,
+    // 避免每次按键都把最长 8000 字再 setData 回原生 textarea。
+    composerText() {
+      if (this._composerDirty) return String(this._composerText || '');
+      return String(this.data.content || '');
+    },
+
+    commitComposerText() {
+      const text = this.composerText().slice(0, MAX_LEN);
+      this._composerText = text;
+      const dirty = this._composerDirty || this.data.content !== text;
+      this._composerDirty = false;
+      if (dirty && !this._disposed) {
+        this.setData({
+          content: text,
+          contentLen: text.length,
+          canSubmit: this.submittable(text, this.data.picList),
+        });
+      }
+      return text;
     },
 
     // 关闭即存。已发布成功的不再存(草稿在 onPublish 里已删);编辑态不写草稿槽位
     // ——草稿是「新建」的存档,拿编辑中的正文去盖掉它 = 静默丢用户没发出去的那篇。
     persist() {
       if (this._published || this.data.editMode) return;
-      const content = String(this.data.content || '').trim();
+      const raw = this.commitComposerText();
+      const content = String(raw || '').trim();
       if (!content || !this._memberId) return;
       try {
         proEditorDraft.saveDraft(wx, {
           memberId: this._memberId,
           topicId: draftIdentity(this._memberId, this.data.clubId).topicId,
-          formData: { contents: this.data.content },
+          formData: { contents: raw },
         });
       } catch (e) {
         // 存草稿失败(storage 满/被禁)不该在退出路径上再弹一层打断,静默放过。
@@ -304,6 +330,8 @@ Component({
     // 正文单一入口:输入、草稿恢复、发布后清空都走它,长度/可提交态不会分叉。
     applyContent(value) {
       const text = String(value == null ? '' : value).slice(0, MAX_LEN);
+      this._composerText = text;
+      this._composerDirty = false;
       this.setData({
         content: text,
         contentLen: text.length,
@@ -339,7 +367,12 @@ Component({
 
     onInput(e) {
       if (this._disposed || !this._composeVisible || String(app.getUserID() || '') !== String(this._memberId || '')) return;
-      this.applyContent(((e || {}).detail || {}).value || '');
+      const text = String((((e || {}).detail || {}).value) || '').slice(0, MAX_LEN);
+      this._composerText = text;
+      this._composerDirty = true;
+      const canSubmit = this.submittable(text, this.data.picList);
+      if (this.data.contentLen === text.length && !!this.data.canSubmit === canSubmit) return;
+      this.setData({ contentLen: text.length, canSubmit: canSubmit });
     },
 
     // 关闭的所有权在广场页(show 是它给的),这里只上报。
@@ -441,7 +474,7 @@ Component({
       }
       const pick = function (res) {
         const next = (that.data.picList || []).concat(res || []).slice(0, max);
-        that.setData({ picList: next, canSubmit: that.submittable(that.data.content, next) });
+        that.setData({ picList: next, canSubmit: that.submittable(that.composerText(), next) });
       };
       // 俱乐部帖沿用原俱乐部页的上传口径(不走社区帖的媒体登记)
       if (club) app.chooseImage(pick, left);
@@ -453,7 +486,7 @@ Component({
       if (!Number.isFinite(idx)) return;
       const arr = (this.data.picList || []).slice();
       arr.splice(idx, 1);
-      this.setData({ picList: arr, canSubmit: this.submittable(this.data.content, arr) });
+      this.setData({ picList: arr, canSubmit: this.submittable(this.composerText(), arr) });
     },
 
     // 俱乐部模式的「带上一次游玩记录」与公告开关
@@ -485,10 +518,12 @@ Component({
 
     onOpenActivityPicker() {
       this.setData({ activityPickerShow: true });
-      // L06-063:同一次发帖、同一账号只拉一次;失败或换号才重拉(重试入口仍走 loadActivityOptions)
-      const key = String(app.getUserID() || '') + ':' + (this._composeSession || 0);
-      if (this._actLoadedKey === key && !this.data.activityError && !this.data.activityLoading) return;
-      this._actLoadedKey = key;
+      // L06-063:这个账号上次已经加载成功,再开选择器不要把参加列表和主办列表再打一遍。
+      // 只在第一次打开、上次失败、或换了账号时重拉。同一账号的加载还在飞也不再发。
+      // 面板上的重试仍直接走 loadActivityOptions。
+      const account = String(app.getUserID() || '');
+      if (this._actAccount === account && this.data.activityLoading) return;
+      if (this._actAccount === account && this._actOk && !this.data.activityError) return;
       this.loadActivityOptions();
     },
 
@@ -497,8 +532,11 @@ Component({
     },
 
     loadActivityOptions() {
+      const account = String(app.getUserID() || '');
       const epoch = (this._actEpoch || 0) + 1;
       this._actEpoch = epoch;
+      this._actAccount = account;
+      this._actOk = false;
       this.setData({ activityLoading: true, activityError: false });
       const that = this;
       let pending = 2;
@@ -508,10 +546,17 @@ Component({
       const done = function () {
         pending -= 1;
         if (pending > 0 || epoch !== that._actEpoch) return;
-        if (failed === 2) {
-          that.setData({ activityLoading: false, activityError: true, activityList: [] });
+        const sameAccount = String(app.getUserID() || '') === account;
+        if (failed > 0 || !sameAccount) {
+          that._actOk = false;
+          that.setData({
+            activityLoading: false,
+            activityError: failed > 0 && sameAccount,
+            activityList: failed === 2 || !sameAccount ? [] : mergeActivityOptions(joined, hosted),
+          });
           return;
         }
+        that._actOk = true;
         that.setData({
           activityLoading: false,
           activityError: false,
@@ -568,7 +613,7 @@ Component({
       this._lng = '';
       this._lat = '';
       this.setData({ picList: [], address: '', selectedActivity: null, activityPickerShow: false, asAnnouncement: false,
-        canSubmit: this.submittable(this.data.content, []) });
+        canSubmit: this.submittable(this.composerText(), []) });
     },
 
     onPublish() {
@@ -593,7 +638,7 @@ Component({
         cyToast('当前身份不能发布到广场');
         return;
       }
-      const content = String(that.data.content || '').trim();
+      const content = String(that.commitComposerText() || '').trim();
       // 与 canSubmit 同一口径。视觉禁用只是 opacity,真正的闸在这里。
       if (!that.submittable(content, that.data.picList)) {
         cyToast(that.data.clubId ? '说点什么，或加张图' : '请输入内容');
@@ -636,7 +681,7 @@ Component({
       }
 
       const pending = { memberId: that._memberId, editing: editing, editId: that._editId,
-        intent: intent, snapshot: that.composeSnapshot(), settled: false, task: null };
+        intent: intent, scope: 'square:compose', snapshot: that.composeSnapshot(), settled: false, task: null };
       that._publishContext = pending;
       const task = community.request({
         hideLoading: true,
@@ -651,9 +696,9 @@ Component({
           if (!res || res.code != '200') {
             if (!editing) {
               if (res && res.intentDiscarded === true) {
-                publishIntent.discard(wx, 'square:compose', pending.memberId, intent.key);
+                publishIntent.discard(wx, pending.scope || 'square:compose', pending.memberId, intent.key);
               } else {
-                publishIntent.settle(wx, 'square:compose', pending.memberId, intent.key, 'rejected');
+                publishIntent.settle(wx, pending.scope || 'square:compose', pending.memberId, intent.key, 'rejected');
               }
               pending.settled = true;
             }
@@ -664,7 +709,7 @@ Component({
           }
           const keepOpen = res.recoveredPrevious === true || that.composeSnapshot() !== pending.snapshot;
           if (!editing) {
-            publishIntent.settle(wx, 'square:compose', pending.memberId, intent.key, 'success');
+            publishIntent.settle(wx, pending.scope || 'square:compose', pending.memberId, intent.key, 'success');
             pending.settled = true;
             if (!keepOpen && pending.memberId) {
               proEditorDraft.removeDraft(wx, draftIdentity(pending.memberId, that.data.clubId), { memberId: pending.memberId });
@@ -677,6 +722,7 @@ Component({
           // 保存回包只清提交时的稿子，继续输入的正文和附件留在当前编辑器。
           that._published = !keepOpen;
           if (keepOpen) {
+            that.commitComposerText();
             that.persist();
             that.triggerEvent('published', { keepOpen: true });
             return;
@@ -689,7 +735,7 @@ Component({
         fail: (err) => {
           if (!that.isCurrentPublish(pending)) return;
           if (!editing) {
-            publishIntent.settle(wx, 'square:compose', pending.memberId, intent.key, 'unknown');
+            publishIntent.settle(wx, pending.scope || 'square:compose', pending.memberId, intent.key, 'unknown');
             pending.settled = true;
           }
           cyToast(app.getRequestErrorMessage ? app.getRequestErrorMessage(err, '网络异常，请检查后重试') : '网络异常，请检查后重试');
@@ -705,12 +751,28 @@ Component({
     },
 
     // 俱乐部模式发布(P-20):请求体与原俱乐部页内嵌输入框一致;单飞 / 关闭即存 / 发后删草稿与广场同一套。
+    // L06-062:requestId 跟这次发送走。切后台不 abort;回包晚到也收下,同一意图的重试复用这个号。
     publishClubPost(content) {
       const that = this;
       const ref = that.data.postRef;
       const clubId = that.data.clubId;
+      const post = {
+        clubId: clubId,
+        content: content,
+        images: (that.data.picList || []).join(','),
+        type: that.data.canAnnounce && that.data.asAnnouncement ? 2 : 0,
+        refType: ref ? ref.refType : null,
+        refId: ref ? ref.refId : null,
+      };
+      const scope = 'club:compose:' + String(clubId);
+      const intent = publishIntent.begin(wx, {
+        scope: scope,
+        memberId: that._memberId,
+        payload: [String(clubId), post.content, post.images, post.type, post.refType, post.refId],
+      });
+      if (intent.previousUnknown) cyToast('上次结果未确认，重试不重复发');
       const pending = { memberId: that._memberId, editing: false, editId: that._editId,
-        intent: null, snapshot: that.composeSnapshot(), settled: true, task: null, club: true };
+        intent: intent, scope: scope, snapshot: that.composeSnapshot(), settled: false, task: null, club: true };
       that._publishContext = pending;
       // 切后台期间也要收尾(不看 _composeVisible),换号/卸载/被新发布替换才作废
       const live = () => that._publishContext === pending && !that._disposed
@@ -722,45 +784,46 @@ Component({
       };
       const task = app.sendRequest({
         url: '/api/club/post/create', method: 'POST',
-        data: JSON.stringify({
-          clubId: clubId,
-          content: content,
-          images: (that.data.picList || []).join(','),
-          type: that.data.canAnnounce && that.data.asAnnouncement ? 2 : 0,
-          // 没选就一个字段都不带 —— 半个引用(只有类型没有 ID)会被服务端挡下
-          refType: ref ? ref.refType : null,
-          refId: ref ? ref.refId : null,
-        }),
+        data: JSON.stringify(Object.assign({ requestId: intent.key }, post)),
         header: { 'Content-Type': 'application/json', 'Authorization': app.getAuthorization() },
         success(res) {
           if (!live()) return;
+          pending.settled = true;
+          const accepted = !!(res && (res.code == '200' || res.code == 200));
+          publishIntent.settle(wx, scope, pending.memberId, intent.key, accepted ? 'success' : 'rejected');
           finish();
-          if (res && res.code == '200') {
-            if (pending.memberId) {
-              proEditorDraft.removeDraft(wx, draftIdentity(pending.memberId, clubId), { memberId: pending.memberId });
-            }
-            that._published = true;
-            that.applyContent('');
-            that.clearAttachments();
-            that.triggerEvent('published');
-            that.triggerEvent('close');
-            return;
-          }
-          if (res && CLUB_POST_REF_ERROR_TEXT[res.errorCode]) {
-            // 正文与图片保留,只撤掉这条引用,用户可以直接再发
-            that.triggerEvent('refclear');
-            cyToast(CLUB_POST_REF_ERROR_TEXT[res.errorCode]);
-            return;
-          }
-          cyToast((res && res.msg) || '发布失败');
+          that._deliverClubResult(res, { memberId: pending.memberId, clubId: clubId });
         },
         fail() {
           if (!live()) return;
+          pending.settled = true;
+          publishIntent.settle(wx, scope, pending.memberId, intent.key, 'unknown');
           finish();
           cyToast('网络异常，请重试');
         },
       });
       if (that._publishContext === pending) pending.task = task;
+    },
+
+    _deliverClubResult(res, pending) {
+      if (res && (res.code == '200' || res.code == 200)) {
+        if (pending.memberId) {
+          proEditorDraft.removeDraft(wx, draftIdentity(pending.memberId, pending.clubId), { memberId: pending.memberId });
+        }
+        this._published = true;
+        this.applyContent('');
+        this.clearAttachments();
+        this.triggerEvent('published');
+        this.triggerEvent('close');
+        return;
+      }
+      if (res && CLUB_POST_REF_ERROR_TEXT[res.errorCode]) {
+        // 正文与图片保留,只撤掉这条引用,用户可以直接再发
+        this.triggerEvent('refclear');
+        cyToast(CLUB_POST_REF_ERROR_TEXT[res.errorCode]);
+        return;
+      }
+      cyToast((res && res.msg) || '发布失败');
     },
   },
 });

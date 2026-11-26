@@ -276,11 +276,31 @@ test('详情通过真实上一页#profile组件桥置本地脏，保留广场全
   assert.equal(h.app.globalData.squareListDirty, true);
 });
 
-test('详情点赞取消与收藏取消成功标记返回列表脏，失败及在途重复tap不标', () => {
+function listHost(rows) {
+  let marked = 0;
+  const host = {
+    data: { list: rows.map((row) => Object.assign({}, row)), feed: rows.map((row) => Object.assign({}, row, { source: 'community' })) },
+    setData(patch) {
+      Object.entries(patch).forEach(([key, value]) => {
+        const match = key.match(/^(list|feed)\[(\d+)\]$/);
+        assert.ok(match, key);
+        this.data[match[1]][Number(match[2])] = value;
+      });
+    },
+    markSquareListDirty() { marked += 1; },
+  };
+  host.marked = () => marked;
+  return host;
+}
+
+test('详情点赞收藏评论只改打开的那一行，返回后整表还在；失败和连点不改行', () => {
   for (const action of ['like', 'favorite']) {
     for (const enabled of [0, 1]) {
-      let marked = 0;
-      const h = loadPage({ pages: [{ selectComponent: () => ({ markSquareListDirty() { marked++; } }) }, {}] });
+      const previous = listHost([
+        { id: 77, source: 'community', isLiked: enabled ? 0 : 1, likeCount: 3, isBookmarked: enabled ? 0 : 1, commentCount: 2, contents: '甲' },
+        { id: 88, isLiked: 0, likeCount: 1, contents: '乙' },
+      ]);
+      const h = loadPage({ pages: [previous, {}] });
       readyWithComments(h);
       h.page.data.info.isLiked = enabled ? 0 : 1;
       h.page.data.info.isBookmarked = enabled ? 0 : 1;
@@ -291,14 +311,28 @@ test('详情点赞取消与收藏取消成功标记返回列表脏，失败及�
       const url = '/api/creativesquare/' + (action === 'like' ? 'like' : 'bookmark');
       const writes = h.requests.filter(r => r.url === url);
       assert.equal(writes.length, 1);
-      assert.equal(marked, 0);
-      assert.equal(h.app.globalData.squareListDirty, undefined);
+      assert.equal(previous.marked(), 0);
       writes[0].success({ code: 200, data: { isLiked: enabled, isBookmarked: enabled, likeCount: enabled, version: 2 } });
-      assert.equal(marked, 1);
-      assert.equal(h.app.globalData.squareListDirty, true);
+      assert.equal(previous.marked(), 0);
+      assert.equal(h.app.globalData.squareListDirty, undefined);
+      assert.equal(previous.data.list.length, 2);
+      assert.equal(previous.data.list[1].contents, '乙');
+      assert.equal(previous.data.feed.length, 2);
+      assert.equal(previous.data.feed[1].id, 88);
+      if (action === 'like') {
+        assert.equal(previous.data.list[0].isLiked, enabled);
+        assert.equal(previous.data.list[0].likeCount, enabled);
+        assert.equal(previous.data.list[0].contents, '甲');
+        assert.equal(previous.data.feed[0].isLiked, enabled);
+      } else {
+        assert.equal(previous.data.list[0].isBookmarked, enabled);
+        assert.equal(previous.data.feed[0].isBookmarked, enabled);
+        assert.equal(previous.data.list[1].isLiked, 0);
+      }
     }
     for (const outcome of ['refused', 'network']) {
-      const h = loadPage();
+      const previous = listHost([{ id: 77, isLiked: 0, likeCount: 3, isBookmarked: 0, contents: '甲' }]);
+      const h = loadPage({ pages: [previous, {}] });
       readyWithComments(h);
       if (action === 'like') h.page.lickClick({ currentTarget: { dataset: { type: 1 } } });
       else h.page.favoriteClick();
@@ -307,6 +341,34 @@ test('详情点赞取消与收藏取消成功标记返回列表脏，失败及�
       if (outcome === 'refused') write.success({ code: 403, msg: '拒绝' });
       else write.fail({});
       assert.equal(h.app.globalData.squareListDirty, undefined);
+      assert.equal(previous.marked(), 0);
+      assert.equal(previous.data.list[0].likeCount, 3);
     }
   }
+});
+
+test('详情评论成功回写列表计数且不整表标脏，删帖仍让列表重拉', () => {
+  const previous = listHost([
+    { id: 77, commentCount: 2, isLiked: 0, contents: '甲' },
+    { id: 88, commentCount: 1, contents: '乙' },
+    { id: 77, source: 'club', commentCount: 9, contents: '俱乐部' },
+  ]);
+  const h = loadPage({ pages: [previous, {}] });
+  readyWithComments(h);
+  h.page.setData({ commentContent: '刚写的一条', canComment: true });
+  h.page.addComment();
+  const comment = h.requests.find((r) => r.url === '/api/comment/add');
+  comment.success({ code: 200, data: {} });
+  const count = h.requests.filter((r) => r.url === '/api/creativesquare/info').at(-1);
+  count.success({ code: 200, data: { id: 77, memberId: 1, contents: '正文', commentCount: 3 } });
+  assert.equal(previous.marked(), 0);
+  assert.equal(h.app.globalData.squareListDirty, undefined);
+  assert.equal(previous.data.list.length, 3);
+  assert.equal(previous.data.list[0].commentCount, 3);
+  assert.equal(previous.data.list[1].contents, '乙');
+  assert.equal(previous.data.list[2].commentCount, 9);
+  h.page.deleteSquarePost();
+  h.requests.find((r) => r.url === '/api/creativesquare/delete').success({ code: 200 });
+  assert.equal(previous.marked(), 1);
+  assert.equal(previous.data.list.length, 3);
 });

@@ -32,6 +32,7 @@ Page({
     navBarHeight: getApp().globalData.navBarHeight,
     tabBarRaised: true,
     topbarSolid: false,
+    publishHomeError: false,
 
     // 胶囊安全区：胶囊底部 + 额外间距，整体页面从此线开始
     safeTop: 0,
@@ -102,6 +103,7 @@ Page({
   },
 
   retryMerchantAccess() { this.loadMerchantAccess(); },
+  retryPublishHome() { this.getPublishHome(true); },
 
   applyMerchantPublishAccess(canManage) {
     const permission = Object.assign({}, (this.data.pub && this.data.pub.permission) || {}, {
@@ -122,7 +124,8 @@ Page({
     const that = this;
     // MC-036:失败不再吞掉 —— 数字保持 0,记 capabilityError;用户点发布时补拉仍失败就提示。
     const failed = () => {
-      that._capabilityError = true; // 页面上已无能力数字可标注,失败记在实例上,由用户点发布时提示
+      that._capabilityError = true;
+      that.setData({ publishHomeError: true });
       if (fromUser === true) cyToast('发布信息加载失败，请重试');
     };
     const ROLE_TEXT = { player: '玩家', club: '俱乐部主理人', merchant: '商家' };
@@ -147,6 +150,7 @@ Page({
           that._pubLoaded = true;
           that._capabilityError = false;
           that.setData({
+            publishHomeError: false,
             pub: {
               role: merchantScoped ? 'merchant' : (d.role || 'player'),
               roleText: merchantScoped ? '商家' : (ROLE_TEXT[d.role] || '玩家'),
@@ -216,6 +220,7 @@ Page({
   },
 
   onHide() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1;
+    if (this._scrollStopTimer) { clearTimeout(this._scrollStopTimer); this._scrollStopTimer = null; }
     merchantTheme.merchantPageRestore();
   }
 });

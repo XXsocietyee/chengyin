@@ -218,6 +218,7 @@ Page({
     // 活动详情成功渲染过没有。只用来判 auto-back(审查C A1)。
     everLoaded: false,
     loadErrorMsg: '',
+    profileError: '',
     gateClubId: 0,
     skeletonItems: [1, 2], // 加载中两张卡:第三张会被底栏占位切掉一半(p08-baoming-loading)
     ticketList: [],
@@ -352,6 +353,16 @@ Page({
   /**
    * 获取用户信息（当没有参与人信息时预填）
    */
+  _profileLoadFailed() {
+    const info = this.data.userInfo || {};
+    const keep = !!(this.data.selectedAddress || info.realName || info.phone);
+    const patch = { profileError: '个人资料没加载出来，请核对参与人信息' };
+    if (!keep) {
+      patch.userInfo = { realName: '', phone: '', email: '', address: '', point: 0 };
+    }
+    this.setData(patch);
+  },
+
   getUserInfo() {
     const that = this;
     app.sendRequest({
@@ -363,34 +374,18 @@ Page({
       success: function (res) {
         if (res && res.code == "200" && res.data && typeof res.data === 'object' && !Array.isArray(res.data)) {
           that.setData({
-            userInfo: res.data
+            userInfo: res.data,
+            profileError: ''
           });
           // j6 F5 / r1 F3:参与人列表与资料并发,参与人先回包时资料会把已选参与人的姓名/手机冲掉,
           // 付款就误报「参与人信息需要包含姓名」。已选了参与人就以参与人为准。
           if (that.data.selectedAddress) that.updateUserInfoFromAddress(that.data.selectedAddress);
         } else {
-          // 如果获取失败，使用默认信息
-          that.setData({
-            userInfo: {
-              realName: '',
-              phone: '',
-              email: '',
-              point: 0
-            }
-          });
+          that._profileLoadFailed();
         }
       },
-      fail: function (res) {
-        // 失败时使用默认信息
-        that.setData({
-          userInfo: {
-            realName: '',
-            phone: '',
-            email: '',
-            address: '',
-            point: 0
-          }
-        });
+      fail: function () {
+        that._profileLoadFailed();
       }
     });
   },

@@ -20,6 +20,9 @@
   <view class="merchant-readonly-note" wx:if="{{isMerchant && merchantAccessError}}" bindtap="retryMerchantAccess" aria-role="button" aria-label="重新加载岗位权限" hover-class="cy-pressed" hover-stay-time="80">
     岗位权限没加载出来，点此重试
   </view>
+  <view class="merchant-readonly-note" wx:elif="{{isMerchant && publishHomeError}}" bindtap="retryPublishHome" aria-role="button" aria-label="重新加载发布信息" hover-class="cy-pressed" hover-stay-time="80">
+    发布信息没加载出来，点此重试
+  </view>
   <view class="merchant-readonly-note"
     wx:elif="{{operationScope && merchantAccessLoaded && !canManageMerchantProjects}}">
     仅店主、店长可发布和复制

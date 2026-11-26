@@ -52,6 +52,8 @@ Page({
     error: '',
     refused: false,
     isMerchantViewer: false,
+    recoverError: '',
+    recoverErrorIndex: -1,
   },
 
   onLoad() { this._unloaded = false; this.syncViewerTheme(); this.fetch(); },
@@ -188,7 +190,10 @@ Page({
       // L06-046:同一条投递一次只发一个恢复请求;被拒/失败如实说出原因,再回读统计
       this._recovering=this._recovering||{};if(this._recovering[id])return;this._recovering[id]=true;
       const done=(res,failed)=>{this._recovering[id]=false;if(this._unloaded||!sameReader(app,actor))return;
-       if(failed&&typeof app.tips==='function')app.tips(app.getRequestErrorMessage(res,'网络连接失败'));
+       const rejected=failed||!(res&&(res.code==200||res.code=='200'));
+       const message=typeof app.getRequestErrorMessage==='function'?app.getRequestErrorMessage(res,'网络连接失败'):((res&&res.msg)||'网络连接失败');
+       if(rejected&&typeof app.tips==='function')app.tips(message);
+       this.setData({recoverError:rejected?message:'',recoverErrorIndex:rejected?index:-1});
        this.openBroadcastStats({currentTarget:{dataset:{index}}});};
       app.sendRequest({url:'/api/official/broadcast/'+id+'/recover',method:'POST',hideLoading:true,autoErrorToast:false,
        success:res=>done(res,false),fail:res=>done(res,true),successStatusAbnormal:res=>done(res,true)});

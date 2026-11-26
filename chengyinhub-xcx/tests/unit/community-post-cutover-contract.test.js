@@ -257,18 +257,20 @@ test('activity reference uses current public topic projection, never activity ID
   assert.equal(normalizePost(b).sportTopicId, 900);
 });
 
-test('acknowledged community writes invalidate all cached feeds; reads and failures do not', async () => {
-  const h = harness([bundle(), bundle(56, { viewerLiked: 1 }), { code: 500 }, {}, {}]);
+test('reads, failures, likes, bookmarks, and comments do not dirty the square list; delete does', async () => {
+  const h = harness([bundle(), bundle(56, { viewerLiked: 1 }), { code: 500 }, bundle(56, { viewerBookmarked: 1 }), {}, {}]);
   await h.request('/api/creativesquare/info', { id: 56 });
   assert.equal(h.app.globalData.squareListDirtyVersion, undefined);
   await h.request('/api/creativesquare/like', { id: 56, type: 1 });
+  await h.request('/api/creativesquare/bookmark', { id: 56, bookmark: 1 });
+  assert.equal(h.app.globalData.squareListDirtyVersion, undefined);
+  await h.request('/api/creativesquare/bookmark', { id: 56, bookmark: 1 });
+  await h.request('/api/comment/add', { owner_id: 56, contents: '回复' });
+  assert.equal(h.app.globalData.squareListDirtyVersion, undefined);
+  assert.equal(h.app.globalData.squareListDirty, undefined);
+  await h.request('/api/creativesquare/delete', { id: 56 });
   assert.equal(h.app.globalData.squareListDirtyVersion, 1);
   assert.equal(h.app.globalData.squareListDirty, true);
-  await h.request('/api/creativesquare/bookmark', { id: 56, bookmark: 1 });
-  assert.equal(h.app.globalData.squareListDirtyVersion, 1);
-  await h.request('/api/comment/add', { owner_id: 56, contents: '回复' });
-  await h.request('/api/creativesquare/delete', { id: 56 });
-  assert.equal(h.app.globalData.squareListDirtyVersion, 3);
 });
 test('publish/edit invalidate after committed draft even if publishing later fails', async () => {
   const h = harness([guideline, {}, created, { code: 500 }]);

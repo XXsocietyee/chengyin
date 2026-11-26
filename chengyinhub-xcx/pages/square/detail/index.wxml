@@ -170,6 +170,7 @@
     </view>
     <view class="comment-load-more-status" wx:if="{{commentLoadingMore}}" aria-live="polite">正在加载更多评论…</view>
     <cy-inline-error load-failure wx:if="{{commentLoadMoreError}}" kind="network" title="更多评论加载失败" sub="{{commentLoadMoreError}}" action="重试" bind:action="retryCommentLoadMore" />
+    <cy-inline-error load-failure wx:if="{{commentRefreshError}}" kind="network" title="评论没有刷新" sub="{{commentRefreshError}}" action="重试" bind:action="refreshComments" />
   </view>
 
   <!--新加评论-->
