@@ -252,6 +252,61 @@ test('L10-043:验证码发送成功后 60 秒内重发不再发请求;返回页�
   assert.equal(page.data.status, 'ELIGIBLE')
 })
 
+test('L10-042:可注销时隐藏页面不取消在途短信，也不清掉验证码和确认', () => {
+  const page = makePage()
+  page._statusMemberId = '7'
+  page.data.smscode = '654321'
+  page.data.confirmed = true
+  page.sendSms()
+  const info = requests.find(request => request.url === '/api/user/info')
+  componentConfig.pageLifetimes.hide.call(page)
+  assert.equal(page.data.smsSending, true)
+  assert.equal(page.data.smscode, '654321')
+  assert.equal(page.data.confirmed, true)
+  info.success({ code: 200, data: { phone: '13800138000' } })
+  const sms = requests.find(request => request.url === '/api/sms/send')
+  assert.ok(sms)
+  componentConfig.pageLifetimes.show.call(page)
+  assert.equal(page.data.smsSending, true)
+  assert.equal(page.data.smscode, '654321')
+  assert.equal(page.data.confirmed, true)
+  sms.success({ code: 200 })
+  assert.equal(page.data.smsSent, true)
+  assert.equal(page.data.phoneMasked, '8000')
+  assert.equal(page.data.smscode, '654321')
+  assert.equal(page.data.confirmed, true)
+  requests.filter(request => request.url === '/api/user/deregister/status').at(-1).success({ code: 200, data: { status: 'NORMAL' } })
+  requests.filter(request => request.url === '/api/user/deregister/precheck').at(-1).success({
+    code: 200, data: { status: 'ELIGIBLE', blockers: [], verificationMethod: 'SMS' },
+  })
+  assert.equal(page.data.status, 'ELIGIBLE')
+  assert.equal(page.data.smsSent, true)
+  assert.equal(page.data.smscode, '654321')
+  assert.equal(page.data.confirmed, true)
+
+  requests = []
+  const midSend = makePage()
+  midSend._statusMemberId = '7'
+  Object.assign(midSend.data, { smscode: '111111', confirmed: true })
+  midSend.sendSms()
+  requests.find(request => request.url === '/api/user/info').success({ code: 200, data: { phone: '13800138000' } })
+  const inflight = requests.find(request => request.url === '/api/sms/send')
+  componentConfig.pageLifetimes.hide.call(midSend)
+  inflight.success({ code: 200 })
+  assert.equal(midSend.data.smsSent, true)
+  assert.equal(midSend.data.phoneMasked, '8000')
+  assert.equal(midSend.data.smscode, '111111')
+  assert.equal(midSend.data.confirmed, true)
+
+  requests = []
+  const unloaded = makePage()
+  unloaded.sendSms()
+  componentConfig.pageLifetimes.hide.call(unloaded)
+  componentConfig.lifetimes.detached.call(unloaded)
+  requests.at(-1).success({ code: 200, data: { phone: '13800138000' } })
+  assert.equal(requests.filter(request => request.url === '/api/sms/send').length, 0)
+})
+
 test('L10-201:同一次填写重试复用同一个申请编号,重新加载状态才换新编号', async () => {
   consentResult = () => Promise.resolve()
   const page = makePage()

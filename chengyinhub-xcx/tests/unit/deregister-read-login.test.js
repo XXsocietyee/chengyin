@@ -24,6 +24,25 @@ test('HTTP500 and network failure remain read failures', () => {
   flow.loadStatus(); requests[0].successStatusAbnormal({code:500},500); assert.equal(flow.data.status,'ERROR');
   flow.loadPrecheck(); requests[1].fail({errMsg:'request:fail'}); assert.equal(flow.data.status,'ERROR');
 });
+test('account change drops an in-flight sms send and clears the code', () => {
+  Object.assign(flow.data, { status: 'ELIGIBLE', verificationMethod: 'SMS', smscode: '654321', confirmed: true });
+  flow._statusMemberId = '7';
+  flow.sendSms();
+  const info = requests.at(-1);
+  flow.dispose({ keepSms: true });
+  actor = 8;
+  info.success({ code: 200, data: { phone: '13800138000' } });
+  info.fail({ errMsg: 'request:fail late' });
+  assert.equal(requests.filter(item => item.url === '/api/sms/send').length, 0);
+  flow.loadStatus();
+  requests.filter(item => item.url === '/api/user/deregister/status').at(-1).success({ code: 200, data: { status: 'NORMAL' } });
+  requests.filter(item => item.url === '/api/user/deregister/precheck').at(-1).success({
+    code: 200, data: { status: 'ELIGIBLE', blockers: [], verificationMethod: 'SMS' },
+  });
+  assert.equal(flow.data.smscode, '');
+  assert.equal(flow.data.confirmed, false);
+  assert.equal(flow.data.smsSent, false);
+});
 test('previous identity response cannot restore eligibility or blockers', () => {
   flow.loadStatus(); actor=8;
   requests[0].success({code:200,data:{status:'NORMAL'}}); assert.equal(requests.length,2); assert.equal(requests[1].url, '/api/user/deregister/status');

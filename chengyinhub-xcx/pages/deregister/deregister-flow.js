@@ -228,11 +228,14 @@ const methods = {
     if (this.data.smsSent && this._smsSentAt && Date.now() - this._smsSentAt < 60000) return;
     const token = (this._smsToken || 0) + 1;
     this._smsToken = token;
+    const memberId = String(app.getUserID && app.getUserID() || '');
+    // 隐藏不换号:这一次发送继续。卸载会递增 _smsToken;换号则 memberId 对不上。
+    const smsCurrent = () => token === this._smsToken && memberId === String(app.getUserID && app.getUserID() || '');
     this.setData({ smsSending: true, smsSent: false, smsError: '' });
     sendUiStateRequest(app, '/api/user/info', {
       method: 'POST', data: { member_id: app.getUserID() },
       success: (res) => {
-        if (token !== this._smsToken) return;
+        if (!smsCurrent()) return;
         const phone = isOk(res) && isRecord(res.data) && typeof res.data.phone === 'string' ? res.data.phone.trim() : '';
         if (!phone) {
           this.setData({ smsSending: false, smsSent: false, smsError: failureText(res, '请先绑定手机号后再获取验证码') });
@@ -241,7 +244,7 @@ const methods = {
         sendUiStateRequest(app, '/api/sms/send', {
           method: 'POST', data: { phone },
           success: (smsRes) => {
-            if (token !== this._smsToken) return;
+            if (!smsCurrent()) return;
             if (isOk(smsRes)) {
               this._smsSentAt = Date.now();
               this.setData({ phone, phoneMasked: phone.slice(-4), smsSending: false, smsSent: true, smsError: '' });
@@ -249,12 +252,12 @@ const methods = {
             }
             this.setData({ smsSending: false, smsSent: false, smsError: failureText(smsRes, '验证码发送失败，请重试') });
           },
-          fail: () => { if (token === this._smsToken) this.setData({ smsSending: false, smsSent: false, smsError: '网络异常，验证码没有发送' }); },
-          successStatusAbnormal: () => { if (token === this._smsToken) this.setData({ smsSending: false, smsSent: false, smsError: '服务暂时不可用，验证码没有发送' }); },
+          fail: () => { if (smsCurrent()) this.setData({ smsSending: false, smsSent: false, smsError: '网络异常，验证码没有发送' }); },
+          successStatusAbnormal: () => { if (smsCurrent()) this.setData({ smsSending: false, smsSent: false, smsError: '服务暂时不可用，验证码没有发送' }); },
         });
       },
-      fail: () => { if (token === this._smsToken) this.setData({ smsSending: false, smsSent: false, smsError: '网络异常，手机号没有读取成功' }); },
-      successStatusAbnormal: () => { if (token === this._smsToken) this.setData({ smsSending: false, smsSent: false, smsError: '服务暂时不可用，手机号没有读取成功' }); },
+      fail: () => { if (smsCurrent()) this.setData({ smsSending: false, smsSent: false, smsError: '网络异常，手机号没有读取成功' }); },
+      successStatusAbnormal: () => { if (smsCurrent()) this.setData({ smsSending: false, smsSent: false, smsError: '服务暂时不可用，手机号没有读取成功' }); },
     });
   },
 
@@ -396,7 +399,7 @@ const methods = {
     });
   },
 
-  dispose() {
+  dispose(options) {
     if (this._wechatConfirmTimer) {
       clearTimeout(this._wechatConfirmTimer);
       this._wechatConfirmTimer = null;
@@ -404,7 +407,8 @@ const methods = {
     this._readLoginEpoch = (this._readLoginEpoch || 0) + 1;
     this._readLoginPending = false;
     this._statusToken = (this._statusToken || 0) + 1;
-    this._smsToken = (this._smsToken || 0) + 1;
+    // L10-042:页面隐藏时不作废在途短信。卸载和换号不带 keepSms,仍作废。
+    if (!(options && options.keepSms)) this._smsToken = (this._smsToken || 0) + 1;
     this._applyToken = (this._applyToken || 0) + 1;
     this._cancelToken = (this._cancelToken || 0) + 1;
     this._reconcileToken = (this._reconcileToken || 0) + 1;

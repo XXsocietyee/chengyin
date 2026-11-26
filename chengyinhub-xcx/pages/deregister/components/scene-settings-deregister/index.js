@@ -10,13 +10,14 @@ Component({
     detached() { this._detached = true; this.dispose(); },
   },
   pageLifetimes: {
-    hide() { this._hidden = true; this.dispose(); },
+    // L10-042:切到短信 App 只是隐藏。在途验证码继续发送,已填验证码和确认留下。卸载走 detached。
+    hide() { this._hidden = true; this.dispose({ keepSms: true }); },
     // 短信 App、选图等短暂离开再回来:不整页重载、不清已填验证码。仍安静回读;阻断结果照常展示。
     show() {
       const wasHidden = this._hidden;
       this._hidden = false;
       if (wasHidden && !this._detached) {
-        this.setData({ submitting: false, smsSending: false, canceling: false });
+        this.setData({ submitting: false, canceling: false });
         this.loadStatus({ quiet: true });
       }
     },
@@ -39,6 +40,6 @@ Component({
     cancel() { return methods.cancel.call(this); },
     recheck() { return methods.recheck.call(this); },
     _reconcileApply() { return methods._reconcileApply.call(this); },
-    dispose() { return methods.dispose.call(this); },
+    dispose(options) { return methods.dispose.call(this, options); },
   },
 });
