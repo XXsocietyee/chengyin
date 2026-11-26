@@ -463,6 +463,7 @@ Page({
     // L06-019:下面那份手写清单漏了主办侧的若干私有投影(招商站点、叠层、群发名单、分润、签到码…),
     // 一律回到页面初始值;实例上的主办通知目标/直达标记/审核在途也一起清。
     this._clubNotifyTarget = null; this._openOnHost = ''; this._supplyReviewBusy = false;
+    this._clubCandidateRows = null; this._clubCandidateHomeSeq = 0; this._clubSheetHomeSeq = 0; this._clubCandidateUnpaired = 0; this._clubSheetClubs = null;
     const reset = this._privateResetExtra();
     this.setData({
       hostOwnerType: reset.hostOwnerType, recruitStations: reset.recruitStations, layers: reset.layers,
@@ -2182,7 +2183,18 @@ Page({
       },
       fail(res) {
         if (current.handle(res)) return; if (current()) that.setData({ loadFailed: true }); },
-      complete() { if (current()) that._loadingProjectHome = false; }
+      complete() {
+        if (!current()) return;
+        that._loadingProjectHome = false;
+        // 同一次刷新的主页没有落到主办名单上:候选不能停在转圈,也不能用更旧的名单放行
+        if ((that._clubCandidateHomeSeq || 0) > (that._clubSheetHomeSeq || 0)) {
+          if (that._clubCandidateRows) that._renderClubCandidates();
+          else {
+            that._clubCandidateUnpaired = that._clubCandidateHomeSeq;
+            that.setData({ clubCandidates: { state: 'error', rows: [] } });
+          }
+        }
+      }
     });
   },
 
@@ -2387,10 +2399,12 @@ Page({
       ? { clubId: Number(host.clubId), activityId: Number(host.selfHostActivityId) || 0 } : null;
     const nodeTotal = recruit.nodeTotal || 0;
     const nodeFilled = recruit.nodeFilled || 0;
+    const clubs = this.mapClubs(host.clubs);
+    this._clubSheetClubs = clubs;
     this.setData({
       quickActions: this.buildQuickActions('host', host.ownerType, host.canEdit, this.hostRecruitGate(topic, host)),
       hostOwnerType: host.ownerType || 'merchant',
-      'clubSheet.items': this.mapClubs(host.clubs),
+      'clubSheet.items': clubs,
       recruitStations: hostLayers.decorateStations(host.recruitChapters),
       hostTopic: {
         status: topic.status,
@@ -2427,7 +2441,10 @@ Page({
       hostPlayers: { paidCount: players.paidCount || 0, arrivedCount: players.arrivedCount || 0,
         pendingCount: Math.max(0, (players.paidCount || 0) - (players.arrivedCount || 0)) },
     });
-    this._renderClubCandidates(); // L06-021:已邀约名单更新后重新过滤候选
+    // L06-021:这次 project/home 的已邀约名单才是候选过滤的依据;比它旧的名单不能先把候选画成可邀约
+    this._clubSheetHomeSeq = (this._projectReads && this._projectReads.loadProjectHome) || 0;
+    this._clubCandidateUnpaired = 0;
+    this._renderClubCandidates(this._clubSheetClubs);
   },
 
   retryLoad() {
@@ -2612,14 +2629,17 @@ Page({
     if (host) this.loadClubCandidates();
   },
 
-  // L06-021:候选俱乐部原始行留在实例上,按「当前已邀约名单」过滤后再渲染;
-  // project/home 晚到刷新了已邀约名单时(见 applyHome 里 clubSheet.items),再过滤一次,不会把刚邀约的又列出来。
+  // L06-021:候选原始行留在实例上,只按「同一次刷新的 project/home」里的已邀约名单过滤。
+  // 主页还在路上时不先用更旧的名单把刚邀约的俱乐部放回可邀约;更旧的候选回包也不能把新俱乐部抹掉。
   loadClubCandidates() {
     if (this.data.role !== 'host') return;
+    if (!this._loadingProjectHome && (this._clubCandidateUnpaired || 0) > (this._clubSheetHomeSeq || 0)) this.loadProjectHome();
     const that = this;
     const seq = this._clubCandSeq = (this._clubCandSeq || 0) + 1;
     const owner = projectMemberId();
+    const homeSeq = (this._projectReads && this._projectReads.loadProjectHome) || 0;
     const live = () => !that._unloaded && seq === that._clubCandSeq && projectMemberId() === owner;
+    this._clubCandidateHomeSeq = homeSeq;
     this._clubCandidateRows = null;
     this.setData({ clubCandidates: { state: 'loading', rows: [] } });
     app.sendRequest({
@@ -2628,19 +2648,39 @@ Page({
       success(res) {
         if (!live()) return;
         const rows = res && res.code == '200' && Array.isArray(res.data) ? res.data : null;
-        if (!rows) { that.setData({ clubCandidates: { state: 'error', rows: [] } }); return; }
+        if (!rows) { that._clubCandidateRows = null; that.setData({ clubCandidates: { state: 'error', rows: [] } }); return; }
+        if (that._clubCandidateUnpaired === homeSeq && !that._loadingProjectHome && (that._clubSheetHomeSeq || 0) < homeSeq) {
+          that._clubCandidateRows = null;
+          that.setData({ clubCandidates: { state: 'error', rows: [] } });
+          return;
+        }
         that._clubCandidateRows = rows;
         that._renderClubCandidates();
       },
-      fail() { if (live()) that.setData({ clubCandidates: { state: 'error', rows: [] } }); },
+      fail() {
+        if (!live()) return;
+        that._clubCandidateRows = null;
+        that.setData({ clubCandidates: { state: 'error', rows: [] } });
+      },
     });
   },
 
-  _renderClubCandidates() {
+  _renderClubCandidates(clubs) {
     const rows = this._clubCandidateRows;
     if (!rows) return;
+    const need = this._clubCandidateHomeSeq || 0;
+    const have = this._clubSheetHomeSeq || 0;
+    if (have < need) {
+      if (this._loadingProjectHome) return;
+      this._clubCandidateRows = null;
+      this._clubCandidateUnpaired = need;
+      this.setData({ clubCandidates: { state: 'error', rows: [] } });
+      return;
+    }
     const invited = {};
-    (this.data.clubSheet.items || []).forEach(function (c) { invited[String(c.clubId)] = true; });
+    // 有同一次主页落下来的名单就用它;没有主页代次时才读页面上的旧名单(打开抽屉、单测手动改名单)
+    const items = clubs || (this._clubSheetHomeSeq ? this._clubSheetClubs : null) || (this.data.clubSheet && this.data.clubSheet.items) || [];
+    items.forEach(function (c) { invited[String(c.clubId)] = true; });
     this.setData({ clubCandidates: { state: 'ready', rows: rows.filter(function (c) { return c && c.id && !invited[String(c.id)]; }).slice(0, 30).map(function (c) {
       return {
         id: c.id, name: c.name || '未命名俱乐部', logo: c.logo || '', initial: String(c.name || '?').slice(0, 1),
