@@ -153,10 +153,26 @@ test('隐藏首页立即收loading，迟到GPS不得继续逆地理请求',()=>{
   assert.equal(requests.some(x=>x.url==='/api/map/reverse-geocode'),false)
   assert.deepEqual(toasts,[])
 })
-test('回到首页重新读取该账号同意，不复用隐藏前的取位回执',async()=>{
+test('L10-002 没有在途定位时切回首页不读取同意、不调用精确位置',async()=>{
   const p=page();p.data.isAppReady=true
   p.getUserData=()=>{};p.loadContinueExplore=()=>{}
   p.onHide();p.onShow()
+  await new Promise(resolve=>setTimeout(resolve,120))
+  assert.equal(requests.some(x=>x.url==='/api/compliance/consents/latest'),false)
+  assert.equal(requests.some(x=>x.url==='/api/map/reverse-geocode'),false)
+  assert.equal(locations.length,0);assert.equal(loading,false)
+})
+test('定位在途时离开再回来才重读同意，迟到回执不能取位',async()=>{
+  const p=page();p.data.isAppReady=true
+  p.getUserData=()=>{};p.loadContinueExplore=()=>{}
+  p.getHomeCityLocation()
+  const first=requests.find(x=>x.url==='/api/compliance/consents/latest')
+  assert.ok(first)
+  p.onHide()
+  first.success({code:200,data:consent()})
+  assert.equal(locations.length,0)
+  requests.length=0
+  p.onShow()
   await new Promise(resolve=>setTimeout(resolve,120))
   const r=requests.find(x=>x.url==='/api/compliance/consents/latest')
   assert.ok(r);assert.equal(locations.length,0)

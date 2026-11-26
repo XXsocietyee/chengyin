@@ -243,7 +243,74 @@ test('首页旧内容重试时显示轻量同步态，离页会取消 onShow 延
   }
   assert.doesNotMatch(wxml, /已显示上次内容，本次刷新失败 · 重试/);
   assert.match(js, /this\._onShowRefreshTimer\s*=\s*setTimeout/);
-  assert.match(js, /clearTimeout\(this\._onShowRefreshTimer\)/);
+  assert.match(js, /clearTimeout\(page\._onShowRefreshTimer\)/);
+});
+
+test('下拉刷新的收圈定时器在离页时清掉，不再 setData', async () => {
+  const { page } = loadPage();
+  wx.setNavigationBarColor = () => {};
+  page.getUserData = () => {};
+  page.getListData = () => {};
+  page.loadBottomTopicList = () => {};
+  page.loadBottomActivityList = () => {};
+  page.onRefresh();
+  assert.equal(page.data.refreshing, true);
+  page.onHide();
+  assert.equal(page.data.refreshing, false);
+  assert.equal(page._refreshEndTimer, null);
+  let sets = 0;
+  const original = page.setData;
+  page.setData = (...args) => { sets += 1; return original(...args); };
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  assert.equal(sets, 0);
+});
+
+test('底部页码和编辑精选原列表不进 setData，触底仍请求下一页', () => {
+  const { page, requests } = loadPage();
+  const keys = [];
+  const original = page.setData;
+  page.setData = (patch, callback) => {
+    keys.push(...Object.keys(patch));
+    return original(patch, callback);
+  };
+  page.getListData('recommendedTopicList', '/api/topic/list', { is_recommend: 1 });
+  requests.at(-1).success({ code: 200, data: { rows: [{ id: 9, name: '外滩夜行', signupCount: 3 }] } });
+  requests.at(-1).complete();
+  assert.equal(keys.includes('recommendedTopicList'), false);
+  assert.equal(page.data.recoCards[0].id, 9);
+  keys.length = 0;
+  page.loadBottomTopicList(1, true);
+  requests.at(-1).success({ code: 200, data: { rows: [{ id: 1, name: '主题' }], total: 40 } });
+  assert.equal(keys.includes('bottomTopicPageNo'), false);
+  assert.equal(keys.includes('isAppReady'), false);
+  page.onReachBottom();
+  assert.equal(requests.at(-1).data.pageNum, 2);
+});
+
+test('L10-024:编辑精选未换可见卡时不重发整组样式', () => {
+  const { page } = loadPage();
+  page.data.recoCards = [{ id: 1 }, { id: 2 }, { id: 3 }];
+  page.data.recoCurrent = 0;
+  page.data.reducedMotion = false;
+  page._recoSnapPx = 300;
+  page._recoVisibleIndex = 0;
+  let sets = 0;
+  const original = page.setData;
+  page.setData = (patch, callback) => {
+    if (Object.prototype.hasOwnProperty.call(patch, 'recoCardStyles')) sets += 1;
+    return original(patch, callback);
+  };
+  page.onRecoTransition({ detail: { dx: -10 } });
+  page.onRecoTransition({ detail: { dx: -100 } });
+  page.onRecoTransition({ detail: { dx: -101 } });
+  page.onRecoTransition({ detail: { dx: -140 } });
+  assert.equal(sets, 0);
+  page.onRecoTransition({ detail: { dx: -150 } });
+  assert.equal(sets, 1);
+  page.onRecoTransition({ detail: { dx: -160 } });
+  page.onRecoTransition({ detail: { dx: -299 } });
+  assert.equal(sets, 1, '同一张新卡的后续帧不再重发整组样式');
+  assert.equal(page.data.recoCardStyles.length, 3);
 });
 
 test('推荐主题切换后忽略旧 transition 尾帧，焦点卡不得重新变糊', async () => {

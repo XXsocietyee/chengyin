@@ -86,6 +86,7 @@ test('当前账号的用户资料响应可以正常写入', () => {
   sent[0].success({ code: '200', data: { nickname: '当前账号', phone: '13800000000' } })
 
   assert.equal(page.data.userInfo.nickname, '当前账号')
+  assert.equal(page.data.userInfo.phone, undefined, '手机号等非问候字段不进 setData')
 })
 
 test('未绑定手机号的账号回到首页不会被主动弹窗索取手机号(F-L5C-04)', () => {
@@ -263,6 +264,7 @@ test('M-15:onShow刷新核销权限，失效和请求失败不沿用旧权限', 
   assert.equal(page.data._needsRedirect, false)
   page.onShow()
   assert.deepEqual(redirects, [], '未收到有效权限前不跳工作台')
+  page.onHide()
 })
 
 test('M-15:无权限、失效、错误或畸形access不进入工作台', () => {
@@ -323,6 +325,48 @@ test('L10-019/L10-020:onShow 不再直接发 /api/user/info;appReady 前不发 a
   assert.equal(sent.filter(r => r.url === '/api/user/info').length, 0)
   assert.equal(sent.filter(r => r.url === '/api/merchant/access/me').length, 0)
   page.onHide()
+})
+
+test('L10-019:同一轮展示里 loadPageData 和 onShow 定时器只发一次 /api/user/info', async () => {
+  const page = makePage()
+  page.data.isAppReady = true
+  page.getHomeCityLocation = () => {}
+  page.getListData = () => {}
+  page.loadBottomTopicList = () => {}
+  page.loadBottomActivityList = () => {}
+  page.onShow()
+  page.loadPageData()
+  await new Promise(resolve => setTimeout(resolve, 150))
+  assert.equal(sent.filter(r => r.url === '/api/user/info').length, 1)
+  page.onHide()
+  sent.length = 0
+  page.onShow()
+  await new Promise(resolve => setTimeout(resolve, 150))
+  assert.equal(sent.filter(r => r.url === '/api/user/info').length, 1, '下一轮展示仍要刷新一次')
+  page.onHide()
+})
+
+test('L10-020:app 已就绪时冷启动只发一次 access/me 和 user/info', async () => {
+  async function coldStart(showBeforeReadyMicrotask) {
+    sent.length = 0
+    const page = makePage()
+    page.getHomeCityLocation = () => {}
+    page.getListData = () => {}
+    page.loadBottomTopicList = () => {}
+    page.loadBottomActivityList = () => {}
+    try {
+      page.onLoad({})
+      if (!showBeforeReadyMicrotask) await new Promise(resolve => setTimeout(resolve, 0))
+      page.onShow()
+      await new Promise(resolve => setTimeout(resolve, 150))
+      assert.equal(sent.filter(r => r.url === '/api/user/info').length, 1)
+      assert.equal(sent.filter(r => r.url === '/api/merchant/access/me').length, 1)
+    } finally {
+      page.onUnload()
+    }
+  }
+  await coldStart(false)
+  await coldStart(true)
 })
 
 test('L10-023:user/info 连续 401 时页面层最多重登一次', () => {

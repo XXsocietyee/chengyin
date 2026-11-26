@@ -31,5 +31,5 @@ test('D5:精选没有内容时整段(标题也)不挂;失败态只在 !recoHero 
 test('_buildRecoHero:精选为空时 recoHero 置空', () => {
   const js = fs.readFileSync(path.join(ROOT, 'pages/index/index.js'), 'utf8')
   const body = js.slice(js.indexOf('  _buildRecoHero()'), js.indexOf('  onHeroBannerTap(e)'))
-  assert.match(body, /if \(!items\.length\) \{\s*this\.setData\(\{ recoHero: null/)
+  assert.match(body, /if \(!items\.length\) \{[\s\S]*?this\.setData\(\{ recoHero: null/)
 })
