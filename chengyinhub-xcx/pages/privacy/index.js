@@ -66,11 +66,22 @@ Page({
     this._homeCityConsentEpoch = (this._homeCityConsentEpoch || 0) + 1;
     this.setData({ homeCityBusy: false, homeCityError: '' });
     this._mediaHidden = false;
+    if (this._presenceFlight != null && this._presenceFlight !== (this._presenceEpoch || 0)) {
+      this._presenceFlight = null;
+      this.setData({ submitting: false });
+    }
     // L10-044:同一账号的列表还新鲜时,隐藏后再回来不重拉;首次打开、换账号、失败重试仍读。
     if (!this.data.pendingAuthorization && !this.mediaListFresh()
         && (this.data.mediaOpen || this.mediaAccountDiffers())) this.loadOwnMedia();
   },
-  onHide() { this.invalidateRoamRevoke(); this.retainMediaAcrossHide(); },
+  onHide() { this.invalidateRoamRevoke(); this.retainMediaAcrossHide(); this.releasePresenceRequest(); },
+  // L10-194:离开或新一次关闭都作废在途回包。迟到成功不能把分享重新打开；当前这次仍在途时照常收口。
+  releasePresenceRequest() {
+    this._presenceEpoch = (this._presenceEpoch || 0) + 1;
+    if (this._presenceFlight == null) return;
+    this._presenceFlight = null;
+    this.setData({ submitting: false });
+  },
 
   invalidateRoamRevoke() {
     this._roamRevokeHidden = true;
@@ -292,6 +303,7 @@ Page({
   onUnload() {
     this.invalidateRoamRevoke();
     this.clearMediaState();
+    this.releasePresenceRequest();
     if (!app.hasPendingPrivacyAuthorization()) return;
     // 用户用系统返回离开了授权闸 = 没有作出同意。按「不同意」结算,让调用方拿到确定结果,
     // 而不是永远等下去。不同意不是猜测,是这个动作唯一安全的解释。
@@ -408,12 +420,19 @@ Page({
   },
 
   disablePresenceSharing() {
-    if (this.data.submitting) return;
+    if (this._mediaHidden || this.data.submitting) return;
+    const epoch = this._presenceEpoch = (this._presenceEpoch || 0) + 1;
+    this._presenceFlight = epoch;
+    const live = () => !this._mediaHidden && epoch === (this._presenceEpoch || 0);
     this.setData({ submitting: true });
     presencePrivacy.setSharing(app, null, false)
-      .then(() => toast('已关闭附近的人位置分享'))
-      .catch(error => toast(error.message))
-      .finally(() => this.setData({ submitting: false }));
+      .then(saved => { if (live() && saved !== true) toast('已关闭附近的人位置分享'); })
+      .catch(error => { if (live()) toast(error.message); })
+      .finally(() => {
+        if (!live()) return;
+        this._presenceFlight = null;
+        this.setData({ submitting: false });
+      });
   },
 
   // PC-168:只读本机按用途的持有状态(bg-tracker),不改撤回核心(#439)。
