@@ -115,6 +115,34 @@ test('设置登录初始化异常解除锁，仍可再次主动登录', async ()
   h.app.firstLogin=()=>{h.app.globalData.user_id=7;return Promise.resolve({ok:true});};h.page.onLoginSettings();
   await new Promise(r=>setImmediate(r));assert.equal(h.requests.length,1);
 });
+test('L10-041:资料没载入成功时,同一账号再次显示仍重读,原始手机号不进视图', () => {
+  for (const fail of [
+    (req) => req.fail({ statusCode: 500 }),
+    (req) => req.successStatusAbnormal({ code: 401 }, 401),
+    (req) => req.success({ code: 500, data: { name: 'nope', phone: '13800138000' } }),
+  ]) {
+    const h = load();
+    h.page.onLoad();
+    h.page.onShow();
+    fail(h.requests[0]);
+    assert.equal(h.page.data.userInfo.phone, undefined);
+    h.page.onHide();
+    h.page.onShow();
+    assert.equal(h.requests.filter(r => r.url === '/api/user/info').length, 2);
+  }
+  const h = load();
+  h.page.onLoad();
+  h.page.onShow();
+  h.requests[0].success({ code: 200, data: { role: 'club', name: 'ok', phone: '13800138000', phoneMasked: '138****8000' } });
+  assert.equal(h.page.data.userInfo.phone, undefined);
+  assert.equal(h.page.data.userInfo.phoneMasked, undefined);
+  h.page.onHide();
+  h.page.onShow();
+  assert.equal(h.requests.filter(r => r.url === '/api/user/info').length, 1);
+  h.app.globalData.user_id = 9;
+  h.page.onShow();
+  assert.equal(h.requests.filter(r => r.url === '/api/user/info').length, 2);
+});
 test('L10-041:设置页资料不带原始或脱敏手机号进视图层', () => {
   const h = load(); h.page.getUserData();
   h.requests[0].success({ code: 200, data: { role: 'club', name: 'current', phone: '13800138000', phoneMasked: '138****8000' } });

@@ -62,8 +62,9 @@ Page({
     this._refreshProfileOnShow = false;
     if (this._skipInitialShow) this._skipInitialShow = false;
     else this.syncCommunityEntry();
-    // L10-041:普通返回不重拉 /api/user/info,也不把整份资料再写进视图。改完资料,或账号已经换了,才重读。
-    if (refreshProfile || this._settingsReadOwner !== settingsIdentity()) this.getUserData();
+    // L10-041:同一账号的资料已经载入,再次显示不再打 /api/user/info。
+    // 改完资料、换了账号,或上次没载入成功,才重读。
+    if (refreshProfile || this._settingsProfileFailed || this._settingsReadOwner !== settingsIdentity()) this.getUserData();
   },
 
   // 与 IM 列表 _syncCommunityEntry、收藏页 syncCommunityTab 同一判据:app.canUseCommunity(false),开关稍后到达再补一次
@@ -415,10 +416,13 @@ Page({
     if (!(Number(app.getUserID()) > 0)) {
       this.setData({ userInfo: {}, settingsAuthRequired: true, settingsAccessDenied: false });
       this._settingsReadOwner = requestedIdentity;
+      this._settingsProfileFailed = false;
       return;
     }
     if (this._settingsReadOwner && this._settingsReadOwner !== requestedIdentity) this.setData({ userInfo: {} });
     this._settingsReadOwner = requestedIdentity;
+    this._settingsProfileFailed = false;
+    const profileStillCurrent = () => epoch === that._userInfoEpoch && !that._unloaded && requestedIdentity === identity();
     const handleAuth = (res, statusCode) => {
       if (epoch !== that._userInfoEpoch || that._unloaded) return true;
       if (requestedIdentity !== identity() || res && res.reason === 'sessionChanged') {
@@ -430,6 +434,7 @@ Page({
       const code = Number(statusCode || res && (res.statusCode || res.code));
       if (code !== 401 && code !== 403) return false;
       that.setData({ userInfo: {}, settingsAuthRequired: code === 401, settingsAccessDenied: code === 403 });
+      that._settingsProfileFailed = true;
       return true;
     };
     app.sendRequest({
@@ -449,11 +454,12 @@ Page({
           const data = Object.assign({}, res.data);
           delete data.phone;
           delete data.phoneMasked;
+          that._settingsProfileFailed = false;
           that.setData({ userInfo: data, settingsAuthRequired: false, settingsAccessDenied: false });
-        }
+        } else if (profileStillCurrent()) that._settingsProfileFailed = true;
       },
-      fail(res, code) { handleAuth(res, code); },
-      successStatusAbnormal(res, code) { handleAuth(res, code); }
+      fail(res, code) { if (!handleAuth(res, code) && profileStillCurrent()) that._settingsProfileFailed = true; },
+      successStatusAbnormal(res, code) { if (!handleAuth(res, code) && profileStillCurrent()) that._settingsProfileFailed = true; }
     });
   },
 });
