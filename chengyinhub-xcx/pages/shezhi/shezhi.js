@@ -75,11 +75,37 @@ Page({
       this.setData({
         invoiceOn: !!(app.globalData && app.globalData.features && app.globalData.features.userInvoice === true) });
     };
-    // L10-040:开关已为当前账号加载过就直接读,不在每次 onShow 重拉(重拉会先把社区开关清零)。
-    const loaded = app._communityFeatureOwner === String((app.getUserID && app.getUserID()) || '');
-    const pending = !loaded && typeof app.loadFeatureFlags === 'function' ? app.loadFeatureFlags() : null;
+    // L10-040:同一趟里读过的开关直接用。loadFeatureFlags 一调用就清掉归属,回包前再进 onShow 会再 POST。
+    // 换账号(含登录态)或上次没读到,下一次再拉。
+    const owner = String(memberId || '');
+    const tracksAuth = typeof app.getAuthorization === 'function';
+    const authorization = tracksAuth ? String(app.getAuthorization() || '') : '';
+    const key = tracksAuth ? owner + '|' + authorization : owner;
+    const fresh = app._communityFeatureOwner === owner
+      && (!tracksAuth || app._communityFeatureAuthorization === authorization);
+    if (this._featureFlagsKey !== key) {
+      this._featureFlagsKey = key;
+      this._featureFlagsPending = null;
+      this._featureFlagsReady = false;
+    }
+    if (fresh) this._featureFlagsReady = true;
+    if (this._featureFlagsReady || this._featureFlagsPending) {
+      sync();
+      return;
+    }
+    const pending = typeof app.loadFeatureFlags === 'function' ? app.loadFeatureFlags() : null;
+    if (pending && typeof pending.then === 'function') {
+      this._featureFlagsPending = pending;
+      const settle = () => {
+        if (this._featureFlagsPending !== pending || this._featureFlagsKey !== key) return;
+        this._featureFlagsPending = null;
+        this._featureFlagsReady = app._communityFeatureOwner === owner
+          && (!tracksAuth || app._communityFeatureAuthorization === authorization);
+        sync();
+      };
+      pending.then(settle, settle);
+    }
     sync();
-    if (pending && typeof pending.then === 'function') pending.then(sync);
   },
 
   onHide() { this._hidden = true; merchantTheme.merchantPageRestore(); },
