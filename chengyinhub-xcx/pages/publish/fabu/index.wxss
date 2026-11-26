@@ -2714,6 +2714,23 @@ page { background: var(--cy-btn-solid-bg); }
   color: var(--cy-color-text-tertiary);
 }
 
+.public-temp-search {
+  margin: 0 var(--cy-space-4) var(--cy-space-2);
+  padding: var(--cy-space-2) var(--cy-space-3);
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-bg-surface-subtle);
+}
+
+.public-temp-search__input {
+  width: 100%;
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-label);
+}
+
+.public-temp-search__ph { color: var(--cy-color-text-tertiary); }
+
+.public-temp-more { min-height: var(--cy-space-4); }
+
 /* 票种编辑器就地展开(2026-08-11):不再是 position:fixed 的整屏覆盖。
    这一页常常本身就是从主题编辑器里进来的,再盖一层就成了「弹窗的弹窗」,
    返回钮也跟着叠两个 —— 现在它只是票种列表里长出来的一段。 */

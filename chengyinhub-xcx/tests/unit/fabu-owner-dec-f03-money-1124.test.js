@@ -202,6 +202,33 @@ test('L03-050 票价输入最多两位小数、多余小数点并掉;超上限�
   }
   page.setData({ 'formData.tickets': [Object.assign({}, base, { price: '12.30' })] })
   assert.deepEqual(ticketBlocking(page), [])
+
+  const store = makePage(1)
+  store.openTicketEditor({ currentTarget: { dataset: { index: -1 } } })
+  fillTicketExceptPrice(store)
+  input(store, 'price', '12.349')
+  assert.equal(store.data.editingTicket.price, '12.34')
+  store.saveTicket()
+  const saved = store.data.formData.tickets[0].price
+  assert.equal(saved, '12.34')
+  assert.equal(typeof saved, 'string', '12.349 不能落成更长的浮点')
+  store.openTicketEditor({ currentTarget: { dataset: { index: 0 } } })
+  input(store, 'price', '12')
+  store.saveTicket()
+  assert.equal(store.data.formData.tickets[0].price, 12)
+  assert.equal(typeof store.data.formData.tickets[0].price, 'number', '整数仍是整数')
+  store.openTicketEditor({ currentTarget: { dataset: { index: 0 } } })
+  input(store, 'price', '12.00')
+  store.saveTicket()
+  assert.equal(store.data.formData.tickets[0].price, 12, '12.00 仍是整数 12')
+
+  const sale = makePage(2)
+  sale.setData({ fePricing: { show: true, disabled: false, rows: [{ id: 1, name: '票', price: '' }] } })
+  sale.onFePriceInput({ currentTarget: { dataset: { index: 0 } }, detail: { value: '12.349' } })
+  assert.equal(sale.data.fePricing.rows[0].price, '12.34')
+  assert.equal(typeof sale.data.fePricing.rows[0].price, 'string')
+  sale.onFePriceInput({ currentTarget: { dataset: { index: 0 } }, detail: { value: '8' } })
+  assert.equal(sale.data.fePricing.rows[0].price, '8')
 })
 
 test('L03-193 合法票价与自玩价上送两位小数字符串,纯字符串补零不四舍五入', () => {

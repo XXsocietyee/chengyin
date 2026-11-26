@@ -397,56 +397,86 @@ const libraryPage = (start, size) => Array.from({ length: size }, (_, i) => ({
   id: start + i, title: '可采用内容' + (start + i), advancedConfigJson: '{}',
 }));
 
-test('完整公共库读取未进home推荐切片的内容，翻完所有页才显示ready且不产生采用写入', () => {
+test('打开玩法选择只读公共库第一页，滚近末尾才读下一页，不把整库放进内存', () => {
   const p = makePage(); p._refreshSupportMatrix = () => {};
   p.getPublicTempList();
   const first = sent.at(-1);
   assert.equal(first.url, '/api/template/list');
   assert.deepEqual(first.data, { pageNum: 1, pageSize: 100 });
   first.success({ code: 200, data: { rows: libraryPage(1, 100), total: 101 } });
-  assert.equal(p.data.publicTempState, 'loading');
-  assert.deepEqual(p.data.publicTempList, []);
+  assert.equal(p.data.publicTempState, 'ready');
+  assert.equal(p.data.publicTempList.length, 100);
+  assert.equal(p.data.publicTempHasMore, true);
+  assert.equal(sent.filter(r => r.url === '/api/template/list').length, 1, '第一页回来后不再往下翻');
+  p.onPublicTempNearEnd();
   const second = sent.at(-1);
   assert.equal(second.url, '/api/template/list');
   assert.deepEqual(second.data, { pageNum: 2, pageSize: 100 });
   second.success({ code: 200, data: { rows: libraryPage(701, 1), total: 101 } });
   assert.equal(p.data.publicTempState, 'ready');
   assert.equal(p.data.publicTempList.length, 101);
+  assert.equal(p.data.publicTempHasMore, false);
   assert.equal(p.data.publicTempList.at(-1).id, 701, '非home推荐项也可被选择');
   assert.equal(sent.some(r => /homeData|adopt-draft|\/draft$/.test(r.url)), false);
+  p.onPublicTempNearEnd();
+  assert.equal(sent.filter(r => r.url === '/api/template/list').length, 2, '没有下一页就不再请求');
 });
 
-test('公共库真实空结果与分页失败分开，已取部分不能伪装完整或自动采用', () => {
+test('公共库真实空结果与分页失败分开，失败页给重试且不伪装空库', () => {
   const p = makePage(); p._refreshSupportMatrix = () => {};
   p.getPublicTempList();
   sent.at(-1).success({ code: 200, data: { rows: [], total: 0 } });
   assert.equal(p.data.publicTempState, 'ready');
   assert.deepEqual(p.data.publicTempList, []);
   p.getPublicTempList();
-  sent.at(-1).success({ code: 200, data: { rows: libraryPage(1, 100), total: 101 } });
   sent.at(-1).fail({});
   assert.equal(p.data.publicTempState, 'error');
   assert.deepEqual(p.data.publicTempList, []);
+  p.getPublicTempList();
+  sent.at(-1).success({ code: 200, data: { rows: libraryPage(1, 100), total: 101 } });
+  assert.equal(p.data.publicTempList.length, 100);
+  p.onPublicTempNearEnd();
+  sent.at(-1).fail({});
+  assert.equal(p.data.publicTempState, 'ready');
+  assert.equal(p.data.publicTempMoreState, 'error');
+  assert.equal(p.data.publicTempList.length, 100, '失败页不清空已加载的库');
   assert.equal(sent.some(r => r.url === '/api/template/adopt-draft'), false);
+  const before = sent.filter(r => r.url === '/api/template/list').length;
+  p.onPublicTempNearEnd();
+  assert.equal(sent.filter(r => r.url === '/api/template/list').length, before, '失败后不自动再翻页');
+  p.retryPublicTempMore();
+  assert.equal(sent.at(-1).data.pageNum, 2);
 });
 
-test('公共库缺总数、重复页与总数前空页明确失败，不吞成空库或截断结果', () => {
+test('公共库缺总数、重复页与总数前空页明确失败，不吞成空库或截断成完整结果', () => {
   for (const bad of [
-    { rows: [], total: 'bad' }, { rows: [] }, { rows: libraryPage(1, 1), total: 2 },
+    { rows: [], total: 'bad' }, { rows: [] }, { rows: [], total: 2 },
   ]) {
     const p = makePage(); p._refreshSupportMatrix = () => {};
     p.getPublicTempList();
     sent.at(-1).success({ code: 200, data: bad });
-    if (bad.total === 2) sent.at(-1).success({ code: 200, data: { rows: libraryPage(1, 1), total: 2 } });
     assert.equal(p.data.publicTempState, 'error');
     assert.deepEqual(p.data.publicTempList, []);
   }
-  const p = makePage(); p._refreshSupportMatrix = () => {};
-  p.getPublicTempList();
+  const dup = makePage(); dup._refreshSupportMatrix = () => {};
+  dup.getPublicTempList();
   sent.at(-1).success({ code: 200, data: { rows: libraryPage(1, 1), total: 2 } });
+  assert.equal(dup.data.publicTempState, 'ready');
+  assert.equal(dup.data.publicTempList.length, 1);
+  assert.equal(dup.data.publicTempHasMore, true);
+  dup.onPublicTempNearEnd();
+  sent.at(-1).success({ code: 200, data: { rows: libraryPage(1, 1), total: 2 } });
+  assert.equal(dup.data.publicTempMoreState, 'error');
+  assert.equal(dup.data.publicTempList.length, 1);
+  assert.equal(dup.data.publicTempState, 'ready');
+  const blank = makePage(); blank._refreshSupportMatrix = () => {};
+  blank.getPublicTempList();
+  sent.at(-1).success({ code: 200, data: { rows: libraryPage(1, 1), total: 2 } });
+  blank.onPublicTempNearEnd();
   sent.at(-1).success({ code: 200, data: { rows: [], total: 2 } });
-  assert.equal(p.data.publicTempState, 'error');
-  assert.deepEqual(p.data.publicTempList, []);
+  assert.equal(blank.data.publicTempMoreState, 'error');
+  assert.equal(blank.data.publicTempList.length, 1);
+  assert.notEqual(blank.data.publicTempState, 'error');
 });
 
 test('公共库回包绑定账号和经营scope，旧读取不能覆盖新读取(onHide 不作废只读列表,L03-004)', () => {
@@ -470,6 +500,73 @@ test('公共库回包绑定账号和经营scope，旧读取不能覆盖新读取
   fresh.success({ code: 200, data: { rows: libraryPage(9, 1), total: 1 } });
   old.success({ code: 200, data: { rows: libraryPage(1, 1), total: 1 } });
   assert.deepEqual(p.data.publicTempList.map(r => r.id), [9]);
+});
+
+test('换账号后再开玩法选择从第一页重读，旧库不留', () => {
+  const p = makePage(); p._refreshSupportMatrix = () => {};
+  p.getPublicTempList();
+  sent.at(-1).success({ code: 200, data: { rows: libraryPage(1, 1), total: 1 } });
+  assert.deepEqual(p.data.publicTempList.map(r => r.id), [1]);
+  actorId = 43;
+  p.showTemp();
+  const lists = sent.filter(r => r.url === '/api/template/list');
+  assert.equal(lists.at(-1).data.pageNum, 1);
+  assert.equal(lists.at(-1).data.keyword, undefined);
+  assert.deepEqual(p.data.publicTempList, []);
+  lists.at(-1).success({ code: 200, data: { rows: libraryPage(8, 1), total: 1 } });
+  assert.deepEqual(p.data.publicTempList.map(r => r.id), [8]);
+  lists[0].success({ code: 200, data: { rows: libraryPage(1, 1), total: 1 } });
+  assert.deepEqual(p.data.publicTempList.map(r => r.id), [8]);
+});
+
+test('搜索公共库只读该词的第一页，滚近末尾才带同一词读下一页', () => {
+  const p = makePage(); p._refreshSupportMatrix = () => {};
+  p.onPublicTempSearch({ detail: { value: ' 谜题 ' } });
+  const first = sent.filter(r => r.url === '/api/template/list').at(-1);
+  assert.deepEqual(first.data, { pageNum: 1, pageSize: 100, keyword: '谜题' });
+  first.success({ code: 200, data: { rows: libraryPage(3, 100), total: 150 } });
+  assert.equal(p.data.publicTempList.length, 100);
+  assert.equal(p.data.publicTempHasMore, true);
+  assert.equal(sent.filter(r => r.url === '/api/template/list').length, 1);
+  const before = sent.length;
+  p.onPublicTempSearch({ detail: { value: '谜题' } });
+  assert.equal(sent.length, before, '同一个词不重新把库拉一遍');
+  p.onPublicTempNearEnd();
+  assert.deepEqual(sent.at(-1).data, { pageNum: 2, pageSize: 100, keyword: '谜题' });
+});
+
+test('玩法选择的搜索、末尾哨兵和失败重试都接在公共库上', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const wxml = fs.readFileSync(path.join(__dirname, '../../pages/publish/fabu/index.wxml'), 'utf8');
+  const js = fs.readFileSync(path.join(__dirname, '../../pages/publish/fabu/index.js'), 'utf8');
+  assert.match(wxml, /bindconfirm="onPublicTempSearch"/);
+  assert.match(wxml, /id="public-temp-more"/);
+  assert.match(wxml, /bind:action="retryPublicTempMore"/);
+  assert.equal(js.includes('load(pageNum + 1)'), false);
+});
+
+test('观察器刚挂上不算滚动，末尾先离开画面再靠近才读下一页', () => {
+  const p = makePage(); p._refreshSupportMatrix = () => {};
+  let cb;
+  p.createIntersectionObserver = () => ({
+    relativeToViewport() { return this; },
+    observe(sel, fn) { assert.equal(sel, '#public-temp-more'); cb = fn; return this; },
+    disconnect() {},
+  });
+  p.getPublicTempList();
+  sent.at(-1).success({ code: 200, data: { rows: libraryPage(1, 100), total: 250 } });
+  assert.equal(typeof cb, 'function');
+  const before = sent.filter(r => r.url === '/api/template/list').length;
+  cb({ intersectionRatio: 1 });
+  assert.equal(sent.filter(r => r.url === '/api/template/list').length, before, '挂上时末尾已在画面里也不连着翻');
+  cb({ intersectionRatio: 0 });
+  cb({ intersectionRatio: 1 });
+  assert.equal(sent.filter(r => r.url === '/api/template/list').length, before + 1);
+  assert.equal(sent.at(-1).data.pageNum, 2);
+  cb({ intersectionRatio: 0 });
+  cb({ intersectionRatio: 1 });
+  assert.equal(sent.filter(r => r.data && r.data.pageNum === 2).length, 1, '这一页还没回来不再连翻');
 });
 
 test('采用已确认但个人详情未回读时重复确认不创建第二份草稿', () => {

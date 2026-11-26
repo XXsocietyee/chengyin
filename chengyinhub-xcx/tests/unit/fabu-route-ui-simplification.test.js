@@ -36,6 +36,8 @@ test('节点编辑只保留一行下一站，底部弹层只做结果到地点�
   // bind:change。断言的意图(控件必须接上 handler)不变,所以两种写法都认。
   // 10-28 原型 A e-route：去往改为结果行内就地勾选，每个选项直接接 handler。
   assert.match(pageWxml, /bind(?::?change|tap|:press)="onRouteMappingTargetPick"/)
+  assert.match(pageWxml, /wx:for="\{\{routeMappingTargets\}\}"/)
+  assert.doesNotMatch(pageWxml, /mapping\.targetOptions/)
   assert.match(pageWxml, /bind(?:tap|:action)="finishNodeRouteMapping"/)
   assert.match(pageWxml, />其他结果</)
   assert.match(pageWxml, /routeMappingFallbackLabel/)

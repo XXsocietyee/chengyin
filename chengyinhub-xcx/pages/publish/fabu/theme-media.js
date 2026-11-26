@@ -88,7 +88,7 @@ const methods = {
         that.setData({
           'chapterForm.audioUrl': file.url,
           'chapterForm.audioFileName': file.filename || '',
-          'chapterForm.audioDuration': 0
+          'chapterForm.audioDuration': null
         });
         that.autoDetectAudioDuration(file.url);
       }
@@ -121,15 +121,27 @@ const methods = {
         && chapterIndex === that.data.popChapterIndex && that.data.chapterForm.audioUrl === url
         && owner === memberId(getApp());
       if (!current) { that._destroyChapterDurationAudio(); return; }
-      // L03-048:iOS 的 InnerAudioContext 在 canplay 时常报 0,隔一会儿再读几次
+      // L03-048:iOS 的 InnerAudioContext 在 canplay 时常报 0。0 不是时长:
+      // 等到读出正数再写;一直是 0 就留空,不把 0 存进去。
       let tries = 0;
       const read = () => {
         if (that._chapterDurationAudio !== audio) return;
-        const duration = Math.round(audio.duration || 0);
-        if (duration > 0 && that.data.popChapter && token === that._chapterAudioToken && that.data.chapterForm.audioUrl === url) {
+        const still = !that._unloaded && that.data.popChapter
+          && token === that._chapterAudioToken && chapterForm === that.data.chapterForm
+          && chapterIndex === that.data.popChapterIndex && that.data.chapterForm.audioUrl === url
+          && owner === memberId(getApp());
+        if (!still) { that._destroyChapterDurationAudio(); return; }
+        const duration = Math.round(Number(audio.duration) || 0);
+        if (duration > 0) {
           that.setData({ 'chapterForm.audioDuration': duration });
-        } else if (duration <= 0 && tries < 5) {
-          tries += 1; that._chapterDurationPoll = setTimeout(read, 200); return;
+          that._destroyChapterDurationAudio();
+          return;
+        }
+        if (that.data.chapterForm.audioDuration === 0) that.setData({ 'chapterForm.audioDuration': null });
+        if (tries < 5) {
+          tries += 1;
+          that._chapterDurationPoll = setTimeout(read, 200);
+          return;
         }
         that._destroyChapterDurationAudio();
       };
