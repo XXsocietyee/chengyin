@@ -46,6 +46,20 @@ Page({
     this.setData({ state: 'loading', series: [], sources: [], current: { label: '', totalText: '0.00' } })
     const rows = [], ids = new Set()
     let total = null
+    // 这条接口固定带 includeExternalClubIncome,SQL 是 order by create_time desc, id desc。
+    // 近 6 个月与 monthlySeries 同一窗口;整页都更早时后面只会更早,不再把整本流水读进来。
+    const now = new Date()
+    const windowStart = new Date(now.getFullYear(), now.getMonth() - 5, 1)
+    const olderThanWindow = (row) => {
+      const value = row && row.createTime
+      const parsed = value instanceof Date ? value : new Date(String(value || '').replace(/-/g, '/'))
+      return !isNaN(parsed.getTime()) && parsed < windowStart
+    }
+    const finish = () => {
+      this._rows = rows
+      this.setData({ state: 'ready' })
+      this._render()
+    }
     // PG-038:401/会话失效(code 2)/无会话落登录态,其余失败才是加载失败
     const fail = (res, statusCode) => { if (current()) this.setData({ state: isLoginRequired(app, res, statusCode) ? 'login' : 'error' }) }
     const readPage = (pageNum) => app.sendRequest({
@@ -65,10 +79,13 @@ Page({
           ids.add(id); rows.push(row)
         }
         if (rows.length > total) { if (current()) this.setData({ state: 'error' }); return }
+        if (page.length && page.every(olderThanWindow)) {
+          rows.splice(rows.length - page.length, page.length)
+          finish()
+          return
+        }
         if (rows.length < total) { readPage(pageNum + 1); return }
-        this._rows = rows
-        this.setData({ state: 'ready' })
-        this._render()
+        finish()
       },
       fail,
       successStatusAbnormal: fail,

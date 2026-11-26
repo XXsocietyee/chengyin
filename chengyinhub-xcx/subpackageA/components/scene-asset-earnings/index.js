@@ -47,17 +47,31 @@ Component({
   },
   pageLifetimes: {
     show() {
-      const refresh = this._hidden || this._loadIdentity !== identityKey()
+      const hidden = this._hidden
       this._hidden = false
-      if (refresh) this.load(true)
+      if (!hidden) {
+        if (this._loadIdentity !== identityKey()) this.load(true)
+        return
+      }
+      if (this._shownBalance() && this._loadIdentity === identityKey()) return
+      this.load(true)
     },
     hide() {
       this._hidden = true
       this._loadToken = (this._loadToken || 0) + 1
-      this._clearBalance()
+      if (this._shownBalance()) this._holdBalance()
+      else this._clearBalance()
     },
   },
   methods: {
+    _shownBalance() {
+      return !this._detached && this.data.state === 'ready' && this.data.balance !== '' && this._dataIdentity === identityKey()
+    },
+    _holdBalance() {
+      const stopCount = this._pmCounters && this._pmCounters.balanceK
+      if (stopCount) stopCount()
+      if (this.data.balanceK != null) this.setData({ balanceK: null })
+    },
     _clearBalance() {
       const stopCount = this._pmCounters && this._pmCounters.balanceK
       if (stopCount) stopCount()
@@ -131,7 +145,7 @@ Component({
       })
     },
     /* 金额落定:共用件 countMoney 慢-快-慢落地(1300ms,与商家首页累计收入一致);只写进度 balanceK,
-     * 显示 = 真值 × 进度,换号/隐藏时 _clearBalance 停表并清空真值,不会闪出旧金额。减动效 / 非正数直接落定。 */
+     * 显示 = 真值 × 进度。换号、销毁、还没读成就隐藏时停表并清空;同一账号已经显示的金额留在屏上。减动效 / 非正数直接落定。 */
     _showBalance(balance, token) {
       if (!this._acceptRead(token)) return
       this._dataIdentity = this._loadIdentity
