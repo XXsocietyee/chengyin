@@ -89,7 +89,7 @@ test('统一邀请页(proto sh-invite):kind=invite 眉题 / 邀请人 · 剩余�
 
 test('邀请入口全部走统一邀请页:同行席位(带席位数 + 信封插图)、队伍详情(队长 + 空席)、我的 → 邀请好友(个人码)', () => {
   const seats = read('subpackageJourney/pages/seats/index.wxml')
-  assert.match(seats, /<cy-share-card show="\{\{inviteShow\}\}" card="\{\{inviteCard\}\}" bind:close="onCloseInvite" \/>/)
+  assert.match(seats, /<cy-share-card show="\{\{inviteShow\}\}" card="\{\{inviteCard\}\}" share-ready="\{\{inviteShareReady\}\}" bind:close="onCloseInvite" \/>/)
   // 2026-11-24 DEC-F12 B 业主:按手机号转赠用席位页内半屏(cy-sheet「转赠第 N 席」);邀请仍不回到半屏
   assert.doesNotMatch(seats, /<cy-sheet(?![^>]*title="转赠第)/, '邀请半屏撤掉;已邀请列表留在页面里')
   assert.match(seats, /class="lb-invited"/)

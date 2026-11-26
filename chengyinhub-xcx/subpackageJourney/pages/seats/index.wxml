@@ -82,7 +82,7 @@
       <view slot="footer"><cy-btn variant="primary" block loading="{{transfer.busy}}" bindtap="onTransferConfirm">确认转赠</cy-btn></view>
     </cy-sheet>
     <!-- 邀请同行 = 统一的 Spotify 式邀请页:封面压暗卡 + 邀请人 · 剩余席位 + 码;「发给微信好友」走本页 onShareAppMessage(带席位邀请 token) -->
-    <cy-share-card show="{{inviteShow}}" card="{{inviteCard}}" bind:close="onCloseInvite" />
+    <cy-share-card show="{{inviteShow}}" card="{{inviteCard}}" share-ready="{{inviteShareReady}}" bind:close="onCloseInvite" />
     <!-- qx-final:邀请卡「保存图片」走 wx.saveImageToPhotosAlbum,隐私授权在本页内弹(同 settle 页) -->
     <cy-privacy-gate show="{{privacyGateShow}}" bind:settled="onPrivacyGateSettled" />
   </block>

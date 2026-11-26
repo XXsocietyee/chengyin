@@ -18,7 +18,7 @@ const INVITE_KEY = 'journey-seat-invite:';
 Page({
   data: { state: 'loading', stateKind: 'loading', stateTitle: '加载中', stateCta: '',
     actionError: '',
-    lobby: null, head: null, me: null, tiles: [], inviteShow: false, inviteCard: null, playUrl: '', privacyGateShow: false,
+    lobby: null, head: null, me: null, tiles: [], inviteShow: false, inviteShareReady: true, inviteCard: null, playUrl: '', privacyGateShow: false,
     transfer: { show: false, no: 0, name: '', phone: '', nameError: '', phoneError: '', busy: false, error: '' } },
 
   showPrivacyGate() { this.setData({ privacyGateShow: true }); },
@@ -61,7 +61,7 @@ Page({
         const invited = (seats && seats.seats || []).find(seat => seat.invitationId === String(this._invite.invitationId));
         if (!invited || invited.state !== 'INVITED') { this._invite = null; this._inviteToken = ''; this._tokenShared = false; }
       }
-      this.setData({ state: 'ready', lobby: lobby.lobbyView(seats, res.data, this.data.me), playUrl: lobby.playUrl(seats) });
+      this.setData({ state: 'ready', lobby: lobby.lobbyView(seats, res.data, this.data.me), playUrl: lobby.playUrl(seats), inviteShareReady: this._inviteShareReady() });
       if (!this._extrasRead) { this._extrasRead = true; this._loadExtras(seats); }
     });
   },
@@ -98,12 +98,12 @@ Page({
     const head = this.data.head || {};
     const me = this.data.me || {};
     const s = this._summary || {};
-    this.setData({ inviteShow: true, inviteCard: {
+    // 已经发出去的邀请占着那个席位。还有空席时另开一条，不把同一枚码再交给下一位。
+    if (this._spentInvitedToken() && this._freeSeatsRemain()) this._dropSharedInvite();
+    this.setData({ inviteShow: true, inviteShareReady: this._unusedInviteToken(), inviteCard: {
       kind: 'invite', id: String(s.topicId || ''), title: head.name || '一起来玩', cover: head.cover || '',
       inviter: me.name || '', seatsLeft: l.openCount, art: illus.layers('envelope').fg
     } });
-    // 已经发出去的邀请占着那个席位。还有空席时另开一条，不把同一枚码再交给下一位。
-    if (this._spentInvitedToken() && this._freeSeatsRemain()) this._dropSharedInvite();
     if (!this._inviteToken && !this._busy) this.onInvite();
   },
   onSeatTap(e) { if (e.currentTarget.dataset.tappable) this.onOpenInvite(); },
@@ -120,7 +120,7 @@ Page({
     const requestId = this._pendingId || this._pending() || view.newRequestId('seatinv');
     this._setPending(requestId);
     this._busy = true; // 只防连点,不渲染
-    this.setData({ actionError: '' });
+    this.setData({ actionError: '', inviteShareReady: this._inviteShareReady() });
     api.seatInvite(app, this._registrationId, requestId).then(res => {
       this._busy = false;
       if (res.netFail || res.code === 'fail' || Number(res.code) >= 500) {
@@ -132,6 +132,7 @@ Page({
       this._invite = res.data;
       this._inviteToken = res.data.token; // 只给分享路径用,不渲染
       this._tokenShared = false;
+      this._markInviteShareReady();
       this.load();
     });
   },
@@ -148,7 +149,7 @@ Page({
       api.seatCancel(app, id, requestId).then(res => {
         this._busy = false;
         if (!api.ok(res) && !res.netFail) this.setData({ actionError: res.msg || '撤销失败' });
-        if (this._invite && String(this._invite.invitationId) === String(id)) { this._invite = null; this._inviteToken = ''; this._tokenShared = false; }
+        if (this._invite && String(this._invite.invitationId) === String(id)) { this._invite = null; this._inviteToken = ''; this._tokenShared = false; this._markInviteShareReady(); }
         this.load();
       });
     } });
@@ -199,10 +200,22 @@ Page({
     const seat = this._inviteSeat();
     return !!(this._tokenShared && this._inviteToken && seat && seat.state === 'INVITED');
   },
+  _unusedInviteToken() {
+    return !!(this._inviteToken && !this._tokenShared);
+  },
+  // 半屏开着且没有未使用的席位码(含下一席请求还在飞)时,主按钮不能是分享。
+  _inviteShareReady() {
+    return !this.data.inviteShow || this._unusedInviteToken();
+  },
+  _markInviteShareReady() {
+    this.setData({ inviteShareReady: this._inviteShareReady() });
+  },
   _dropSharedInvite() {
     this._invite = null;
     this._inviteToken = '';
     this._tokenShared = false;
+    // 与清掉令牌同一次 setData。微信会同步写回 this.data,下一次点击读到的已是普通按钮。
+    this._markInviteShareReady();
   },
   _topicShare() {
     const s = this._summary || {};
@@ -231,11 +244,19 @@ Page({
       if (!this._busy) this.onInvite();
     } else if (token && this._inviteSeat() && this._inviteSeat().state === 'INVITED') {
       this._tokenShared = true;
+      this._markInviteShareReady();
     } else if (!token && this._freeSeatsRemain() && !this._busy) {
       this.onInvite();
     }
-    // L09-058:还没有有效邀请令牌(右上角菜单分享、令牌已被领走)⇒ 分享主题页,不发一条领不了的席位链接
-    if (!token) return this._topicShare();
+    // L09-058:半屏关着、还没有有效邀请令牌(右上角菜单、令牌已被领走)⇒ 分享主题页,不发一条领不了的席位链接。
+    // 半屏还开着且没有未使用的码:不能把主题页交给下一位。主按钮此时也不是 open-type=share。
+    if (!token) {
+      if (this.data.inviteShow) {
+        this._markInviteShareReady();
+        return;
+      }
+      return this._topicShare();
+    }
     return this._inviteShare(token);
   }
 });

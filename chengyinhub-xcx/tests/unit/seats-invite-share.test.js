@@ -62,6 +62,7 @@ test('onShow refreshes seats', async () => {
 test('four-seat buyer: each share of an empty seat gets its own invitation', async () => {
   const page = mount('INVITED', FOUR); await tick();
   assert.match(page.onShareAppMessage().path, /k=s&t=tok-31/);
+  // 半屏没开(右上角菜单):下一席还没回来时仍分享主题页(L09-058),且不再带出刚才那枚码
   const again = page.onShareAppMessage().path;
   assert.equal(again, '/pages/topic/index/index?id=9');
   assert.equal(again.includes('tok-31'), false);
@@ -84,4 +85,35 @@ test('four-seat buyer: each share of an empty seat gets its own invitation', asy
   assert.match(page.onShareAppMessage().path, /k=s&t=tok-32/);
   const fourth = page.onShareAppMessage().path;
   assert.equal(fourth.includes('tok-31') || fourth.includes('tok-32'), false);
+});
+
+test('invite sheet open: a second share before the next invite returns does not hand out the topic page', async () => {
+  const page = mount('INVITED', FOUR); await tick();
+  page.onOpenInvite();
+  assert.equal(page.data.inviteShow, true);
+  assert.equal(page.data.inviteShareReady, true);
+  const first = page.onShareAppMessage();
+  assert.match(first.path, /\/subpackageJourney\/pages\/landing\/index\?k=s&t=tok-31/);
+  assert.equal(page._inviteToken, '');
+  assert.equal(page.data.inviteShareReady, false);
+  const second = page.onShareAppMessage();
+  assert.equal(String(second && second.path || '').includes('/pages/topic/'), false);
+  assert.equal(String(second && second.path || '').includes('tok-31'), false);
+  const invite = page._requests.filter((r) => r.url === '/api/play/seat-invitations/invite');
+  assert.equal(invite.length, 1);
+  invite[0].success({ code: 200, data: { invitationId: 32, token: 'tok-32', seatNo: 3 } });
+  await tick();
+  assert.equal(page.data.inviteShareReady, true);
+  const seats = page._requests.filter((r) => r.url === '/api/play/player-journey/seats');
+  seats[seats.length - 1].success({ code: 200, data: {
+    registrationId: 5, topicId: 9, ownerType: 1, seatCount: 4, freeSeats: 1,
+    buyerIsCaller: true, readOnly: false, seats: [
+      { seatNo: 1, state: 'BUYER' },
+      { seatNo: 2, state: 'INVITED', invitationId: 31 },
+      { seatNo: 3, state: 'INVITED', invitationId: 32 },
+      { seatNo: 4, state: 'AVAILABLE' }
+    ] } });
+  await tick();
+  assert.equal(page.data.inviteShareReady, true);
+  assert.match(page.onShareAppMessage().path, /k=s&t=tok-32/);
 });
