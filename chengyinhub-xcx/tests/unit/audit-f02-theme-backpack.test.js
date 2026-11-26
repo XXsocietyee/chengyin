@@ -107,6 +107,44 @@ test('L02-017: occurredAt is China time regardless of the phone time zone; expir
   assert.equal(ops.clockText('garbage'), '');
 });
 
+test('L02-014: setData themeBag keeps template fields and leaves the raw server view off the payload', () => {
+  const vm = page(() => Promise.resolve({}));
+  vm._applyZeroHpView = () => {};
+  vm._stopThemePoll = () => {};
+  vm._startThemePoll = () => {};
+  const sent = [];
+  const base = vm.setData;
+  vm.setData = (patch, cb) => { sent.push(JSON.parse(JSON.stringify(patch))); return base.call(vm, patch, cb); };
+  const view = {
+    sessionId: 1, version: 4, status: 'ACTIVE', used: 1, capacity: 6, scope: 'PLAYER',
+    contents: [{ id: 'a', kind: 'ITEM', name: '钥匙', quantity: 1 }],
+    events: [{ id: 'e', name: '窗' }],
+    world: { round: 1, itemCatalog: [{ id: 'a', name: '钥匙' }] },
+    quests: [{ questKey: 'q', nodeId: 1 }],
+    pending: {},
+    attributes: [{ key: 'counter.x', label: '能量', value: 1, max: 3 }],
+    secret: 'leak',
+    hpEnabled: true, hp: 2, hpMax: 5,
+  };
+  vm._applyThemeView(view);
+  const bag = sent.map((patch) => patch.themeBag).find(Boolean);
+  assert.equal(bag.used, 1);
+  assert.equal(bag.capacity, 6);
+  assert.equal(bag.sessionId, 1);
+  assert.equal(bag.hp, 2);
+  assert.equal(bag.items[0].name, '钥匙');
+  assert.equal(bag.valueRows.some((row) => row.key === 'counter.x'), true);
+  assert.equal(bag.result, null);
+  assert.equal(bag.replayAllowed, null);
+  assert.equal(Object.hasOwn(bag, 'result'), true);
+  for (const key of ['secret', 'contents', 'events', 'world', 'quests', 'pending', 'attributes', 'version', 'status']) assert.equal(bag[key], undefined);
+  assert.equal(vm.data.themeBag.world.itemCatalog[0].id, 'a');
+  assert.equal(vm.data.themeBag.version, 4);
+  assert.equal(vm.data.themeBag.quests[0].questKey, 'q');
+  assert.equal(vm._themeView.secret, 'leak');
+  assert.deepEqual(Object.keys(JSON.parse(JSON.stringify(vm.data.themeBag))).filter((key) => key === 'world' || key === 'contents' || key === 'secret'), []);
+});
+
 test('L02-094: receipt lines from a previous run are cleared when the session changes', () => {
   const vm = page(() => Promise.resolve({}));
   vm._applyZeroHpView = () => {}; vm._stopThemePoll = () => {}; vm._startThemePoll = () => {};
