@@ -49,7 +49,7 @@ Page({
     this._openPx = Math.round(360 * ((sys.windowWidth || 375) / 750)); this._identityEpoch = identitySync.identityEpoch(); this._offIdentity = identitySync.onIdentityChange(() => { this._identityEpoch = -1; });
     this._syncViewTheme();
     this.loadConversations();
-    this.loadInvites();
+    this._loadInvitesForVisit(false);
   },
   onShow() {
     const resumed = this._hidden;
@@ -57,20 +57,33 @@ Page({
     this._navigating = false; // 从聊天页返回时刷新未读/最后一条;兜底清跳转中标记
     this._syncViewTheme();
     this._syncCommunityEntry(); const identityDirty = this._identityEpoch !== undefined && this._identityEpoch !== identitySync.identityEpoch(); this._identityEpoch = identitySync.identityEpoch(); // G-5:身份广播过 ⇒ 丢掉已确认的会话快照整表重拉
-    if (identityDirty && this.data.loaded) { this.loadConversations(false); this.loadInvites(); } else if (this.data.loaded || resumed || this._conversationReader && !sameReader(app, this._conversationReader)) {
+    if (identityDirty && this.data.loaded) this.loadConversations(false);
+    else if (this.data.loaded || resumed || this._conversationReader && !sameReader(app, this._conversationReader)) {
       this.loadConversations(true);
-      this.loadInvites();
     }
+    // 同一次打开里返回本页不重复拉邀请;换了账号会换 reader key,才会再拉。
+    this._loadInvitesForVisit(false);
     this.loadMerchantEntry();
+  },
+  onPullDownRefresh() {
+    this.loadConversations(!!this.data.loaded);
+    this._loadInvitesForVisit(true);
+    if (typeof wx.stopPullDownRefresh === 'function') wx.stopPullDownRefresh();
   },
   onHide() {
     this._hidden = true;
-    this._inviteEpoch = (this._inviteEpoch || 0) + 1;
     this._conversationRequestEpoch = (this._conversationRequestEpoch || 0) + 1;
     this._merchantEntryRequestEpoch = (this._merchantEntryRequestEpoch || 0) + 1;
+    this._clearListMotion();
     if (this.data.isMerchantView) merchantTheme.merchantPageRestore();
   },
-  onUnload() { this._disposed = true; if (this._offIdentity) this._offIdentity(); this.onHide(); },
+  onUnload() { this._disposed = true; this._unloaded = true; if (this._offIdentity) this._offIdentity(); this.onHide(); },
+  _clearListMotion() {
+    const timer = this._pmListTimer;
+    this._pmListTimer = null;
+    if (timer != null && typeof clearTimeout === 'function') clearTimeout(timer);
+    if (!this._unloaded && this.data && this.data.pmList) this.setData({ pmList: 0 });
+  },
   // 视角只认 roleGuard(与请求层 G-4 闸同源):商家浅色(原生导航栏跟着切亮),玩家保持默认深色。
   _syncViewTheme() {
     const isMerchantView = roleGuard.isMerchantView();
@@ -183,8 +196,38 @@ Page({
     retryLogin(this, app, function () { if (!this._disposed) this.loadConversations(false); });
   },
 
+  // 能收到合作邀请的才读 /api/coop/list:商家、主理人、名下有俱乐部。
+  // 普通玩家没有收件方,不发这个请求。同一次打开只读一遍,下拉刷新才再读。
+  _accountCanReceiveCoopInvites() {
+    if (roleGuard.isMerchantView() || roleGuard.isClubLeader()) return true;
+    const clubs = roleGuard.ownedClubs();
+    if (clubs && clubs.length) return true;
+    const role = typeof app.getUserRole === 'function' ? String(app.getUserRole() || '') : '';
+    if (role === 'merchant' || role === 'club') return true;
+    const userType = typeof app.getUserType === 'function' ? app.getUserType() : '';
+    return userType == 2;
+  },
+  _inviteReaderKey() {
+    const who = reader(app);
+    return String(who.id || '') + '\n' + String(who.token || '');
+  },
+  _loadInvitesForVisit(force) {
+    const key = this._inviteReaderKey();
+    if (!this._accountCanReceiveCoopInvites()) {
+      this._invitesLoadedKey = key;
+      if ((this.data.invitesIn && this.data.invitesIn.length) || (this.data.invitesOut && this.data.invitesOut.length) || this.data.inviteError) {
+        this._inviteEpoch = (this._inviteEpoch || 0) + 1;
+        this.setData({ invitesIn: [], invitesOut: [], inviteError: '' });
+        this.refreshView();
+      }
+      return;
+    }
+    if (!force && this._invitesLoadedKey === key) return;
+    this._invitesLoadedKey = key;
+    this.loadInvites();
+  },
+
   // 合作邀请与 IM 会话是两套数据源:读不到只在列表上方局部报错,不影响会话。
-  // 普通玩家返回两份空数组,收发件箱里就只有会话。
   loadInvites() {
     const that = this;
     const epoch = (this._inviteEpoch || 0) + 1;
@@ -192,7 +235,8 @@ Page({
     const capturedReader = reader(app);
     let settled = false;
     const finish = () => {
-      if (settled || epoch !== this._inviteEpoch || this._disposed || this._hidden
+      // 藏到后台不算作废:同一次打开不再补拉,回包必须还能写进列表,回来才看得到。
+      if (settled || epoch !== this._inviteEpoch || this._disposed
           || !sameReader(app, capturedReader)) return false;
       settled = true;
       return true;

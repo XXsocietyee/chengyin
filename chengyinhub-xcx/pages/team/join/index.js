@@ -43,8 +43,14 @@ Page({
     this._hidden = false;
     if (refresh) { this._openRecovery(); this.load(); }
   },
-  onHide() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1; if (this._recovery) this._recovery.dispose(); this._hidden = true; this._epoch = (this._epoch || 0) + 1; this._inviteLoading = false; },
-  onUnload() { this._disposed = true; this.onHide(); },
+  onHide() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1; if (this._recovery) this._recovery.dispose(); this._hidden = true; this._epoch = (this._epoch || 0) + 1; this._inviteLoading = false; this._clearEntrance(); },
+  onUnload() { this._disposed = true; this._unloaded = true; this.onHide(); },
+  _clearEntrance() {
+    const timer = this._seatInTimer;
+    this._seatInTimer = null;
+    if (timer != null && typeof clearTimeout === 'function') clearTimeout(timer);
+    if (!this._unloaded && this.data && this.data.seatIn) this.setData({ seatIn: 0 });
+  },
 
   _openRecovery() {
     this._recoveryReader = reader(app);

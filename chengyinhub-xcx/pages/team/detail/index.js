@@ -80,8 +80,14 @@ Page({
     }
   },
   onShow() { this._hidden = false; this._syncSeatBreath(); if (this.teamId && !this._left) { this._openRecovery(); this.load(); } },
-  onHide() { this._hidden = true; this._stopSeatBreath(); if (this._recovery) this._recovery.dispose(); this._resetReads(); },
-  onUnload() { this._disposed = true; this._unloaded = true; this._stopSeatBreath(); if (this._recovery) this._recovery.dispose(); this._resetReads(); },
+  onHide() { this._hidden = true; this._stopSeatBreath(); this._clearEntrance(); if (this._recovery) this._recovery.dispose(); this._resetReads(); },
+  onUnload() { this._disposed = true; this._unloaded = true; this._stopSeatBreath(); this._clearEntrance(); if (this._recovery) this._recovery.dispose(); this._resetReads(); },
+  _clearEntrance() {
+    const timer = this._seatInTimer;
+    this._seatInTimer = null;
+    if (timer != null && typeof clearTimeout === 'function') clearTimeout(timer);
+    if (!this._unloaded && this.data && this.data.seatIn) this.setData({ seatIn: 0 });
+  },
 
   _syncSeatBreath() {
     if (this._hidden || this._unloaded || !(this.data.openSeats || []).length) { this._stopSeatBreath(); return; }

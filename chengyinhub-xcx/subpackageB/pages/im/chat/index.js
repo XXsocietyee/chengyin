@@ -136,6 +136,8 @@ Page({
     this._pendingClearReturn = null;
     this._pollWatermark = null;
     this._pollInFlight = false;
+    this._historyAppliedEpoch = null;
+    this._scrollWhenShown = false;
     this._pendingReadConversationId = 0;
     this._pendingReadMemberId = 0;
     const sb = (app.globalData && app.globalData.statusBarHeight) || 20;
@@ -332,8 +334,12 @@ Page({
       url: '/api/im/messages', method: 'POST', hideLoading: true, silentError: true,
       data: { conversation_id: conversationId, cursor_id: 0, size: 30 },
       success(res) {
-        if (!current()) return;
-        that._pollInFlight = false;
+        // 离开页面会抬高轮询代际,首屏回包因此不再算 current。线程还空着时仍要落地,
+        // 否则回来只剩骨架,要等下一次读取才看得到已经到了的消息。
+        const latest = current();
+        const sameThread = viewCurrent() && that._isReadContextCurrent(conversationId, memberId);
+        if (!latest && (!sameThread || (that._historyAppliedEpoch != null && that._historyAppliedEpoch >= requestEpoch))) return;
+        if (latest) that._pollInFlight = false;
         if (res && res.code == 200 && res.data && typeof res.data === 'object' && !Array.isArray(res.data)
             && (res.data.list == null || isRecordList(res.data.list))) {
           const list = that.decorate(Array.isArray(res.data.list) ? res.data.list : []);
@@ -341,6 +347,7 @@ Page({
           const pending = that.data.msgs.filter(m => m.sendPayload && !list.some(server =>
             server.clientMessageId === m.clientMessageId && server.senderId == m.senderId));
           const msgs = list.concat(pending);
+          that._historyAppliedEpoch = requestEpoch;
           that.setData({ msgs, sending: msgs.some(m => m.sending), hasMore: !!res.data.hasMore, cursor: res.data.nextCursor || 0, loadState: 'ready', loadErrorText: '', loadMoreError: '' });
           if (that._needPeerName && !that.data.name) that._fillPeerName();
           // 拉黑只存服务端:重进会话按回包禁用输入框,不然能打字、一发就失败(3-22)
@@ -348,12 +355,15 @@ Page({
           that._blockedByMe = blockedByMe;
           that.setData({ disabled: that.data.readOnly || res.data.blocked === true, disabledText: that.data.readOnly ? '城瘾小助手不接收回复' : res.data.blocked === true ? (blockedByMe ? '你已拉黑对方，无法发送消息' : '对方暂不可联系，无法发送消息') : '',
             moreSheetItems: that.data.readOnly ? ['隐藏会话'] : moreItems(blockedByMe ? '解除拉黑' : '拉黑') });
-          if (toBottom) that.scrollBottom();
+          if (toBottom) {
+            if (that._hidden) that._scrollWhenShown = true;
+            else that.scrollBottom();
+          }
           that._markReadWhenVisible(conversationId, memberId);
           that.recoverPending();
           return;
         }
-        that._setMessageLoadError(res, res && res.code != null && res.code != 200);
+        if (latest) that._setMessageLoadError(res, res && res.code != null && res.code != 200);
       },
       fail(res) {
         if (!current()) return;
@@ -515,7 +525,10 @@ Page({
     const that = this;
     const conversationId = this.data.conversationId;
     const memberId = this.data.myId;
-    setTimeout(function () {
+    if (this._scrollTimer) clearTimeout(this._scrollTimer);
+    this._scrollTimer = setTimeout(function () {
+      that._scrollTimer = null;
+      if (that._hidden || that._disposed) return;
       if (that._isReadContextCurrent(conversationId, memberId)) {
         that.setData({ toView: 'bottom-anchor' });
       }
@@ -694,11 +707,7 @@ Page({
     const targets = new Set(this.data.msgs.filter(m => m.card && m.card.cardType === 'route'
       && Number.isSafeInteger(Number(m.id)) && Number(m.id) > 0).map(m => String(m.id)));
     if (!targets.size) return;
-    // 先清除消息本身与缓存的旧投影，其他消息合并也不能复活旧私密名称。
-    const masked = this.data.msgs.map(m => targets.has(String(m.id)) ? Object.assign({}, m, {
-      content: '路线已不可用', extraJson: JSON.stringify({ cardType: 'route', topicId: m.card.topicId })
-    }) : m);
-    this.setData({ msgs: this.decorate(masked) });
+    // 先读再改。失败或回包不合法时保留已经显示的卡；只有这一次成功回包里写明不可用的 id 才换成「路线已不可用」。
     // 历史游标依据可见时间排序，不能用 id+1 猜一条不存在的游标行。
     let projectionEpoch = this._topicEpoch;
     const visited = new Set();
@@ -1187,6 +1196,7 @@ Page({
   // ===== 准实时:页面可见时轮询新消息 =====
   onShow() {
     this._hidden = false;
+    if (this._scrollWhenShown) { this._scrollWhenShown = false; this.scrollBottom(); }
     if (this.data.isMerchantView) merchantTheme.merchantPageShow();
     this._navigating = false;
     if (this.data.type == 2 && this._reportEntryEpoch) this.loadReportEntry();
@@ -1219,6 +1229,7 @@ Page({
     if (this.data.reviewResult) this.closeReviewResult();
     this._hidden = true;
     if (this.data.routePickerOpen) this.closeRoutePicker();
+    this._clearPageTimers();
     this._pollRequestEpoch = (this._pollRequestEpoch || 0) + 1;
     this._pollInFlight = false;
     this.stopPoll();
@@ -1240,7 +1251,11 @@ Page({
     this._loadMoreRequestEpoch = (this._loadMoreRequestEpoch || 0) + 1;
     this._pollRequestEpoch = (this._pollRequestEpoch || 0) + 1;
     this.stopPoll();
-    clearTimeout(this._routeTimer);
+    this._clearPageTimers();
+  },
+  _clearPageTimers() {
+    if (this._scrollTimer) { clearTimeout(this._scrollTimer); this._scrollTimer = null; }
+    if (this._routeTimer) { clearTimeout(this._routeTimer); this._routeTimer = null; }
   },
   startPoll() {
     const that = this;
