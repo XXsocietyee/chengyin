@@ -515,6 +515,62 @@ function canSeeClubRoster(club) {
     && Number(club.joinPolicy) === 0;
 }
 
+function inviteMinuteLabel(at) {
+  const parts = chinaParts(at);
+  if (!parts) return '';
+  const pad = function (n) { return n < 10 ? '0' + n : String(n); };
+  return pad(parts.month) + '-' + pad(parts.day) + ' ' + pad(parts.hours) + ':' + pad(parts.minutes);
+}
+
+// 只剩 'MM-DD HH:mm' 时,字符串序会把 12 月说成比次年 1 月更新。
+// 月序的短弧跨过 1 月就不报这条跨年顺序;落在同一年内才取最近一次。
+function bareInviteLabel(texts) {
+  let minMonth = 13;
+  let maxMonth = 0;
+  let best = '';
+  let count = 0;
+  for (let i = 0; i < texts.length; i += 1) {
+    const text = texts[i];
+    const match = /^(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(text);
+    if (!match) continue;
+    const month = Number(match[1]);
+    const day = Number(match[2]);
+    const hour = Number(match[3]);
+    const minute = Number(match[4]);
+    if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59) continue;
+    if (month < minMonth) minMonth = month;
+    if (month > maxMonth) maxMonth = month;
+    if (!best || text > best) best = text;
+    count += 1;
+  }
+  if (!count) return '';
+  if (minMonth !== maxMonth && (minMonth + (12 - maxMonth)) <= (maxMonth - minMonth)) return '';
+  return best;
+}
+
+function latestInviteLabel(invites) {
+  let bestAt = NaN;
+  let bestText = '';
+  const bare = [];
+  for (let i = 0; i < invites.length; i += 1) {
+    const item = invites[i] || {};
+    const raw = item.createTime;
+    const at = raw === undefined || raw === null || raw === ''
+      ? NaN
+      : toTimestamp(typeof raw === 'number' || raw instanceof Date ? raw : String(raw));
+    if (!isNaN(at)) {
+      if (isNaN(bestAt) || at > bestAt) {
+        bestAt = at;
+        bestText = item.timeText || inviteMinuteLabel(at);
+      }
+    } else if (item.timeText) {
+      bare.push(String(item.timeText));
+    }
+  }
+  if (!isNaN(bestAt)) return bestText;
+  return bareInviteLabel(bare);
+}
+
 Page({
   // MC-029:切后台可能被系统回收,等不到撤销条到期 —— 未撤销的移出成员此刻就提交(卸载同理)。
   onHide() { this._skipShowRefresh = this._overlayPending === true; this._overlayPending = false; this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1; const pending = this._pendingRemoval; this._pendingRemoval = null; if (typeof pending === 'function') pending(); },
@@ -1618,12 +1674,7 @@ Page({
     const topics = this._topics || [];
     const invites = this.data.sentInvites || [];
     const pending = invites.filter(function (item) { return Number(item.status) === 0; });
-    const latest = invites.reduce(function (best, item) {
-      const at = item.createTime ? toTimestamp(String(item.createTime)) : NaN;
-      return !isNaN(at) && item.timeText && (!best || at > best.at) ? { at: at, text: item.timeText } : best;
-    }, null);
-    const latestInviteTime = latest ? latest.text
-      : (invites.map(function (item) { return item.timeText || ''; }).filter(Boolean).sort().pop() || '');
+    const latestInviteTime = latestInviteLabel(invites);
     const descs = [
       topics.length ? ('已发布 ' + topics.length + ' 个项目') : '先发布一个俱乐部项目',
       invites.length ? ('已发出 ' + invites.length + ' 份邀请') : '选择一个项目，开始对接商家',
