@@ -97,13 +97,24 @@ Page({
   },
   closeRank() { this.setData({ rankOpen: false }); },
 
+  // L09-159:本页已经有这一局结束的战报时交给结算页,结算页不再立刻重拉同一局。
+  // 失败或还没结束的不交(handed 也不带),结算页仍自己读。
   openSettle() {
     const r = this.data.report || {};
+    const finished = this.data.state === 'ready' && r.finished === true;
+    this._settleHandoff = finished ? {
+      activityId: String(this._query.activityId || ''),
+      topicId: String(this._query.topicId || ''),
+      runId: r.runId ? String(r.runId) : '',
+      topicName: this._topicName || '',
+      report: r
+    } : null;
     const q = [];
     if (this._query.activityId) q.push('activityId=' + this._query.activityId);
     if (this._query.topicId) q.push('topicId=' + this._query.topicId);
     if (r.runId) q.push('runId=' + r.runId);
     if (this._topicName) q.push('topicName=' + encodeURIComponent(this._topicName));
+    if (finished) q.push('handed=1');
     wx.navigateTo({ url: '/subpackageJourney/pages/settle/index?' + q.join('&') });
   },
 
