@@ -45,12 +45,12 @@ public class ApiRoamHangoutController extends BaseController {
 
     @Operation(summary = "附近的局 + 有坐标的活动(只读叠加)")
     @GetMapping("/nearby")
-    public AjaxResult nearby(Double lat, Double lng, Integer radius) {
+    public AjaxResult nearby(Double lat, Double lng, Double radius) {
         Long memberId = uid();
         if (lat == null || lng == null) return error("缺少定位");
         if (!Double.isFinite(lat) || !Double.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return error("经纬度格式不正确");
         try {
-            return success(roamHangoutService.nearby(memberId, lat, lng, radius == null ? 0 : radius));
+            return success(roamHangoutService.nearby(memberId, lat, lng, ApiRoamController.resolveNearbyRadiusMeters(radius)));
         } catch (ServiceException e) {
             return fail(e);
         }

@@ -8,9 +8,11 @@ import com.chengyinhub.business.mapper.MemberVisitedPoiMapper;
 import com.chengyinhub.business.mapper.RoamMapper;
 import com.chengyinhub.business.service.IGrowthService;
 import com.chengyinhub.business.service.impl.RoamSessionWriteService;
+import com.chengyinhub.business.service.IRoamHangoutService;
 import com.chengyinhub.common.core.domain.AjaxResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
@@ -24,9 +26,11 @@ import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -283,18 +287,77 @@ class ApiRoamCoordinateBoundaryTest
     @Test
     void poisRejectsRadiusAbove50kmWithoutQuerying()
     {
-        AjaxResult over = controller.pois(NEAR_LAT, NEAR_LNG, 50_001);
+        AjaxResult over = controller.pois(NEAR_LAT, NEAR_LNG, 50_001d);
         assertNotEquals(200, over.get("code"));
         assertEquals("查询半径不能超过50公里", over.get("msg"));
-        AjaxResult huge = controller.pois(NEAR_LAT, NEAR_LNG, 1_000_000);
+        AjaxResult huge = controller.pois(NEAR_LAT, NEAR_LNG, 1_000_000d);
         assertNotEquals(200, huge.get("code"));
+        AjaxResult fraction = controller.pois(NEAR_LAT, NEAR_LNG, 50_000.9d);
+        assertNotEquals(200, fraction.get("code"));
+        assertEquals("查询半径不能超过50公里", fraction.get("msg"));
         verify(roamMapper, never()).selectPoisNear(anyDouble(), anyDouble(), anyDouble(), anyDouble(), any(), anyInt());
 
         when(roamMapper.selectPoisNear(anyDouble(), anyDouble(), anyDouble(), anyDouble(), org.mockito.ArgumentMatchers.eq(PLAYER),
                 org.mockito.ArgumentMatchers.eq(ApiRoamController.POIS_NEAR_LIMIT + 1))).thenReturn(Collections.emptyList());
         assertEquals(200, controller.pois(NEAR_LAT, NEAR_LNG, null).get("code"));
-        assertEquals(200, controller.pois(NEAR_LAT, NEAR_LNG, 0).get("code"));
-        assertEquals(200, controller.pois(NEAR_LAT, NEAR_LNG, 50_000).get("code"));
+        assertEquals(200, controller.pois(NEAR_LAT, NEAR_LNG, 0d).get("code"));
+        assertEquals(200, controller.pois(NEAR_LAT, NEAR_LNG, 50_000d).get("code"));
+    }
+
+    @Test
+    void poisRejectsNonFiniteRadiusWithoutDefaultingOrQuerying()
+    {
+        for (double bad : new double[] { Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, 1.5d }) {
+            AjaxResult r = controller.pois(NEAR_LAT, NEAR_LNG, bad);
+            assertNotEquals(200, r.get("code"), "非有限或非整数半径不得查询:" + bad);
+            assertEquals("查询半径无效", r.get("msg"), "不得当成超过 50 公里:" + bad);
+        }
+        verify(roamMapper, never()).selectPoisNear(anyDouble(), anyDouble(), anyDouble(), anyDouble(), any(), anyInt());
+
+        when(roamMapper.selectPoisNear(anyDouble(), anyDouble(), anyDouble(), anyDouble(), eq(PLAYER),
+                eq(ApiRoamController.POIS_NEAR_LIMIT + 1))).thenReturn(Collections.emptyList());
+        assertEquals(200, controller.pois(NEAR_LAT, NEAR_LNG, null).get("code"));
+        ArgumentCaptor<Double> minLat = ArgumentCaptor.forClass(Double.class);
+        ArgumentCaptor<Double> maxLat = ArgumentCaptor.forClass(Double.class);
+        verify(roamMapper).selectPoisNear(minLat.capture(), maxLat.capture(), anyDouble(), anyDouble(), eq(PLAYER),
+                eq(ApiRoamController.POIS_NEAR_LIMIT + 1));
+        assertEquals(2 * 3_000 / 111320.0, maxLat.getValue() - minLat.getValue(), 1e-9, "省略半径仍用 3 公里");
+    }
+
+    @Test
+    void entryAndHangoutRejectNonFiniteRadiusAndKeepOmittedAt3km()
+    {
+        IRoamHangoutService service = mock(IRoamHangoutService.class);
+        ReflectionTestUtils.setField(controller, "roamHangoutService", service);
+        ApiRoamHangoutController hangout = new ApiRoamHangoutController();
+        ReflectionTestUtils.setField(hangout, "roamHangoutService", service);
+        double[] bad = { Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, 12.5d };
+        for (double radius : bad) {
+            AjaxResult entry = controller.entryNearby(NEAR_LAT, NEAR_LNG, radius);
+            AjaxResult hang = hangout.nearby(NEAR_LAT, NEAR_LNG, radius);
+            assertNotEquals(200, entry.get("code"), radius);
+            assertNotEquals(200, hang.get("code"), radius);
+            assertEquals("查询半径无效", entry.get("msg"));
+            assertEquals("查询半径无效", hang.get("msg"));
+        }
+        AjaxResult entryOver = controller.entryNearby(NEAR_LAT, NEAR_LNG, 50_001d);
+        AjaxResult hangOver = hangout.nearby(NEAR_LAT, NEAR_LNG, 50_001d);
+        assertEquals("查询半径不能超过50公里", entryOver.get("msg"));
+        assertEquals("查询半径不能超过50公里", hangOver.get("msg"));
+        verifyNoInteractions(service);
+
+        when(service.nearby(eq(PLAYER), eq(NEAR_LAT), eq(NEAR_LNG), eq(3_000)))
+                .thenReturn(java.util.Map.of("items", java.util.List.of(), "radius", 3_000));
+        when(service.nearby(eq(0L), eq(NEAR_LAT), eq(NEAR_LNG), eq(3_000)))
+                .thenReturn(java.util.Map.of("items", java.util.List.of(), "radius", 3_000));
+        AjaxResult entry = controller.entryNearby(NEAR_LAT, NEAR_LNG, null);
+        AjaxResult hang = hangout.nearby(NEAR_LAT, NEAR_LNG, null);
+        assertEquals(200, entry.get("code"));
+        assertEquals(200, hang.get("code"));
+        assertEquals(3_000, ((java.util.Map<?, ?>) entry.get("data")).get("radius"));
+        assertEquals(3_000, ((java.util.Map<?, ?>) hang.get("data")).get("radius"));
+        verify(service).nearby(eq(PLAYER), eq(NEAR_LAT), eq(NEAR_LNG), eq(3_000));
+        verify(service).nearby(eq(0L), eq(NEAR_LAT), eq(NEAR_LNG), eq(3_000));
     }
 
     // ---------- C-13 已发现按账号投影 ----------
@@ -310,7 +373,7 @@ class ApiRoamCoordinateBoundaryTest
                 org.mockito.ArgumentMatchers.eq(ApiRoamController.POIS_NEAR_LIMIT + 1)))
                 .thenReturn(Collections.singletonList(found));
 
-        AjaxResult r = controller.pois(NEAR_LAT, NEAR_LNG, 3000);
+        AjaxResult r = controller.pois(NEAR_LAT, NEAR_LNG, 3000d);
 
         assertEquals(200, r.get("code"));
         assertEquals(Boolean.TRUE, ((java.util.List<RoamPoi>) r.get("data")).get(0).getFound(),
@@ -335,7 +398,7 @@ class ApiRoamCoordinateBoundaryTest
         when(roamMapper.selectPoisNear(anyDouble(), anyDouble(), anyDouble(), anyDouble(), org.mockito.ArgumentMatchers.eq(PLAYER),
                 org.mockito.ArgumentMatchers.eq(ApiRoamController.POIS_NEAR_LIMIT + 1))).thenReturn(rows);
 
-        AjaxResult r = controller.pois(NEAR_LAT, NEAR_LNG, 3000);
+        AjaxResult r = controller.pois(NEAR_LAT, NEAR_LNG, 3000d);
 
         java.util.List<RoamPoi> data = (java.util.List<RoamPoi>) r.get("data");
         assertEquals(ApiRoamController.POIS_NEAR_LIMIT, data.size(), "多取的 1 条只用于判断截断,不下发");

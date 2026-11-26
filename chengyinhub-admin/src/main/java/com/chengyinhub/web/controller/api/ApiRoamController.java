@@ -125,14 +125,32 @@ public class ApiRoamController extends BaseController {
     /** /pois 单次最多返回的点数(由近到远截断);地图一屏画不下更多,也不做整城导出口。 */
     static final int POIS_NEAR_LIMIT = 500;
 
+    /**
+     * 附近查询半径（米）。省略或非正整数用 3km。
+     * 给出的值不是有限数时拒绝：不能落成默认半径，也不能当成超过 50 公里。
+     * 有限且大于 50 公里时拒绝。带小数的米数同样拒绝，避免截成更小的距离。
+     */
+    static int resolveNearbyRadiusMeters(Double radius) {
+        if (radius == null) return IRoamHangoutService.DEFAULT_RADIUS_M;
+        if (!Double.isFinite(radius)) throw new ServiceException("查询半径无效", 400);
+        if (radius > IRoamHangoutService.MAX_RADIUS_M) throw new ServiceException("查询半径不能超过50公里", 400);
+        if (radius.doubleValue() != Math.rint(radius)) throw new ServiceException("查询半径无效", 400);
+        if (radius <= 0) return IRoamHangoutService.DEFAULT_RADIUS_M;
+        return radius.intValue();
+    }
+
     @Operation(summary = "附近 POI(经纬度包围盒粗筛)")
     @GetMapping("/pois")
-    public AjaxResult pois(Double lat, Double lng, Integer radius) {
+    public AjaxResult pois(Double lat, Double lng, Double radius) {
         if (lat == null || lng == null) return error("缺少定位");
         if (!validLat(lat) || !validLng(lng)) return error("定位无效");
-        // 省略或非正数用 3km;客户端要的半径超过 50km 直接拒绝。条数仍按距离截断(POIS_NEAR_LIMIT)。
-        if (radius != null && radius > IRoamHangoutService.MAX_RADIUS_M) return error("查询半径不能超过50公里");
-        int r = (radius == null || radius <= 0) ? IRoamHangoutService.DEFAULT_RADIUS_M : radius;
+        // 省略或非正整数用 3km;非有限数拒绝;超过 50km 直接拒绝。条数仍按距离截断(POIS_NEAR_LIMIT)。
+        final int r;
+        try {
+            r = resolveNearbyRadiusMeters(radius);
+        } catch (ServiceException rejected) {
+            return error(rejected.getMessage());
+        }
         double dLat = r / 111320.0;
         double dLng = r / (111320.0 * Math.max(0.2, Math.cos(Math.toRadians(lat))));
         // C-13:found 是「这个账号已发现过」的服务端事实(按会员投影),换设备/清缓存不再回到迷雾。
@@ -182,11 +200,11 @@ public class ApiRoamController extends BaseController {
 
     @Operation(summary = "漫游入口附近活动")
     @GetMapping("/entry/nearby")
-    public AjaxResult entryNearby(Double lat, Double lng, Integer radius) {
+    public AjaxResult entryNearby(Double lat, Double lng, Double radius) {
         if (lat == null || lng == null) return error("缺少定位");
         if (!validLat(lat) || !validLng(lng)) return error("定位无效");
         try {
-            return success(roamHangoutService.nearby(uid(), lat, lng, radius == null ? 0 : radius));
+            return success(roamHangoutService.nearby(uid(), lat, lng, resolveNearbyRadiusMeters(radius)));
         } catch (ServiceException e) {
             return codedServiceException(e);
         }
