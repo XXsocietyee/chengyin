@@ -2304,10 +2304,11 @@ Page({
     this.onStoryDragSlot();
   },
 
-  // 贴边自动滚屏:渲染层每两帧报一次目标 scrollTop
+  // 贴边自动滚屏:渲染层每两帧报一次目标 scrollTop;和 data 里已有的值相同就不写
   onStoryDragScroll(arg) {
     const top = Math.max(0, Number(arg && arg.scrollTop) || 0);
     this._storyScrollNow = top;
+    if (this.data.storyScrollTop === top) return;
     this.setData({ storyScrollTop: top });
   },
 

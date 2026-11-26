@@ -337,6 +337,32 @@ test('页面:长按原地松手 = 选中该块(显示删除键),不改顺序', (
   assert.equal(page.data.storyEditor.selectedBlockKey, 'd1')
 })
 
+test('L03-032 贴边滚屏:storyScrollTop 与 data 相同则不 setData,变了才写;松手仍留下最终位置', () => {
+  const page = withDivider(openPage())
+  const writes = []
+  const base = page.setData
+  page.setData = function (patch, cb) {
+    if (Object.prototype.hasOwnProperty.call(patch, 'storyScrollTop')) writes.push(patch.storyScrollTop)
+    return base.call(this, patch, cb)
+  }
+  page.onStoryDragScroll({ scrollTop: 0 })
+  page.onStoryDragScroll({ scrollTop: 24 })
+  page.onStoryDragScroll({ scrollTop: 24 })
+  page.onStoryDragScroll({ scrollTop: -3 })
+  page.onStoryDragScroll({ scrollTop: 36 })
+  assert.deepEqual(writes, [24, 0, 36])
+  assert.equal(page.data.storyScrollTop, 36)
+  assert.equal(page._storyScrollNow, 36)
+  queryRects = [{ top: 120, height: 40 }, { top: 170, height: 20 }, { top: 200, height: 40 }]
+  page.onStoryDragArm({ currentTarget: { id: 'sb-d1', dataset: { blockkey: 'd1', index: 1 } }, target: { dataset: {} }, touches: [{ clientY: 180 }] })
+  writes.length = 0
+  page.onStoryDragDrop({ key: 'd1', from: 1, to: 1, scrollTop: 48 })
+  assert.equal(page.data.storyEditor.selectedBlockKey, 'd1')
+  assert.equal(page.data.storyScrollTop, 48)
+  assert.deepEqual(blocksOf(page).map((b) => b.key), ['p1', 'd1', 'p2'])
+  assert.deepEqual(writes, [48])
+})
+
 test('页面:几何还没量完手就松了 → 不进入拖拽态,按原地松手处理', () => {
   const page = withDivider(openPage())
   queryRects = [{ top: 120, height: 40 }, { top: 170, height: 20 }, { top: 200, height: 40 }]
