@@ -1043,11 +1043,35 @@ Page({
   },
   _nodesForRoute(catalog, routeState) {
     const nodes = applyRouteStateToNodes(catalog, routeState);
-    if (routeState.routeMode !== 'LINEAR' || !this._hasGenericProofFlow()) return nodes;
-    return nodes.map(node => {
+    const projected = routeState.routeMode !== 'LINEAR' || !this._hasGenericProofFlow() ? nodes : nodes.map(node => {
       const state = routeState.nodeStates[String(node.nodeId)];
       return state ? Object.assign({}, node, { done: state === 'COMPLETED', playable: state === 'PLAYABLE', locked: state === 'DISCOVERED_LOCKED', routeNodeState: state }) : node;
     });
+    return projected.map((node) => this._nodeForSetData(node));
+  },
+  /** 完成事实或已揭示才把答案留在页面数据里。未解出、未揭示的站不带答案正文。 */
+  _answerEarned(n) {
+    if (!n || typeof n !== 'object') return false;
+    if (!!n.done || !!n.gameDone || n.revealed === true) return true;
+    if (String(n.routeNodeState || '').toUpperCase() === 'COMPLETED') return true;
+    const mode = String(n.completionMode || '').toUpperCase();
+    return mode === 'SOLVED' || mode === 'REVEALED' || mode === 'SKIPPED';
+  },
+  _answerTextForSetData(n) {
+    if (!n || !this._answerEarned(n)) return '';
+    if (n.answerReveal != null && n.answerReveal !== '') return n.answerReveal;
+    return n.reveal || n._heldAnswer || '';
+  },
+  _nodeForSetData(n) {
+    if (!n || typeof n !== 'object') return n;
+    const reveal = this._answerTextForSetData(n);
+    const leaked = Object.prototype.hasOwnProperty.call(n, 'answerReveal') || !!n._heldAnswer;
+    if ((n.reveal || '') === reveal && !leaked) return n;
+    const next = Object.assign({}, n, { reveal });
+    delete next.answerReveal;
+    delete next._heldAnswer;
+    delete n._heldAnswer;
+    return next;
   },
   _applyRouteState(routeStateInput, callback) {
     if (!this._acceptRouteStateProjection(routeStateInput)) {
@@ -4750,6 +4774,7 @@ Page({
       const acceptProjection = that._acceptRouteStateProjection(routeInput);
       const routeState = acceptProjection ? normalizeRouteState(routeInput) : that._routeState;
       const nodes = that._nodesForRoute(catalog, routeState);
+      catalog.forEach((node) => { if (node) delete node._heldAnswer; });
       that._routeState = routeState;
       that._serverRunKey = precisePlayId(d.runKey);
       if (!that._currentCompletedHistory()) that._discardCompletedHistory();
@@ -4871,7 +4896,8 @@ Page({
     that._noteStationImageContext(d);
     const catalog = raw.map((n, i) => that.normNode(n, i, mode));
     const routeState = normalizeRouteState(d.routeState || { routeMode: d.routeMode });
-    const nodes = applyRouteStateToNodes(catalog, routeState);
+    const nodes = applyRouteStateToNodes(catalog, routeState).map((node) => that._nodeForSetData(node));
+    catalog.forEach((node) => { if (node) delete node._heldAnswer; });
     that._routeState = routeState;
     that._versionedRouteState = that._routeStateVersionKnown(d.routeState) ? routeState : null;
     that._routeNodeCatalog = catalog;
@@ -4989,7 +5015,8 @@ Page({
       story: n.storyText || '', cover: n.storyImg || n.imgUrl || '',
       cardHook: n.cardHookLong || '',
       fragmentText: n.fragmentText || '',
-      hint1: n.hint1 || '', hint2: n.hint2 || '', reveal: n.answerReveal || '',
+      hint1: n.hint1 || '', hint2: n.hint2 || '', reveal: this._answerTextForSetData(n),
+      ...(!this._answerEarned(n) && n.answerReveal ? { _heldAnswer: n.answerReveal } : {}),
       hintLocked: !!n.hintLocked, hintCost: n.hintCost || 0, hintCount: n.hintCount || 0,
       puzzleScoring: !!n.puzzleScoring,
       puzzleHintLevel: Number(n.puzzleHintLevel) || 0,
@@ -6275,10 +6302,11 @@ Page({
       description: node.description && String(node.name || '').indexOf(String(node.description).trim()) >= 0 ? '' : node.description,
       cardHook: node.cardHook || ''
     }, this._sheetFacts(node)); /* l-play:地点卡玻璃面板的距离 / 步行 / 开放,只写拿得到的 */
+    const publishedSheet = this._nodeForSetData(sheetNode);
     this.setData({
-      'sheet.show': true, sheetOut: false, 'sheet.node': sheetNode,
-      'sheet.continueText': this.data.allDone ? '查看城市足迹卡' : '前往下一站', sheetShown: this._sheetRollInit(sheetNode)
-    }, () => this._sheetRoll(sheetNode));
+      'sheet.show': true, sheetOut: false, 'sheet.node': publishedSheet,
+      'sheet.continueText': this.data.allDone ? '查看城市足迹卡' : '前往下一站', sheetShown: this._sheetRollInit(publishedSheet)
+    }, () => this._sheetRoll(publishedSheet));
     // M6:开卡时相机平移,让选中节点落到上 1/3 视野(半屏大卡遮住下半屏时仍可见);无坐标节点优雅跳过
     if (node && node.lat && node.lng) {
       const fm = this.selectComponent('#fmMap');
@@ -6828,7 +6856,9 @@ Page({
         qname: node.question || '依据现场线索作答', opts,
         qImg: node.questionImg, qAudio: node.questionAudio,
         audio: node.audio, audioDur: node.audioDur, photoDesc: node.photoDesc,
-        feedback: node.feedback, passText: node.passText, reveal: node.reveal, hint1: node.hint1, hint2: node.hint2,
+        feedback: node.feedback, passText: node.passText,
+        reveal: (!!node.done || !!node.gameDone || node.revealed === true || String(node.routeNodeState || '').toUpperCase() === 'COMPLETED' || /^(SOLVED|REVEALED|SKIPPED)$/.test(String(node.completionMode || '').toUpperCase())) ? (node.reveal || '') : '',
+        hint1: node.hint1, hint2: node.hint2,
         hintLocked: !!node.hintLocked, hintCost: node.hintCost || 0, hintCount: node.hintCount || 0,
         puzzleScoring: !!node.puzzleScoring,
         medalName: node.medalName, medalImg: node.medalImg, couponId: node.couponId
@@ -7501,7 +7531,7 @@ Page({
    *  然后带进商家详情页,由三步条接管「拍照 → 出示核销码」。 */
   onShopDayArrived(nodeId, data) {
     const patch = data || {};
-    const nodes = this.data.nodes.map((n) => String(n.nodeId) === String(nodeId) ? Object.assign({}, n, patch) : n);
+    const nodes = this.data.nodes.map((n) => this._nodeForSetData(String(n.nodeId) === String(nodeId) ? Object.assign({}, n, patch) : n));
     this.setData({ nodes, 'sheet.show': false }, () => this.rebuild());
     wx.navigateTo({ url: '/pages/play/merchant/index?nodeId=' + nodeId + '&justScanned=1' });
   },
@@ -7588,7 +7618,7 @@ Page({
       const merge = node => String(node.nodeId) === String(nodeId) ? Object.assign({}, node, patch) : node;
       if (this._routeNodeCatalog) this._routeNodeCatalog = this._routeNodeCatalog.map(merge);
       this.stopNav(); this.clearGameNetworkError();
-      this.setData({ nodes: this.data.nodes.map(merge), screen: '', 'sheet.show': false, flyScore: false, themeBackpackOpen: true, themeBackpackTab: 'game' }, () => this.rebuild());
+      this.setData({ nodes: this.data.nodes.map((node) => this._nodeForSetData(merge(node))), screen: '', 'sheet.show': false, flyScore: false, themeBackpackOpen: true, themeBackpackTab: 'game' }, () => this.rebuild());
       if (data.themeRuntime && data.themeRuntime.sessionId) this._applyThemeView(data.themeRuntime);
       const message = data.disabledReason === 'PROOF_PENDING' ? '待审核 / 凭证未通过，请确认原任务' : '凭证已记录，请继续当前任务';
       this.diegetic(message);
@@ -7652,8 +7682,9 @@ Page({
     const justId = nodeId;
     this._routeState = routeState;
     if (acceptedProjection) this._versionedRouteState = this._routeStateVersionKnown(data.routeState) ? routeState : null;
+    const nodesForView = nodes.map((node) => this._nodeForSetData(node));
     this.setData({
-      nodes,
+      nodes: nodesForView,
       routeNotice: returnedRouteState ? this._routeNoticeForState(returnedRouteState) : this.data.routeNotice,
       journeyAttributes: routeState.attributes,
       screen: '',

@@ -298,3 +298,39 @@ test('站点卡:全天营业不挂、导语取整句、简介重复标题时隐�
   assert.equal(page.data.sheet.node.metaLine, '故事玩法 · 06:00-18:00')
   assert.equal(page.data.sheet.node.description, '纪念碑')
 })
+
+test('L01-026 未解出且未揭示的节点不把答案写进 setData', () => {
+  const page = makePage()
+  const hidden = page._nodeForSetData(page.normNode({
+    nodeId: 7, validationMethod: 1, question: '门牌',
+    answerReveal: '梧桐', feedbackText: '恭喜你解开了', hint1: '抬头',
+  }, 0))
+  assert.equal(hidden.reveal, '')
+  assert.equal(hidden.passText, '恭喜你解开了')
+  assert.equal(hidden.hint1, '抬头')
+  assert.equal(Object.prototype.hasOwnProperty.call(hidden, 'answerReveal'), false)
+  assert.equal(hidden._heldAnswer, undefined)
+  assert.equal(JSON.stringify(hidden).includes('梧桐'), false)
+
+  assert.equal(page.normNode({ nodeId: 8, done: true, answerReveal: '梧桐', feedbackText: '恭喜你解开了' }, 0).reveal, '梧桐')
+  assert.equal(page.normNode({ nodeId: 8, done: true, answerReveal: '梧桐', feedbackText: '恭喜你解开了' }, 0).passText, '恭喜你解开了')
+  assert.equal(page.normNode({ nodeId: 9, revealed: true, answerReveal: '第二句' }, 0).reveal, '第二句')
+  assert.equal(page.normNode({ nodeId: 10, completionMode: 'REVEALED', answerReveal: '已揭示的答案' }, 0).reveal, '已揭示的答案')
+  assert.equal(page.normNode({ nodeId: 11, gameDone: true, answerReveal: '店内答案' }, 0).reveal, '店内答案')
+  assert.equal(page.normNode({ nodeId: 12, done: true, reveal: '回执里的答案' }, 0).reveal, '回执里的答案')
+  assert.equal(page._nodeForSetData(page.normNode({ nodeId: 13, reveal: '不该留下', answerReveal: '也不该' }, 0)).reveal, '')
+
+  const completedByRoute = page._nodesForRoute([
+    page.normNode({ nodeId: 21, answerReveal: '路线完成才给的答案' }, 0),
+  ], { routeMode: 'BRANCH_GRAPH', nodeStates: { 21: 'COMPLETED' } })
+  assert.equal(completedByRoute[0].reveal, '路线完成才给的答案')
+  assert.equal(completedByRoute[0]._heldAnswer, undefined)
+  assert.equal(Object.prototype.hasOwnProperty.call(completedByRoute[0], 'answerReveal'), false)
+
+  const stillOpen = page._nodesForRoute([
+    page.normNode({ nodeId: 22, done: true, answerReveal: '还没轮到这站' }, 0),
+  ], { routeMode: 'BRANCH_GRAPH', nodeStates: { 22: 'PLAYABLE' } })
+  assert.equal(stillOpen[0].done, false)
+  assert.equal(stillOpen[0].reveal, '')
+  assert.equal(JSON.stringify(stillOpen[0]).includes('还没轮到这站'), false)
+})
