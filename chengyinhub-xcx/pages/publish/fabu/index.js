@@ -3547,10 +3547,41 @@ Page({
     }
   },
 
-  // 生成日期列表（今天至30天内）
+  // 表单里已有的起止日 → 当天 00:00。认不出或日历不存在(如 2 月 30 日)返回 null,不另造一天。
+  _themeDateBound(value) {
+    const normalized = publishDate.normalizeDateTime(value, '00:00:00');
+    const match = normalized && /^(\d{4})-(\d{2})-(\d{2})/.exec(normalized);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+    return date;
+  },
+
+  // L04-022:把已有起止日交给 buildDateList。较早的那天做 start(早于今天时表从那天起),
+  // 较晚的那天做 end(超出 31 天时表盖到那天)。没有日期就不传范围。
+  _themeDateRange() {
+    const form = this.data.formData || {};
+    const bounds = [this._themeDateBound(form.startDate), this._themeDateBound(form.endDate)].filter(Boolean);
+    if (!bounds.length) return undefined;
+    return {
+      start: bounds.reduce((earliest, bound) => (bound < earliest ? bound : earliest)),
+      end: bounds.reduce((latest, bound) => (bound > latest ? bound : latest))
+    };
+  },
+
+  _themeDateList() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return publishDate.buildDateList(today, this._themeDateRange());
+  },
+
+  // 生成日期列表。没有已存起止日时仍是今天起 31 天;有则把那两天包进表里。
   generateDateList() {
     this.setData({
-      dateList: publishDate.buildDateList(new Date())
+      dateList: this._themeDateList()
     });
   },
 
@@ -3569,23 +3600,24 @@ Page({
       this.data.formData[`${type}Date`], type === 'start' ? '09:00:00' : '18:00:00'
     );
     const match = saved && /^(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2}):/.exec(saved);
-    const dateList = match && Number.isFinite(toTimestamp(saved)) ? this._dateListWith(match[1]) : this.data.dateList; // L03-057
-    if (dateList !== this.data.dateList) this.setData({ dateList });
-    const dateIndex = match && Number.isFinite(toTimestamp(saved))
-      ? dateList.findIndex(item => item.date === match[1]) : -1;
+    // 表和滚轮下标一次写入。已存的那天必须在表里,确认才不会落到另一天。
+    const dateList = this._themeDateList();
+    const dateIndex = match ? dateList.findIndex(item => item.date === match[1]) : -1;
+    const patch = { dateList };
     if (type === 'start') {
-      this.setData({
-        'startTimePicker.show': true,
-        startDateIndex: dateIndex >= 0 ? [dateIndex] : this.data.startDateIndex,
-        startTimeIndex: dateIndex >= 0 ? [Number(match[2]), Number(match[3])] : this.data.startTimeIndex,
-      });
+      patch['startTimePicker.show'] = true;
+      if (dateIndex >= 0) {
+        patch.startDateIndex = [dateIndex];
+        patch.startTimeIndex = [Number(match[2]), Number(match[3])];
+      }
     } else {
-      this.setData({
-        'endTimePicker.show': true,
-        endDateIndex: dateIndex >= 0 ? [dateIndex] : this.data.endDateIndex,
-        endTimeIndex: dateIndex >= 0 ? [Number(match[2]), Number(match[3])] : this.data.endTimeIndex,
-      });
+      patch['endTimePicker.show'] = true;
+      if (dateIndex >= 0) {
+        patch.endDateIndex = [dateIndex];
+        patch.endTimeIndex = [Number(match[2]), Number(match[3])];
+      }
     }
+    this.setData(patch);
   },
 
   

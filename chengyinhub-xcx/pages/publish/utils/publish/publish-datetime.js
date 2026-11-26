@@ -76,6 +76,14 @@ function formatTime(hour, minute) {
 // 走本地 getMonth/getDate——正偏移时区(如 UTC+8)下,本地午夜到时区偏移那几个小时内
 // (UTC+8 是 00:00-08:00),UTC 还停在前一天,date 字段就会比 display/month/day 慢一天。
 // 改成 date 字段也用本地 getter 拼,四个字段单一真源,不会互相对不上。
+// 首尾两个本地日历日之间的天数(含首尾)。用 UTC 日序,不拿本地毫秒除 86400000:
+// 夏令时把某一天收成 23 小时,毫秒向下取整会让表尾少一天,原定结束日又落到表外。
+function inclusiveCalendarDays(first, end) {
+  const startUtc = Date.UTC(first.getFullYear(), first.getMonth(), first.getDate());
+  const endUtc = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+  return Math.floor((endUtc - startUtc) / 86400000) + 1;
+}
+
 // range(可选,L04-022):{ start, end } 是表单里已有的起止日(当天 00:00 的 Date)。
 // 表从 min(今天, start) 起、至少 31 天且覆盖到 end —— 编辑已开始或很远的场次时原日期也在表里,
 // 确认滚轮不会把日期悄悄换成别的。不传 range = 今天起 31 天(原行为)。
@@ -83,7 +91,7 @@ function buildDateList(today, range) {
   const dateList = [];
   const r = range || {};
   const first = r.start && r.start < today ? r.start : today;
-  const span = r.end ? Math.floor((r.end.getTime() - first.getTime()) / 86400000) + 1 : 0;
+  const span = r.end ? inclusiveCalendarDays(first, r.end) : 0;
   const count = Math.max(31, span);
 
   for (let i = 0; i < count; i++) {
