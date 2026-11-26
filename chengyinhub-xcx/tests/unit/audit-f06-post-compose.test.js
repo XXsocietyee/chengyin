@@ -15,7 +15,7 @@ const root = path.resolve(__dirname, '../..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
-function mount(props) {
+function mount(props, hooks) {
   let definition;
   const requests = [], events = [], tips = [], drafts = [], picks = [];
   const storage = new Map();
@@ -37,7 +37,11 @@ function mount(props) {
     require(id) {
       if (id.includes('community-post-api')) return { createClient: () => ({ request() {}, captureUpload() {} }) };
       if (id.includes('pro-editor-draft')) return {
-        loadDraft(w, identity) { drafts.push(['load', identity.topicId]); return { status: 'empty' }; },
+        loadDraft(w, identity, options) {
+          drafts.push(['load', identity.topicId]);
+          if (hooks && hooks.loadDraft) return hooks.loadDraft(w, identity, options);
+          return { status: 'empty' };
+        },
         saveDraft(w, payload) { drafts.push(['save', payload.topicId, payload.formData && payload.formData.contents]); },
         removeDraft(w, identity) { drafts.push(['remove', identity.topicId]); },
       };
@@ -156,4 +160,19 @@ test('L06-063 同一账号上次成功后再开选择器不再打两支列表;�
   h.instance.onOpenActivityPicker();
   assert.equal(count(), 3, '换号后再开要重拉');
   assert.equal(lists().length, 6);
+});
+
+test('L06-173 草稿箱读取失败要说明，不能打开成空列表', () => {
+  const h = mount({}, { loadDraft() { throw new Error('storage'); } });
+  h.instance.onOpenDrafts();
+  assert.equal(h.instance.data.draftsShow, false);
+  assert.deepEqual(h.instance.data.drafts, []);
+  assert.ok(h.tips.includes('草稿读取失败，请重试'));
+});
+
+test('L06-173 点开一条草稿时读取失败要说明', () => {
+  const h = mount({}, { loadDraft() { throw new Error('storage'); } });
+  h.instance.onPickDraft({ detail: { key: 'square_post_member-A' } });
+  assert.ok(h.tips.includes('这条草稿无法打开了'));
+  assert.equal(h.instance.data.content, '');
 });

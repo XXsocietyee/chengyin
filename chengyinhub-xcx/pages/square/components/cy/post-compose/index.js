@@ -389,8 +389,15 @@ Component({
       const memberId = this._memberId;
       if (!memberId) return [];
       const identity = draftIdentity(memberId, this.data.clubId);
-      const res = proEditorDraft.loadDraft(wx, identity, { memberId: memberId });
-      const envelope = res.status === 'ready' ? res.envelope : null;
+      // L06-173:读失败必须和「没有草稿」分开。返回 null 让调用方出错误文案,
+      // 不能当成空列表打开草稿箱(人会看见「还没有草稿」)。
+      let res;
+      try {
+        res = proEditorDraft.loadDraft(wx, identity, { memberId: memberId });
+      } catch (e) {
+        return null;
+      }
+      const envelope = res && res.status === 'ready' ? res.envelope : null;
       const contents = envelope && envelope.formData ? String(envelope.formData.contents || '') : '';
       if (!contents) return [];
       // 稿 379:885 的日期文本是「8月30日」—— 不带时分。本页只有一份草稿,
@@ -412,7 +419,12 @@ Component({
     //    这里传 loading 就能立刻用上,不必届时再补一套骨架。
     //    ★ 但在那之前,别把「Loading 已实现」读成「Loading 已验证」—— 它没被渲染过。
     onOpenDrafts() {
-      this.setData({ drafts: this.readDrafts(), draftsShow: true });
+      const drafts = this.readDrafts();
+      if (drafts == null) {
+        cyToast('草稿读取失败，请重试');
+        return;
+      }
+      this.setData({ drafts: drafts, draftsShow: true });
     },
 
     onCloseDrafts() {
@@ -428,8 +440,13 @@ Component({
       const key = ((e || {}).detail || {}).key;
       const fail = (msg) => cyToast(msg);
       if (!key || !this._memberId) return fail('草稿已不在了');
-      const res = proEditorDraft.loadDraft(wx, { topicId: key }, { memberId: this._memberId });
-      if (res.status !== 'ready' || !res.envelope || !res.envelope.formData) {
+      let res;
+      try {
+        res = proEditorDraft.loadDraft(wx, { topicId: key }, { memberId: this._memberId });
+      } catch (e) {
+        return fail('这条草稿无法打开了');
+      }
+      if (!res || res.status !== 'ready' || !res.envelope || !res.envelope.formData) {
         // status 可能是 member_mismatch / revision_conflict / 空 —— 对用户是同一件事:这条恢复不了。
         return fail('这条草稿无法打开了');
       }
@@ -444,17 +461,23 @@ Component({
       const memberId = this._memberId;
       this.setData({ drafts: (this.data.drafts || []).filter((d) => d.key !== key) });
       cyToast.undo('草稿已删除', {
-        onUndo: () => { this.setData({ drafts: this.readDrafts() }); },
+        onUndo: () => {
+          const drafts = this.readDrafts();
+          if (drafts == null) { cyToast('草稿读取失败，请重试'); return; }
+          this.setData({ drafts: drafts });
+        },
         onCommit: () => {
           // 「回执 ≠ 观测」:removeStorageSync 还可能抛,唯一算数的是回头再读一遍 storage。
           try {
             proEditorDraft.removeDraft(wx, { topicId: key }, { memberId });
           } catch (err) {
-            this.setData({ drafts: this.readDrafts() });
+            const drafts = this.readDrafts();
+            if (drafts) this.setData({ drafts: drafts });
             cyToast('删除失败，请重试');
             return;
           }
           const left = this.readDrafts();
+          if (left == null) { cyToast('删除结果未确认，请重试'); return; }
           if (left.some((d) => d.key === key)) {
             this.setData({ drafts: left });
             cyToast('删除失败，请重试');   // 删了还在 = 没删掉,别报「已删除」
