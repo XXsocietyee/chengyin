@@ -290,7 +290,7 @@ module.exports = { scroll: scroll, start: start, move: move, end: end };
         <!-- 内嵌玩法(契约 §1.5):一块一个 .chfull__para(整块玩法都在这一层里,
              ⚠️ 里面再多元素也不进 measureChapter 的 selectAll 选择器,但外层少一个就整屏错位)。
              kit 直接绑页面上的 playKit.kit:作答/提交后 setData 更新它,这一块就地跟着变,
-             不必重铺整章。show 传 true —— 它在流里露着,不由弹层那套控制。 -->
+             不必重铺整章。流里这份在没另开整屏时露着;页级那份(playKit.show 且不是岔路弹窗)开着时这里关掉,同一站不能两套一起动。 -->
         <!-- 终章反转:对面回的话,左侧气泡;读到这一块整章翻成对话框(.chfull.is-chat) -->
         <view wx:elif="{{item.kind === 'divider'}}" class="chfull__divider" aria-hidden="true"></view>
         <!-- 延伸阅读(作者标 optional 的文字块):折叠卡,默认收起,点一下展开 / 收起;who 作副标题。整卡仍是一个 .chfull__para -->
@@ -335,7 +335,7 @@ module.exports = { scroll: scroll, start: start, move: move, end: end };
             <view class="chfull__kitcard-copy"><text class="chfull__kitcard-type" wx:if="{{playKit.cardLabel}}">{{playKit.cardLabel}}</text><text class="chfull__kitcard-title">{{advancedPlay.node.name || playKit.kit.title || playKit.kit.kicker || '玩法'}}</text></view>
             <view class="chfull__kitcard-play" aria-hidden="true"><view class="chfull__kitcard-tri"></view></view>
           </view>
-          <cy-playkit wx:else kit="{{playKit.kit}}" show="{{true}}" inline="{{true}}" bind:kitaction="onPlayKitAction" />
+          <cy-playkit wx:else kit="{{playKit.kit}}" show="{{!(playKit.show && !playKit.pop)}}" inline="{{true}}" bind:kitaction="onPlayKitAction" />
         </view>
         <view wx:elif="{{item.kind === 'journeyCheck'}}" class="chfull__kit kit-tapsurface" catchtap="noop" hover-class="none">
           <template is="chfullKitAnchor" data="{{item, chrome}}" />
