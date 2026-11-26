@@ -139,6 +139,7 @@ function methods() {
       if (nodeId != null) {
         const anchor = 'chapter-kit-' + nodeId;   // V3-10/53:对准块内锚点(已让出顶栏与渐隐),块本身不再垫一屏高的上边距
         const aim = () => {
+          if (this._playDisposed || this._unloaded || this._detached) return;
           const kit = this.data.journeyCheck || {};
           if (!kit.show || kit.present !== 'inline' || !this.data.chapterFull || String(kit.nodeId) !== String(nodeId)) return;
           this.setData({ chapterGameAnchor: '' }, () => this.setData({ chapterGameAnchor: anchor }));
@@ -148,6 +149,7 @@ function methods() {
         this._inlineCheckAimTimer = setTimeout(aim, 1200);
       }
       this._inlineCheckTimer = setTimeout(() => {
+        if (this._playDisposed || this._unloaded || this._detached) return;
         const kit = this.data.journeyCheck || {};
         if (!kit.show || kit.present !== 'inline') return;
         const para = (this.data.chapterParas || []).find(p => p.kind === 'journeyCheck');

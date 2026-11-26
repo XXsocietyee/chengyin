@@ -15,6 +15,7 @@ Component({
     reducedMotion: { type: Boolean, value: false },
   },
   data: { order: [], poses: [] },
+  lifetimes: { detached() { this._gone = true; clearTimeout(this._endT); } },
   observers: {
     items(list) { this._order = (list || []).map((_, i) => i); this._paint(0, false); },
   },
@@ -46,7 +47,8 @@ Component({
     onEnd() {
       if (!this._moved) return;
       if (Math.abs(this._dx || 0) > 60) this._next(); else this._paint(0, false);
-      setTimeout(() => { this._moved = false; }, 50);
+      clearTimeout(this._endT);
+      this._endT = setTimeout(() => { this._endT = 0; if (!this._gone) this._moved = false; }, 50);
     },
   },
 });

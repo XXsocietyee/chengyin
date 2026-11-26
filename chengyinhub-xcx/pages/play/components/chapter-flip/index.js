@@ -323,6 +323,7 @@ Component({
       // 返回的时长照旧,后面按钮出现的节奏不变
       const settle = reduced || !!info.book;
       const step = () => {
+        if (this._gone) { clearInterval(this._decodeTimer); this._decodeTimer = 0; return; }
         const t = settle ? 1e9 : Date.now() - start;
         let pending = 0;
         jobs.forEach((j) => {

@@ -256,10 +256,13 @@ function methods(req, keyFactory) {
       if (!Number.isFinite(target) || target <= 0) { this.setData({ 'scoreOv.shown': total }); return; }
       let step = 0;
       this._scoreCountTimer = setInterval(() => {
+        if (this._playDisposed || this._unloaded || this._detached || !this.data.scoreOv || !this.data.scoreOv.show) {
+          clearInterval(this._scoreCountTimer); this._scoreCountTimer = 0; return;
+        }
         step += 1;
-        const done = step >= 16 || !this.data.scoreOv.show;
+        const done = step >= 16;
         this.setData({ 'scoreOv.shown': done ? total : String(Math.round(target * step / 16)) });
-        if (done) clearInterval(this._scoreCountTimer);
+        if (done) { clearInterval(this._scoreCountTimer); this._scoreCountTimer = 0; }
       }, 40);
     },
     closeScoreOverlay() { clearInterval(this._scoreCountTimer); this.setData({ 'scoreOv.show': false }); },

@@ -20,6 +20,7 @@ function roll(page, key, facts, options) {
   const t0 = Date.now();
   const delay = opts.delay > 0 ? opts.delay : 0;
   timers[key] = setInterval(() => {
+    if (page._unloaded || page._detached || page._playDisposed) { clearInterval(timers[key]); timers[key] = null; return; }
     const elapsed = Math.max(0, Date.now() - t0 - delay);
     const o = {};
     ks.forEach((k) => { o[k] = frame(facts[k], elapsed); });

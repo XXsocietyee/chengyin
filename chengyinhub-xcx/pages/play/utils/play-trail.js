@@ -5,13 +5,16 @@ const { createRouteLine } = require('../../../utils/my-route-line.js');
 const { simplifyTrack } = require('../../../utils/roam-track-simplify.js');
 
 const STORE_KEY = 'cy_play_trail';
-// OR-014:轨迹副本按账号分键(cy_play_trail:<账号>),换号不串;取不到账号沿用旧键。
-function storeKey() {
+// OR-014:轨迹副本按账号分键(cy_play_trail:<账号>)。没有账号就不读写:
+// 不带账号的旧键只按场次(主题)分开,退出登录后下一个人会读到上一个人的点。
+// 单测没有 App 时才退回不带账号的键(注入的内存存储,不跨账号)。
+function accountStoreKey() {
   try {
-    const app = typeof getApp === 'function' ? getApp() : null;
+    if (typeof getApp !== 'function') return STORE_KEY;
+    const app = getApp();
     const id = app && typeof app.getUserID === 'function' ? String(app.getUserID() || '') : '';
-    return /^[1-9]\d*$/.test(id) ? STORE_KEY + ':' + id : STORE_KEY;
-  } catch (e) { return STORE_KEY; }
+    return /^[1-9]\d*$/.test(id) ? STORE_KEY + ':' + id : '';
+  } catch (e) { return ''; }
 }
 const MIN_STEP_M = 8;        // 小于这个位移不记,原地抖动不画毛刺
 const MAX_ACCURACY_M = 60;   // 精度太差的点不画
@@ -30,26 +33,49 @@ function createPlayTrail(storage, sessionKey, now) {
   const line = createRouteLine();
   let points = [];
   let startedAt = 0, savedAt = 0, dirty = false;
-  const key = storeKey();
-  try {
-    const saved = storage && storage.getStorageSync ? storage.getStorageSync(key) : null;
-    if (saved && saved.key === sessionKey && Array.isArray(saved.points)) {
-      points = saved.points.filter((q) => q && Number.isFinite(q.lat) && Number.isFinite(q.lng));
-      startedAt = Number(saved.startedAt) || 0;
-    }
-  } catch (e) { points = []; }
+  let boundKey;
 
+  function snapshot() {
+    return { key: sessionKey, startedAt, points: simplifyTrack(points, { maxPoints: 600, epsilonMeters: 3 }) };
+  }
+  function read(key) {
+    points = []; startedAt = 0;
+    if (!key || !storage || !storage.getStorageSync) return;
+    try {
+      const saved = storage.getStorageSync(key);
+      if (saved && saved.key === sessionKey && Array.isArray(saved.points)) {
+        points = saved.points.filter((q) => q && Number.isFinite(q.lat) && Number.isFinite(q.lng));
+        startedAt = Number(saved.startedAt) || 0;
+      }
+    } catch (e) { points = []; startedAt = 0; }
+  }
+  // 账号变了先把脏点写回旧键,再清空内存。不能把上一个账号的点写进新键。
+  function rebind() {
+    const next = accountStoreKey();
+    if (boundKey === next) return next;
+    if (boundKey && dirty && storage && storage.setStorageSync) {
+      try { storage.setStorageSync(boundKey, snapshot()); } catch (e) { /* 存不下不影响换号 */ }
+    }
+    dirty = false;
+    if (boundKey !== undefined) line.reset();
+    boundKey = next;
+    read(next);
+    return next;
+  }
   function persist(force) {
-    if (!dirty || !storage || !storage.setStorageSync) return;
+    const key = rebind();
+    if (!key || !dirty || !storage || !storage.setStorageSync) return;
     const t = clock();
     if (!force && t - savedAt < SAVE_MS) return;
     savedAt = t; dirty = false;
-    try { storage.setStorageSync(key, { key: sessionKey, startedAt, points: simplifyTrack(points, { maxPoints: 600, epsilonMeters: 3 }) }); } catch (e) { /* 存不下不影响画线 */ }
+    try { storage.setStorageSync(key, snapshot()); } catch (e) { /* 存不下不影响画线 */ }
   }
+  rebind();
 
   return {
     key: sessionKey,
     note(loc) {
+      rebind();
       if (!loc) return false;
       const lat = Number(loc.latitude), lng = Number(loc.longitude);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
@@ -70,8 +96,9 @@ function createPlayTrail(storage, sessionKey, now) {
     lines() { return line.lines(points); },
     persist() { persist(true); },
     clear() {
+      const key = rebind();
       points = []; startedAt = 0; dirty = false; line.reset();
-      try { if (storage && storage.removeStorageSync) storage.removeStorageSync(key); } catch (e) { /* noop */ }
+      try { if (key && storage && storage.removeStorageSync) storage.removeStorageSync(key); } catch (e) { /* noop */ }
     },
   };
 }

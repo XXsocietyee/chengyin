@@ -21,7 +21,8 @@ function squashFrames() {
 }
 
 function alive(page) {
-  return page && !page._unloaded && !page._detached && !page._playDisposed && page.data && !page.data.reducedMotion && !page.data.packOpen;
+  // L02-074:藏到后台(_themeHidden)也停。回调里 !alive 会清掉 _packDetailOn,下次 ensure 再起。
+  return page && !page._unloaded && !page._detached && !page._playDisposed && !page._themeHidden && page.data && !page.data.reducedMotion && !page.data.packOpen;
 }
 
 function ensure(page) {

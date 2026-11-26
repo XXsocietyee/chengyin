@@ -217,7 +217,10 @@ test('没有角色痕迹的主题:游玩页开局不多一次请求;有台词块
   assert.equal(cast.castHints({ chapters: [{ blocks: [{ type: 'line', speaker: 'player' }] }] }), true)
   assert.equal(cast.castHints({ routeState: { playerProfile: { name: '阿栗' } } }), true)
   const calls = []
-  const mk = () => Object.assign({ data: { cast: cast.data.cast, topicId: '' }, _routeState: {}, setData(p) { Object.assign(this.data, p) } },
+  const savedGetApp = global.getApp
+  global.getApp = () => ({ getUserID: () => 7 })
+  try {
+  const mk = () => Object.assign({ data: { cast: cast.data.cast, topicId: '' }, _routeState: {}, _boundPlayOwner: () => 7, setData(p) { Object.assign(this.data, p) } },
     cast.methods((...args) => { calls.push(args); return Promise.resolve({ code: 200, data: { castConfig: RAW } }) }))
   mk()._applyCast({ topicId: 501, chapters: [{ blocks: [{ type: 'text', content: '雾。' }] }], routeState: {} })
   assert.equal(calls.length, 0, '没有角色的主题请求逐条不变')
@@ -227,7 +230,12 @@ test('没有角色痕迹的主题:游玩页开局不多一次请求;有台词块
   await page._castReady
   assert.equal(page._castOn(), true); assert.equal(page.data['cast.on'], true)
   mk()._applyCast({ topicId: 502, chapters: [{ blocks: [{ type: 'line' }] }] })
-  assert.equal(calls.length, 1, '同一主题读过就用缓存')
+  assert.equal(calls.length, 1, '同一账号同一主题读过就用缓存')
+  const guest = Object.assign({ data: { cast: cast.data.cast, topicId: '' }, _routeState: {}, setData(p) { Object.assign(this.data, p) } },
+    cast.methods((...args) => { calls.push(args); return Promise.resolve({ code: 200, data: { castConfig: RAW } }) }))
+  guest._applyCast({ topicId: 502, chapters: [{ blocks: [{ type: 'line' }] }] })
+  assert.equal(calls.length, 2, '没有账号不读按主题共用的缓存')
   const inline = mk(); inline._applyCast({ topicId: 503, castConfig: null, chapters: [{ blocks: [{ type: 'line' }] }] })
-  assert.equal(calls.length, 1, '回包自带 castConfig 就不再查'); assert.equal(inline._castOn(), false)
+  assert.equal(calls.length, 2, '回包自带 castConfig 就不再查'); assert.equal(inline._castOn(), false)
+  } finally { if (savedGetApp) global.getApp = savedGetApp; else delete global.getApp }
 })
