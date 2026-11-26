@@ -136,6 +136,69 @@ test('游客打开工作台:不静默建号,落「登录后查看经营台」,�
   assert.deepEqual(switched, [])
 })
 
+test('L07-013 离开后进行中的登录重试不得写回', async () => {
+  userId = 0
+  const hidden = loadPage()
+  hidden.onShow()
+  assert.equal(hidden._hidden, false)
+  hidden.onConsoleLogin()
+  hidden.onHide()
+  assert.equal(hidden._hidden, true)
+  await flush()
+  assert.equal(requested('/api/merchant/access/me').length, 0, '藏起后登录结果不得再确认身份')
+
+  userId = 0
+  requests = []
+  const unloaded = loadPage()
+  unloaded.onShow()
+  unloaded.onConsoleLogin()
+  unloaded.onUnload()
+  assert.equal(unloaded._unloaded, true)
+  await flush()
+  assert.equal(requested('/api/merchant/access/me').length, 0, '卸下后登录结果不得再确认身份')
+
+  userId = 0
+  requests = []
+  const returned = loadPage()
+  returned.onShow()
+  returned.onConsoleLogin()
+  returned.onHide()
+  returned.onShow()
+  assert.equal(returned._hidden, false)
+  const afterReturn = requested('/api/merchant/access/me').length
+  await flush()
+  assert.equal(requested('/api/merchant/access/me').length, afterReturn, '离开前已发出的登录重试不得在回来后补写')
+})
+
+test('L07-013 会话重登进行中离开,结果不得再进入经营台', async () => {
+  userId = 9
+  const page = loadPage()
+  page.onShow()
+  const identity = requested('/api/merchant/access/me')[0]
+  userId = 0
+  identity.fail({ code: 401, msg: '登录状态失效' }, 401)
+  page.onHide()
+  page.onShow()
+  const afterReturn = requests.length
+  await flush()
+  assert.equal(requests.length, afterReturn, '离开前已发出的静默重登不得在回来后重拉身份')
+  assert.notEqual(page.data.consoleError, '登录失败，请重试')
+
+  userId = 9
+  requests = []
+  sessionResults = []
+  const stayed = loadPage()
+  stayed.onShow()
+  const again = requested('/api/merchant/access/me')[0]
+  userId = 0
+  sessionResults.push({ ok: false })
+  again.fail({ code: 401, msg: '登录状态失效' }, 401)
+  stayed.onUnload()
+  await flush()
+  assert.equal(requested('/api/merchant/access/me').length, 1)
+  assert.notEqual(stayed.data.consoleError, '登录失败，请重试')
+})
+
 test('游客点「登录」才登录,登录后自动确认身份并渲染工作台', async () => {
   userId = 0
   const page = loadPage()
@@ -590,7 +653,7 @@ test('wxml 不再有整屏身份闸,未登录的出路是页内错误 + 重试',
 
 test('负控:游客分支恢复静默登录必须判红', async () => {
   const source = fs.readFileSync(PAGE_PATH, 'utf8')
-  const anchor = '      waitForInitialSession(this, app, this.enterConsole);\n      return;'
+  const anchor = '      const epoch = this._loginEpoch || 0;\n      waitForInitialSession(this, app, function () {\n        if (!this._loginStillCurrent(epoch)) return;\n        this.enterConsole();\n      });\n      return;'
   assert.ok(source.includes(anchor), '负控锚点失效')
   const mutated = source.replace(anchor, '      app.getSessionManager().ensureSession();\n      return;')
   const tmp = path.join(ROOT, 'pages/merchant/index/.index.mutant.js')

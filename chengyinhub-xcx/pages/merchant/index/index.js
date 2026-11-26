@@ -686,8 +686,24 @@ Page({
     }
   },
 
+  // L07-013:离开时作废已经发出的登录重试。回来后的 onShow 自己再进,旧结果不再写页。
+  _loginStillCurrent(epoch) {
+    return epoch === (this._loginEpoch || 0) && !this._hidden && !this._unloaded;
+  },
+
+  _noteLoginLeave() {
+    this._loginEpoch = (this._loginEpoch || 0) + 1;
+    this._initialSessionWait = false;
+  },
+
   // 重新加载:清掉页内错误再走一遍 onShow 的身份+数据链路。
-  onConsoleLogin() { retryLogin(this, app, this.enterConsole); },
+  onConsoleLogin() {
+    const epoch = this._loginEpoch || 0;
+    retryLogin(this, app, function () {
+      if (!this._loginStillCurrent(epoch)) return;
+      this.enterConsole();
+    });
+  },
 
   reloadConsole() {
     this.setData({ consoleError: '' });
@@ -870,6 +886,7 @@ Page({
   },
 
   enterConsole(authRetryUsed) {
+    if (this._hidden || this._unloaded) return;
     const version = (this._consoleVersion || 0) + 1;
     this._consoleVersion = version;
     const identityMemberId = String(app.getUserID() || '');
@@ -883,7 +900,11 @@ Page({
       // owner 2026-10-24(app.js:142-144):游客不在打开页面时静默建号(j6 F1)。落「登录后查看」,
       // 点「登录」才走 retryLogin;冷启动还在恢复缓存会话时,恢复完自动重进。
       this.setData({ consoleError: '', consoleStatus: null, merchantAccess: inactiveAccess(), consoleLogin: true, consoleDenied: false });
-      waitForInitialSession(this, app, this.enterConsole);
+      const epoch = this._loginEpoch || 0;
+      waitForInitialSession(this, app, function () {
+        if (!this._loginStillCurrent(epoch)) return;
+        this.enterConsole();
+      });
       return;
     }
     if (this.data.consoleLogin) this.setData({ consoleLogin: false });
@@ -904,6 +925,7 @@ Page({
   // 会话失效:静默重登一次(同一轮 onShow 内只重试一次,防死循环),成功即重走身份链路;
   // 已经重试过或重登失败,就落页内错误态,而不是整屏「去登录」。
   recoverConsoleSession(version, authRetryUsed) {
+    if (this._hidden || this._unloaded || version !== this._consoleVersion) return;
     // 会话没了:旧商家的金额/项目/入口不能继续留在屏上(与旧整屏闸同一条数据纪律)。
     if (this._merchantScopeKey) this.clearMerchantScopedData();
     this._merchantScopeKey = '';
@@ -916,9 +938,10 @@ Page({
       this.setData({ consoleError: '登录已失效，请重新登录' });
       return;
     }
+    const epoch = this._loginEpoch || 0;
     clearInvalidSession();
     ensureSession(app, true).then((ok) => {
-      if (version !== this._consoleVersion) return;
+      if (!this._loginStillCurrent(epoch) || version !== this._consoleVersion) return;
       if (!ok) {
         this.setData({ consoleError: '登录失败，请重试' });
         return;
@@ -1834,11 +1857,13 @@ Page({
   },
 
   onHide() {
+    this._hidden = true;
     if (this._scanOpen) {
       this._hiddenForScan = true;
       merchantTheme.merchantPageRestore();
       return;
     }
+    this._noteLoginLeave();
     const sceneId = this.data && this.data.sceneCurrent && this.data.sceneCurrent.id;
     if (this._systemPickerOpen
         || sceneId === 'merchant-chapter-picker'
@@ -1847,7 +1872,6 @@ Page({
       this._pickerReturn = true;
       this._pickerMember = String(app.getUserID() || '');
     }
-    this._hidden = true;
     this._businessActionEpoch = (this._businessActionEpoch || 0) + 1;
     this.stopRevenueCount();
     if (this._refreshEndTimer) {
@@ -1861,6 +1885,7 @@ Page({
 
   onUnload() {
     this._unloaded = true;
+    this._noteLoginLeave();
     if (this._offIdentitySync) { this._offIdentitySync(); this._offIdentitySync = null; }
     if (this._revHoldTimer) { clearTimeout(this._revHoldTimer); this._revHoldTimer = null; }
     if (this._revenueCountStop) this._revenueCountStop();
