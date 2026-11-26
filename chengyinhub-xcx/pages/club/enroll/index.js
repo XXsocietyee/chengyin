@@ -61,9 +61,13 @@ Page({
     // 预聚焦 = 到达时自动展开该团并拉它的名单(不隐藏其他团,避免看起来像丢了数据)。
     const focusTopicId = Number(options && options.topicId);
     this._focusTopicId = Number.isInteger(focusTopicId) && focusTopicId > 0 ? focusTopicId : null;
+    let clubName = '';
+    if (options.clubName) {
+      try { clubName = decodeURIComponent(options.clubName); } catch (error) { clubName = ''; }
+    }
     this.setData({
       clubId: options.clubId || null,
-      clubName: options.clubName ? decodeURIComponent(options.clubName) : '',
+      clubName,
     });
     if (this.data.clubId) this.checkPermission();
     else this.resolveClub();

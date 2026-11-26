@@ -69,6 +69,19 @@ function mount(relativePath, appOverrides) {
   return { page, app, requests, navigations, modals, toasts }
 }
 
+test('报名名册俱乐部名含坏百分号时用空名继续加载，正常编码名仍解码', () => {
+  const bad = mount('pages/club/enroll/index.js')
+  assert.doesNotThrow(() => bad.page.onLoad({ clubId: '9', clubName: '%' }))
+  assert.equal(bad.page.data.clubName, '')
+  assert.equal(bad.page.data.clubId, '9')
+  assert.equal(bad.requests[0].url, '/api/club/detail', '坏名称不得拦住权限校验')
+
+  const named = mount('pages/club/enroll/index.js')
+  named.page.onLoad({ clubId: '9', clubName: encodeURIComponent('城瘾夜跑') })
+  assert.equal(named.page.data.clubName, '城瘾夜跑')
+  assert.equal(named.requests[0].url, '/api/club/detail')
+})
+
 test('报名名册把权限查询失败与真实无权限分开，错误态可以原位重试', () => {
   const network = mount('pages/club/enroll/index.js')
   network.page.onLoad({ clubId: '9' })
