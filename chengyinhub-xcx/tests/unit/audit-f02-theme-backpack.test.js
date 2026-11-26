@@ -22,6 +22,63 @@ test('L02-013: the WeRun step sync runs at most every three minutes', () => {
   assert.equal(vm._themeStepSyncDue(t0 + 180_000), true);
 });
 
+test('L02-013: the backpack poll does not setData thought rows that did not change', async () => {
+  const vm = page(() => Promise.resolve({}));
+  const same = [{ key: 'a', name: '窗', desc: '光', progress: 1, need: 10, done: false }];
+  vm._routeState = { thoughts: same };
+  vm.data.chapterParas = [{ kind: 'thought', name: '窗' }];
+  vm.data.chapStory = { lines: [{ thoughtKey: 'a', title: '窗' }] };
+  vm.data.themeBag = Object.assign({}, vm.data.themeBag, { sessionId: 1, status: 'ACTIVE', stepEggs: true });
+  const paints = [];
+  const later = [];
+  const base = vm.setData;
+  vm.setData = (patch, cb) => { paints.push(JSON.parse(JSON.stringify(patch))); base(patch); if (typeof cb === 'function') later.push(cb); };
+  let syncs = 0;
+  vm._syncThoughts = () => {
+    syncs += 1;
+    vm._routeState = { thoughts: same.map((row) => ({ ...row })) };
+    vm.setData({ nodes: [{ nodeId: 1 }] }, () => {
+      vm.setData({ 'chapStory.lines': [{ thoughtKey: 'a', title: '窗' }] });
+      vm.setData({ chapterParas: [{ kind: 'thought', name: '窗' }] });
+    });
+    return Promise.resolve(true);
+  };
+  vm.refreshThemeBackpack = () => Promise.resolve(false);
+  let tick;
+  const realSet = global.setInterval;
+  const realClear = global.clearInterval;
+  global.setInterval = (fn) => { tick = fn; return 42; };
+  global.clearInterval = () => {};
+  try {
+    vm._startThemePoll();
+    await tick();
+    await tick();
+    later.splice(0).forEach((cb) => cb());
+  } finally {
+    global.setInterval = realSet;
+    global.clearInterval = realClear;
+  }
+  assert.equal(syncs, 1);
+  assert.equal(vm.data.nodes[0].nodeId, 1);
+  assert.deepEqual(paints.filter((patch) => patch.chapterParas || patch['chapStory.lines']), []);
+  assert.equal(vm.data.chapterParas[0].name, '窗');
+  assert.equal(vm.data.chapterParas[0].done, undefined);
+
+  later.length = 0;
+  vm._syncThoughts = () => {
+    vm._routeState = { thoughts: [{ key: 'a', name: '窗', desc: '光', progress: 10, need: 10, done: true }] };
+    vm.setData({ nodes: [{ nodeId: 1 }] }, () => {
+      vm.setData({ chapterParas: [{ kind: 'thought', name: '窗', done: true }] });
+      vm.setData({ 'chapStory.lines': [{ thoughtKey: 'a', title: '窗', meta: '伏笔 · 已应验' }] });
+    });
+    return Promise.resolve(true);
+  };
+  await vm._syncPolledThoughts();
+  later.splice(0).forEach((cb) => cb());
+  assert.equal(vm.data.chapterParas[0].done, true);
+  assert.equal(vm.data['chapStory.lines'][0].meta, '伏笔 · 已应验');
+});
+
 test('L02-015: a fresh action view is not followed by a second GET theme/state', async () => {
   const urls = [];
   const view = { sessionId: 1, version: 3, status: 'DONE', contents: [], events: [] };
