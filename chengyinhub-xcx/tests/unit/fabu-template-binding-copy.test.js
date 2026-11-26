@@ -751,6 +751,33 @@ test('编辑器导航回传仍拒绝账号ABA、会话变更和原节点主题sc
   } finally { wx.navigateTo = navigate; }
 });
 
+test('L03-072 刚选的公共模板:打开浮层把页面藏起来仍绑定;换账号仍丢掉并提示重新选择', () => {
+  for (const change of ['hide', 'account']) {
+    actorId = 42; authorization = 'fixture-actor-A';
+    const begin = sent.length;
+    const p = makePage();
+    p.data.nodesForm = { _localId: 'original', templateId: 0, name: '' };
+    p._templateSupportReason = () => '';
+    p._openNodePlanEndings = () => {};
+    p.selectTemp(tap(libraryRow, 'public'));
+    p.confirmTemp();
+    const { adopt, command } = confirmAdoptionSource(begin);
+    adopt.success(completedAdoption(command, '9001'));
+    const detail = sent.slice(begin).find(r => r.url === '/api/template/adoption-detail');
+    if (change === 'hide') p.onHide();
+    else actorId = 43;
+    detail.success({ code: 200, data: { id: 9001, title: '刚选的', advancedConfigJson: '{}' } });
+    if (change === 'hide') {
+      assert.equal(p.data.nodesForm.templateId, 9001);
+      assert.equal(p._hidden, true, '浮层还开着,页面仍是隐藏的');
+      assert.equal(toasts.includes('请重新选择'), false);
+    } else {
+      assert.equal(p.data.nodesForm.templateId, 0);
+      assert.equal(toasts.at(-1), '请重新选择');
+    }
+  }
+});
+
 test('L03-072 编辑器导航回传:登录凭证续期、会话版本变化、再次进出页面都不是换人,照常绑定', () => {
   const navigate = wx.navigateTo;
   try {

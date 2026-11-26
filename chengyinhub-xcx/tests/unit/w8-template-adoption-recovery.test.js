@@ -34,12 +34,22 @@ test('来源变动明确拒绝保原稿；同号异参/错误回执不清记录'
   write.success(reply);assert.equal(h.bound(),null);assert.equal(h.p.data.nodesForm.templateId,5);assert.equal(Object.keys(h.storage).length,bad==='rejected'?0:1);
  }
 });
-// L03-072(业主 2026-11-24 默认 A):同一人只看账号 + 操作身份;登录凭证续期('auth')不再算换人,见 fabu-owner-dec-f03-identity-1124
-test('采用或详情迟到不能跨账号、scope、草稿、节点或隐藏卸载绑定',()=>{
- for(const phase of ['adopt','detail'])for(const change of ['member','scope','draft','node','hidden','unloaded']){
+// L03-072(业主 2026-11-24 默认 A):同一人只看账号 + 操作身份。登录凭证续期、为打开浮层而隐藏页面,都不是换人。
+test('采用或详情迟到不能跨账号、scope、草稿、节点或卸载绑定',()=>{
+ for(const phase of ['adopt','detail'])for(const change of ['member','scope','draft','node','unloaded']){
   const h=page();const write=start(h);if(phase==='detail')write.success(receipt(h));
-  if(change==='member')h.member();if(change==='auth')h.auth();if(change==='scope')h.p.data.operationScope='MERCHANT';if(change==='draft')h.p.data.draftUuid='other';if(change==='node')h.p.data.nodesForm.name='继续编辑';if(change==='hidden')h.p._hidden=true;if(change==='unloaded')h.p._unloaded=true;
+  if(change==='member')h.member();if(change==='scope')h.p.data.operationScope='MERCHANT';if(change==='draft')h.p.data.draftUuid='other';if(change==='node')h.p.data.nodesForm.name='继续编辑';if(change==='unloaded')h.p._unloaded=true;
   h.sent.at(-1).success(phase==='detail'?{code:200,data:detail}:receipt(h));assert.equal(h.bound(),null);assert.equal(h.p.data.nodesForm.templateId,5);
+ }
+});
+test('L03-072 采用途中静默续期或隐藏页面去开浮层,结果照常绑定',()=>{
+ for(const phase of ['adopt','detail'])for(const change of ['hidden','auth']){
+  const h=page();const write=start(h);if(phase==='detail')write.success(receipt(h));
+  if(change==='hidden')h.p.onHide();else h.auth();
+  h.sent.at(-1).success(phase==='detail'?{code:200,data:detail}:receipt(h));
+  if(phase==='adopt')h.sent.at(-1).success({code:200,data:detail});
+  assert.deepEqual(h.bound(),detail);
+  assert.equal(h.messages.includes('请重新选择'),false);
  }
 });
 test('存储失败不写；旧无请求号UNKNOWN不伪造新请求；实际查看入口保留',()=>{

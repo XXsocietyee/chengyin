@@ -8798,15 +8798,15 @@ Page({
    * 结果不确定(超时/断网)时不自动重发,避免重复建草稿;请作者去「我的玩法」查回。
    */
   // 复用原节点对象/身份与选择代次；编辑器导航可正常返回，换节点/主题/账号不能接旧结果。
-  _nodeTemplateTargetCurrent(editorReturn = false) {
+  _nodeTemplateTargetCurrent() {
     const node = this.data.nodesForm, key = templateBinding.nodeKey(node);
     const owner = memberId(app), scope = this.data.operationScope, topicId = this.data.editingTopicId;
     const token = this._nodeTemplateLoadToken;
     const draftUuid = this.data.draftUuid, editToken = this._editLoadToken;
-    // L03-072(与 L03-008 同一规则,业主 2026-11-24 默认 A):同一人只看账号 + 操作身份,
-    // 不再比登录凭证、会话对象 / 版本或 onHide 登录代次;换账号 / 换操作身份照旧丢弃结果。
-    // A child editor emits before navigateBack, while its opener is hidden; only that path may arrive hidden.
-    return () => !this._unloaded && (editorReturn || !this._hidden)
+    // L03-072(与 L03-008 同一规则,业主 2026-11-24 默认 A):同一人只看账号 + 操作身份。
+    // 静默续期、以及为打开选图/浮层而 onHide(页面藏起、登录代次加一),都不是换人,不能丢掉刚选的模板。
+    // 页面已卸载、换账号、换操作身份、换节点/主题/草稿仍丢弃。
+    return () => !this._unloaded
       && owner === memberId(app) && scope === this.data.operationScope
       && draftUuid === this.data.draftUuid && editToken === this._editLoadToken
       && topicId === this.data.editingTopicId && token === this._nodeTemplateLoadToken
@@ -8958,7 +8958,7 @@ Page({
       this._loadingSelectedTemplate = templateAdoption.id(selectedTemplate.id);
       const token = (this._nodeTemplateLoadToken || 0) + 1;
       this._nodeTemplateLoadToken = token;
-      const current = this._nodeTemplateTargetCurrent(); // L03-072:不再比登录代次
+      const current = this._nodeTemplateTargetCurrent(); // L03-072:续期或藏页开浮层都不算换人
       this._loadingSelectedTemplateCurrent = current;
       const that = this;
       app.sendRequest({ url: '/api/template/author-myinfo', method: 'POST', hideLoading: true, silentError: true,
@@ -9324,7 +9324,7 @@ Page({
     if (this._navigating) return;
     this._nodeTemplateLoadToken = (this._nodeTemplateLoadToken || 0) + 1;
     const that = this;
-    const targetCurrent = this._nodeTemplateTargetCurrent(true);
+    const targetCurrent = this._nodeTemplateTargetCurrent();
     const themeName = this.data.formData.name;
     const nodeName = this.data.nodesForm.name || ''; // 没起名就留空让作者在玩法页起,别把内部编号 lid3 当名字带过去
     this._navigating = true; wx.navigateTo({ // 跳转中不响应连点,免得叠两层玩法编辑页
