@@ -32,31 +32,33 @@ function uuid() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,
 function ids(value) { const result = String(value || '').split(/[,，\s]+/).filter(Boolean).map(Number); if (!result.length || result.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error('请填写有效编号'); return result; }
 function dateMs(value) { if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value || '')) throw new Error('请按 YYYY-MM-DDTHH:mm 填写上海时间'); const time = Date.parse(value + ':00+08:00'); if (!Number.isFinite(time)) throw new Error('时间无效'); return time; }
 function page(config) {
-  const initial = Object.assign({ reducedMotion: readReducedMotion(), status: 'idle', message: '', busy: false, result: null, items: [], hasMore: false, counts: null, coverage: '', candidates: [], inviteToken: '', completions: [], completionLoaded: false, completionMore: false, answers: {}, pickerShow: false, pickerKind: 'ROUTE', selectedTitle: '', selectedRoutes: [], completions: [], completionLoaded: false, completionMore: false }, config.data);
+  const seed = JSON.parse(JSON.stringify(Object.assign({ reducedMotion: readReducedMotion(), status: 'idle', message: '', busy: false, result: null, items: [], hasMore: false, counts: null, coverage: '', candidates: [], inviteToken: '', completions: [], completionLoaded: false, completionMore: false, answers: {}, pickerShow: false, pickerKind: 'ROUTE', selectedTitle: '', selectedRoutes: [] }, config.data)));
+  const initial = () => JSON.parse(JSON.stringify(seed));
   return Object.assign({
-    data: initial,
+    data: initial(),
     onLoad(query) { this._query = query || {}; this._queryIdentity = identity(); this._sequence = 0; },
     onShow() {
       this._active = true;
       const current = identity();
       if (this._identity !== current || !this.client) {
+        this._heldView = null;
         if (this.client && this.client.dispose) this.client.dispose();
         this._command = null; this._identity = current; this.clearPrivate();
         if (!current) { this.setData({ status: 'no-permission', message: '请先登录后使用' }); return; }
         try { this.client = config.client(options(this)); } catch (error) { this.setData({ status: 'error', message: error.message }); return; }
-      }
+      } else if (this._heldView && this._heldView.identity === current && config.resume && config.resume.call(this)) return;
       if (config.show) { try { config.show.call(this, this._queryIdentity === current ? this._query : {}); } catch (error) { this.clearPrivate(); this.setData({ status: error.code === 'OUTCOME_UNKNOWN' ? 'unknown' : 'error', message: error.message }); } }
     },
     invalidateSession(owner, client) { if (this._identity !== owner || this.client !== client) return; if (client && client.dispose) client.dispose(); if (config.hide) config.hide.call(this); this.client = null; this._command = null; this._identity = ''; this._query = {}; this._queryIdentity = ''; this.clearPrivate(); this.setData({ status: 'no-permission', message: '登录会话已变化，请重新进入' }); },
-    clearPrivate() { this._sequence++; this._cursor = null; this.setData(Object.assign({}, initial, { status: 'idle' })); },
-    onHide() { this._active = false; this.clearPrivate(); if (this.client && this.client.invalidate) this.client.invalidate(); if (config.hide) config.hide.call(this); if (config.disposeOnHide && this.client) { if (this.client.dispose) this.client.dispose(); this.client = null; this._command = null; } },
+    clearPrivate() { this._sequence++; this._cursor = null; this.setData(initial()); },
+    onHide() { this._active = false; if (config.hold) config.hold.call(this); this.clearPrivate(); if (this.client && this.client.invalidate) this.client.invalidate(); if (config.hide) config.hide.call(this); if (config.disposeOnHide && this.client) { if (this.client.dispose) this.client.dispose(); this.client = null; this._command = null; } },
     onUnload() { this.onHide(); if (this.client && this.client.dispose) this.client.dispose(); this.client = null; this._command = null; this._identity = ''; this._query = {}; this._queryIdentity = ''; },
-    input(event) { if (this.data.busy || !this._active) return; const key = event.currentTarget.dataset.field; if (Object.prototype.hasOwnProperty.call(initial, key)) this.setData({ [key]: event.detail.value }); },
+    input(event) { if (this.data.busy || !this._active) return; const key = event.currentTarget.dataset.field; if (Object.prototype.hasOwnProperty.call(seed, key)) this.setData({ [key]: event.detail.value }); },
     openReference(event) { if (this.data.busy || !this._active || this._identity !== identity() || this._command || this.client && this.client.state && this.client.state().pending) return; this._pickerTarget = event.currentTarget.dataset.target || ''; this.setData({ pickerShow: true, pickerKind: event.currentTarget.dataset.kind || 'ROUTE' }); },
     closeReference() { this.setData({ pickerShow: false }); },
     pickReference(event) { const value = event.detail; if (this.data.busy || !this._active || this._identity !== identity() || !this.data.pickerShow || !value || value.kind !== this.data.pickerKind || value.availability !== 'CURRENT_VISIBLE_CATALOGUE' || !Number.isSafeInteger(Number(value.id)) || Number(value.id) <= 0) return; this.setData({ pickerShow: false }); if (this.selectReference) this.selectReference(value, this._pickerTarget); },
     copyInvitation() { const value = this.data.inviteToken || this.data.result && this.data.result.inviteCode; if (!this._active || this._identity !== identity() || !value) return; wx.setClipboardData({ data: value }); },
-    dateInput(event) { const { field, part } = event.currentTarget.dataset; if (!Object.prototype.hasOwnProperty.call(initial, field + 'Date') || !['date', 'time'].includes(part) || this.data.busy) return; const suffix = part === 'date' ? 'Date' : 'Time'; this.setData({ [field + suffix]: event.detail.value }); },
+    dateInput(event) { const { field, part } = event.currentTarget.dataset; if (!Object.prototype.hasOwnProperty.call(seed, field + 'Date') || !['date', 'time'].includes(part) || this.data.busy) return; const suffix = part === 'date' ? 'Date' : 'Time'; this.setData({ [field + suffix]: event.detail.value }); },
     async run(work, render, write) {
       if (!this._active || this.data.busy) return;
       if (!this._identity || this._identity !== identity()) { this.invalidateSession(this._identity, this.client); return; }
