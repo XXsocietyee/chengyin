@@ -11,6 +11,8 @@ function userText(res, fallback) {
     : fallback;
 }
 const merchantTheme = require('../../utils/merchant-theme.js');
+// L10-045:同一账号刚读到的收藏,大约一分钟内返回不打回第一页。
+const FAVORITE_FRESH_MS = 60 * 1000;
 
 Page({
   /**
@@ -77,9 +79,11 @@ Page({
       this._hasShown = true;
       return;
     }
-    // 返回页面后仍刷新第一页；首展交给 onLoad，避免同一页并发两次 page=1。
-    // 回包前不摘掉已有卡片。刷新失败则留下这些卡片，并给出重试。
-    // 在途列表期间返回:排队一次刷新,由当前请求 complete 出队(刷新归属本次返回,不记在列表 handler 名下)。
+    // L10-045:同一账号的列表还新鲜时,返回不把页码打回 1,也不换掉已加载的行。
+    // 下拉刷新和换号仍重读。过了窗口,或这次还没成功读到,才刷新第一页。
+    // 回包前不摘掉已有卡片。刷新失败则留下这些卡片,并给出重试。
+    // 还没读成功、且列表仍在途:排队一次刷新,由当前请求 complete 出队。
+    if (this._favoriteListFresh()) return;
     if (this.data.loading) {
       this._favoriteShowRefresh = { owner: this._favoriteOwner, generation: this._favoriteGeneration, run: () => this.refreshData() };
       return;
@@ -101,6 +105,7 @@ Page({
     this._stopPullWithCurrent = false;
     this._favoriteShowRefresh = null;
     this._favoriteLoadedPages = Object.create(null);
+    this._favoriteFresh = Object.create(null);
     this._favoriteRemovals = { posts: Object.create(null), topics: Object.create(null), nodes: Object.create(null) };
     this._unlikePrompts = Object.create(null); this._nodeUnfavoriteRequests = Object.create(null);
     this.setData({ postList: [], ztList1: [], nodeList: [], loading: false, refreshing: false, errorMsg: '', refreshError: '', loginRequired: false,
@@ -110,6 +115,14 @@ Page({
   _isFavoriteResponseCurrent(owner, generation) {
     return !this._favoritesDisposed && owner === this._favoriteMember()
       && generation === this._favoriteGeneration;
+  },
+  _markFavoriteFresh(tab) {
+    const fresh = this._favoriteFresh || (this._favoriteFresh = Object.create(null));
+    fresh[tab] = { at: Date.now(), owner: this._favoriteMember() };
+  },
+  _favoriteListFresh() {
+    const mark = this._favoriteFresh && this._favoriteFresh[this.data.activeFavoriteTab];
+    return !!mark && mark.owner === this._favoriteMember() && (Date.now() - mark.at) < FAVORITE_FRESH_MS;
   },
 
   _flushFavoriteShowRefresh() {
@@ -212,6 +225,7 @@ Page({
           });
           loadedPages.posts = pageConfig.pageNum;
           const postList = pageConfig.pageNum === 1 ? rows : that.data.postList.concat(rows);
+          that._markFavoriteFresh('posts');
           that.setData({ postList: postList, hasMorePosts: res.data.hasMore === true, errorMsg: '', refreshError: '' });
         } else finishLoadError(res, '收藏帖文加载失败');
       },
@@ -286,6 +300,7 @@ Page({
           // 处理日期格式
           list = that.processListData(list);
           loadedPages.topics = pageConfig.pageNum;
+          that._markFavoriteFresh('topics');
           
           // 如果是第一页，直接替换；否则追加
           if (pageConfig.pageNum === 1) {
@@ -352,6 +367,7 @@ Page({
         if (!isCurrent()) return;
         if (res && res.code == '200' && isRecordList(res.data)) {
           const rows = res.data.map(function (row) { return Object.assign({}, row, { id: row.poiId }); });
+          that._markFavoriteFresh('nodes');
           that.setData({ nodeList: that._filterFavoriteRead('nodes', rows, removalVersion), errorMsg: '', refreshError: '' });
         } else {
           finishLoadError(res, '收藏加载失败');
