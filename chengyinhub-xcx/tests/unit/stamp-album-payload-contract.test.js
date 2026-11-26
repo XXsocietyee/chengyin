@@ -53,6 +53,9 @@ test('200 畸形 list/total 进入错误态，续页时保留已确认邮票与�
 
 test('合法 total 决定终页；非空第一页不会因默认 0 被误判为 noMore', () => {
   const { page, sandbox } = loadPage()
+  const patches = []
+  const orig = page.setData.bind(page)
+  page.setData = (patch, cb) => { patches.push(patch); orig(patch, cb) }
   page.load()
   sandbox.requests[0].success({ code: '200', data: { list: [stamp(1)], total: 51 } })
   assert.equal(page.data.error, false)
@@ -60,10 +63,17 @@ test('合法 total 决定终页；非空第一页不会因默认 0 被误判为 
   assert.equal(page.data.total, 51)
   assert.equal(page.data.pageNum, 2)
   assert.equal(page.data.noMore, false)
+  assert.equal(page.data.items.length, 1)
 
+  patches.length = 0
   page.load()
   sandbox.requests[1].success({ code: 200, data: { list: [], total: 51 } })
   assert.equal(page.data.noMore, true)
+  assert.equal(page.data.items.length, 1)
+  const tail = patches.filter((patch) => Object.prototype.hasOwnProperty.call(patch, 'pageNum')).pop()
+  assert.ok(tail, '空续页仍要落地游标')
+  assert.equal(Object.prototype.hasOwnProperty.call(tail, 'items'), false, '空续页不得重发整表')
+  assert.equal(Object.keys(tail).some((key) => key.indexOf('items[') === 0), false)
 })
 
 test('空列表 + total 0 是合法真空态', () => {
