@@ -74,13 +74,16 @@ test('L06-050 一条有效条目都没有时报错', () => {
 });
 
 // ---------------- L06-110 玩法模板举报(未接入口)删除 ----------------
-test('L06-110 举报工具只保留主题举报，玩法模板两个举报函数与接口已删除', () => {
+test('2026-11-26 举报工具同时覆盖主题、评价和玩法模板', () => {
   const file = path.join(ROOT, 'pages/topic/utils/content-report.js');
   delete require.cache[file];
   const mod = require(file);
-  assert.deepEqual(Object.keys(mod), ['reportTopic']);
-  assert.equal(typeof mod.reportTopic, 'function');
-  assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /\/api\/template\/(?:personal-)?report/);
+  assert.deepEqual(Object.keys(mod).sort(), ['reportComment', 'reportTemplate', 'reportTopic']);
+  const src = fs.readFileSync(file, 'utf8');
+  assert.match(src, /\/api\/topic\/report/);
+  assert.match(src, /\/api\/comment\/report/);
+  assert.match(src, /\/api\/template\/personal-report/);
+  assert.match(src, /\/api\/template\/report/);
 });
 
 // ---------------- L06-162 商家视角先查发布权限再出发布钮 ----------------

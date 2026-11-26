@@ -2382,11 +2382,10 @@ Page({
           const ratingStars = [];
           for (let i = 1; i <= rounded; i++) ratingStars.push({ star: i });
 
-          // V-23:详情正文不再放举报行,可否举报只作处理器内部闸,不进页面 data
           that._canReport = canReportTopic(res.data, typeof app.getUserID === 'function' ? app.getUserID() : '');
           const routeStyle = routeMapStyleOf(res.data);
           that.setData({
-            info: res.data, mapSubkey: routeStyle.mapSubkey, mapLayerStyle: routeStyle.mapLayerStyle, castRow: castPlay.routeCastRow(castPlay.remember(that.data.id, res.data.castConfig)), openChapterKey: '',
+            info: res.data, canReport: that._canReport, mapSubkey: routeStyle.mapSubkey, mapLayerStyle: routeStyle.mapLayerStyle, castRow: castPlay.routeCastRow(castPlay.remember(that.data.id, res.data.castConfig)), openChapterKey: '',
             // P0(2026-09-05 审核):已购态不再只信 URL 参数 is_join(全仓只有订单详情会传 1,
             // 从首页/搜索进来的已购用户永远看不到「开始玩」)。/info-to-user 已按 ownerType=1 &
             // registrationStatus=2 回填 isSignUp,与自玩通行证的建单口径同源,直接用它。
@@ -2568,6 +2567,10 @@ Page({
     if (app.ensureLoginFor && !app.ensureLoginFor('report', () => this.reportTopic(), { owner: this, target: () => [this.data.id] })) return; // 2026-10-24 游客写前登录
     if (!this._canReport) return;
     contentReport.reportTopic(this, app, this.data.id);
+  },
+  reportComment(e) {
+    const id = e && e.currentTarget && e.currentTarget.dataset ? e.currentTarget.dataset.id : '';
+    contentReport.reportComment(this, app, id);
   },
   onReportReasonSelect(e) { reportSheet.select(this, e); },
   onReportReasonCancel() { reportSheet.cancel(this); },
