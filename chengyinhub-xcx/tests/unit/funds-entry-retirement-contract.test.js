@@ -9,7 +9,7 @@
 //   ③ 共享工具与后端接口不陪葬:utils/withdraw-form.js 仍在。
 // L09-124
 // 业主默认 A(2026-11-24):闲置的 subpackageA/utils/withdrawal-preflight.js 连同其单测删除,提现统一走客服。
-// 新弹窗契约(6 入口打开客服弹窗/复制/常量单一来源)见 withdraw-cs-popup-contract.test.js。
+// 新弹窗契约(入口打开客服会话说明,且不放微信号)见 withdraw-cs-popup-contract.test.js。
 
 const assert = require('node:assert/strict')
 const fs = require('node:fs')

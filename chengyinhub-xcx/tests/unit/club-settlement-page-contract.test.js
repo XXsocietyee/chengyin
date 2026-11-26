@@ -5,8 +5,6 @@ const path = require('node:path')
 
 const root = path.resolve(__dirname, '../..')
 const PAGE = path.join(root, 'pages/club/settlement/index.js')
-const withdrawCs = require(path.join(root, 'utils/withdraw-cs.js'))
-
 function mount() {
   let config
   const requests = []
@@ -232,9 +230,9 @@ test('结算数据形状不完整时 fail-closed，绝不用 0 兜底渲染金�
   assert.equal(broken.data.summary, null)
 })
 
-test('提现改弹平台客服微信:不跳银行卡表单、不自己发提现请求', () => {
+test('提现改弹客服会话说明:不跳银行卡表单、不自己发提现请求', () => {
   // ⚠️ 2026-09-15 收款模型定稿 §3:平台不打款。本页不再跳 pages/coop/withdraw,
-  //    也不自己打 /api/club/settlement/withdraw,一律弹平台客服微信线下处理。
+  //    也不自己打 /api/club/settlement/withdraw,只说明去小程序客服会话确认金额。
   const { vm, requests } = mount()
   vm.onLoad({ clubId: '21' })
   requests[0].success({ code: 200, data: VALID_SUMMARY })
@@ -255,10 +253,11 @@ test('提现改弹平台客服微信:不跳银行卡表单、不自己发提现�
 
   assert.equal(requests.length, before, '本页不该自己发提现请求')
   assert.equal(navs.length, 0, '不得再跳银行卡表单页')
-  assert.equal(modals.length, 1, '必须弹客服微信确认层(单测里以 wx.showModal 回落呈现)')
+  assert.equal(modals.length, 1, '必须弹客服说明(单测里以 wx.showModal 回落呈现)')
   assert.equal(modals[0].title, '联系平台客服提现')
-  assert.ok(modals[0].content.includes(withdrawCs.WITHDRAW_CS_WECHAT_ID), '弹窗正文必须显示客服微信号')
-  assert.ok(modals[0].content.includes(withdrawCs.WITHDRAW_CS_TIP), '弹窗正文必须带线下处理说明')
+  assert.equal(modals[0].content, '请在小程序客服会话里确认金额。平台不直接打款。')
+  assert.equal(modals[0].confirmText, '知道了')
+  assert.equal(modals[0].showCancel, false)
 })
 
 test('负控:本页若自己打 /withdraw,合同必须判红', () => {

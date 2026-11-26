@@ -1,10 +1,10 @@
 'use strict'
 
-// 2026-09-15 收款模型定稿 §3:平台不打款,个人余额「提现」一律改为弹平台客服微信号线下处理。
+// 2026-09-15 收款模型定稿 §3:平台不打款。个人余额「提现」只说明去小程序客服会话确认金额。
 // 本契约钉住三件事:
 //   ① 4 个提现入口(原 6 个,PG-034/PG-042 下线两页)点击后都打开同一个客服弹窗,且不发 /api/withdrawal/create;
-//   ② 弹窗正文/按钮文案与复制行为(复制的是常量里的号,不是别的);
-//   ③ 微信号全仓只有 utils/withdraw-cs.js 一处字面量。
+//   ② 弹窗正文是客服会话说明,只有「知道了」,不写剪贴板;
+//   ③ 客服微信号不出现在客户端。
 // 负控:把任一入口改回旧逻辑(不弹客服、回到提现请求/跳转)必须判红。
 
 const assert = require('node:assert/strict')
@@ -40,7 +40,7 @@ function methodBody(source, signature) {
 // —— 弹窗真源沙箱:modal / toast 换成记录桩,只测它自己发了什么 ——
 function loadWithdrawCs(source = read(WITHDRAW_CS_PATH)) {
   const file = path.join(ROOT, WITHDRAW_CS_PATH)
-  const calls = { modals: [], clipboard: [], toasts: [], clipboardFails: false }
+  const calls = { modals: [], clipboard: [], toasts: [] }
   const sandbox = {
     module: { exports: {} },
     console,
@@ -56,9 +56,6 @@ function loadWithdrawCs(source = read(WITHDRAW_CS_PATH)) {
     wx: {
       setClipboardData(options) {
         calls.clipboard.push(options && options.data)
-        if (calls.clipboardFails) {
-          if (options.fail) options.fail({ errMsg: 'setClipboardData:fail' })
-        } else if (options.success) options.success({})
       },
     },
   }
@@ -170,7 +167,7 @@ function loadEntry(relPath, source = read(relPath), fixture = {}) {
     Component: (config) => { definition = flattenComponentToPage(config) },
     require(request) {
       if (request.endsWith('utils/withdraw-cs.js')) {
-        return { showWithdrawCsPopup() { popups.push(true) }, WITHDRAW_CS_WECHAT_ID: 'stub-not-real' }
+        return { showWithdrawCsPopup() { popups.push(true) } }
       }
       if (request.endsWith('utils/analytics.js')) return { track() {} }
       if (request.endsWith('utils/roleGuard.js')) return { can: () => true, isMerchantView: () => false, load(callback) { if (fixture.deferGuard) guardCallbacks.push(callback); else callback() } }
@@ -211,45 +208,34 @@ function assertEntryOpensPopup(entry, source = read(entry.file)) {
   })
 }
 
-test('弹窗合同:标题/正文/两枚按钮并排(返回左次级 · 复制右主),微信号来自常量', () => {
+test('弹窗合同:客服会话说明,只有「知道了」', () => {
   const { api, calls } = loadWithdrawCs()
   api.showWithdrawCsPopup()
   assert.equal(calls.modals.length, 1, '必须弹一次')
   const opts = calls.modals[0]
   assert.equal(opts.title, '联系平台客服提现')
-  assert.equal(opts.cancelText, '返回')
-  assert.equal(opts.confirmText, '复制')
-  assert.ok(opts.content.includes(api.WITHDRAW_CS_WECHAT_ID), '正文必须显示微信号')
-  assert.ok(opts.content.includes(api.WITHDRAW_CS_TIP), '正文必须带线下处理说明')
-  assert.equal(opts.showCancel, undefined, '走 cy-modal 默认显示取消键(返回),不额外加第三枚按钮')
+  assert.equal(opts.content, '请在小程序客服会话里确认金额。平台不直接打款。')
+  assert.equal(opts.confirmText, '知道了')
+  assert.equal(opts.showCancel, false)
+  assert.equal(calls.clipboard.length, 0)
+  assert.deepEqual(calls.toasts, [])
 })
 
-test('复制:确认键复制的是常量微信号并 toast「已复制微信号」,返回键不复制', () => {
+test('确认不写剪贴板', () => {
   const { api, calls } = loadWithdrawCs()
   api.showWithdrawCsPopup()
-  calls.modals[0].success({ confirm: false, cancel: true })
-  assert.deepEqual(calls.clipboard, [], '点「返回」不得写剪贴板')
-
-  api.showWithdrawCsPopup()
-  calls.modals[1].success({ confirm: true })
-  assert.deepEqual(calls.clipboard, [api.WITHDRAW_CS_WECHAT_ID], '复制参数必须就是常量微信号')
-  assert.deepEqual(calls.toasts, ['已复制微信号'])
+  const opts = calls.modals[0]
+  if (typeof opts.success === 'function') opts.success({ confirm: true })
+  assert.deepEqual(calls.clipboard, [])
+  assert.deepEqual(calls.toasts, [])
+  assert.doesNotMatch(read(WITHDRAW_CS_PATH), /setClipboardData|copyWithdrawCsWechat/)
 })
 
-test('复制失败:toast 提示手动添加,不把微信号塞进 toast(会被安全过滤吞掉)', () => {
-  const { api, calls } = loadWithdrawCs()
-  calls.clipboardFails = true
-  api.showWithdrawCsPopup()
-  calls.modals[0].success({ confirm: true })
-  assert.deepEqual(calls.toasts, ['复制失败，请手动添加客服微信'])
-})
-
-test('微信号全仓唯一来源:只有 utils/withdraw-cs.js 含字面量,且只出现一次', () => {
-  const { api } = loadWithdrawCs()
-  const id = api.WITHDRAW_CS_WECHAT_ID
-  assert.match(id, /^\d{8,}$/, '常量必须是真实微信号形态')
-  assert.equal(read(WITHDRAW_CS_PATH).split(id).length - 1, 1, '常量文件里应恰好声明一次')
-
+test('客服微信号已离开客户端', () => {
+  const id = '1801857'+'1626'
+  const source = read(WITHDRAW_CS_PATH)
+  assert.equal(source.includes(id), false)
+  assert.doesNotMatch(source, /setClipboardData|copyWithdrawCsWechat|添加客服微信，确认金额后线下处理/)
   const hits = []
   const walk = (dir) => {
     fs.readdirSync(dir, { withFileTypes: true }).forEach((item) => {
@@ -257,12 +243,17 @@ test('微信号全仓唯一来源:只有 utils/withdraw-cs.js 含字面量,且�
       const full = path.join(dir, item.name)
       if (item.isDirectory()) { walk(full); return }
       if (!/\.(js|wxml|wxss|json)$/.test(item.name)) return
-      const count = fs.readFileSync(full, 'utf8').split(id).length - 1
+      const text = fs.readFileSync(full, 'utf8')
+      const count = text.split(id).length - 1
       if (count) hits.push([path.relative(ROOT, full), count])
+      const rel = path.relative(ROOT, full)
+      if (!rel.startsWith('tests' + path.sep) && text.includes('添加客服微信，确认金额后线下处理')) {
+        hits.push([rel, 'tip'])
+      }
     })
   }
   walk(ROOT)
-  assert.deepEqual(hits, [[WITHDRAW_CS_PATH, 1]], `微信号字面量只许出现在 ${WITHDRAW_CS_PATH}`)
+  assert.deepEqual(hits, [])
 })
 
 ENTRIES.forEach((entry) => {
