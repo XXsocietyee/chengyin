@@ -510,12 +510,13 @@ test('失败体里的 11 位号仍消毒,不能当业务文案透出', () => {
 
 function ownerRequestFixture() {
   let owner = '7', auth = 'A', finishLogin;
+  let revision = 0;
   let loginCalls = 0;
   const calls = [], scheduled = [], events = [], toasts = [];
   const client = createRequestClient({
     wxRequest: options => { calls.push(options); return { abort() {} }; },
     getBaseUrl: () => 'https://fixture',
-    getUserID: () => owner, getAuthorization: () => auth,
+    getUserID: () => owner, getAuthorization: () => auth, getSessionRevision: () => revision,
     reLogin: cb => { loginCalls++; finishLogin = cb; },
     scheduleRetry: fn => scheduled.push(fn),
     showToast: msg => toasts.push(msg)
@@ -526,6 +527,7 @@ function ownerRequestFixture() {
     complete: () => events.push('complete') };
   return { client, calls, scheduled, events, toasts, param,
     setSession(id, token) { owner = id; auth = token; },
+    setRevision(value) { revision = value; },
     finishLogin(ok, result) { finishLogin(ok, result); },
     loginCalls: () => loginCalls };
 }
@@ -601,30 +603,70 @@ for (const mode of ['success', 'fail', 'complete']) for (const identity of ['sam
     assert.deepEqual(f.events, ['fail', 'complete']); assert.equal(f.loginCalls(), 0);
   });
 }
-// 2026-11-24 业主决策 L10-025(默认项 A):同一账号只是自动续登时,并发在途的**读取**仍不采用旧 token 的回包,
-// 但改为用新登录状态重发一次(原先直接按「登录状态已变更」失败);写请求、换号、外部替换会话仍直接停止。
-test('another same-owner request surviving automatic refresh cannot adopt its prior-token response; a read resends once with the new token', () => {
-  const f = ownerRequestFixture(); f.client.send(f.param); f.client.send(f.param);
-  f.calls[0].success(ownerAuthResponses[0]); f.calls[0].complete({});
-  f.setSession('7', 'new-token'); f.finishLogin(true, { isCurrentSession: () => true });
-  f.calls[1].success({ statusCode: 200, data: { code: 200 } }); f.calls[1].complete({});
-  assert.deepEqual(f.events, [], '旧 token 的回包不被采用');
-  assert.equal(f.calls.length, 4, '续登重试 + 并发读用新 token 重发各一次');
-  assert.match(JSON.stringify(f.calls[3].header), /new-token/);
-  f.calls[2].success({ statusCode: 200, data: { code: 200 } }); f.calls[2].complete({});
-  f.calls[3].success({ statusCode: 200, data: { code: 200 } }); f.calls[3].complete({});
-  assert.deepEqual(f.events, ['success', 'complete', 'success', 'complete']);
-});
-
-test('L10-025: a concurrent WRITE during the same automatic refresh still stops with sessionChanged', () => {
+// L10-025:同一会员静默续登会换 token,快照也会推进会话版本。那不是新登录。
+// 续登进行中或刚刚以同一会员结束时,在途读/写照原响应收尾,不得报「登录状态已变更」,也不得另重发。
+const keptBody = { code: 200, data: { item: 'kept' } };
+function trackedRequest(f, extra) {
+  const seen = [];
+  const param = Object.assign({}, f.param, extra, {
+    success: (body) => { seen.push('success'); seen.push(body); },
+    fail: (body) => { seen.push('fail'); seen.push(body && body.reason || body); },
+    complete: (body) => { seen.push('complete'); seen.push(body); },
+  });
+  return { param, seen };
+}
+test('L10-025: same-member refresh keeps the in-flight response after the snapshot advances revision', () => {
   const f = ownerRequestFixture();
-  const write = Object.assign({}, f.param, { url: '/api/fixture/submit' });
-  f.client.send(f.param); f.client.send(write);
+  const read = trackedRequest(f, { method: 'GET', url: '/api/fixture/detail' });
+  const write = trackedRequest(f, { method: 'POST', url: '/api/fixture/submit' });
+  f.client.send(f.param); f.client.send(read.param); f.client.send(write.param);
   f.calls[0].success(ownerAuthResponses[0]); f.calls[0].complete({});
-  f.setSession('7', 'new-token'); f.finishLogin(true, { isCurrentSession: () => true });
-  f.calls[1].success({ statusCode: 200, data: { code: 200 } }); f.calls[1].complete({});
-  assert.deepEqual(f.events, ['fail', 'complete']);
-  assert.equal(f.calls.length, 3, '写请求不重发');
+  f.setRevision(6); f.setSession('7', 'new-token');
+  f.finishLogin(true, { isCurrentSession: () => true });
+  assert.equal(f.calls.length, 4, '只有遇到 401 的那一跳用新 token 重发');
+  assert.equal(f.calls[3].header.Authorization, 'new-token');
+  f.calls[1].success({ statusCode: 200, data: keptBody }); f.calls[1].complete({ data: keptBody });
+  f.calls[2].success({ statusCode: 200, data: keptBody }); f.calls[2].complete({ data: keptBody });
+  assert.deepEqual(read.seen, ['success', keptBody, 'complete', keptBody]);
+  assert.deepEqual(write.seen, ['success', keptBody, 'complete', keptBody]);
+  assert.equal(f.calls.length, 4, '在途读和写都不因续登重发');
+  assert.deepEqual(f.events, []);
+});
+test('L10-025: in-flight success, fail, and complete settle while the same-member refresh is still pending', () => {
+  for (const mode of ['success', 'fail', 'complete']) {
+    const f = ownerRequestFixture();
+    const inflight = trackedRequest(f, { method: 'GET', auth: mode === 'complete' ? false : undefined });
+    f.client.send(f.param); f.client.send(inflight.param);
+    f.calls[0].success(ownerAuthResponses[0]); f.calls[0].complete({});
+    f.setRevision(4); f.setSession('7', 'new-token');
+    assert.equal(f.loginCalls(), 1);
+    if (mode === 'success') f.calls[1].success({ statusCode: 200, data: keptBody });
+    else if (mode === 'fail') f.calls[1].fail({ errMsg: 'request:fail interrupted' });
+    f.calls[1].complete(mode === 'fail' ? { errMsg: 'request:fail interrupted' } : { data: keptBody });
+    if (mode === 'success') assert.deepEqual(inflight.seen, ['success', keptBody, 'complete', keptBody]);
+    else if (mode === 'fail') assert.deepEqual(inflight.seen, ['fail', { errMsg: '网络异常，请稍后重试' }, 'complete', { errMsg: 'request:fail interrupted' }]);
+    else assert.deepEqual(inflight.seen, ['complete', keptBody]);
+    assert.equal(f.calls.length, 2, mode + ' 在途请求不得重发');
+    assert.equal(f.loginCalls(), 1, mode + ' 在途请求不得再触发续登');
+  }
+});
+test('L10-025: another member, logout, or a finished renewal that is not current still stops the in-flight request', () => {
+  const cases = [
+    (f) => f.setSession('8', 'other-token'),
+    (f) => f.setSession('', ''),
+    (f) => { f.setRevision(4); f.setSession('7', 'external-session'); f.finishLogin(true, { isCurrentSession: () => false }); },
+  ];
+  for (const change of cases) {
+    const f = ownerRequestFixture();
+    const inflight = trackedRequest(f, { method: 'GET' });
+    f.client.send(f.param); f.client.send(inflight.param);
+    f.calls[0].success(ownerAuthResponses[0]); f.calls[0].complete({});
+    f.setRevision(4);
+    change(f);
+    f.calls[1].success({ statusCode: 200, data: keptBody }); f.calls[1].complete({ data: keptBody });
+    assert.deepEqual(inflight.seen, ['fail', 'sessionChanged', 'complete', { reason: 'sessionChanged', msg: '登录状态已变更，请重试' }]);
+    assert.equal(f.calls.length, 2);
+  }
 });
 test('obsolete successful login result cannot rebind to an externally replaced same-user session', () => {
   const f = ownerRequestFixture(); f.client.send(f.param);

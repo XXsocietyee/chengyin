@@ -186,8 +186,25 @@ function createRequestClient(deps) {
     var control = requestControl(state);
     if (state.aborted || state.sessionChanged) return control;
     function ownerChanged() { return state.owner !== String(getUserID() || ''); }
-    function sessionChanged() { return ownerChanged() || state.sessionRevision !== getSessionRevision()
-      || (param.auth !== false && state.authorization !== getAuthorization()); }
+    // L10-025:同一会员的静默续登只是换新 token。快照会把会话版本也往前推,那不是新登录。
+    // 这次续登还在进行、或刚刚以同一会员结束时,在途请求照原响应收尾,不得报「登录状态已变更」。
+    // 换成别的会员、退出,或这份会话并不是本客户端这次静默续登,仍然按登录状态已变更停止。
+    function sameMemberTokenRefresh() {
+      if (ownerChanged() || !state.owner || !getAuthorization()) return false;
+      var renewal = ownRenewals[state.sessionRevision];
+      if (!renewal || renewal.owner !== state.owner) return false;
+      if (renewal.pending) return true;
+      try {
+        // 只认这次续登刚刚落地的那一份。之后又被外部换成别的 token，不再算同一次续登。
+        return renewal.revision === getSessionRevision() && renewal.authorization === getAuthorization()
+          && renewal.current() === true;
+      } catch (stale) { return false; }
+    }
+    function sessionChanged() {
+      if (sameMemberTokenRefresh()) return false;
+      return ownerChanged() || state.sessionRevision !== getSessionRevision()
+        || (param.auth !== false && state.authorization !== getAuthorization());
+    }
     function stopForSessionChange() {
       state.sessionChanged = true;
       var failure = { reason: 'sessionChanged', msg: '登录状态已变更，请重试' };
@@ -195,20 +212,6 @@ function createRequestClient(deps) {
       typeof param.complete == 'function' && param.complete(failure);
     }
     if (sessionChanged()) { stopForSessionChange(); return control; }
-    // L10-025(业主 2026-11-24 默认项 A):同一账号只是自动续登(换了新 token)时,正在读取的内容用新登录状态
-    // 重发一次;换账号、登出、提交类请求仍直接按「登录状态已变更」停止。
-    function resendReadAfterRenewal() {
-      if (state.sessionResent || ownerChanged() || !getAuthorization() || isWriteRequest(param, method)) return false;
-      // 只认本客户端自己的静默续登;外部换号/重新登录(哪怕同一账号)仍按「登录状态已变更」停止
-      var renewal = ownRenewals[state.sessionRevision];
-      if (!renewal || renewal.owner !== state.owner || renewal.revision !== getSessionRevision() || !renewal.current()) return false;
-      state.sessionResent = true;
-      state.authorization = getAuthorization();
-      state.sessionRevision = getSessionRevision();
-      suppressComplete = true;
-      send(param, customSiteUrl, state);
-      return true;
-    }
     // G-4:玩家视角不发商家工作台接口,异步按 403 静默失败。
     if (!state.attempt && playerView() && roleViewFilter.isMerchantOnlyUrl(param.url)) {
       Promise.resolve().then(function () {
@@ -233,7 +236,7 @@ function createRequestClient(deps) {
       header: header,
       success: function (res) {
         if (state.aborted || state.sessionChanged) return;
-        if (sessionChanged()) { if (!resendReadAfterRenewal()) stopForSessionChange(); return; }
+        if (sessionChanged()) { stopForSessionChange(); return; }
         responseObserved = true;
         if (res && res.data && typeof res.data === 'object') sanitizeResponseMessage(res.data, '操作失败');
         // G-4:玩家视角收到商家身份报错 ⇒ 清文案、打标记、不 toast。
@@ -279,12 +282,27 @@ function createRequestClient(deps) {
             return;
           }
           var revisionBeforeRenewal = state.sessionRevision;
+          // 快照会在回调之前推进版本并换上新 token。先记下进行中的续登,在途请求才不会被误判为换登录。
+          if (state.owner) {
+            var trackedRenewal = ownRenewals[revisionBeforeRenewal];
+            if (!trackedRenewal || trackedRenewal.owner !== state.owner || trackedRenewal.pending) {
+              ownRenewals[revisionBeforeRenewal] = { owner: state.owner, pending: true };
+            }
+          }
           reLogin(function (ok, result) {
-            if (ok && result && typeof result.isCurrentSession === 'function' && result.isCurrentSession()
-                && state.owner && state.owner === String(getUserID() || '')) {
+            var finishedSameMember = false;
+            try {
+              finishedSameMember = !!(ok && result && typeof result.isCurrentSession === 'function'
+                && result.isCurrentSession() && state.owner && state.owner === String(getUserID() || ''));
+            } catch (stale) { finishedSameMember = false; }
+            if (finishedSameMember) {
               // L10-025:记下「本客户端自己完成的同账号续登」:旧版本号 → 新版本号
               ownRenewals[revisionBeforeRenewal] = { owner: state.owner, revision: getSessionRevision(),
+                authorization: getAuthorization(),
                 current: function () { return result.isCurrentSession(); } };
+            } else {
+              var tracked = ownRenewals[revisionBeforeRenewal];
+              if (tracked && tracked.pending && tracked.owner === state.owner) delete ownRenewals[revisionBeforeRenewal];
             }
             if (state.aborted || state.sessionChanged) return;
             // 只有自己完成的首登可把匿名请求绑定到新身份，外部换号不能冒充首登。
@@ -360,7 +378,7 @@ function createRequestClient(deps) {
       },
       fail: function (res) {
         if (state.aborted || state.sessionChanged) return;
-        if (sessionChanged()) { if (!resendReadAfterRenewal()) stopForSessionChange(); return; }
+        if (sessionChanged()) { stopForSessionChange(); return; }
         responseObserved = true;
         // 传输层失败(断网/超时)可以原样重发:调用方显式声明 retry 才重试,
         // 而且只在这一支重试 —— code!=200 是业务结论,重试只会把同一个错误再问一遍。
@@ -389,7 +407,7 @@ function createRequestClient(deps) {
       complete: function (res) {
         if (state.aborted || state.sessionChanged) return;
         if (suppressComplete) return; // 被重登重试/失败分支接管,避免 complete 双触发或早于 fail
-        if (!responseObserved && sessionChanged()) { if (!resendReadAfterRenewal()) stopForSessionChange(); return; }
+        if (!responseObserved && sessionChanged()) { stopForSessionChange(); return; }
         typeof param.complete == 'function' && param.complete(res && res.data ? res.data : res);
       }
     };

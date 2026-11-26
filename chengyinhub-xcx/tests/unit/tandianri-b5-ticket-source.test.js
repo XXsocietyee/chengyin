@@ -13,6 +13,7 @@ const assert = require('node:assert/strict')
 const MODULE = '../../utils/ticket-source.js'
 
 let store
+let appUserId = null
 
 global.wx = {
   getStorageSync: (key) => (Object.prototype.hasOwnProperty.call(store, key) ? store[key] : ''),
@@ -25,7 +26,16 @@ function load() {
   return require(MODULE)
 }
 
-beforeEach(() => { store = {} })
+function setAppUser(id) {
+  appUserId = id
+  global.getApp = () => ({ getUserID: () => appUserId })
+}
+
+beforeEach(() => {
+  store = {}
+  appUserId = null
+  delete global.getApp
+})
 
 // ---------- 捕获 ----------
 
@@ -201,47 +211,77 @@ test('negative control:storage 被手改成别的 clubId 但 topicId 不匹配 �
 
 test('登录后捕获的归因绑定当前账号;同机换到别的账号下单 ⇒ 不带标记(归平台)', () => {
   const ts = load()
-  store.user_id = 1001
+  store.user_id = 9999
+  setAppUser(1001)
   assert.equal(ts.captureFromQuery({ id: '77', sourceClubId: '7' }).captured, true)
+  assert.equal(JSON.parse(store[ts.STORAGE_KEY]).memberId, 1001)
   assert.deepEqual(ts.attributionPayload(77), { sourceClubId: 7 })
-  store.user_id = 2002
-  assert.deepEqual(ts.attributionPayload(77), {}, 'A 号的归因不能跟到 B 号的订单上')
-  delete store.user_id
-  assert.deepEqual(ts.attributionPayload(77), {}, '退出登录后也不再带 A 号的归因')
   store.user_id = 1001
+  setAppUser(2002)
+  assert.deepEqual(ts.attributionPayload(77), {}, 'A 号的归因不能跟到 B 号的订单上')
+  setAppUser(null)
+  store.user_id = 1001
+  assert.deepEqual(ts.attributionPayload(77), {}, '退出登录后也不再带 A 号的归因')
+  setAppUser(1001)
+  store.user_id = 2002
   assert.deepEqual(ts.attributionPayload(77), { sourceClubId: 7 }, 'A 号重新登录仍是自己的归因')
 })
 
 test('登录前捕获的归因由第一次下单的账号认领,之后换号不跟随', () => {
   const ts = load()
-  assert.equal(ts.captureFromQuery({ id: '77', sourceClubId: '7' }).captured, true)
   store.user_id = 1001
+  assert.equal(ts.captureFromQuery({ id: '77', sourceClubId: '7' }).captured, true)
+  assert.equal(JSON.parse(store[ts.STORAGE_KEY]).memberId, null, '没有 App 用户 id 时保持未绑定')
+  setAppUser(1001)
   assert.deepEqual(ts.attributionPayload(77), { sourceClubId: 7 })
-  store.user_id = 2002
+  assert.equal(JSON.parse(store[ts.STORAGE_KEY]).memberId, 1001)
+  store.user_id = 1001
+  setAppUser(2002)
   assert.deepEqual(ts.attributionPayload(77), {})
 })
 
 test('别的账号留下的归因(含冲突墓碑)不挡当前账号自己的捕获', () => {
   const ts = load()
-  store.user_id = 1001
+  store.user_id = 2002
+  setAppUser(1001)
   ts.captureFromQuery({ id: '77', sourceClubId: '7' })
   ts.captureFromQuery({ id: '77', sourceClubId: '8' })
   assert.deepEqual(ts.attributionPayload(77), {}, 'A 号本期已冲突')
-  store.user_id = 2002
+  store.user_id = 1001
+  setAppUser(2002)
   assert.equal(ts.captureFromQuery({ id: '77', sourceClubId: '8' }).captured, true)
   assert.deepEqual(ts.attributionPayload(77), { sourceClubId: 8 })
 })
 
-test('L10-113:账号归属读 App 会话(唯一真相),onLaunch 前才退回 storage', () => {
-  store = { user_id: '5' }
-  global.getApp = () => ({ getUserID: () => '9' })
-  try {
-    const ts = load()
-    assert.equal(ts.captureFromQuery({ id: '77', sourceClubId: '7' }).captured, true)
-    store.user_id = '9'
-    delete global.getApp
-    assert.deepEqual(ts.attributionPayload(77), { sourceClubId: 7 }, '捕获时记的是会话账号 9,不是 storage 里的旧号 5')
-    store.user_id = '5'
-    assert.deepEqual(ts.attributionPayload(77), {}, 'storage 回退读到别的账号 ⇒ 不带归因')
-  } finally { delete global.getApp }
+test('L10-113:账号归属只读 getApp().getUserID(),缺省或换号后不接受 storage 旧号', () => {
+  store.user_id = '5'
+  global.getApp = () => ({})
+  const ts = load()
+  assert.equal(ts.captureFromQuery({ id: '77', sourceClubId: '7' }).captured, true)
+  assert.equal(JSON.parse(store[ts.STORAGE_KEY]).memberId, null, '没有 getUserID 时不把 storage 旧号写成归属')
+
+  global.getApp = () => { throw new Error('not ready') }
+  assert.deepEqual(ts.attributionPayload(77), { sourceClubId: 7 }, '未绑定记录仍可在登录前读出')
+  assert.equal(JSON.parse(store[ts.STORAGE_KEY]).memberId, null, 'getApp 抛错时也不回读 storage')
+
+  store.user_id = '5'
+  setAppUser('9')
+  assert.deepEqual(ts.attributionPayload(77), { sourceClubId: 7 })
+  assert.equal(JSON.parse(store[ts.STORAGE_KEY]).memberId, 9, '认领的是会话账号 9,不是 storage 里的 5')
+
+  store.user_id = '9'
+  setAppUser(null)
+  assert.deepEqual(ts.attributionPayload(77), {}, 'App 用户 id 为空时保持未绑定')
+
+  delete global.getApp
+  store.user_id = '9'
+  assert.deepEqual(ts.attributionPayload(77), {}, 'getApp 不可用时不回读 storage')
+
+  store.user_id = '9'
+  setAppUser('5')
+  assert.deepEqual(ts.attributionPayload(77), {}, '换号后 storage 旧号不能把归因带过去')
+
+  store.user_id = '5'
+  setAppUser('9')
+  assert.deepEqual(ts.attributionPayload(77), { sourceClubId: 7 })
 })
