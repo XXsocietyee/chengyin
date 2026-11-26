@@ -90,6 +90,19 @@ test('离开页面撤掉等图闸和还原定时器,到点回调不再 setData',
   assert.equal(writes, 0, '离开后的定时器回调不能再 setData');
 });
 
+test('读图失败把原因和重试画出来,不留白也不自动离开', () => {
+  const wxml = fs.readFileSync(path.resolve(__dirname, '../../pages/crop/index.wxml'), 'utf8');
+  const branch = wxml.match(/sourceState === 'error'[\s\S]*?<cy-error\b([^>]*?)\s*\/>/);
+  assert.ok(branch, '读图失败必须用 cy-error');
+  const tag = branch[1];
+  assert.match(tag, /title="图片没能打开"/);
+  assert.match(tag, /sub="\{\{sourceError\}\}"/);
+  assert.match(tag, /retry="重试"/);
+  assert.match(tag, /bind:retry="onRetrySource"/);
+  assert.doesNotMatch(tag, /load-failure/, 'load-failure 会把原因和重试画成空白');
+  assert.doesNotMatch(tag, /auto-back/, 'auto-back 会在两秒后离开,来不及重试或使用原图');
+});
+
 test('读图失败和画布抛错只显示人话,不带异常原文', () => {
   const { page, wx } = loadCrop();
   const reads = [];
