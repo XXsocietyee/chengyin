@@ -5,7 +5,9 @@ const { roamCacheEpoch, invalidateRoamCache } = require('./roam-cache-epoch.js')
 const { tileCursor } = require('./roam-tile-cursor.js')
 const { exactSessionId } = require('./roam-recovery.js')
 const PREFIX = 'roam_memory_v1'
+const STAMP_PREFIX = 'roam_memory_stamp_v1'
 const PLAYER_MEMORY_KINDS = ['tiles', 'reveals', 'recovery', 'sessions']
+let writeSerial = 0
 
 function isPlayerMemoryKey(storageKey) {
   const parts = typeof storageKey === 'string' ? storageKey.split(':') : []
@@ -41,7 +43,14 @@ function createPlayerRoamMemory(playerId, storage) {
     if (!storageKey || typeof target.setStorageSync !== 'function') return false
     try {
       target.setStorageSync(storageKey, value)
-      return true
+      // Recovery stays one key (callers assert that). Other kinds confirm with a
+      // short stamp so a swallowed setStorageSync cannot look successful, without
+      // reading the history blob back or stringifying it.
+      if (kind === 'recovery' || typeof target.getStorageSync !== 'function') return true
+      const stampKey = `${STAMP_PREFIX}:${owner}:${kind}`
+      const stamp = `${++writeSerial}:${Date.now()}`
+      target.setStorageSync(stampKey, stamp)
+      return target.getStorageSync(stampKey) === stamp
     } catch (_) {
       return false
     }
@@ -63,11 +72,11 @@ function createPlayerRoamMemory(playerId, storage) {
       const recoveryRead = readResult('recovery')
       if (!recoveryRead.ok) throw new Error('漫游恢复记录暂时无法读取')
       const recovery = recoveryRead.value
-      const active = recovery && !recovery.finishedAt && Array.isArray(recovery.allTiles) ? recovery.allTiles : []
+      const active = new Set(recovery && !recovery.finishedAt && Array.isArray(recovery.allTiles) ? recovery.allTiles : [])
       const retained = {}
       Object.keys(tiles).forEach(tile => {
         const at = Number(state.retentionAt && state.retentionAt[tile])
-        if ((at > 0 && at > Date.now() - THIRTY_DAYS) || active.includes(tile)) retained[tile] = tiles[tile]
+        if ((at > 0 && at > Date.now() - THIRTY_DAYS) || active.has(tile)) retained[tile] = tiles[tile]
       })
       const keptAt = {}
       Object.keys(retained).forEach(tile => { keptAt[tile] = state.retentionAt && state.retentionAt[tile] || 0 })
@@ -89,12 +98,7 @@ function createPlayerRoamMemory(playerId, storage) {
         if (serverRetentionAt && Number(serverRetentionAt[tile]) > 0) retentionAt[tile] = Number(serverRetentionAt[tile])
         else if (!(tile in retentionAt)) retentionAt[tile] = previous.tiles && tile in previous.tiles ? 0 : Date.now()
       })
-      try {
-        const serialized = JSON.stringify({ tiles: values, retentionAt, serverCursor: cursor })
-        if (!write('tiles', JSON.parse(serialized))) return false
-        const result = readResult('tiles')
-        return result.ok && JSON.stringify(result.value) === serialized
-      } catch (_) { return false }
+      return write('tiles', { tiles: values, retentionAt, serverCursor: cursor })
     },
     readReveals() {
       const result = readResult('reveals')
@@ -113,24 +117,14 @@ function createPlayerRoamMemory(playerId, storage) {
       const known = new Map((Array.isArray(previous) ? previous : []).map(point => [key(point), point.retentionAt || 0]))
       const points = (Array.isArray(value) ? value : []).map(point => ({ ...point,
         retentionAt: known.has(key(point)) ? known.get(key(point)) : Date.now() }))
-      try {
-        const serialized = JSON.stringify(points)
-        if (!write('reveals', JSON.parse(serialized))) return false
-        const saved = readResult('reveals')
-        return saved.ok && JSON.stringify(saved.value) === serialized
-      } catch (_) { return false }
+      return write('reveals', points)
     },
     readRecoveryState() {
       const result = readResult('recovery')
       return { ok: result.ok, record: result.value == null || result.value === '' ? null : result.value }
     },
     writeRecovery(value) {
-      try {
-        const serialized = JSON.stringify(value)
-        if (!write('recovery', JSON.parse(serialized))) return false
-        const result = readResult('recovery')
-        return result.ok && JSON.stringify(result.value) === serialized
-      } catch (_) { return false }
+      return write('recovery', value)
     },
     readSessions() {
       return this.readSessionState().sessions
@@ -144,17 +138,13 @@ function createPlayerRoamMemory(playerId, storage) {
       const recovery = readResult('recovery')
       if (!recovery.ok) return { ok: false, sessions: [] }
       const sessions = pruneSessions(value, recovery.value)
-      if (JSON.stringify(sessions) !== JSON.stringify(value) && !write('sessions', sessions))
-        return { ok: false, sessions: [] }
+      let changed = sessions.length !== value.length
+      for (let i = 0; !changed && i < sessions.length; i += 1) changed = sessions[i] !== value[i]
+      if (changed && !write('sessions', sessions)) return { ok: false, sessions: [] }
       return { ok: true, sessions }
     },
     writeSessions(value) {
-      try {
-        const serialized = JSON.stringify(Array.isArray(value) ? value : [])
-        if (!write('sessions', JSON.parse(serialized))) return false
-        const result = readResult('sessions')
-        return result.ok && JSON.stringify(result.value) === serialized
-      } catch (_) { return false }
+      return write('sessions', Array.isArray(value) ? value : [])
     },
     /* 清空本机缓存(原型 setScreen 的最后一行「不影响已上传的记录」)。
        只清这一个玩家桶里的四样本机数据 —— 服务端那份(roam_tile / roam_session / 邮票)

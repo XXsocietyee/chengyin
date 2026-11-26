@@ -361,7 +361,7 @@
     }
   ],
   "preloadRule": {
-    "pages/member/index/index": { "network": "all", "packages": ["subpackageA"] },
+    "pages/member/index/index": { "network": "all", "packages": ["subpackageMember", "subpackageA"] },
     "pages/index/index": { "network": "wifi", "packages": ["subpackageTopic"] },
     "pages/topic/index/index": { "network": "wifi", "packages": ["subpackageMember", "subpackagePlaykit"] },
     "pages/play/index": { "network": "all", "packages": ["subpackagePlaykit", "subpackageRoam"] },

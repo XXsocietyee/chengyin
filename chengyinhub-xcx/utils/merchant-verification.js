@@ -12,6 +12,16 @@ function isConflict(response, httpStatus) {
 function conflictMessage(msg) {
   return typeof msg === 'string' && /[\u4e00-\u9fa5]/.test(msg) ? msg : CONFLICT_MESSAGE;
 }
+// 成败只看响应码和这些稳定 errorCode。中文句子可以改写，不能把成功判成失败，也不能反过来。
+// 不认识的 errorCode 保持待确认，不能显示成成功。
+const SUCCESS_ERROR_CODES = new Set(['VERIFIED', 'ALREADY_RECORDED']);
+const FAILURE_ERROR_CODES = new Set(['NOT_REDEEMED', 'ALREADY_VERIFIED', 'NEED_CHOICE']);
+function errorCodeClass(response) {
+  if (!record(response) || typeof response.errorCode !== 'string' || !response.errorCode) return '';
+  if (SUCCESS_ERROR_CODES.has(response.errorCode)) return 'success';
+  if (FAILURE_ERROR_CODES.has(response.errorCode)) return 'failure';
+  return 'unknown';
+}
 const positiveId = value => (typeof value === 'number' || typeof value === 'string')
   && /^[1-9]\d*$/.test(String(value)) && Number.isSafeInteger(Number(value));
 function chapterReceipt(data, request) {
@@ -56,21 +66,28 @@ function classifyVerificationOutcome(response, channel, httpStatus, request) {
   const coupon = url === '/api/coupon/verification';
   const group = url === '/api/verify/groupcode/redeem';
   if (!(ticket || chapter || coupon || group)) return unknown();
+  const coded = errorCodeClass(response);
+  if (coded === 'unknown') return unknown();
   if (response.code === 200 || response.code === '200') {
+    if (coded === 'failure') return unknown();
     if (originalSeat) return validSeatReceipt(data, originalSeat)
       ? { status: 'success', response } : unknown();
-    const simple = response.msg === '核销成功' && (data == null || record(data) && Object.keys(data).length === 0);
-    if (group ? groupReceipt(data, request) && response.msg === (data.alreadyVerified ? '已记录过' : '已记录接待该团') : chapter ? chapterReceipt(data, request)
-        : coupon ? simple || record(data) && data.alreadyUsed === true && response.msg === '该优惠券已核销'
+    // 没有结构字段时，200 配非空说明或稳定成功码即成功。不核对「核销成功」这句原文。
+    const emptyBody = data == null || record(data) && Object.keys(data).length === 0;
+    const stated = typeof response.msg === 'string' && response.msg.trim() !== '';
+    const simple = emptyBody && (stated || coded === 'success');
+    if (group ? groupReceipt(data, request) : chapter ? chapterReceipt(data, request)
+        : coupon ? simple || record(data) && data.alreadyUsed === true
         : simple || automaticChapter && chapterReceipt(data, request)) return { status: 'success', response };
     return unknown();
   }
   if (response.code === 500 || response.code === '500') {
+    if (coded === 'success') return unknown();
     // M-02：服务端只在核销事务开始前的拒绝上带 notRedeemed=true，只有这个标记判「未核销」；其余业务500仍待确认。
     if (!originalSeat && (ticket || chapter || group) && record(data) && data.notRedeemed === true
         && typeof response.msg === 'string' && response.msg) return { status: 'failed', response };
     // Controller 在选择分支尚未调用核销事务；重复标记是服务端现有的幂等事实。
-    if (ticket && (validChoice(data) || record(data) && data.alreadyVerified === true && response.msg === '该订单已核销'))
+    if (ticket && (validChoice(data) || record(data) && data.alreadyVerified === true))
       return { status: 'failed', response };
   }
   // 包括带非空 msg 的业务500：verifyAndSettle 已提交后 award 抛异常也会包装成此形状。
@@ -142,6 +159,10 @@ function resolveVerificationResult(response, action) {
   const label = action || '核销';
   if (isConflict(response)) {
     return { state: 'review', title: '待复核', message: conflictMessage(response.msg), show: true };
+  }
+  const coded = errorCodeClass(response);
+  if (coded === 'unknown' || coded === 'failure' && isSuccess(response) || coded === 'success' && !isSuccess(response)) {
+    return { state: 'unknown', title: label + '结果待确认', message: UNKNOWN_MESSAGE, show: true };
   }
   // 展示层不作提交结论；写闸已按端点将未知结果正规化为202。
   if (!record(response) || ![200, '200', 400, 401, 403, 404, 405, 413, 415, 426, 429, 500, '500'].includes(response.code)

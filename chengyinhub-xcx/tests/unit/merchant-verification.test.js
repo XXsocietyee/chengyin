@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { resolveVerificationResult, completionReceiptMessage } = require('../../utils/merchant-verification');
+const { resolveVerificationResult, completionReceiptMessage, classifyVerificationOutcome } = require('../../utils/merchant-verification');
 
 test('首次核销显示成功结果', () => {
   assert.deepEqual(resolveVerificationResult({ code: 200, msg: '核销成功' }, '核销'), {
@@ -48,6 +48,51 @@ test('通关探索值回执只在 earnedXp>0 的首次响应展示', () => {
   assert.equal(completionReceiptMessage({
     code: 200, msg: '核销成功', data: { completionEarnedXp: 36 }
   }, '核销成功'), '核销成功 · 玩家通关 +36 探索值已到账', 'profile toast 复用同一回执口径');
+});
+
+test('结构化回执按结构判定，不要求固定文案；裸 200 与无证明的 500 仍待确认', () => {
+  const group = { url: '/api/verify/groupcode/redeem', data: { code: 'v1.2.group_v2_3_4.9.1.sig' } };
+  const groupData = alreadyVerified => ({ topicId: 2, activityId: 3, leaderMemberId: 4, coopOrderId: 5, alreadyVerified });
+  const classify = (response, request) => classifyVerificationOutcome(response, 'success', 200, request).status;
+  assert.equal(classify({ code: 200, data: groupData(false) }, group), 'success');
+  assert.equal(classify({ code: 200, msg: '别的句子', data: groupData(true) }, group), 'success');
+  assert.equal(classify({ code: 200, msg: '核销成功' }, group), 'unknown');
+  assert.equal(classify({ code: 200, data: { ...groupData(false), topicId: 9 } }, group), 'unknown');
+
+  const coupon = { url: '/api/coupon/verification', data: { code: 'coupon' } };
+  assert.equal(classify({ code: 200, data: { alreadyUsed: true } }, coupon), 'success');
+  assert.equal(classify({ code: 200, msg: '核销成功' }, coupon), 'success');
+  assert.equal(classify({ code: 200, msg: '核销成功', data: { useTime: 1 } }, coupon), 'unknown');
+  assert.equal(classify({ code: 200 }, coupon), 'unknown');
+
+  const chapter = { url: '/api/registration/scan_qr_code_chapter', data: { chapterId: 4 } };
+  assert.equal(classify({ code: 200, data: { chapterId: 4, redemptionId: 5 } }, chapter), 'success');
+  assert.equal(classify({ code: 200, msg: '核销成功', data: {} }, chapter), 'unknown');
+
+  const ticket = { url: '/api/registration/scan_qr_code', data: { code: 'ticket' } };
+  assert.equal(classify({ code: 200, msg: '核销成功', data: null }, ticket), 'success');
+  assert.equal(classify({ code: 200 }, ticket), 'unknown');
+  assert.equal(classify({ code: 200, data: { alreadyVerified: true } }, ticket), 'unknown');
+  assert.equal(classifyVerificationOutcome({ code: 500, data: { alreadyVerified: true } }, 'success', undefined, ticket).status, 'failed');
+  assert.equal(classifyVerificationOutcome({ code: 500, msg: '请选择要核销的章节', data: { needChapterChoice: true, chapters: [{ id: 4 }] } }, 'success', undefined, ticket).status, 'failed');
+  assert.equal(classifyVerificationOutcome({ code: 500, msg: '已过期', data: { notRedeemed: true } }, 'success', undefined, ticket).status, 'failed');
+  assert.equal(classifyVerificationOutcome({ code: 500, msg: '发分失败' }, 'success', undefined, ticket).status, 'unknown');
+  assert.equal(classifyVerificationOutcome({ code: 500, data: { alreadyVerified: 'true' } }, 'success', undefined, ticket).status, 'unknown');
+  assert.equal(classify({ code: 200, msg: '已经核销', data: null }, ticket), 'success');
+  assert.equal(classify({ code: 200, msg: '核销失败', data: null }, ticket), 'success');
+  assert.equal(classify({ code: 500, msg: '核销成功' }, ticket), 'unknown');
+  assert.equal(classify({ code: 200, msg: '已经核销', errorCode: 'VERIFIED', data: null }, ticket), 'success');
+  assert.equal(classify({ code: 200, errorCode: 'VERIFIED', data: null }, ticket), 'success');
+  assert.equal(classify({ code: 200, msg: '核销成功', errorCode: 'NEW_MACHINE_CODE' }, ticket), 'unknown');
+  assert.equal(classify({ code: 200, msg: '核销成功', errorCode: 'NOT_REDEEMED' }, ticket), 'unknown');
+  assert.equal(classify({ code: 500, msg: '核销成功', errorCode: 'VERIFIED', data: { notRedeemed: true } }, ticket), 'unknown');
+  assert.equal(classifyVerificationOutcome({ code: 500, msg: '别的原因', errorCode: 'NOT_REDEEMED', data: { notRedeemed: true } }, 'success', undefined, ticket).status, 'failed');
+  assert.equal(classifyVerificationOutcome({
+    code: 200, data: { chapterId: 4, redemptionId: 5 }, errorCode: 'NEW_MACHINE_CODE'
+  }, 'success', 200, chapter).status, 'unknown');
+  assert.equal(resolveVerificationResult({ code: 200, msg: '核销成功', errorCode: 'NEW_MACHINE_CODE' }).state, 'unknown');
+  assert.equal(resolveVerificationResult({ code: 200, msg: '核销失败', errorCode: 'NOT_REDEEMED' }).state, 'unknown');
+  assert.equal(resolveVerificationResult({ code: 201, msg: '核销成功' }).state, 'unknown');
 });
 
 test('章节重放只展示原回执，严格布尔标记且不重复展示奖励', () => {

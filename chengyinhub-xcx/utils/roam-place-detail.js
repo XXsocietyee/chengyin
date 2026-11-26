@@ -25,8 +25,8 @@ async function readStripPlace(app, item, nearby, center) {
   const matches = row => row && Number(row.type) === 1 && PM.parseTags(row.tags).includes(item.seed)
   let row = (nearby || []).find(matches)
   if (!row && center) {
-    // 目录只有种子标签，没有数据库 ID；扩大公开读取范围后按标签精确对上，绝不按名称猜。
-    const res = await read(app, '/api/roam/pois', { lat: center[0], lng: center[1], radius: 100000 })
+    // 目录只有种子标签，没有数据库 ID；在服务端 50 公里上限内按标签精确对上，绝不按名称猜。
+    const res = await read(app, '/api/roam/pois', { lat: center[0], lng: center[1], radius: 50000 })
     const got = res && Number(res.code) === 200 && PM.unwrapPois(res)
     row = got && got.rows.find(matches)
   }
