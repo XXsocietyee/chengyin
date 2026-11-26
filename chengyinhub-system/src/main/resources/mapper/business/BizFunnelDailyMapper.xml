@@ -1,0 +1,392 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.chengyinhub.business.mapper.BizFunnelDailyMapper">
+
+    <resultMap type="BizFunnelDaily" id="BizFunnelDailyResult">
+        <result property="id" column="id" />
+        <result property="statDate" column="stat_date" />
+        <result property="funnelName" column="funnel_name" />
+        <result property="stepName" column="step_name" />
+        <result property="stepOrder" column="step_order" />
+        <result property="bizType" column="biz_type" />
+        <result property="cityCode" column="city_code" />
+        <result property="memberCount" column="member_count" />
+        <result property="eventCount" column="event_count" />
+        <result property="conversionRate" column="conversion_rate" />
+        <result property="createTime" column="create_time" />
+    </resultMap>
+
+    <select id="selectBizFunnelDailyList" parameterType="BizFunnelDaily" resultMap="BizFunnelDailyResult">
+        select id, stat_date, funnel_code as funnel_name, step_code as step_name,
+               case step_code
+                   when 'community_post_impression' then 1
+                   when 'community_post_open' then 2
+                   when 'community_post_qualified_view' then 3
+                   when 'content_view' then 1
+                   when 'search_submit' then 1
+                   when 'content_like' then case when funnel_code = 'community_post_engagement' then 4 else 2 end
+                   when 'content_favorite' then case when funnel_code = 'community_post_engagement' then 5 else 3 end
+                   when 'content_share' then case when funnel_code = 'community_post_engagement' then 6 else 4 end
+                   when 'signup_start' then 4
+                   when 'signup_submit' then 5
+                   when 'payment_success' then 6
+                   when 'template_reuse' then 7
+                   when 'topic_publish_success' then 8
+                   when 'activity_publish_success' then 9
+                   when 'coupon_verify' then 10
+                   when 'withdrawal_submit' then 11
+                   else 99
+               end as step_order,
+               source as biz_type, city_code, user_count as member_count,
+               event_count, conversion_rate, create_time
+        from biz_funnel_daily
+        <where>
+            <if test="funnelName != null and funnelName != ''"> and funnel_code = #{funnelName}</if>
+            <if test="bizType != null and bizType != ''"> and source = #{bizType}</if>
+            <if test="cityCode != null and cityCode != ''"> and city_code = #{cityCode}</if>
+            <if test="params.beginStatDate != null and params.beginStatDate != ''"> and stat_date &gt;= #{params.beginStatDate}</if>
+            <if test="params.endStatDate != null and params.endStatDate != ''"> and stat_date &lt;= #{params.endStatDate}</if>
+        </where>
+        order by stat_date desc, funnel_code asc, step_order asc
+    </select>
+
+    <delete id="deleteByStatDate" parameterType="String">
+        delete from biz_funnel_daily where stat_date = #{statDate}
+    </delete>
+
+    <!--
+      user_count = 当日该步骤的去重已识别用户（member_id 非空）。
+      转化率另用 attributed_user_count：仅计同日同漏斗起点 cohort 中、起点之后发生的用户，
+      分母为起点步骤人数；无起点步骤的漏斗（general 等）转化率为 0，但人数照实计。
+      旧实现把「人数」也套在起点归因上，general 漏斗没有起点事件 ⇒ 人数恒为 0（2026-11-22 生产只读回读 7/8 行）。
+    -->
+    <insert id="insertFromEventLog" parameterType="String">
+        insert into biz_funnel_daily
+        (stat_date, funnel_code, step_code, source, city_code,
+         user_count, event_count, conversion_rate, create_time, update_time)
+        with normalized as (
+        select
+            date(event.occurred_at) as stat_date,
+            case
+                when event.event_name in ('community_post_impression', 'community_post_open', 'community_post_qualified_view')
+                    or (event.biz_type = 'community_post' and event.event_name in ('content_like', 'content_favorite', 'content_share'))
+                    then 'community_post_engagement'
+                when event.event_name in ('content_view', 'content_like', 'content_favorite', 'content_share') then 'content_engagement'
+                when event.event_name in ('signup_start', 'signup_submit', 'payment_success') then 'activity_conversion'
+                when event.event_name in ('template_reuse', 'topic_publish_success', 'activity_publish_success') then 'creator_conversion'
+                else 'general'
+            end as funnel_code,
+            event.event_name as step_code,
+            event.biz_type as source,
+            event.city_code,
+            event.member_id,
+            event.occurred_at,
+            case
+                when event.event_name in ('community_post_impression','content_view','signup_start','template_reuse') then 1
+                else 0
+            end as is_funnel_start
+        from biz_event_log event
+        left join community_post cp
+          on event.biz_type = 'community_post' and cp.id = event.biz_id
+        where event.occurred_at &gt;= cast(#{statDate} as date)
+          and event.occurred_at &lt;= timestamp(cast(#{statDate} as date), '23:59:59')
+          and (event.event_name &lt;&gt; 'community_post_qualified_view'
+               or (event.member_id is not null
+                   and cp.id is not null
+                   and cp.author_id &lt;&gt; event.member_id))
+        ), funnel_starts as (
+          select stat_date, funnel_code, source, city_code, member_id,
+                 min(occurred_at) as first_started_at
+          from normalized
+          where is_funnel_start = 1 and member_id is not null
+          group by stat_date, funnel_code, source, city_code, member_id
+        ), aggregated as (
+          select event.stat_date, event.funnel_code, event.step_code,
+                 event.source, event.city_code,
+                 count(distinct event.member_id) as user_count,
+                 count(distinct case
+                   when event.is_funnel_start = 1 or starter.member_id is not null
+                   then event.member_id end) as attributed_user_count,
+                 count(1) as event_count,
+                 event.is_funnel_start
+          from normalized event
+          left join funnel_starts starter
+            on starter.stat_date = event.stat_date
+           and starter.funnel_code = event.funnel_code
+           and starter.source &lt;=> event.source
+           and starter.city_code &lt;=> event.city_code
+           and starter.member_id = event.member_id
+           and starter.first_started_at &lt;= event.occurred_at
+          group by event.stat_date, event.funnel_code, event.step_code,
+                   event.source, event.city_code, event.is_funnel_start
+        ), scored as (
+          select aggregated.*,
+                 max(case when is_funnel_start = 1 then attributed_user_count end)
+                   over (partition by stat_date, funnel_code, source, city_code) as start_user_count
+          from aggregated
+        )
+        select stat_date, funnel_code, step_code, source, city_code,
+               user_count, event_count,
+               case when start_user_count &gt; 0
+                    then round(attributed_user_count / start_user_count, 4)
+                    else 0 end as conversion_rate,
+               now() as create_time, now() as update_time
+        from scored
+    </insert>
+
+    <!-- 阶段 1 试点总分母：先跨整个查询窗口按 user-post 去重，再计算用户与覆盖面。 -->
+    <select id="selectCommunityQualifiedPilotMetric" resultType="map">
+        with qualified_user_posts as (
+          select event.member_id, event.biz_id, post.author_id as current_author_id,
+                 min(event.occurred_at) as first_qualified_at,
+                 max(event.occurred_at) as last_qualified_at
+          from biz_event_log event
+          left join community_post post on post.id = event.biz_id
+          where event.event_name = 'community_post_qualified_view'
+            and event.biz_type = 'community_post'
+            and event.member_id is not null
+            and event.occurred_at &gt;= cast(#{startDate} as date)
+            and event.occurred_at &lt;= timestamp(cast(#{endDate} as date), '23:59:59')
+          group by event.member_id, event.biz_id, post.author_id
+        )
+        select count(distinct member_id) as qualified_user_count,
+               count(1) as qualified_user_post_count,
+               count(distinct biz_id) as qualified_post_count,
+               count(distinct nullif(current_author_id, 0)) as current_qualified_author_count,
+               min(first_qualified_at) as first_qualified_at,
+               max(last_qualified_at) as last_qualified_at
+        from qualified_user_posts
+    </select>
+
+    <!--
+      R6 路线购买与游玩漏斗（只读，按日 × 主题）。有服务端事实的步骤一律读事实表，不读客户端事件：
+        detail_view / checkout_open  客户端事件（biz_type='topic'，biz_id=主题；采集接口要求登录，member_id 恒有值）
+        order_created  cms_registration 自玩通行证建单（按 create_time；同 parent_order_no 多席算一单）
+        paid           同上，payment_status in (2,4) 且 payment_time 非空（含之后被退的单；按 payment_time）
+        paid_cash      paid 中实付 > 0 的子集（免单/全额权益抵扣不计）
+        play_started   topic_route_session 自玩局（activity_id=0）建局（按 create_time）
+        completed      同上 completed_at 非空（按 completed_at）
+        refunded       refund_application 已审核通过的自玩通行证退款（按 reviewed_at，缺失回落 create_time）
+      自玩通行证判据与 CmsRegistrationMapper.countActiveSelfPlayPasses 同口径。
+      时间边界由服务层传入 [from, toExclusive) 的 yyyy-MM-dd，不在 SQL 里做日期加法。
+    -->
+    <sql id="routeFunnelSelfPlayPass">
+        r.owner_type = 1
+        and (r.purchase_kind = 2
+             or (r.purchase_kind is null and r.ticket_id is null and r.expires_at is not null))
+    </sql>
+
+    <select id="selectRouteFunnel" resultType="map">
+        select fact.stat_date as stat_date, fact.topic_id as topic_id, topic.name as topic_name,
+               fact.step_code as step_code,
+               count(distinct fact.member_id) as member_count,
+               count(distinct fact.fact_key) as fact_count
+        from (
+            select date(e.occurred_at) as stat_date, e.biz_id as topic_id, 'detail_view' as step_code,
+                   e.member_id as member_id, concat('event:', e.id) as fact_key
+              from biz_event_log e
+             where e.event_name = 'content_view' and e.biz_type = 'topic' and e.biz_id &gt; 0
+               and e.occurred_at &gt;= cast(#{from} as date) and e.occurred_at &lt; cast(#{toExclusive} as date)
+            union all
+            select date(e.occurred_at), e.biz_id, 'checkout_open', e.member_id, concat('event:', e.id)
+              from biz_event_log e
+             where e.event_name = 'checkout_open' and e.biz_type = 'topic' and e.biz_id &gt; 0
+               and e.occurred_at &gt;= cast(#{from} as date) and e.occurred_at &lt; cast(#{toExclusive} as date)
+            union all
+            select date(r.create_time), r.owner_id, 'order_created', r.member_id,
+                   coalesce(nullif(r.parent_order_no, ''), concat('registration:', r.id))
+              from cms_registration r
+             where <include refid="routeFunnelSelfPlayPass"/>
+               and r.create_time &gt;= cast(#{from} as date) and r.create_time &lt; cast(#{toExclusive} as date)
+            union all
+            select date(r.payment_time), r.owner_id, 'paid', r.member_id,
+                   coalesce(nullif(r.parent_order_no, ''), concat('registration:', r.id))
+              from cms_registration r
+             where <include refid="routeFunnelSelfPlayPass"/>
+               and r.payment_status in (2, 4)
+               and r.payment_time &gt;= cast(#{from} as date) and r.payment_time &lt; cast(#{toExclusive} as date)
+            union all
+            select date(r.payment_time), r.owner_id, 'paid_cash', r.member_id,
+                   coalesce(nullif(r.parent_order_no, ''), concat('registration:', r.id))
+              from cms_registration r
+             where <include refid="routeFunnelSelfPlayPass"/>
+               and r.payment_status in (2, 4)
+               and coalesce(r.payable_amount, r.total_amount, 0) &gt; 0
+               and r.payment_time &gt;= cast(#{from} as date) and r.payment_time &lt; cast(#{toExclusive} as date)
+            union all
+            select date(s.create_time), s.topic_id, 'play_started', s.member_id, concat('session:', s.id)
+              from topic_route_session s
+             where s.activity_id = 0
+               and s.create_time &gt;= cast(#{from} as date) and s.create_time &lt; cast(#{toExclusive} as date)
+            union all
+            select date(s.completed_at), s.topic_id, 'completed', s.member_id, concat('session:', s.id)
+              from topic_route_session s
+             where s.activity_id = 0
+               and s.completed_at &gt;= cast(#{from} as date) and s.completed_at &lt; cast(#{toExclusive} as date)
+            union all
+            select date(coalesce(f.reviewed_at, f.create_time)), r.owner_id, 'refunded', r.member_id,
+                   concat('refund:', f.id)
+              from refund_application f
+              join cms_registration r on r.id = f.source_id
+             where f.source_type = 'registration' and f.del_flag = 0 and f.status = 1
+               and <include refid="routeFunnelSelfPlayPass"/>
+               and coalesce(f.reviewed_at, f.create_time) &gt;= cast(#{from} as date)
+               and coalesce(f.reviewed_at, f.create_time) &lt; cast(#{toExclusive} as date)
+        ) fact
+        left join cms_topic topic on topic.id = fact.topic_id
+        group by fact.stat_date, fact.topic_id, topic.name, fact.step_code
+        order by fact.stat_date desc, fact.topic_id asc, fact.step_code asc
+    </select>
+
+    <!-- ===== R7 路线与站点到访报告（只读，仅聚合；不返回 member_id / 坐标 / 精确时间） ===== -->
+
+    <!-- 主题存在性与名称；只读 cms_topic，不按 del_flag 过滤（已下架主题的历史仍可出报告）。 -->
+    <select id="selectRouteVisitorTopic" resultType="java.util.LinkedHashMap">
+        select t.id as topic_id, t.name as topic_name
+        from cms_topic t
+        where t.id = #{topicId}
+    </select>
+
+    <!-- 该主题是否建立过路线局。0 = 该主题从未写过 topic_route_session（线性主题未配旅程），
+         开局/完局没有事实源 ⇒ 报表显示未知，不显示 0。走 idx_topic_route_current(topic_id,...) 左前缀。 -->
+    <select id="countRouteVisitorSessions" resultType="java.lang.Long">
+        select count(1) from (
+            select s.id from topic_route_session s where s.topic_id = #{topicId} limit 1
+        ) probe
+    </select>
+
+    <!-- 开局 = topic_route_session.create_time；完局 = completed_at（仅终点写入）。
+         两类事件各自按自己的时间列落日，[from,to) 半开窗口；用时 = completed_at - create_time（墙钟跨度）。
+         byDay=false 时不分日，用于整个窗口的去重玩家数。 -->
+    <select id="selectRouteVisitorRunStats" resultType="java.util.LinkedHashMap">
+        select
+        <choose>
+            <when test="byDay">e.stat_day,</when>
+            <otherwise>null as stat_day,</otherwise>
+        </choose>
+               sum(e.started) as runs_started,
+               sum(e.completed) as runs_completed,
+               sum(case when e.duration_seconds is not null then 1 else 0 end) as duration_runs,
+               sum(e.duration_seconds) as duration_seconds_sum,
+               count(distinct e.member_id) as players
+        from (
+            select date_format(s.create_time, '%Y-%m-%d') as stat_day, s.member_id,
+                   1 as started, 0 as completed, null as duration_seconds
+            from topic_route_session s
+            where s.topic_id = #{topicId}
+              and s.create_time &gt;= #{from} and s.create_time &lt; #{to}
+            union all
+            select date_format(s.completed_at, '%Y-%m-%d') as stat_day, s.member_id,
+                   0 as started, 1 as completed,
+                   case when s.completed_at &gt;= s.create_time
+                        then timestampdiff(second, s.create_time, s.completed_at) end as duration_seconds
+            from topic_route_session s
+            where s.topic_id = #{topicId}
+              and s.completed_at &gt;= #{from} and s.completed_at &lt; #{to}
+        ) e
+        <if test="byDay">
+        group by e.stat_day
+        order by e.stat_day
+        </if>
+    </select>
+
+    <!-- 退款（背景数据）：refund_application 审核通过（status=1）的报名退款，按 reviewed_at 落日。
+         归属沿用 ProjectPlayerReadServiceImpl 的口径：owner_type=1 主题本身，或 owner_type=2 由该主题生成的活动场次。 -->
+    <select id="selectRouteVisitorRefundDaily" resultType="java.util.LinkedHashMap">
+        select date_format(f.reviewed_at, '%Y-%m-%d') as stat_day, count(1) as refunds
+        from refund_application f
+        where f.del_flag = 0
+          and f.status = 1
+          and f.source_type = 'registration'
+          and ((f.owner_type = 1 and f.owner_id = #{topicId})
+               or (f.owner_type = 2 and f.owner_id in (select a.id from cms_activity a where a.topic_id = #{topicId})))
+          and f.reviewed_at &gt;= #{from} and f.reviewed_at &lt; #{to}
+        group by date_format(f.reviewed_at, '%Y-%m-%d')
+        order by stat_day
+    </select>
+
+    <!-- 站点清单：只给是否有承接商家（has_merchant），不返回商家 member_id 与坐标。 -->
+    <select id="selectRouteVisitorStations" resultType="java.util.LinkedHashMap">
+        select n.id as node_id, n.name as station_name, n.sort_id,
+               case when n.merchant_member_id is not null then 1 else 0 end as has_merchant
+        from cms_topic_node n
+        where n.topic_id = #{topicId}
+        order by n.sort_id, n.id
+    </select>
+
+    <!-- 站点事实（同一张 union all 事件表，各自按自己的时间列落日）：
+         · 到访 = player_node_progress 行（每 member×activity×node×play_instance 唯一 ⇒ 不重复计）；
+           落日 coalesce(visit_time, create_time, checkin_time)；
+         · 完成 = player_node_progress.status=1，按 checkin_time 落日（checkin_time 为空的见 selectRouteVisitorUndatedCompletions）；
+           不用 topic_route_action：它是推进回执，含 MISTAKE/STAGE_REST 等非完成动作且合法 loop 可重复完成同站，
+           线性未配旅程的主题根本不写；而 advance 前置必须先有 progress.status=1。
+         · 商家核销 = redemption ACTIVE，按 (chapter_id, merchant_id) 归到该商家在本章的站点（多站取最小 id，防一笔多算）；
+           其中 offer.terms_mode='PERK' 计为权益兑换（权益兑换 ⊆ 商家核销）。整单核销（chapter_id 为空/0）无站点维度，不计入。 -->
+    <select id="selectRouteVisitorStationStats" resultType="java.util.LinkedHashMap">
+        select
+        <choose>
+            <when test="byDay">e.stat_day,</when>
+            <otherwise>null as stat_day,</otherwise>
+        </choose>
+               e.node_id,
+               sum(e.arrived) as arrivals,
+               sum(e.completed) as completions,
+               sum(e.verified) as verifications,
+               sum(e.perk) as perk_redemptions,
+               count(distinct e.member_id) as players
+        from (
+            select date_format(coalesce(p.visit_time, p.create_time, p.checkin_time), '%Y-%m-%d') as stat_day,
+                   p.node_id, p.member_id, 1 as arrived, 0 as completed, 0 as verified, 0 as perk
+            from player_node_progress p
+            where p.topic_id = #{topicId}
+              and p.del_flag = 0
+              and coalesce(p.visit_time, p.create_time, p.checkin_time) &gt;= #{from}
+              and coalesce(p.visit_time, p.create_time, p.checkin_time) &lt; #{to}
+            union all
+            select date_format(p.checkin_time, '%Y-%m-%d') as stat_day,
+                   p.node_id, p.member_id, 0 as arrived, 1 as completed, 0 as verified, 0 as perk
+            from player_node_progress p
+            where p.topic_id = #{topicId}
+              and p.del_flag = 0
+              and p.status = 1
+              and p.checkin_time &gt;= #{from} and p.checkin_time &lt; #{to}
+            union all
+            select date_format(r.create_time, '%Y-%m-%d') as stat_day,
+                   sn.node_id, g.member_id, 0 as arrived, 0 as completed, 1 as verified,
+                   case when o.terms_mode = 'PERK' then 1 else 0 end as perk
+            from (
+                select n.chapter_id, n.merchant_member_id, min(n.id) as node_id
+                from cms_topic_node n
+                where n.topic_id = #{topicId}
+                  and n.merchant_member_id is not null
+                  and n.chapter_id &gt; 0
+                group by n.chapter_id, n.merchant_member_id
+            ) sn
+            join redemption r on r.chapter_id = sn.chapter_id and r.merchant_id = sn.merchant_member_id
+            left join merchant_chapter_offer o on o.id = r.offer_id
+            left join cms_registration g on g.id = r.registration_id
+            where r.status = 'ACTIVE'
+              and r.topic_id = #{topicId}
+              and r.create_time &gt;= #{from} and r.create_time &lt; #{to}
+        ) e
+        group by
+        <if test="byDay">e.stat_day,</if>
+                 e.node_id
+        order by
+        <if test="byDay">e.stat_day,</if>
+                 e.node_id
+    </select>
+
+    <!-- 已完成但 checkin_time 为空（如探店日 0→1 只改 status）的站点完成：无法落到某一天，单列全期数量，不并入任何一天。 -->
+    <select id="selectRouteVisitorUndatedCompletions" resultType="java.util.LinkedHashMap">
+        select p.node_id, count(1) as completions, count(distinct p.member_id) as players
+        from player_node_progress p
+        where p.topic_id = #{topicId}
+          and p.del_flag = 0
+          and p.status = 1
+          and p.checkin_time is null
+        group by p.node_id
+    </select>
+</mapper>

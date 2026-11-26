@@ -1,0 +1,48 @@
+@import "../../../style/reduced-motion.wxss";
+/* cy-loading-mask · 全屏遮罩 + 居中转圈;遮罩吃掉触摸,防支付/核销期间重复提交
+ * 遮罩淡入用 transition;转圈是唯一一组 @keyframes(减动效下停转,改为静态环)。 */
+:host { display: block; }
+.lm {
+  position: fixed;
+  inset: 0;
+  z-index: var(--cy-z-modal);   /* 压过 sheet/modal,但低于 toast:遮罩期间的提示仍要看得见 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--cy-color-overlay);
+  opacity: 0;
+  transition: opacity var(--cy-motion-fast) var(--cy-ease-out);
+}
+.lm.lm--in { opacity: 1; }
+.lm.lm--reduced-motion { transition: none; }
+.lm__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cy-space-3);
+  min-width: 240rpx;
+  padding: var(--cy-space-5) var(--cy-space-4);
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-comp-modal-panel);
+  border: 2rpx solid var(--cy-border-card);
+  color: var(--cy-text-title);
+  font-size: var(--cy-font-body);
+}
+.lm__spinner {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  border: 4rpx solid var(--cy-border-card);
+  border-top-color: var(--cy-text-title);
+  animation: lm-spin var(--cy-motion-spinner-cycle) linear infinite; /* motion-1118:与 cy-btn / cy-empty 同形制转圈同速 */
+}
+.lm.lm--reduced-motion .lm__spinner { animation: none; }
+@keyframes lm-spin { to { transform: rotate(360deg); } }
+
+/* G-10(2026-10-27):商家视角遮罩浅色雾面、面板白底黑字。组件 isolated 读不到 .theme-merchant,就地镜像 tokens 商家值。 */
+.lm.lm--light {
+  --cy-comp-modal-panel: #FFFFFF; /* ds-ok: 镜像 .theme-merchant */
+  --cy-text-title: #000000; /* ds-ok: 镜像 .theme-merchant */
+  --cy-border-card: #E8E8E8; /* ds-ok: 镜像 .theme-merchant */
+  background: rgba(243,244,244,.72); /* ds-ok: 商家 bg-page @72% */
+}

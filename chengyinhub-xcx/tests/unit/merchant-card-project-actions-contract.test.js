@@ -1,0 +1,83 @@
+'use strict'
+
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const test = require('node:test')
+
+const ROOT = path.resolve(__dirname, '../..')
+const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8')
+
+function rule(source, selector) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = source.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))
+  assert.ok(match, `缺少 ${selector}`)
+  return match[1]
+}
+
+function assertContract(overrides = {}) {
+  const source = (file) => overrides[file] === undefined ? read(file) : overrides[file]
+  const cardWxml = source('components/cy/merchant-card/index.wxml')
+  const cardWxss = source('components/cy/merchant-card/index.wxss')
+  assert.match(cardWxml, /class="mc__service"[^>]*aria-role="button"[^>]*aria-label=/)
+  // 找场地整卡为主入口，旧 mc__action 已随共享照片卡退役；服务仍是独立触点。
+  assert.match(cardWxml, /class="photo-card mc mc--\{\{status\}\}"[^>]*aria-role="\{\{interactive \? 'button' : ''\}\}"[^>]*aria-label="查看商家：\{\{name\}\}"[^>]*catchtap="onTap"/)
+  assert.match(cardWxss, /@import "\.\.\/\.\.\/\.\.\/style\/photo-card\.wxss"/)
+  assert.match(rule(source('style/photo-card.wxss'), '.photo-card'), /min-height:\s*428rpx/)
+  assert.match(rule(cardWxss, '.mc__service'), /min-height:\s*var\(--cy-btn-h\)/)
+  assert.match(cardWxml, /<text class="mc__service-text">/)
+  assert.match(rule(cardWxss, '.mc__service-text'), /overflow-wrap:\s*anywhere/)
+
+  const projectWxml = source('subpackageA/pages/myproject/index.wxml')
+  const projectWxss = source('subpackageA/pages/myproject/index.wxss')
+  /* 2026-09-08 稿 260:277 的裁决把主题卡上那三个动作(候选池 / 上下架 / 删除)赶出了卡面,
+     它们搬进「长按卡片」打开的操作面板。所以 .mp-op 只剩模板 tab 那两个,
+     新的三行按 .mp-ops-row 计 —— 动作总数没变,热区与可读名称的要求也没变。 */
+  const actions = [...projectWxml.matchAll(/<view\b[^>]*class="mp-op(?:\s[^"\n]*)?"[^>]*>/g)].map((match) => match[0])
+  // 2026-10-20 FOLLOWUP-A-2:被驳回 / 下架的玩法卡多一个「审核记录」(含申诉),3 → 4。
+  assert.equal(actions.length, 4, '模板管理应保留提交广场、上下架、审核记录和删除动作')
+  for (const action of actions) {
+    assert.match(action, /aria-role="button"/)
+    assert.match(action, /aria-label=/)
+  }
+  assert.match(rule(projectWxss, '.mp-op'), /min-height:\s*var\(--cy-btn-h\)/)
+  assert.match(rule(projectWxss, '.mp-op'), /display:\s*inline-flex/)
+
+  // 卡面不许再长回按钮:三个动作只能从长按面板走
+  assert.doesNotMatch(projectWxml, /catchtap="(goCandidates|toggleStatus|deleteItem)"/,
+    '候选池 / 上下架 / 删除不能回到卡面上')
+  // 2026-11-17 PG-084 = A:卡面右上角允许一个「···」(catchtap="onCardMore"),打开与长按同一个面板;
+  // 长按保留作快捷方式。两者都只调 _openOps —— 「···」不能长出自己的第二套菜单。
+  assert.match(projectWxml, /bindlongpress="onCardLong"/, '长按快捷方式不能丢')
+  assert.match(projectWxml, /class="mp-card-more"[^>]*catchtap="onCardMore"/, '卡面必须有可见的「···」入口')
+  const projectJs = source('subpackageA/pages/myproject/index.js')
+  assert.match(projectJs, /onCardMore\(e\) \{\s*this\._openOps\(rowOf\(this, e\)\);\s*\}/)
+  assert.match(projectJs, /onCardLong\(e\) \{\s*this\._openOps\(rowOf\(this, e\)\);\s*\}/)
+  // 长按面板同时保留审核记录与另存为模板；另一张审核 cy-sheet 不计入操作行。
+  const opsStart = projectWxml.indexOf('<cy-sheet show="{{opsSheet.show}}"')
+  assert.notEqual(opsStart, -1, '长按操作面板必须存在')
+  const opsSheet = projectWxml.slice(opsStart, projectWxml.indexOf('</cy-sheet>', opsStart))
+  // 2026-10-28 m694:Threads 式分组菜单(style/threads-menu.wxss),行高 112rpx ≥ 44px
+  const sheetRows = [...opsSheet.matchAll(/<view\b[^>]*class="tm-row(?:\s[^"\n]*)?"[^>]*>/g)].map((m) => m[0])
+  assert.equal(sheetRows.length, 7, '操作面板应有候选池 / 编辑 / 上下架 / 取消 / 审核记录 / 另存为模板 / 删除')
+  for (const row of sheetRows) assert.match(row, /bindtap="onOpsPick"/)
+  assert.match(read('style/threads-menu.wxss'), /\.tm-row \{ min-height: 112rpx;/)
+}
+
+test('商家卡与我的项目管理动作具有 44px 热区和按钮语义', () => {
+  assertContract()
+})
+
+test('负控：商家服务入口移除最小高度会判红', () => {
+  const file = 'components/cy/merchant-card/index.wxss'
+  const broken = read(file).replace(/(\.mc__service\s*\{) min-height: var\(--cy-btn-h\);/, '$1')
+  assert.notEqual(broken, read(file), '负控必须实际移除服务触点高度')
+  assert.throws(() => assertContract({ [file]: broken }), /min-height/)
+})
+
+test('负控：项目删除动作移除可读名称会判红', () => {
+  const file = 'subpackageA/pages/myproject/index.wxml'
+  // 现在第一处 aria-label="删除{{item.title}}" 是模板 tab 的删除动作
+  const broken = read(file).replace(' aria-role="button" aria-label="删除{{item.title}}"', '')
+  assert.throws(() => assertContract({ [file]: broken }), /aria-role/)
+})

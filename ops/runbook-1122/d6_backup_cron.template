@@ -1,0 +1,5 @@
+# 审计 D6：每周逻辑备份（模板）。只适用于只读从库，或业主确认的停写窗口；主库在线写入时工具会因前后快照不一致而失败。
+# 安装：替换占位符后放到 /etc/cron.d/chengyin-backup（root:root 0644）。真实路径与 UUID 不要提交到仓库。
+# 占位符：<REPO_DIR> 仓库目录；<PRIVATE_DIR> 仓库外、600/700 权限的私有目录；<SOURCE_UUID> 备份源 server_uuid。
+SHELL=/bin/bash
+10 4 * * 1 root cd <REPO_DIR> && python3 scripts/db-backup-restore.py backup --defaults-file <PRIVATE_DIR>/source.cnf --database chengyinhubdb --server-uuid <SOURCE_UUID> --output <PRIVATE_DIR>/backup-$(date +\%Y\%m\%d-\%H\%M).sql >> <PRIVATE_DIR>/backup.log 2>&1 && ls -1t <PRIVATE_DIR>/backup-*.sql | tail -n +9 | while read -r f; do rm -f -- "$f" "$f.json"; done

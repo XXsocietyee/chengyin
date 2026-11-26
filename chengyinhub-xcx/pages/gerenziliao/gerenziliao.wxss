@@ -1,0 +1,185 @@
+page { background: var(--cy-bg-page); }
+.profile-nav-spacer { flex: none; }
+.profile-load-shell { padding: var(--cy-space-3) var(--cy-page-x) var(--cy-space-8); }
+.profile-refresh-state,
+.profile-save-state { margin: 0 var(--cy-page-x) var(--cy-space-4); }
+.profile-refresh-state { position: relative; }
+/* X1:刷新状态浮在内容上不占位(共用 .cy-refresh-float),列表不再被顶下去 */
+.profile-refreshing {
+  padding: var(--cy-space-1) var(--cy-space-3); border-radius: var(--cy-radius-pill); background: var(--cy-color-bg-elevated); white-space: nowrap;
+  color: var(--cy-text-secondary);
+  font-size: var(--cy-font-label);
+}
+/* W10b #25 头像审核回执:状态说明,不是按钮 */
+
+/* 8pt 网格对齐(WT1 已处理过被导航盖住的旧标题,这里只补剩下的游离间距):
+   页边距统一 --cy-page-x,30/40/50rpx 落回 32/48 档 */
+
+/* 2026-10-28 业主:每支修改笔下面都是灰色圆底;头像上那支点了就是换头像 */
+ /* ds-ok: 深色页上的灰底笔 */
+
+/* 用户原话「直接写到背景上」:去掉卡面与圆角,资料行直接落在页面底色上(margin 保留)。 */
+
+/* 定宽 560rpx 在窄机上会把右侧编辑钮挤出去;行已是 flex,改自适应 */
+
+
+/* 触控热区:删除图标视觉 24rpx(12px),是全站最小的可点元素。
+   ★ 这一处到不了 88rpx,原因是几何而不是没做:
+     宿主 .shzlbox_li_left_txt_li 高 50rpx 且 overflow:hidden,纵向热区封顶 50rpx。
+     去掉 overflow:hidden 也不行 —— chip 之间纵向只隔 10rpx(margin-top),
+     热区一越界就跨行盖住上下一行 chip 的删除钮,变成互相偷点击,比目标小更糟。
+   所以扩到 chip 允许的最大值:48rpx 宽 × 50rpx 满高 = 24×25px,
+   满足 WCAG 2.5.8 AA 的 24px 下限,离 44px 的差额已在 wxml 的 ds-ok 里写明。
+   真要到 88rpx,得把 chip 本身加高 —— 那是视觉改动,留给设计走查。 */
+
+/* 命中区 40 → 88rpx(DS §3.8 / WCAG 2.2 SC 2.5.8),图标视觉仍 40rpx */
+
+/* 底栏避让占位:保存栏已收编 cy-footer-bar,故直接用它的官方高度 token。
+   R5 变更缘由:原来是自造的 .bmbottom(position:fixed 但**无 z-index**),
+   C03-R4 复拍 S1_scroll_bottom 里它滚到底后整条消失,而同队列走 cy-footer-bar 的
+   address / addressinfo 两页不消失 —— 差别就是那个层级。连带把「手算自造栏三档高度」
+   这一类占位不同源的坑一起消掉(R3/R4 的 40rpx 短缺就出自那里)。 */
+.gz-footer-hold{ height: var(--cy-comp-footer-h); }
+
+.david_tk { height: auto; overflow: visible; }
+.david_tk_box{ overflow: hidden; background: var(--cy-comp-field-idle-bg); margin-top: var(--cy-space-2-5); border-radius: var(--cy-radius-md); padding: var(--cy-space-2-5);}
+.david_tk_box.is-filled { background: var(--cy-comp-field-filled-bg); }
+.profile-edit-placeholder { color: var(--cy-color-text-placeholder); }
+.david_tk_box textarea{ width: 100%; height:360rpx; color: var(--cy-text-title); font-size: var(--cy-type-body); line-height: var(--cy-leading-normal);}
+
+.david_tk_con { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--cy-space-3); margin-top: var(--cy-space-2); width: 100%; }
+.profile-contact-media { grid-template-columns: minmax(0, 1fr); width: 50%; margin-left: auto; margin-right: auto; }
+.david_tk_con_sc{ width:100%; height:auto; aspect-ratio:1; overflow:hidden; margin:0; position: relative;
+  border-radius: var(--cy-radius-lg); box-shadow: var(--cy-shadow-card);}
+.david_tk_con_sc image{ width: 100%; height: 100%; vertical-align: top;}
+.david_tk_con_sc image.david_del{ width: 40rpx; height: 40rpx; }
+/* 触控热区:删除徽标视觉 40rpx,低于 88rpx 最小可点(DS §3.2)。
+   <image> 是替换元素,挂 ::after 不保险 —— 按 DS 的「透明 wrapper 扩大点击区」范式
+   (searchmap 那套分层)包一层 .david_del-hit,tap 移到 wrapper 上,图片只负责视觉。
+   ⚠️ 宿主 .david_tk_con_sc 是 318rpx 且 overflow:hidden,热区越界就会被裁,
+   所以不居中而是锚在右上角向内(左下)展开:88rpx 完整落在 318rpx 瓦片内。
+   瓦片里的缩略图与相邻瓦片都没有 tap,扩出来的热区不从谁那儿偷点击;
+   末尾那个「上传」按钮在所有瓦片之后,88rpx 也够不到。 */
+.david_tk_con_sc .david_del-hit{
+  position: absolute;
+  right: var(--cy-space-1-5);
+  top: var(--cy-space-1-5);
+  width: 40rpx;
+  height: 40rpx;
+}
+.david_tk_con_sc .david_del-hit::after{
+  content: '';
+  position: absolute;
+  right: calc(-1 * var(--cy-space-1-5));
+  top: calc(-1 * var(--cy-space-1-5));
+  width: 88rpx;
+  height: 88rpx;
+}
+button.david_tk_con_tgb{border: 2rpx dashed var(--cy-border-line); width:100%; height:auto; aspect-ratio:1; box-sizing:border-box; overflow:hidden; margin:0;
+  border-radius: var(--cy-radius-lg); background: var(--cy-bg-card); box-shadow: var(--cy-shadow-card); display: block;}
+.david_tk_con_tgb_tu{ width: 60rpx; height: 60rpx; margin: var(--cy-space-8) auto var(--cy-space-1-5) auto;}
+.david_tk_con_tgb_tu image{ width: 60rpx; height: 60rpx; vertical-align: top;}
+/* QA 复核去紫色化:"上传路线照片"/"上传联系二维码"这两处上传按钮文案原是品牌紫,收回中性字色 */
+.david_tk_con_tgb_txt{ width: 100%; color: var(--cy-text-title);display:block; text-align: center; font-size: var(--cy-type-body); line-height: var(--cy-leading-normal); font-weight: 500;}
+.david_tk_con_tgb_txt text{color: var(--cy-text-title);}
+
+/* 标题、关闭和完成按钮由 cy-sheet 统一提供，内层只保留表单内容。 */
+.pop-model {
+  position: static;
+  left: auto;
+  bottom: auto;
+  width: auto;
+  z-index: auto;
+  border-radius: 0;
+  padding: 0;
+  display: block;
+}
+.pop-model::before { display: none; }
+.profile-name-field { display: block; margin-top: var(--cy-space-2-5); }
+
+/* 昵称校验/推荐(N4):「换一批」「重新检查」是文字链,命中区用 min-height 撑到 88rpx(44px) */
+.profile-name-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--cy-space-4); }
+.profile-name-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 88rpx;
+  min-width: 88rpx;
+  justify-content: center;
+  color: var(--cy-accent);
+  font-size: var(--cy-type-body);
+}
+.profile-name-link.is-disabled { color: var(--cy-text-tertiary); }
+/* 推荐昵称:无描边胶囊,点选即填入;命中区 88rpx(44px) */
+.profile-name-suggest { display: flex; flex-direction: column; gap: var(--cy-space-2); margin-top: var(--cy-space-3); }
+.profile-name-suggest-title { color: var(--cy-text-secondary); font-size: var(--cy-font-caption); }
+/* 「换一批」与标题同一行靠右,不再单独占一行悬在推荐与「完成」之间;负外边距只收视觉高度,命中区仍是 88rpx */
+.profile-name-suggest-head { display: flex; align-items: center; justify-content: space-between; gap: var(--cy-space-2); }
+.profile-name-suggest-head .profile-name-link { margin: calc(var(--cy-space-3) * -1) 0; font-size: var(--cy-font-label); }
+.profile-name-chips { display: flex; flex-wrap: wrap; gap: var(--cy-space-2); }
+.profile-name-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 88rpx;
+  padding: 0 var(--cy-space-4);
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-comp-field-idle-bg);
+  color: var(--cy-text-title);
+  font-size: var(--cy-type-body);
+}
+
+/* ===== 2026-10-30 业主定稿 P-2(V-15 / V-21):Revolut 式资料页 ===== */
+/* 页顶铺主页背景图,整张高斯模糊 + 半透明压暗,往下渐隐到页面底色 */
+.rv-bg { position: absolute; left: 0; right: 0; top: 0; height: 640rpx; overflow: hidden; z-index: 0; }
+.rv-bg__img { width: 110%; height: 110%; margin: -5%; filter: blur(40rpx); transform: scale(1.06); }
+.rv-bg__fade { position: absolute; left: 0; right: 0; top: 0; bottom: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, .35) 0%, rgba(0, 0, 0, .45) 55%, var(--cy-bg-page) 100%); } /* ds-ok: 背景图上的压暗渐层,落到页面底色 */
+/* 命中区 88rpx,可见药丸 56rpx */
+.rv-bg-hit { margin-top: var(--cy-space-1); min-height: 88rpx; display: flex; align-items: center; justify-content: center; }
+.rv-bg-btn { height: 56rpx; padding: 0 var(--cy-space-3); border-radius: var(--cy-radius-pill);
+  display: flex; align-items: center; gap: var(--cy-space-1-5); font-size: var(--cy-font-caption); color: #ffffff; /* ds-ok: 压在照片上的常量白 */
+  background: rgba(0, 0, 0, .38); /* ds-ok: 照片上的半透明底 */ }
+.rv-head { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; padding-top: var(--cy-space-4); }
+.rv-ava { position: relative; width: 208rpx; height: 208rpx; border-radius: 50%; }
+/* 上传中:外圈一道亮环,上传完收起(不用转圈动画) */
+.rv-ring { position: absolute; left: -10rpx; top: -10rpx; right: -10rpx; bottom: -10rpx; border-radius: 50%; border: 6rpx solid var(--cy-color-text-primary); opacity: 0; transition: opacity .2s ease; }
+.rv-ring.is-on { opacity: .9; }
+/* 编辑笔:头像正下方居中的实心圆(原来在右下角、偏心) */
+.rv-ava-edit { margin-top: -44rpx; z-index: 2; width: 88rpx; height: 88rpx; display: flex; align-items: center; justify-content: center; } /* 44pt 命中区 */
+.rv-ava-edit__dot { width: 56rpx; height: 56rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: var(--cy-btn-solid-bg); color: var(--cy-btn-solid-fg); border: 4rpx solid var(--cy-bg-page); box-sizing: border-box; }
+.rv-name { margin-top: var(--cy-space-3); font-size: var(--cy-font-title); font-weight: 700; color: var(--cy-text-title); }
+.rv-review { margin-top: var(--cy-space-2); padding: 0 var(--cy-page-x); text-align: center; font-size: var(--cy-font-label); color: var(--cy-danger); }
+/* 分组列表:左字段名、右当前值、末尾 › */
+.rv-group { position: relative; z-index: 1; margin: var(--cy-space-4) var(--cy-page-x) 0; border-radius: var(--cy-radius-lg); background: var(--cy-bg-card); overflow: hidden; }
+.rv-row { position: relative; display: flex; align-items: center; gap: var(--cy-space-2); min-height: 104rpx; padding: 0 var(--cy-space-3) 0 var(--cy-space-4); box-sizing: border-box; }
+.rv-row + .rv-row::before { content: ""; position: absolute; left: var(--cy-space-4); right: 0; top: 0; height: 1rpx; background: var(--cy-border-line); }
+button.rv-row--btn { width: 100%; margin: 0; border: 0; border-radius: 0; background: transparent; line-height: normal; text-align: left; font-size: inherit; color: inherit; }
+button.rv-row--btn::after { border: 0; }
+/* 第九轮 m1-9:头像两处换成 open-type="chooseAvatar" 的 button,去掉原生按钮的底、边、内距,版面不变 */
+button.rv-ava--btn { padding: 0; margin-left: 0; margin-right: 0; background: transparent; line-height: normal; font-size: inherit; color: inherit; overflow: visible; }
+button.rv-ava--btn::after { border: 0; }
+.rv-row__k { flex: none; font-size: var(--cy-font-body); color: var(--cy-text-title); }
+.rv-row__v { flex: 1; min-width: 0; text-align: right; font-size: var(--cy-font-body); color: var(--cy-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rv-row__v.is-empty, .rv-row__intro.is-empty { color: var(--cy-text-tertiary); }
+.rv-row__cv { flex: none; color: var(--cy-text-tertiary); }
+/* 个人介绍:值放在字段名下面,最多三行 */
+.rv-row--stack { flex-direction: column; align-items: stretch; gap: var(--cy-space-1); padding-top: var(--cy-space-3); padding-bottom: var(--cy-space-3); }
+.rv-row__line { display: flex; align-items: center; justify-content: space-between; }
+.rv-row__intro { font-size: var(--cy-font-label); line-height: var(--cy-leading-normal); color: var(--cy-text-secondary);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.rv-thumbs { flex: 1; display: flex; justify-content: flex-end; gap: var(--cy-space-1-5); }
+.rv-thumb { width: 64rpx; height: 64rpx; border-radius: var(--cy-radius-sm); }
+.rv-chips { flex: 1; min-width: 0; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--cy-space-1-5); }
+.rv-chip { padding: 4rpx var(--cy-space-2); border-radius: var(--cy-radius-pill); background: var(--cy-bg-subtle); font-size: var(--cy-font-caption); color: var(--cy-text-secondary); }
+.rv-count { display: block; text-align: right; margin-top: var(--cy-space-1-5); font-size: var(--cy-font-caption); color: var(--cy-text-tertiary); }
+@media (prefers-reduced-motion: reduce) { .rv-ring { transition: none; } }
+
+/* 细节打磨二期 L1/L5/L7 */
+.rv-ava { transition: var(--cy-tr-press); }
+.rv-ava-edit { transition: var(--cy-tr-press); }
+.rv-bg-hit { transition: var(--cy-tr-press); }
+.rv-row { transition: var(--cy-tr-press); }
+.rv-row--stack { transition: var(--cy-tr-press); }
+.profile-name-link { transition: var(--cy-tr-press); }
+.profile-name-chip { transition: var(--cy-tr-press); }
+.rv-count { font-variant-numeric: tabular-nums; }

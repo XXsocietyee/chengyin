@@ -1,0 +1,98 @@
+<wxs src="../../../../utils/wxs/img.wxs" module="img" />
+<wxs src="../../../../utils/wxs/money.wxs" module="money" />
+<view class="moh">
+  <!-- 筛选留在正文顶端(方案 §5.2 H09:筛选、空态、重试都在正文) -->
+  <view class="order-tabs-wrap">
+    <cy-tabs tabs="{{orderTabs}}" active="{{activeTab}}" variant="chip" sticky bind:change="switchTab" />
+  </view>
+
+  <view class="moh-body" style="{{pmList === 1 ? '--pm-l:1;' : (pmList === 2 ? '--pm-l-d:.32s;--pm-l-s:1;' : '')}}">
+    <cy-skeleton wx:if="{{loading && list.length==0}}" type="list" count="3" />
+    <!-- 买家走查 1122:订单列表读失败不再留白 ——「订单加载失败」+「重试」;登录/无权的副文案与标题同义,去掉 -->
+    <cy-error class="cy-fade-in"
+      wx:elif="{{errorMsg && list.length==0}}"
+      fill="{{true}}"
+      size="lg"
+      title="{{orderAuthRequired ? '登录后查看订单' : orderAccessDenied ? '当前身份不能查看订单' : '订单加载失败'}}"
+      retry="{{orderAuthRequired ? '登录' : '重试'}}"
+      bind:retry="retryList"
+    />
+
+    <cy-empty wx:if="{{!loading && !errorMsg && list.length==0 && !hasOrders}}" fill class="cy-fill-state" size="lg"
+              kind="empty" title="还没有城市路线订单"
+              cta="{{canDiscoverRoutes ? '去发现城市路线' : ''}}" bind:cta="goDiscoverRoutes" />
+    <cy-empty wx:if="{{!loading && !errorMsg && list.length==0 && hasOrders}}" fill class="cy-fill-state" size="lg"
+              kind="empty" title="当前筛选暂无订单" />
+
+    <cy-error load-failure class="cy-fade-in" wx:if="{{errorMsg && list.length>0}}"
+      title="订单刷新失败" retry="重试" bind:retry="retryList" />
+
+    <!-- V3-22(2026-11-09 业主「我的订单卡片…间距太空了 而且都没有对齐」;旧规则「不用写几张票 也不用出示核销码 应该是主题的信息
+         城市定向还是自由探索 具体的类别」):卡面只讲主题 —— 封面 | 类别 + 状态 / 主题名 / 时间 / 地点,底行实付与动作。
+         订单号收进详情(详情首行就是订单号,复制也在那里);没有地点时不画「—」占一行。
+         整卡 tap → open 事件推 H10 子层,不压新页。 -->
+    <view class="orderbox_li" wx:for="{{list}}" wx:key="id" bindtap="openDetail" hover-class="orderbox_li--press" hover-stay-time="80" data-id="{{item.id}}" style="--pmi:{{index}};">
+      <view class="orderbox_li_con" wx:if="{{item.cmsActivity!=null}}">
+        <view class="orderbox_li_con_tu cy-img-ph {{wideCover[item.id] ? 'orderbox_li_con_tu--wide' : ''}}"><image lazy-load="true" class="moh-cover cy-img-fade {{imgOn[item.id] ? 'cy-img-fade--on' : ''}}" src="{{item.cmsActivity.imgUrl}}" mode="aspectFill" bindload="onCoverLoad" data-id="{{item.id}}" /></view>
+        <view class="orderbox_li_con_info">
+          <view class="moh-head">
+          <!-- 场次订单同样按 productType 出标签:自由探索场次曾被一律标成「城市定向」(实走 B13);
+               没挂主题的普通活动(productType 为空)标「活动」,不再一律写成城市定向(第十轮 f4,f1 遗留)。 -->
+          <view class="order-mode-line" wx:if="{{item.cmsActivity.productType == 2}}">
+            <text class="order-mode-tag green">自由探索</text>
+          </view>
+          <view class="order-mode-line" wx:elif="{{item.cmsActivity.productType == 1}}">
+            <text class="order-mode-tag">城市定向</text>
+          </view>
+            <text class="moh-state order-state-{{item.orderStateKey}}">{{item.orderStateText}}</text>
+          </view>
+          <view class="orderbox_li_con_info_name ep1">{{item.cmsActivity.name}}</view>
+          <view class="orderbox_li_con_info_time ep1" wx:if="{{item.cmsActivity.timeRangeFormatted}}"><image lazy-load="true" class="moh-ico" src="/subpackageMember/images/d_orderIcon.png" mode="widthFix" />{{item.cmsActivity.timeRangeFormatted}}</view>
+          <view class="orderbox_li_con_info_txt ep1 cy-addr-tap" wx:if="{{item.addrTap}}" catchtap="onAddressTap" data-id="{{item.id}}" data-address="{{item.addressText}}" data-lat="{{item.addrLat}}" data-lng="{{item.addrLng}}" data-geo="1" hover-class="cy-pressed" hover-stay-time="80" hover-stop-propagation aria-role="button" aria-label="在地图中打开 {{item.addressText}}"><image lazy-load="true" class="moh-ico" src="/subpackageMember/images/d_orderIcon2.png" mode="widthFix" />{{item.addressText}}</view>
+        </view>
+      </view>
+
+      <view class="orderbox_li_con" wx:elif="{{item.cmsTopic!=null}}">
+        <view class="orderbox_li_con_tu cy-img-ph {{wideCover[item.id] ? 'orderbox_li_con_tu--wide' : ''}}"><image lazy-load="true" class="moh-cover cy-img-fade {{imgOn[item.id] ? 'cy-img-fade--on' : ''}}" src="{{img.first(item.cmsTopic.imgArr) || img.first(item.cmsTopic.imgUrl)}}" mode="aspectFill" bindload="onCoverLoad" data-id="{{item.id}}" /></view>
+        <view class="orderbox_li_con_info">
+          <view class="moh-head">
+          <!-- 2026-09-18 UI-20:主题订单不一定是自由探索 —— 模式以主题的 productType 为准
+               (1 城市定向 / 2 自由探索,与游玩页标题同源);存量未回填(null)不猜,不出标签。 -->
+          <view class="order-mode-line" wx:if="{{item.cmsTopic.productType == 2}}">
+            <text class="order-mode-tag green">自由探索</text>
+          </view>
+          <view class="order-mode-line" wx:elif="{{item.cmsTopic.productType == 1}}">
+            <text class="order-mode-tag">城市定向</text>
+          </view>
+            <text class="moh-state order-state-{{item.orderStateKey}}">{{item.orderStateText}}</text>
+          </view>
+          <view class="orderbox_li_con_info_name ep1">{{item.cmsTopic.name}}</view>
+          <view class="orderbox_li_con_info_time ep1" wx:if="{{item.cmsTopic.timeRangeFormatted}}"><image lazy-load="true" class="moh-ico" src="/subpackageMember/images/d_orderIcon.png" mode="widthFix" />{{item.cmsTopic.timeRangeFormatted}}</view>
+          <view class="orderbox_li_con_info_txt ep1 cy-addr-tap" wx:if="{{item.addrTap}}" catchtap="onAddressTap" data-id="{{item.id}}" data-address="{{item.addressText}}" data-lat="{{item.addrLat}}" data-lng="{{item.addrLng}}" data-geo="1" hover-class="cy-pressed" hover-stay-time="80" hover-stop-propagation aria-role="button" aria-label="在地图中打开 {{item.addressText}}"><image lazy-load="true" class="moh-ico" src="/subpackageMember/images/d_orderIcon2.png" mode="widthFix" />{{item.addressText}}</view>
+        </view>
+      </view>
+
+      <!-- OR-034:主题与活动都读不到 —— 不画只剩价格的空卡,写「已下架」 -->
+      <view class="orderbox_li_con" wx:else>
+        <view class="orderbox_li_con_info"><view class="orderbox_li_con_info_name ep1">已下架</view></view>
+      </view>
+
+      <view class="orderbox_li_bot">
+        <!-- OR-021:待付款取应付(payableAmount),空值不渲染金额;已付走实付口径。金额统一走 money.amount -->
+        <view class="orderbox_li_bot_left" wx:if="{{item.registrationStatus==1 ? item.pendingPayAmount !== null : true}}">{{item.registrationStatus==1 ? '待付款' : '实付款'}}：<text class="moh-amount">{{money.amount(item.registrationStatus==1 ? item.pendingPayAmount : item.actualPaidAmount)}}</text></view>
+        <view class="orderbox_li_bot_left" wx:else></view>
+        <view class="orderbox_li_bot_right" wx:if="{{item.registrationStatus==1 && item.orderStateKey==='pending_payment'}}">
+          <view class="orderbut1" catchtap="cancelOrder" data-id="{{item.id}}" data-index="{{index}}" data-status="{{item.registrationStatus}}" aria-role="button" aria-label="{{cancellingId==item.id ? '正在取消订单' : '取消订单'}}" aria-disabled="{{cancellingId!=0}}" hover-class="{{cancellingId!=0 ? 'none' : 'cy-pressed'}}" hover-stay-time="80" hover-stop-propagation="true"><view class="orderbut__visual">{{cancellingId==item.id ? '处理中' : '取消订单'}}</view></view>
+          <view class="orderbut2" catchtap="payOrder" data-id="{{item.id}}" data-index="{{index}}" hover-class="cy-pressed" hover-stay-time="80" hover-stop-propagation="true"><view class="orderbut__visual">立即支付</view></view>
+        </view>
+        <view class="orderbox_li_bot_right" wx:elif="{{item.registrationStatus==2}}">
+          <view class="orderbut1" wx:if="{{item.canRequestRefund}}" catchtap="cancelOrder" data-id="{{item.id}}" data-index="{{index}}" data-status="{{item.registrationStatus}}" aria-role="button" aria-label="{{cancellingId==item.id ? '正在处理' : (item.isFreeOrder ? '取消报名' : '取消并退款')}}" aria-disabled="{{cancellingId!=0}}" hover-class="{{cancellingId!=0 ? 'none' : 'cy-pressed'}}" hover-stay-time="80" hover-stop-propagation="true"><view class="orderbut__visual">{{cancellingId==item.id ? '处理中' : (item.isFreeOrder ? '取消报名' : '取消并退款')}}</view></view>
+          <view class="orderbut2 orderbut-play" catchtap="openDetail" data-id="{{item.id}}" hover-class="cy-pressed" hover-stay-time="80" hover-stop-propagation="true"><view class="orderbut__visual">{{item.orderStateKey==='manual_refund' ? '查看处理进度' : '查看详情'}}</view></view>
+        </view>
+        <view class="orderbox_li_bot_right" wx:elif="{{item.orderStateKey==='refunding' || item.orderStateKey==='refunded'}}">
+          <view class="orderbut2 orderbut-play" catchtap="openDetail" data-id="{{item.id}}" hover-class="cy-pressed" hover-stay-time="80" hover-stop-propagation="true"><view class="orderbut__visual">查看退款详情</view></view>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

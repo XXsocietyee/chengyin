@@ -1,0 +1,100 @@
+<page-meta page-style="{{ fontScaleStyle }}"></page-meta>
+<view class="talent-v2 {{isMerchantViewer ? 'theme-merchant' : 'theme-dark'}}">
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+
+  <!-- ===== 顶栏(自绘·避开胶囊) ===== -->
+  <view class="nav-wrap {{isSticky ? 'sticky' : ''}}">
+    <view class="nav-status" style="height: {{statusBarHeight}}px;"></view>
+    <view class="nav-bar" style="height: {{navBarHeight}}px;">
+      <!-- 2026-10-27 P-13:消息入口挪到左上角,图标改铃铛;未读角标贴铃铛左上角、白字 -->
+      <view class="nav-left">
+        <view class="nav-icon nav-msg" bindtap="onMsgTap" aria-role="button" aria-label="站内消息" hover-class="cy-pressed" hover-stay-time="80">
+          <image lazy-load="true" src="/images/icon_bell.svg" mode="aspectFit" />
+          <view class="im-dot" wx:if="{{imUnread > 0}}">{{imUnread > 99 ? '99+' : imUnread}}</view>
+        </view>
+      </view>
+      <!-- 2026-09-18 UI-19:一级 tab 页也要有页标题(与商家「模板」tab 同一形态:导航栏居中一行) -->
+      <text class="nav-title">发现</text>
+    </view>
+  </view>
+
+  <view style="height: {{headerH}}px;"></view>
+
+  <!-- ===== 帖文 / 俱乐部 一级 tab(2026-08-05)=====
+       2026-10-29 业主:页名改「发现」,帖文看全站(俱乐部帖文 + 社区帖文,见 utils/discover-feed.js)。 -->
+  <cy-tabs class="top-tabs" variant="fill" wide="{{true}}" tabs="{{topTabs}}" active="{{activeTopTab}}" bind:change="onTopTabChange" />
+
+  <!-- ===== 帖文 ===== -->
+  <view class="tab-body tab-body--feed" wx:if="{{activeTopTab === 'feed'}}" style="{{pmFeed === 1 ? '--pm-p:1;' : (pmFeed === 2 ? '--pm-p-d:.32s;--pm-p-s:1;' : '')}}">
+    <!-- r2-store 通票入口卡:帖文流里的一张卡(不做整屏付费墙);只在服务端有在售通票时出现 -->
+    <view wx:if="{{storeCard}}" class="store-card" bindtap="goStore" aria-role="button" aria-label="{{storeCard.title}} {{storeCard.price}}" hover-class="cy-pressed" hover-stay-time="80">
+      <view class="store-card__main">
+        <text class="store-card__t">{{storeCard.title}}</text>
+        <text class="store-card__m">{{storeCard.meta}}</text>
+        <view class="store-card__tags" wx:if="{{storeCard.covers.length}}"><text class="store-card__tag" wx:for="{{storeCard.covers}}" wx:key="*this">{{item}}</text></view>
+      </view>
+      <view class="store-card__side"><text class="store-card__p">{{storeCard.price}}</text><text class="store-card__go">获取通票</text></view>
+    </view>
+    <cy-skeleton class="feed-state" wx:if="{{feedState === 'loading'}}" type="card" count="{{3}}" />
+    <cy-error load-failure="{{!feedLoginRequired}}" class="feed-state cy-fade-in" wx:elif="{{feedState === 'error'}}" title="{{feedLoginRequired ? '登录后查看帖文' : '动态加载失败'}}" sub="{{feedError}}" retry="{{feedLoginRequired ? '登录' : '重试'}}" bind:retry="retryFeed" />
+    <block wx:else>
+      <cy-progress-status class="talent-state cy-refresh-float" wx:if="{{feedState === 'refreshing'}}" title="正在更新帖文" />
+      <block wx:if="{{feed.length}}">
+        <!-- 帖文第三轮:发现 / 俱乐部详情 / 我的 同一张卡同一套动作(点赞、评论、转发、分享、头像「+」关注、点图全屏) -->
+        <cy-post-card wx:for="{{feed}}" wx:key="feedKey" post="{{item}}" index="{{index}}" light="{{isMerchantViewer}}" user-id="{{viewerId}}" interactive-actions interactive-user interactive-club show-follow show-share show-repost
+          accessibility-label="查看{{item.memberNickname || '城瘾玩家'}}的动态"
+          bind:detail="onPostTap" bind:comment="onPostTap" bind:like="onLikePost" bind:follow="onFollowPost" bind:user="onPostUser" bind:club="onPostClub" bind:repost="onRepostPost"
+          bind:playdetail="onPostReference" bind:play="onPostReferencePlay" class="cy-fade-in" />
+      </block>
+      <cy-empty class="feed-state cy-fade-in" wx:else title="还没有帖文" />
+    </block>
+    <view class="safe-bottom"></view>
+  </view>
+
+  <!-- ===== 俱乐部：单页上「我的」、下「附近」===== -->
+  <view class="tab-body" wx:elif="{{activeTopTab === 'club'}}">
+      <!-- 创建俱乐部常驻顶部；商户账户互斥，继续隐藏 -->
+      <view class="club-create" wx:if="{{!isMerchantViewer}}">
+        <view class="club-create-txt">创建你自己的俱乐部</view>
+        <view class="club-create-btn" bindtap="onClubApply" aria-role="button" aria-label="创建俱乐部" hover-class="cy-pressed" hover-stay-time="80">创建俱乐部</view>
+      </view>
+
+      <!-- 2026-09-18 UI-19:商家那条合作邀约入口行已删 —— 用户:邀约情况不在这里看
+           (在合作中心 / 消息与动态里处理),这里就是完整的俱乐部列表。 -->
+
+      <cy-skeleton wx:if="{{!clubsLoaded && !clubsError}}" type="card" count="{{3}}" />
+      <cy-error load-failure="{{!clubsLoginRequired && !clubsPermissionDenied}}" wx:elif="{{clubsError && clubsState !== 'stale-error'}}" fill title="{{clubsLoginRequired ? '登录后查看我的俱乐部' : clubsPermissionDenied ? '当前身份不能查看俱乐部' : '俱乐部列表加载失败'}}" sub="{{clubsErrorText}}" retry="{{clubsLoginRequired ? (clubsLoginPending ? '正在登录…' : '登录') : '重试'}}" bind:retry="retryClubs" class="cy-fade-in" />
+      <block wx:else>
+        <cy-progress-status class="talent-state cy-refresh-float" wx:if="{{clubsState === 'refreshing'}}" title="正在更新俱乐部" />
+        <cy-progress-status class="talent-state cy-fade-in" wx:if="{{isMerchantViewer && merchantCityState === 'loading' && clubsLoaded && clubsState !== 'refreshing'}}" title="正在确认同城范围" />
+        <cy-inline-error load-failure class="talent-state cy-fade-in" wx:elif="{{isMerchantViewer && merchantCityState === 'error'}}" kind="{{merchantCityErrorKind}}" title="同城范围暂未确认" sub="{{merchantCityError}}" action="重试" bind:action="detectMerchant" />
+
+      <!-- 2026-09-18 UI-19:不再分「我的 / 附近」两段 —— 这里就是一张完整的俱乐部列表。
+           顺序:我创建的 → 我加入的 → 同城其他俱乐部(商家视角只有最后一组,仍按店铺城市过滤)。
+           2026-08-20 重设计:三份内联拷贝收敛为 cy-club-card;外层保留 club-card 类名给截图矩阵选择器。 -->
+      <view class="club-section cy-fade-in" wx:if="{{clubsLoaded}}">
+        <view class="club-grid" wx:if="{{myClubs.length || joinedClubs.length || nearbyClubs.length}}" style="{{pmClubs === 1 ? '--pm-c:1;' : (pmClubs === 2 ? '--pm-c-d:.32s;--pm-c-s:1;' : '')}}">
+          <block wx:if="{{!isMerchantViewer}}">
+            <cy-club-card class="club-card" wx:for="{{myClubs}}" wx:key="id" club="{{item}}" interactive="{{true}}"
+              data-id="{{item.id}}" bind:tap="goClubDetail" aria-role="button" aria-label="打开俱乐部主页"  hover-class="cy-pressed" hover-stay-time="80"/>
+            <cy-club-card class="club-card" wx:for="{{joinedClubs}}" wx:key="id" club="{{item}}" interactive="{{true}}"
+              data-id="{{item.id}}" bind:tap="goClubDetail" aria-role="button" aria-label="打开俱乐部主页"  hover-class="cy-pressed" hover-stay-time="80"/>
+          </block>
+          <cy-club-card class="club-card" wx:for="{{nearbyClubs}}" wx:key="id" club="{{item}}" interactive="{{true}}"
+            data-id="{{item.id}}" bind:tap="goClubDetail" aria-role="button" aria-label="打开俱乐部主页"  hover-class="cy-pressed" hover-stay-time="80"/>
+        </view>
+        <cy-empty wx:elif="{{!isMerchantViewer}}" title="还没有俱乐部" />
+        <cy-empty wx:else title="本城还没有俱乐部" />
+      </view>
+      </block>
+
+
+  <view class="safe-bottom"></view>
+  </view><!-- .tab-body -->
+</view>
+
+<tabBar dark="{{!isMerchantViewer}}" monochrome="{{!isMerchantViewer}}"/>
+
+<!-- 危险动作三段式确认:文案来自 utils/danger-actions.js,页面只给 key -->

@@ -1,0 +1,290 @@
+@import '../../../../style/merchant-light.wxss';
+@import '../design.wxss';
+@import '../../../../style/threads-menu.wxss';
+.npc-hero {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  flex-direction: column;
+  gap: 23rpx;
+  margin-bottom: 8rpx;
+}
+
+.npc-preview {
+  width: 277rpx;
+  height: 277rpx;
+  border-radius: 46rpx; /* ds-ok: Figma 定稿尺寸与中性配色；已由原生截图复核 */
+  overflow: hidden;
+}
+.npc-preview--large {
+  width: 338rpx;
+  height: 338rpx;
+}
+.npc-preview image,
+.npc-canvas {
+  width: 100%;
+  height: 100%;
+}
+.npc-stage {
+  padding: 46rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 23rpx;
+  background: var(--cy-color-bg-surface-subtle);
+  border-radius: 46rpx; /* ds-ok: Figma 定稿尺寸与中性配色；已由原生截图复核 */
+}
+.npc-sources {
+  display: flex;
+  gap: 19rpx;
+  width: 100%;
+}
+.npc-sources > view {
+  flex: 1;
+  height: 85rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--cy-color-bg-surface);
+  border-radius: 43rpx; /* ds-ok: Figma 定稿尺寸与中性配色；已由原生截图复核 */
+  font-size: 25rpx; /* ds-ok: Figma 定稿尺寸与中性配色；已由原生截图复核 */
+}
+.npc-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 15rpx;
+}
+.npc-tile {
+  aspect-ratio: 1;
+  border-radius: 23rpx; /* ds-ok: Figma 商家定稿数值，原生截图已复核 */
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 4rpx solid transparent;
+}
+.npc-tile--selected {
+  border-color: var(--cy-color-action-primary-bg);
+}
+.npc-tile-canvas {
+  width: 100%;
+  height: 148rpx;
+}
+.npc-work {
+  position: fixed;
+  left: -1000px;
+  top: -1000px;
+  width: 384px;
+  height: 384px;
+}
+.npc-voice {
+  min-height: 680rpx;
+}
+.npc-voice-mode {
+  position: relative;
+  padding: var(--cy-space-3);
+  box-sizing: border-box;
+  border-radius: 28rpx; /* ds-ok: reference Voice Mode 大圆角卡片 */
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-primary);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.npc-voice-mode__title {
+  display: block;
+  font-size: var(--cy-type-card-title);
+  font-weight: 700;
+}
+.npc-voice-progress {
+  display: flex;
+  gap: var(--cy-space-1);
+  margin: var(--cy-space-2) 0;
+}
+.npc-voice-progress__step {
+  height: 6rpx;
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-border-subtle);
+  flex: 1;
+}
+.npc-voice-progress__step--active { background: var(--cy-color-status-info); }
+.npc-voice-progress__step--done { background: var(--cy-color-status-success); }
+.npc-voice-stage {
+  position: relative;
+  height: 520rpx; /* ds-ok: reference Voice Mode 文字在圆圈上方的纵向比例 */
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-color-bg-surface);
+  overflow: hidden;
+}
+.npc-voice-prompt {
+  position: absolute;
+  z-index: 3;
+  top: var(--cy-space-3);
+  left: var(--cy-space-3);
+  right: var(--cy-space-3);
+  min-height: 150rpx;
+  color: var(--cy-color-text-primary);
+  font-size: 34rpx; /* ds-ok: 用户确认需要更大的居中逐句提示 */
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: center;
+}
+.npc-voice-ring,
+.npc-voice-orb {
+  position: absolute;
+  left: 50%;
+  top: 70%;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+.npc-voice-ring {
+  border: 2rpx solid var(--cy-color-border-default);
+  box-sizing: border-box;
+  opacity: .45;
+}
+.npc-voice-ring--outer { width: 430rpx; height: 430rpx; opacity: .2; } /* ds-ok: reference Voice Mode 双层圆环比例 */
+.npc-voice-ring--inner { width: 300rpx; height: 300rpx; }
+.npc-voice-orb {
+  width: 196rpx; /* ds-ok: reference Voice Mode 中央声纹比例 */
+  height: 196rpx;
+  background: var(--cy-color-bg-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2rpx solid var(--cy-color-text-tertiary);
+  z-index: 2;
+}
+.npc-wave {
+  height: 64rpx; /* ds-ok: reference Voice UI 声纹几何 */
+  display: flex;
+  align-items: center;
+  gap: 5rpx; /* ds-ok: reference Voice UI 紧密声纹间距 */
+}
+.npc-wave view {
+  width: 5rpx; /* ds-ok: reference Voice UI 细声纹 */
+  height: 22rpx; /* ds-ok: reference Voice UI 声纹基线 */
+  border-radius: var(--cy-radius-pill);
+  background: currentColor;
+  transform-origin: center;
+  transition: transform var(--cy-motion-standard) var(--cy-ease-standard);
+}
+.npc-wave view:nth-child(2),
+.npc-wave view:nth-child(10) { height: 32rpx; }
+.npc-wave view:nth-child(3),
+.npc-wave view:nth-child(9) { height: 42rpx; }
+.npc-wave view:nth-child(4),
+.npc-wave view:nth-child(8) { height: 54rpx; }
+.npc-wave view:nth-child(5),
+.npc-wave view:nth-child(7) { height: 46rpx; }
+.npc-wave view:nth-child(6) { height: 62rpx; }
+.npc-voice-mode--listening .npc-wave view:nth-child(2n) { transform: scaleY(.52); }
+.npc-voice-mode--listening .npc-wave view:nth-child(3n) { transform: scaleY(.72); }
+.npc-voice-hold {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 100%;
+  max-width: none;
+  align-self: stretch;
+  height: 104rpx; /* ds-ok: reference Voice Mode 底部大按钮高度 */
+  margin-top: var(--cy-space-2);
+  padding: 0;
+  border: 0;
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-color-text-primary);
+  color: var(--cy-color-text-inverse);
+  font-size: var(--cy-type-body);
+  font-weight: 700;
+  line-height: 104rpx;
+  text-align: center;
+}
+.npc-voice-hold::after { border: 0; }
+.npc-voice-hold--active { transform: scale(.98); }
+.npc-voice-hold[disabled] { opacity: .58; color: var(--cy-color-text-inverse); }
+/* 录完确认是录音卡里的一段(L09 统一版式),不再自带第二层卡片底 */
+.npc-voice-complete {
+  padding: var(--cy-space-4) 0;
+  text-align: center;
+}
+.npc-voice-complete__title {
+  display: block;
+  margin-bottom: var(--cy-space-1);
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-type-card-title);
+  font-weight: 700;
+}
+/* ds-ok: native canvas needs a radius on its own surface. */
+.npc-canvas,.npc-preview image { border-radius:46rpx; } /* ds-ok: Figma 商家定稿数值，原生截图已复核 */
+.npc-tile-canvas { border-radius:23rpx; display:block; height:148rpx; } /* ds-ok: Figma 商家定稿数值，原生截图已复核 */
+.npc-option { display:flex; flex-direction:column; gap:6rpx; min-width:0; text-align:center; }
+.npc-tile { width:100%; height:156rpx; flex-shrink:0; }
+.npc-tile-name { font-size:21rpx;line-height:31rpx;color:var(--cy-color-text-tertiary); } /* ds-ok: Figma 商家定稿数值，原生截图已复核 */
+.npc-voice { min-height:680rpx; }
+
+/* 2026-10-27 业主 M-28:首次进入的说明卡 + 性格三选一 chip */
+
+/* 走查 v2 R12:首次四步介绍 */
+.ni { display: flex; flex-direction: column; align-items: center; padding: var(--cy-space-4) var(--cy-space-5) var(--cy-space-5); }
+.ni-stage { position: relative; width: 100%; height: 360rpx; }
+.ni-glow { position: absolute; left: 50%; top: 50%; width: 360rpx; height: 360rpx; margin: -180rpx 0 0 -180rpx; border-radius: 50%; transition: background 0.5s; }
+.ni-glow--0 { background: radial-gradient(circle, rgba(165, 166, 232, 0.5), rgba(255, 255, 255, 0) 65%); } /* ds-ok: 光晕按定稿原型 */
+/* 每步的光晕换色(R12 定稿原型 p7) */
+.ni-glow--1 { background: radial-gradient(circle, rgba(242, 196, 107, 0.5), rgba(255, 255, 255, 0) 65%); } /* ds-ok: 同上 */
+.ni-glow--2 { background: radial-gradient(circle, rgba(127, 209, 166, 0.5), rgba(255, 255, 255, 0) 65%); } /* ds-ok: 同上 */
+.ni-glow--3 { background: radial-gradient(circle, rgba(240, 138, 160, 0.45), rgba(255, 255, 255, 0) 65%); } /* ds-ok: 同上 */
+/* 翻页:旧物件缩走,新物件进场;进场后每步各自一种动效(r2 a6-w2-16)。
+ * 全部用 transition(MOTION.md 不新增 @keyframes):没轮到的物件停在本步动效的起点(透明、无过渡);
+ * 上一步的物件挂 ni-o--out 缩走;当前步挂 ni-o--on 补间到位;挥手 / 摆动 / 闪烁这类多段动作由
+ * JS beats(niBeat)按原关键帧的段落逐段换 ni-stage--bN,每段同时长同曲线。 */
+.ni-o { position: absolute; left: 50%; top: 50%; width: 240rpx; height: 240rpx; margin: -120rpx 0 0 -150rpx; opacity: 0; transform: scale(0.4) rotate(-20deg); transition: none; }
+.ni-o--sm { width: 128rpx; height: 128rpx; margin: -150rpx 0 0 40rpx; }
+.ni-stage .ni-o.ni-o--out { opacity: 0; transform: scale(0.4) rotate(-20deg); transition: transform 0.5s cubic-bezier(0.3, 1.5, 0.45, 1), opacity 0.3s; }
+.ni-o--on { opacity: 1; }
+/* 1 分身:店铺从下面升起落定,星光一闪一闪 */
+.ni-o--k0 { transform: translateY(80rpx) scale(0.7) rotate(-6deg); }
+.ni-o--k0.ni-o--on { transform: translateY(0) scale(1) rotate(-6deg); transition: transform 0.7s cubic-bezier(0.3, 1.4, 0.45, 1), opacity 0.7s cubic-bezier(0.3, 1.4, 0.45, 1); }
+.ni-o--sm.ni-o--k0 { transform: scale(1) rotate(10deg); }
+.ni-o--sm.ni-o--k0.ni-o--on { transform: scale(1) rotate(10deg); transition: none; }
+.ni-stage--b1 .ni-o--sm.ni-o--k0.ni-o--on { opacity: 0.45; transform: scale(0.72) rotate(28deg); transition: transform 0.7s ease-in-out, opacity 0.7s ease-in-out; }
+.ni-stage--b2 .ni-o--sm.ni-o--k0.ni-o--on { transition: transform 0.7s ease-in-out, opacity 0.7s ease-in-out; }
+/* 2 打招呼:手绕手腕挥两下,气泡随后冒出 */
+.ni-o--k1 { transform-origin: 70% 90%; transform: rotate(-6deg); }
+.ni-o--k1.ni-o--on { transform: rotate(-6deg); transition: opacity 0.3s; }
+.ni-stage--b1 .ni-o--k1.ni-o--on { transform: rotate(-22deg); }
+.ni-stage--b2 .ni-o--k1.ni-o--on { transform: rotate(8deg); }
+.ni-stage--b3 .ni-o--k1.ni-o--on { transform: rotate(-18deg); }
+.ni-stage--b1 .ni-o--k1.ni-o--on, .ni-stage--b2 .ni-o--k1.ni-o--on, .ni-stage--b3 .ni-o--k1.ni-o--on, .ni-stage--b4 .ni-o--k1.ni-o--on { transition: transform 0.24s ease-in-out, opacity 0.3s; }
+.ni-o--sm.ni-o--k1 { transform-origin: 0% 100%; transform: scale(0.2) rotate(10deg); }
+.ni-o--sm.ni-o--k1.ni-o--on { transform: scale(1) rotate(10deg); transition: transform 0.5s cubic-bezier(0.3, 1.6, 0.45, 1) 0.45s, opacity 0.5s cubic-bezier(0.3, 1.6, 0.45, 1) 0.45s; }
+/* 3 菜单和营业时间:餐盘从上面落到桌面,闹钟左右摆两下 */
+.ni-o--k2 { transform: translateY(-90rpx) rotate(-6deg); }
+.ni-o--k2.ni-o--on { transform: translateY(0) rotate(-6deg); transition: transform 0.65s cubic-bezier(0.3, 1.3, 0.45, 1), opacity 0.65s cubic-bezier(0.3, 1.3, 0.45, 1); }
+.ni-o--sm.ni-o--k2 { transform-origin: 50% 100%; transform: rotate(10deg); }
+.ni-o--sm.ni-o--k2.ni-o--on { transform: rotate(10deg); transition: none; }
+.ni-stage--b1 .ni-o--sm.ni-o--k2.ni-o--on { transform: rotate(-4deg); }
+.ni-stage--b2 .ni-o--sm.ni-o--k2.ni-o--on { transform: rotate(18deg); }
+.ni-stage--b3 .ni-o--sm.ni-o--k2.ni-o--on { transform: rotate(4deg); }
+.ni-stage--b1 .ni-o--sm.ni-o--k2.ni-o--on, .ni-stage--b2 .ni-o--sm.ni-o--k2.ni-o--on, .ni-stage--b3 .ni-o--sm.ni-o--k2.ni-o--on, .ni-stage--b4 .ni-o--sm.ni-o--k2.ni-o--on { transition: transform 0.3s ease-in-out; }
+/* 4 起名字、选性格:名牌翻正,面具转一圈换张脸 */
+.ni-o--k3 { transform: perspective(600rpx) rotateY(90deg) rotate(-6deg); }
+.ni-o--k3.ni-o--on { transform: perspective(600rpx) rotateY(0) rotate(-6deg); transition: transform 0.7s cubic-bezier(0.3, 1.2, 0.45, 1), opacity 0.7s cubic-bezier(0.3, 1.2, 0.45, 1); }
+.ni-o--sm.ni-o--k3 { transform: rotateY(-180deg) rotate(10deg); }
+.ni-o--sm.ni-o--k3.ni-o--on { transform: rotateY(0) rotate(10deg); transition: transform 0.9s ease-in-out 0.4s, opacity 0.9s ease-in-out 0.4s; }
+/* 减少动态效果:直接到位(系统开关走媒体查询,应用内开关不跑 beats 并挂 ni--still) */
+.ni--still .ni-stage .ni-o { transition: none !important; }
+@media (prefers-reduced-motion: reduce) { .ni-o { transition: none; } .ni-stage .ni-o { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { .ni-dot, .ni-back, .ni-skip { transition: none; } }
+.ni-t { margin-top: var(--cy-space-3); font-size: var(--cy-type-sheet-title); font-weight: 700; color: var(--cy-text-title); text-align: center; }
+.ni-s { margin-top: var(--cy-space-2); font-size: var(--cy-font-label); color: var(--cy-text-secondary); text-align: center; line-height: 1.5; }
+.ni-bar { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: var(--cy-space-2); }
+.ni-back { width: 88rpx; height: 88rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--cy-bg-card-2); color: var(--cy-text-title); transition: opacity var(--cy-motion-standard); }
+.ni-skip { min-width: 88rpx; height: 88rpx; line-height: 88rpx; text-align: right; font-size: var(--cy-font-body); color: var(--cy-text-title); transition: opacity var(--cy-motion-standard); }
+.ni-back.is-off, .ni-skip.is-off { opacity: 0; pointer-events: none; }
+.ni-period { color: var(--cy-ref-violet-500); }
+.ni-dots { display: flex; gap: 12rpx; }
+.ni-dot { width: 36rpx; height: 12rpx; border-radius: var(--cy-radius-pill); background: var(--cy-bg-card-2); transform: scaleX(0.34); transition: transform 0.3s; }
+.ni-dot--on { transform: scaleX(1); background: var(--cy-text-title); }
+.ni-btn { margin-top: var(--cy-space-5); width: 100%; height: var(--cy-btn-h); line-height: var(--cy-btn-h); border-radius: var(--cy-radius-pill); background: var(--cy-btn-solid-bg); color: var(--cy-btn-solid-fg); text-align: center; font-size: var(--cy-font-body); font-weight: 700; }
+
+/* 细节打磨二期 L1/L5/L7 */
+.ni-btn { transition: var(--cy-tr-press); }
+.npc-option { transition: var(--cy-tr-press); }
+.npc-voice-hold { transition: var(--cy-tr-press); }

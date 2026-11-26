@@ -1,0 +1,261 @@
+.signup {
+  position: relative;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* UI-17(2026-09-18):整页一张完整票卡 —— 标题条删掉后,背景图必须铺满全屏(含状态栏/返回行),
+   否则顶部仍留一段页面黑。固定层 + 主题色遮罩,票卡浮在上面。 */
+.signup .ztbg {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  filter: blur(50rpx); opacity: .5;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.signup-scrim {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(0deg, rgba(0, 0, 0, .3), rgba(0, 0, 0, .6) 30%); /* ds-ok: 沿用原 .main 的遮罩渐变(压在用户照片上,不随主题翻转) */
+}
+
+.signup .main {
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
+  /* UI-17 二次返修:底部安全区(Home 指示条)不算可视区,卡不在它里面居中。 */
+  box-sizing: border-box;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.signup .toolbar {
+  position: relative;
+  margin: 44rpx var(--cy-page-x) var(--cy-legacy-18) var(--cy-page-x); /* ds-ok: 44rpx 是 r1-c04-order-ticket-contract.test.js 锁定的横向边距修复值,不改 */
+}
+
+.signup .toolbar button {
+  position: absolute;
+  right: var(--cy-space-3-5);
+  margin: 0;
+  width: auto;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.signup .toolbar button image {
+  width: 48rpx;
+  height: 48rpx;
+}
+
+/*
+
+/* .signup .slides swiper {
+  height: 92%;
+  box-shadow: none !important;
+} */
+
+/* .signup .slides image {
+  border-radius: 60rpx;
+  width: 576rpx;
+  height: calc(100% - 100rpx) !important;
+  border: 10rpx solid rgba(255, 255, 255, 0.9); box-shadow: 8rpx 8rpx 8rpx rgba(255, 255, 255, .5);
+} */
+/* 活动 */
+.wallet{
+  overflow: hidden;
+}
+.wallet .list {
+  padding: var(--cy-space-6) var(--cy-legacy-72) var(--cy-space-7) var(--cy-legacy-72);
+  box-sizing: border-box;
+  height:100%;
+  overflow-y:auto;
+}
+
+.wallet .list .li {
+  margin-bottom: var(--cy-space-5);
+}
+
+.wallet .list .li .item {
+  height: 368rpx;
+  border-radius: 80rpx;
+  position: relative;
+  overflow: hidden;
+  border: 10rpx solid rgba(255, 255, 255, 0.9);
+}
+
+.wallet .list .li .item image {
+  width: 100%;
+  border-radius: 80rpx; vertical-align: top;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+
+/* 2026-07-31:优惠券票卡(.david、.david_tkb_li 系、.hong)已随"删除票夹页优惠券 tab"整体搬到
+   独立的 subpackageMember/coupon(见 wt3b-visual-semantics-contract.test.js 的 P1-5 契约,已随实现迁移)。 */
+
+/* 2026-07-31:原 position:fixed + top/left:50% 是"整屏居中"(会把内容顶到状态栏/标题下面去算中点),
+   和用户明确的"标题下方到屏幕底部这段剩余空间里居中"不是一回事。改成 flex:1 让出的正常文档流子项,
+   居中交给 cy-empty/cy-error 的 fill 变体做(.signup 根节点已经是 flex-col + height:100vh)。 */
+.davidwu{ position: relative; z-index: 1; width: 100%; overflow: hidden; display: flex; flex-direction: column; flex: 1; }
+/* cy-empty/cy-error 是 styleIsolation:isolated 组件,宿主标签默认 display:block,
+   组件内部的 flex:1 要宿主自己也是 flex 容器才生效,从页面外部补一层。 */
+.fill-slot{ display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; }
+
+/* 2026-07-31:优惠券详情弹框(.tkbg/.tkbox*)随优惠券 tab 一起删除,不再在本页触发。 */
+
+/* UI-17:卡外的票名大字、票面 meta(名称/场次时间)与票根文字都已删——返修后票面零文字,
+   票名/状态只在 aria-label 里出现(见 index.wxml 顶部说明)。 */
+
+/* 票夹里的队伍入口(2026-09-04 判定表补的那条)。跟着当前票走,没有队伍整行不出。 */
+.team-entry {
+  position: absolute;
+  left: var(--cy-page-x);
+  right: var(--cy-page-x);
+  bottom: env(safe-area-inset-bottom);
+  display: flex;
+  align-items: center;
+  padding: var(--cy-space-4);
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-bg-card);
+}
+
+@media (max-height: 700px) {
+  .signup {
+    height: auto;
+    min-height: 100vh;
+    overflow-y: auto;
+  }
+
+  .signup .main {
+    flex: none;
+    overflow: visible;
+  }
+
+
+  .team-entry {
+    position: static;
+    margin: var(--cy-space-4) var(--cy-page-x) 0;
+  }
+}
+
+.team-entry__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+}
+
+.team-entry__k {
+  font-size: var(--cy-font-body);
+  font-weight: 600;
+  color: var(--cy-text-title);
+}
+
+.team-entry__v {
+  margin-left: var(--cy-space-2-5);
+  min-width: 0;
+  font-size: var(--cy-font-caption);
+  color: var(--cy-text-muted);
+}
+
+.team-entry__n {
+  margin-right: var(--cy-space-2);
+  font-size: var(--cy-font-caption);
+  color: var(--cy-text-muted);
+}
+
+
+/* ===== v13 票夹(业主 2026-10-22「和 HTML 一模一样」) ===== */
+/* ds-ok: 本段颜色/尺寸逐项照 v13 原型取值 */
+.signup { background: #050505; } /* ds-ok */
+.signup .ztbg.wbg { top: -77rpx; left: -77rpx; width: calc(100% + 154rpx); height: calc(100% + 154rpx); filter: blur(42rpx) saturate(1.15); transform: scale(1.1); opacity: 0; transition: opacity .8s ease; }
+.signup .ztbg.wbg.vis { opacity: 1; }
+.signup-scrim.wmask { background: linear-gradient(180deg, rgba(0,0,0,.45) 0%, rgba(0,0,0,.35) 35%, rgba(0,0,0,.82) 78%, #050505 100%); } /* ds-ok */
+.wl-nav { position: fixed; left: var(--cy-page-x); right: var(--cy-page-x); z-index: 95; height: 88rpx; display: flex; align-items: center; gap: var(--cy-space-3); }
+/* r3-visual:左对齐大标题 + 右侧「+」与本人头像(refs4/ticket-holder-frames 顶栏结构) */
+.wl-nav__b { flex: 1; min-width: 0; font-size: 44rpx; font-weight: 700; letter-spacing: 1rpx; color: #fff; } /* ds-ok: 压在用户照片模糊底上,不随主题翻转 */
+.wl-nav__add { width: 88rpx; height: 88rpx; display: flex; align-items: center; justify-content: center; color: #fff; } /* ds-ok */
+.wl-nav__add cy-icon { width: 64rpx; height: 64rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.18); backdrop-filter: blur(20rpx); -webkit-backdrop-filter: blur(20rpx); } /* ds-ok */
+.wl-nav__me { width: 88rpx; height: 88rpx; display: flex; align-items: center; justify-content: center; }
+.deck { position: fixed; left: 50%; top: calc(50vh - 414rpx); top: max(calc(50vh - 414rpx), 290rpx); width: 577rpx; height: 865rpx; margin-left: -288rpx; z-index: 2; }
+.wc { position: absolute; top: 0; left: 0; right: 0; bottom: 0; transform-origin: 50% 0; transition: transform .45s cubic-bezier(.2,.8,.2,1), filter .45s, opacity .3s; } /* ds-ok: v13 动效原型定值 */
+/* 2026-10-28 翻面:卡面放到正反两面上,外层 .wc 只管卡堆位置 */
+.wc__flip { position: absolute; top: 0; left: 0; right: 0; bottom: 0; transform-style: preserve-3d; transition: transform .62s cubic-bezier(.2,.9,.25,1.08); }
+.wc__flip--back { transform: rotateY(180deg); }
+.wc__face { position: absolute; top: 0; left: 0; right: 0; bottom: 0; border-radius: 54rpx; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; /* ds-ok: v13 卡面 */
+  background: linear-gradient(180deg, #1c1d1f, #0f1011); box-shadow: inset 0 0 0 1rpx rgba(255,255,255,.1), 0 46rpx 96rpx rgba(0,0,0,.55); } /* ds-ok */
+.wc__back { transform: rotateY(180deg); background: #f6f6f4; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 46rpx; box-sizing: border-box; } /* ds-ok: 入场码白卡,深底上要读得清 */
+.wc__bn { max-width: 100%; font-size: 40rpx; font-weight: 700; color: #111; } /* ds-ok */
+.wc__qr { position: relative; margin-top: 48rpx; width: 400rpx; height: 400rpx; border-radius: 28rpx; background: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 8rpx 28rpx rgba(0,0,0,.08); } /* ds-ok */
+.wc__qr-tip { font-size: 27rpx; color: rgba(17,17,17,.55); padding: 20rpx 30rpx; } /* ds-ok */
+.wc__exp { margin-top: 40rpx; font-size: 23rpx; color: rgba(17,17,17,.5); } /* ds-ok */
+/* 开始游戏:进页扫一道光(transition,棘轮不许新增 @keyframes);按下去填满 → 票卡往前冲出 → 黑色从按钮处铺满 */
+.wl-start { position: fixed; left: 50%; bottom: calc(58rpx + env(safe-area-inset-bottom)); z-index: 6; width: 460rpx; height: 104rpx; margin-left: -230rpx; border-radius: 52rpx; overflow: hidden; background: #fff; } /* ds-ok */
+.wl-start__fill { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #e8e8e8; transform: scaleX(0); transform-origin: 0 50%; transition: transform .5s cubic-bezier(.4,0,.2,1); } /* ds-ok */
+.wl-start__shine { position: absolute; top: 0; bottom: 0; left: 0; width: 120rpx; background: linear-gradient(100deg, rgba(255,255,255,0), rgba(255,255,255,.9), rgba(255,255,255,0)); transform: translateX(-160rpx) skewX(-18deg); transition: transform 1.1s cubic-bezier(.4,0,.2,1); } /* ds-ok */
+.wl-start--lit .wl-start__shine { transform: translateX(560rpx) skewX(-18deg); }
+.wl-start__lbl { position: relative; height: 100%; display: flex; align-items: center; justify-content: center; gap: 14rpx; font-size: 31rpx; font-weight: 700; letter-spacing: 4rpx; color: #111; } /* ds-ok */
+.wl-start__play { width: 24rpx; height: 24rpx; filter: invert(1); }
+.wl-start--go .wl-start__fill { transform: scaleX(1); }
+.wl-burst { position: fixed; left: 50%; bottom: calc(110rpx + env(safe-area-inset-bottom)); z-index: 7; width: 60rpx; height: 60rpx; margin: 0 0 -30rpx -30rpx; border-radius: 50%; background: #050505; transform: scale(0); pointer-events: none; transition: transform .55s cubic-bezier(.6,0,.4,1) .45s; } /* ds-ok */
+.wl-burst--go { transform: scale(60); }
+.signup--go .deck { transform: scale(1.18) translateY(-40rpx); opacity: 0; transition: transform .5s cubic-bezier(.5,0,.2,1) .3s, opacity .35s .45s; }
+.signup--go .team-entry { opacity: 0; transition: opacity .2s; }
+.signup--reduced .wc__flip, .signup--reduced .wl-burst, .signup--reduced .deck { transition: none; }
+.deck--still .wc { transition: none; }
+.signup--reduced .wc { transition: none; }
+/* r3-visual 卷页阴影:跟着 --curl(0 → .9)从卷起的那一侧压暗,像书页翻起时背光的一面 */
+.wc__curl { position: absolute; top: 0; right: 0; bottom: 0; left: 0; pointer-events: none; opacity: var(--curl, 0);
+  background: linear-gradient(var(--curl-a, 90deg), rgba(0,0,0,0) 0%, rgba(0,0,0,.25) 55%, rgba(0,0,0,.65) 100%), linear-gradient(var(--curl-a, 90deg), rgba(255,255,255,0) 70%, rgba(255,255,255,.22) 92%, rgba(255,255,255,0) 100%); } /* ds-ok: 卷页明暗 */
+.wc__go { position: absolute; right: 31rpx; top: 27rpx; width: 62rpx; height: 62rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+.wc__go image { width: 27rpx; height: 27rpx; }
+.wc__t { position: absolute; left: 46rpx; right: 46rpx; top: 100rpx; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.wc__b { font-size: 48rpx; font-weight: 600; line-height: 1.18; letter-spacing: 1rpx; color: #fff; } /* ds-ok */
+.wc__s { margin-top: 15rpx; font-size: 21rpx; letter-spacing: 2rpx; color: rgba(255,255,255,.65); } /* ds-ok */
+.wc__im { position: absolute; left: 27rpx; right: 27rpx; top: 288rpx; bottom: 27rpx; border-radius: 38rpx; overflow: hidden; } /* ds-ok: v13 动效原型定值,业主 2026-10-23 要求与原型一致 */
+.wc__im image { width: 100%; height: 100%; display: block; }
+.wc__im::after { content: ''; position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: linear-gradient(180deg, rgba(0,0,0,0) 65%, rgba(0,0,0,.6)); } /* ds-ok */
+.signup .team-entry { bottom: auto; left: 50%; right: auto; transform: translateX(-50%); z-index: 4; padding: 12rpx 27rpx; gap: 15rpx; border-radius: 40rpx; background: rgba(40,40,42,.72); backdrop-filter: blur(31rpx); -webkit-backdrop-filter: blur(31rpx); } /* ds-ok */
+/* 第十二轮 k9(p1 N-9):left:50% 的胶囊按收缩宽度最多只有半屏,「我的队伍」被折成两行、队名截成两个字;按内容宽、最多到两侧页边距 */
+.signup .team-entry { width: max-content; max-width: calc(100vw - 2 * var(--cy-page-x)); box-sizing: border-box; }
+.signup .team-entry__k, .signup .team-entry__n { flex-shrink: 0; white-space: nowrap; }
+
+
+/* ===== l-after 票夹(业主批准 proto/game wl-wallet):「票夹 ▾」筛选弹出、卷页镜面高光 + 卡下倒影 ===== */
+.wl-nav__flt { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8rpx; min-height: 88rpx; color: #fff; } /* ds-ok: 压在用户照片模糊底上,不随主题翻转 */
+.wl-nav__flt .wl-nav__b { flex: none; }
+/* F13 票夹卡标签:已通关 / 未通关 / M月D日开始 / 退款中 */
+.wc__tag { align-self: center; margin-top: 12rpx; padding: 4rpx 16rpx; border-radius: var(--cy-radius-pill, 999rpx); font-size: 21rpx; letter-spacing: 2rpx; color: #fff; background: rgba(255,255,255,.16); } /* ds-ok: 压在票面深色底上,与 .wc__s 同一组定值 */
+/* 即将开始 / 退款中:整卡置灰、不能点(大麦电子票没到开演时间同做法) */
+.wc__front--locked { filter: grayscale(1); opacity: .55; }
+.wc__spec { position: absolute; top: 0; right: 0; bottom: 0; left: 0; border-radius: 54rpx; pointer-events: none; opacity: var(--spec, 0); mix-blend-mode: screen; /* ds-ok: 上线波次原型逐值(装饰 / 品牌色块) */
+  background: linear-gradient(100deg, transparent calc(var(--sx, 120%) - 18%), rgba(255,255,255,.55) var(--sx, 120%), transparent calc(var(--sx, 120%) + 10%)); } /* ds-ok: 卷页镜面高光带 */
+.wc { -webkit-box-reflect: below 12rpx linear-gradient(transparent 62%, rgba(255,255,255,.18)); } /* ds-ok: 卡下倒影(proto wal3) */
+/* x-fix2 P-18:无封面票卡的插画位:居中,不叠封面压暗 */
+.wc__im--illus { display: flex; align-items: center; justify-content: center; }
+.wc__im--illus::after { display: none; }
+
+/* ===== 细节打磨 2026-11-12 · S6 票卡:票根线两侧的缺口 + 顶边内高光(版式、文案、配色不动) ===== */
+.wc__front::before, .wc__front::after { content: ""; position: absolute; top: 250rpx; width: 28rpx; height: 28rpx; border-radius: 50%; background: rgba(0,0,0,.5); box-shadow: inset 0 2rpx 4rpx rgba(0,0,0,.45); pointer-events: none; z-index: 3; } /* ds-ok 票根缺口 */
+.wc__front::before { left: -14rpx; }
+.wc__front::after { right: -14rpx; }
+.wc__front { box-shadow: inset 0 1rpx 0 rgba(255,255,255,.14), inset 0 0 0 1rpx rgba(255,255,255,.1), 0 46rpx 96rpx rgba(0,0,0,.55); } /* ds-ok G1 顶边内高光,其余沿用原投影 */
+.wl-start { transition: var(--cy-tr-press); }
+
+/* 细节打磨二期 L1/L5/L7 */
+.wl-nav__add { transition: var(--cy-tr-press); }
+.wl-nav__me { transition: var(--cy-tr-press); }
+.wc__qr-tip { transition: var(--cy-tr-press); }
+.team-entry { transition: var(--cy-tr-press); }
+.signup--reduced .cy-img-fade { transition: none; } /* motion-1118 v2:App 内减少动效时票卡封面直接落地 */

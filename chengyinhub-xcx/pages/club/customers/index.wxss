@@ -1,0 +1,96 @@
+/* K1 客户 · 列表(暗)· Figma s7SEFaoJ3GQUIxJhdqcFUb node 141:90
+   色/字/角一律走 token;Figma 页边 20px 按本仓 --cy-page-x(16px)对齐,与其他俱乐部页一致。 */
+page { background: var(--cy-color-bg-page); }   /* 顶栏与铺满层同色，避免固定导航下缘出色带(custom-nav-page-surface 契约) */
+.page { min-height: 100vh; box-sizing: border-box; padding-bottom: calc(var(--cy-space-5) + var(--cy-safe-bottom)); display: flex; flex-direction: column; background: var(--cy-bg-page); color: var(--cy-color-text-primary); } /* 浅色作用域内铺底：page{} 在 .theme-merchant 之外取不到浅色变量 */ /* PG-054:底部留出安全区 */
+cy-empty, cy-error { display: flex !important; flex: 1 !important; min-height: 0; }
+
+/* 统计行:随筛选变化的数据,不是标题下的小标题 */
+.cus-count {
+  padding: 0 var(--cy-page-x);
+  font-size: var(--cy-font-label);
+  color: var(--cy-color-text-placeholder);
+}
+
+/* 筛选 chip 排:选中 = 星白底深墨字;未选 = bg-interactive 上只能配 text-primary */
+/* 1121:chip 视觉 68rpx 不变,上下各 10rpx 透明边把命中区撑到 88rpx;外距同量收回,版面零位移 */
+.cus-chips { margin-top: calc(var(--cy-space-4) - 10rpx); }
+.cus-chiprow { display: flex; gap: var(--cy-space-2-5); padding: 0 var(--cy-page-x); white-space: nowrap; }
+.cus-chip {
+  flex-shrink: 0;
+  height: 88rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--cy-space-3-5);
+  border-style: solid;
+  border-color: transparent;
+  border-width: 10rpx 0;
+  background-clip: padding-box;
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-bg-interactive);
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-label);
+  font-weight: 500;
+}
+.cus-chip--on { background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg); }
+
+.cus-search { display: block; padding: 0 var(--cy-page-x); margin-top: calc(var(--cy-space-3) - 10rpx); }
+
+/* 列表行 */
+.cus-list { padding: 0 var(--cy-page-x); margin-top: var(--cy-space-4); }
+.cus-row { display: flex; align-items: flex-start; }
+.cus-ava { flex-shrink: 0; margin-top: var(--cy-space-1); }
+.cus-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  margin-left: var(--cy-space-3);
+  padding: var(--cy-space-1) 0 var(--cy-space-3);
+  border-bottom: 2rpx solid var(--cy-color-border-subtle);
+}
+.cus-row:last-child .cus-body { border-bottom: none; }
+.cus-main { flex: 1; min-width: 0; }
+.cus-nameline { display: flex; align-items: center; gap: var(--cy-space-1-5); }
+.cus-name {
+  font-size: var(--cy-font-subtitle);
+  font-weight: 700;
+  color: var(--cy-color-text-primary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.cus-remarktag {
+  flex-shrink: 0;
+  padding: 2rpx var(--cy-space-1);
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-color-bg-raised);
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-font-micro);
+}
+.cus-meta, .cus-sub {
+  display: block;
+  margin-top: var(--cy-space-1-5);
+  font-size: var(--cy-font-label);
+  color: var(--cy-color-text-placeholder);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.cus-chevron { flex-shrink: 0; margin: var(--cy-space-2-5) 0 0 var(--cy-space-2); color: var(--cy-color-text-placeholder); }
+
+/* pm20 */
+/* 2026-10-23 页面动效(utils/page-motion.js):容器 --pm-* 置 1 时先隐着,再依次浮上来;静止时无过渡,按压反馈不受影响;减少动态效果时从不触发 */
+.cus-row { filter: opacity(calc(1 - var(--pm-l, 0))); translate: 0 calc(var(--pm-l, 0) * 31rpx); transition: filter var(--pm-l-d, 0s) ease, translate var(--pm-l-d, 0s) cubic-bezier(.2,.82,.2,1), transform var(--cy-motion-press) var(--cy-ease-out), opacity var(--cy-motion-press) var(--cy-ease-out); transition-delay: calc(var(--pm-l-s, 0) * 0ms), calc(var(--pm-l-s, 0) * 0ms), 0s, 0s; }
+.cus-row:nth-child(2) { transition-delay: calc(var(--pm-l-s, 0) * 30ms), calc(var(--pm-l-s, 0) * 30ms), 0s, 0s; }
+.cus-row:nth-child(3) { transition-delay: calc(var(--pm-l-s, 0) * 60ms), calc(var(--pm-l-s, 0) * 60ms), 0s, 0s; }
+.cus-row:nth-child(4) { transition-delay: calc(var(--pm-l-s, 0) * 90ms), calc(var(--pm-l-s, 0) * 90ms), 0s, 0s; }
+.cus-row:nth-child(5) { transition-delay: calc(var(--pm-l-s, 0) * 120ms), calc(var(--pm-l-s, 0) * 120ms), 0s, 0s; }
+.cus-row:nth-child(6) { transition-delay: calc(var(--pm-l-s, 0) * 150ms), calc(var(--pm-l-s, 0) * 150ms), 0s, 0s; }
+.cus-row:nth-child(7) { transition-delay: calc(var(--pm-l-s, 0) * 180ms), calc(var(--pm-l-s, 0) * 180ms), 0s, 0s; }
+.cus-row:nth-child(8) { transition-delay: calc(var(--pm-l-s, 0) * 210ms), calc(var(--pm-l-s, 0) * 210ms), 0s, 0s; }
+.cus-row:nth-child(n+9) { transition-delay: calc(var(--pm-l-s, 0) * 240ms), calc(var(--pm-l-s, 0) * 240ms), 0s, 0s; }
+
+/* 细节打磨二期 L1/L5/L7 */
+.cus-chip { transition: var(--cy-tr-press); }
+.cus-count { font-variant-numeric: tabular-nums; }

@@ -1,0 +1,35 @@
+// 深链兼容壳。旧 id 详情与订单中心入口分别委托组件。
+
+Page({
+  data: { id: '', navScrolled: false, orderCenter: false },
+  onLoad(options) {
+    if (options && Object.prototype.hasOwnProperty.call(options, 'outTradeNo')) {
+      this._outTradeNo = options.outTradeNo;
+      this.setData({ orderCenter: true });
+      return;
+    }
+    this.setData({ id: (options && options.id) || '' });
+  },
+  onReady() {
+    if (this.data.orderCenter) this.selectComponent('#orderCenterEntry').initialize(this._outTradeNo);
+  },
+  onUnload() { this._outTradeNo = null; },
+  // 透明导航只留给首屏;滚动后转实底,内容不再压到返回键和胶囊下面。
+  onPageScroll(e) {
+    const scrolled = !!(e && e.scrollTop > 60);
+    if (scrolled !== this.data.navScrolled) this.setData({ navScrolled: scrolled });
+  },
+  // 组件在场景里发 back/close 是「回上一层场景」;深链壳里没有场景栈,退回页面导航。
+  // 方法名与按钮字面一致 —— c04-r2 的「按钮字面必须为真」就是盯这条。
+  backToOrderList(event) {
+    // 详情组件将打开票夹等页面时，不再同时发起返回导航。
+    if (event && event.detail && event.detail.navigating) return;
+    const pages = getCurrentPages();
+    const previous = pages.length > 1 ? pages[pages.length - 2] : null;
+    if (previous && previous.route === 'subpackageMember/order/order') {
+      wx.navigateBack({ delta: 1 });
+      return;
+    }
+    wx.redirectTo({ url: '/subpackageMember/order/order' });
+  },
+});

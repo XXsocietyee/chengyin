@@ -1,0 +1,240 @@
+const modal = require('../../../utils/modal.js');
+const toast = require('../../../utils/toast.js');
+const app = getApp()
+const { isRecordList } = require('../../../utils/response-shape.js')
+const { decodeDisplayText } = require('../../../utils/display-text.js')
+
+function jsonBody(data) { return JSON.stringify(data || {}) }
+function jsonHeader() { return { 'Content-Type': 'application/json' } }
+
+Page({
+  data: {
+    statusBarHeight: (app.globalData || {}).statusBarHeight || 44,
+    navBarHeight: (app.globalData || {}).navBarHeight || 44,
+    clubId: null,
+    requests: [], leavingMemberId: null, // CP-14:处理完的那张卡先淡出再从列表摘掉
+    // 副标题带待审条数(Figma 30:11)。
+    // ⚠️ 2026-09-11 复核:上一版注释写「后端 owner-only」是错的 ——
+    //    ClubMemberServiceImpl.canApproveMembers 放行三种人:主理人、role=1 管理员、
+    //    以及被委派 club:member:approve 的角色。这行文案跟的是后端真实口径,不是稿。
+    //    编辑资料页那句「只有主理人可通过或拒绝申请」同日一并改掉,三处口径现在一致。
+    // CU-C-133:数「谁能处理」的名单本身就漏掉被委派的成员。本页有 access-gate 拦在
+    //    club:member:approve 上,能打开的人一定按得动,所以只报动作、不报名单。
+    introText: '',
+    state: 'loading', // loading | ready | business-error | network-error | missing-param
+    errorText: '',
+    refreshing: false,
+    // 2026-09-17 用户拍板:刷新失败不再完全静默 —— 有旧快照时保留列表并给内联错误 + 重试。
+    // 这是 2026-08-26「有旧内容时刷新失败一律静默降级」的唯一例外(本页待审名单会直接影响审批动作)。
+    staleError: '',
+    staleErrorKind: 'data',
+    actingMemberId: null,
+    actingAction: '',
+    actionErrorMemberId: null,
+    actionErrorText: '',
+    actionErrorKind: 'data',
+  },
+
+  // 顶部条只报「有多少条 + 能做什么」,不报「谁能处理」:后端 canApproveMembers 放行
+  // 主理人、role=1 管理员与被委派 club:member:approve 的成员(CU-C-133 实证第三种人
+  // 确实按得动,却被旧文案排除在外),名单怎么数都会漏一档。改文案,不动权限。
+  buildIntro(count) {
+    // CU-C-96:待审为 0 时顶部条不再重复「暂无待审申请」—— 中央空态已经写着同一句,
+    // 同屏两句一字不差的话既占位又让人以为漏看了一处。
+    // 第十轮 f3 第 5 项(p3 F7):动作说明属说明小字 —— 每张卡上就是「通过 / 拒绝」两颗按钮,只报条数。
+    return count > 0 ? count + ' 条待审' : ''
+  },
+
+  onLoad(options) {
+    const clubId = options && options.clubId ? Number(options.clubId) : null
+    this.setData({ clubId: clubId })
+    if (clubId) this.loadRequests()
+    else this.setData({ state: 'missing-param', errorText: '缺少俱乐部信息，请返回俱乐部列表后重新进入' })
+  },
+
+  onUnload() { this._requestEpoch = (this._requestEpoch || 0) + 1 },
+
+  goBack() {
+    if (getCurrentPages().length > 1) {
+      wx.navigateBack({ delta: 1 })
+      return
+    }
+    if (this.data.clubId) {
+      wx.redirectTo({ url: '/pages/club/detail/index?id=' + this.data.clubId })
+      return
+    }
+    wx.switchTab({ url: '/pages/talent/list/index' })
+  },
+
+  onPullDownRefresh() {
+    if (this.data.clubId) this.loadRequests()
+    else wx.stopPullDownRefresh()
+  },
+
+  loadRequests() {
+    if (!this.data.clubId) {
+      wx.stopPullDownRefresh()
+      this.setData({ state: 'missing-param', errorText: '缺少俱乐部信息，请返回俱乐部列表后重新进入' })
+      return
+    }
+    const epoch = (this._requestEpoch || 0) + 1
+    this._requestEpoch = epoch
+    const that = this
+    const hadSnapshot = this.data.state === 'ready'
+    this.setData({
+      state: hadSnapshot ? 'ready' : 'loading',
+      errorText: '',
+      refreshing: hadSnapshot,
+      staleError: '',
+    })
+    app.sendRequest({
+      // 下拉刷新的收圈绑在真实完成上;非下拉场景下 stopPullDownRefresh 是 no-op
+      complete() { wx.stopPullDownRefresh(); },
+      hideLoading: true,
+      url: '/api/club/join-requests', method: 'POST',
+      data: jsonBody({ clubId: this.data.clubId }), header: jsonHeader(),
+      success(res) {
+        if (epoch !== that._requestEpoch) return
+        if (res.code != '200' || !isRecordList(res.data)) {
+          // 200 但数据校验不过时 res.msg 是「操作成功」,不能当失败原因(2026-09-17 拍板)。
+          const message = res.code == '200' ? '入会申请暂时不可用' : ((res && res.msg) || '入会申请暂时不可用')
+          if (hadSnapshot) {
+            that.setData({ state: 'ready', refreshing: false, staleErrorKind: 'data', staleError: message })
+          } else {
+            that.setData({ state: 'business-error', refreshing: false, errorText: message })
+          }
+          return
+        }
+        const requests = res.data.map(function (item) {
+          return Object.assign({}, item, {
+            requestTimeText: item.joinTime ? String(item.joinTime).replace('T', ' ').slice(0, 16) : '时间未知',
+            // 稿 P3 30:2:申请人写的那句话,用引号裹起来显示。没写就整行不出 ——
+            // 空引号会被读成「他写了但没说什么」。
+            // 服务端过滤会把 x<y 存成 x&lt;y,纯文本展示前解码一次。
+            joinMessageText: item.joinMessage ? '“' + decodeDisplayText(String(item.joinMessage)) + '”' : ''
+          })
+        })
+        that.setData({ state: 'ready', requests: requests, refreshing: false, staleError: '', introText: that.buildIntro(requests.length) })
+      },
+      fail() {
+        if (epoch !== that._requestEpoch) return
+        if (hadSnapshot) {
+          that.setData({ state: 'ready', refreshing: false, staleErrorKind: 'network', staleError: '入会申请更新失败，请检查网络后重试' })
+        } else {
+          that.setData({ state: 'network-error', refreshing: false, errorText: '网络没有连上' })
+        }
+      },
+    })
+  },
+
+  approve(e) { this.confirmReview(e.currentTarget.dataset.memberId, true) },
+  reject(e) { this.confirmReview(e.currentTarget.dataset.memberId, false) },
+
+  confirmReview(memberId, approve) {
+    if (!memberId || this.data.actingMemberId) return
+    const that = this
+    // CU-C-95:相邻申请连着点时,确认层必须指名道姓。以前 approve 标题写死「通过入会申请」,
+    // reject 的 dangerKey 不传 name —— 标题兑底成「拒绝「这一项」的入会申请?」,最后一步无从核对。
+    const row = this.data.requests.find(function (item) {
+      return String(item.memberId) === String(memberId)
+    })
+    // 第十二轮 k3(p3 N4):默认昵称分不出人时,确认层带上申请时刻(与卡片上「申请于」同一个值)。
+    const baseName = (row && row.nickname) || '城瘾玩家'
+    const name = baseName
+    // x-fix5 N-17:默认昵称仍要分得出人,但时刻放进正文,标题只写名字(原来整句塞进标题,太长且重复「申请」)
+    // L08-085:兜底昵称「城瘾玩家」与历史默认昵称「城瘾用户」一样分不出人,两者都带上申请时刻。
+    const timeLine = (baseName === '城瘾玩家' || baseName === '城瘾用户') && row && row.requestTimeText ? '申请于 ' + row.requestTimeText + '。' : ''
+    // 第十二轮 k9(p3 N13):拒绝原来要点三次(拒绝 → 危险确认 → 原因弹层 → 确认拒绝)。拒绝可逆、原因选填,
+    // 并成一个弹层:标题指名道姓,原因可不填,点「确认拒绝」就发。
+    if (!approve) { this.askRejectReason(memberId, timeLine ? baseName + ' · ' + row.requestTimeText + ' 申请' : baseName); return }
+    modal.show({
+      title: '通过「' + name + '」的入会申请',
+      content: timeLine + '通过后，对方将成为正式成员，可查看成员名单并使用成员功能。',
+      confirmText: '通过',
+      cancelText: '取消',
+      success(result) { if (result.confirm) that.review(memberId, approve) },
+    })
+  },
+
+  // F-L3-09:拒绝原因选填,随「入会申请未通过」通知发给申请人;后端同样限 500 字并做内容检查。
+  askRejectReason(memberId, name) {
+    const that = this
+    modal.show({
+      title: '拒绝「' + (name || '城瘾玩家') + '」的入会申请？',
+      editable: true,
+      // PR10 F-L3-09:500 字原因用多行框,不再挤在单行 input 里
+      multiline: true,
+      maxlength: 500,
+      placeholderText: '会随未通过通知告诉对方，可不填',
+      confirmText: '确认拒绝',
+      cancelText: '取消',
+      validate(content) {
+        return String(content || '').trim().length > 500 ? '拒绝原因不能超过500字' : ''
+      },
+      success(result) {
+        if (result.confirm) that.review(memberId, false, String(result.content || '').trim())
+      },
+    })
+  },
+
+  retryReview(e) {
+    const dataset = e.currentTarget.dataset || {}
+    this.confirmReview(dataset.memberId, (this._lastAction || dataset.action) === 'approve')
+  },
+
+  review(memberId, approve, reason) {
+    if (!memberId || this.data.actingMemberId) return
+    const that = this
+    const action = approve ? 'approve' : 'reject'
+    this._lastAction = ''
+    this.setData({
+      actingMemberId: memberId,
+      actingAction: action,
+      actionErrorMemberId: null,
+      actionErrorText: '',
+    })
+    app.sendRequest({
+      url: approve ? '/api/club/join-request/approve' : '/api/club/join-request/reject',
+      method: 'POST',
+      data: jsonBody(!approve && reason
+        ? { clubId: this.data.clubId, memberId: memberId, reviewReason: reason }
+        : { clubId: this.data.clubId, memberId: memberId }),
+      header: jsonHeader(),
+      success(res) {
+        if (res.code != '200') {
+          that._lastAction = action
+          that.setData({
+            actingMemberId: null,
+            actingAction: '',
+            actionErrorMemberId: memberId,
+            actionErrorKind: 'data',
+            actionErrorText: (res && res.msg) || '这次处理没有完成，请重试',
+          })
+          return
+        }
+        that._lastAction = ''
+        that.setData({
+          actingMemberId: null,
+          actingAction: '',
+          actionErrorMemberId: null,
+          actionErrorText: '',
+          leavingMemberId: memberId,
+          introText: that.buildIntro(that.data.requests.filter(function (item) { return item.memberId != memberId }).length),
+        })
+        toast.success(approve ? '已通过' : '已拒绝'); setTimeout(function () { that.setData({ leavingMemberId: null, requests: that.data.requests.filter(function (item) { return item.memberId != memberId }) }) }, 160)
+        const channel = that.getOpenerEventChannel && that.getOpenerEventChannel()
+        if (channel && channel.emit) channel.emit('joinRequestsChanged')
+      },
+      fail() {
+        that._lastAction = action
+        that.setData({
+          actingMemberId: null,
+          actingAction: '',
+          actionErrorMemberId: memberId,
+          actionErrorKind: 'network',
+          actionErrorText: '网络异常，这次处理没有完成，请重试',
+        })
+      },
+    })
+  },
+})

@@ -1,0 +1,104 @@
+<wxs src="../../../utils/wxs/count.wxs" module="cnt" /><view class="theme-merchant">
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+  <cy-access-gate id="cy-access-gate" kind="login" />
+<view class="page" style="padding-top: {{statusBarHeight + navBarHeight}}px;">
+  <cy-nav-bar custom-back bind:back="goBack" />
+  <cy-page-title title="俱乐部结算" safe-top="{{false}}" />
+  <cy-club-direct-ledger class="section" wx:if="{{summary && summary.isOwner && clubId}}" kind="club" club-id="{{clubId}}" />
+  <!-- F11:本人作为场次收款人的自由探索参考结算,可「标记已结清」;没有就不摆。 -->
+  <cy-fe-reference-range class="section" wx:if="{{summary && clubId}}" kind="payer" />
+  <!-- 9-16 晚拍板第 5 条 + 9-17 总控:余额三段只给主理人本人,管理员不显示(isOwner 由 summary 接口判定) -->
+  <cy-funds-stages class="section" wx:if="{{summary && (summary.isOwner || summary.personal) && (state === 'ready' || state === 'empty')}}" bind:stages="onStages" />
+
+  <view class="section" wx:if="{{(state === 'ready' || state === 'empty') && summary.isOwner && clubId}}">
+    <view class="topic-row" bindtap="openPayoutReceiver" aria-role="button" aria-label="个人收款" hover-class="cy-pressed" hover-stay-time="80">
+      <text class="topic-row-name">个人收款</text><cy-icon name="arrow-right" size="24" />
+    </view>
+  </view>
+
+  <cy-skeleton wx:if="{{state === 'loading'}}" type="list" count="3" />
+  <cy-empty wx:elif="{{state === 'missing-param'}}" fill size="lg" kind="missing-param" cta="返回" bind:cta="goBack" class="cy-fade-in" />
+  <cy-error load-failure wx:elif="{{state === 'network-error'}}" title="网络连接失败" sub="{{errorText}}" retry="重新加载" bind:retry="retryLoad" class="cy-fade-in" />
+  <cy-error load-failure wx:elif="{{state === 'error'}}" title="结算数据暂不可用" sub="{{errorText}}" retry="重新加载" bind:retry="retryLoad" class="cy-fade-in" />
+  <cy-empty wx:elif="{{state === 'empty'}}" kind="empty" title="还没有平台分润记录" class="cy-fade-in" />
+
+  <view class="section cy-fade-in" wx:elif="{{state === 'clubs'}}">
+    <view class="topic-row" wx:for="{{clubs}}" wx:key="clubId" data-id="{{item.clubId}}" bindtap="openClubSettlement" aria-role="button" hover-class="cy-pressed" hover-stay-time="80">
+      <text class="topic-row-name">{{item.name}}</text><cy-icon name="arrow-right" size="24" />
+    </view>
+  </view>
+  <block wx:elif="{{state === 'ready'}}">
+    <view class="section cy-fade-in">
+      <view class="settled-card" wx:if="{{summary.topics.length}}">
+        <text class="settled-label">已入账分润</text>
+        <text class="settled-amount">{{summary.settledAmountStatus === 'unverified' ? '金额待核验' : cnt.money(summary.settledAmountText, settledK)}}</text>
+        <text class="settled-label" wx:if="{{summary.unverifiedSettledCount}}">{{summary.unverifiedSettledCount || 0}} 笔已结算记录缺少入账证据，合计待核验</text>
+      </view>
+
+      <!-- CU-C-92:可提现余额为 0(或还没取到)时主按钮不得再冒充提现 —— 与商家侧同款禁用,
+           并把可提现条件写在按钮下面。余额数由下方 cy-funds-stages 自己拉的 /api/wallet/stages 给出。 -->
+      <!-- 1121:原生 <button disabled> 会吞掉点击 → cy-btn;置灰时点它由 onWithdrawBlockedTap 说明为什么还不能提 -->
+      <view class="withdraw-cta">
+        <cy-btn variant="primary" disabled="{{withdrawState !== 'positive'}}"
+          accessibilityLabel="{{withdrawState === 'zero' ? '联系平台客服提现，当前可提现为 0' : (withdrawState === 'unknown' ? '联系平台客服提现，可提现余额待确认' : '联系平台客服提现')}}"
+          bindtap="goWithdraw" bind:disabledtap="onWithdrawBlockedTap">联系平台客服提现</cy-btn>
+      </view>
+      <text class="withdraw-hint" wx:if="{{withdrawState === 'zero' && complaintWaiting}}">客诉期结束后可提现</text>
+      <text class="withdraw-hint" wx:elif="{{withdrawState === 'unknown' && summary.isOwner === false && !summary.personal}}">仅主理人可发起提现</text>
+      <!-- 2026-09-04 截图走查改:原文案是「已入账金额待确认」,而它正上方那张卡
+           写着「已入账分润 ¥12,480.00」—— 一个说已入账、一个说待确认,自相矛盾,
+           而且是在动钱的页面上。
+           2026-09-09:这里原来那句被我改成了和页脚一模一样的文案,一页两条同话。
+           稿 G2 105:6 只在最底下写一次,这里就不再重复了。 -->
+    </view>
+
+    <!-- F-16:俱乐部场次的钱由活动结算直接入主理人余额,不在主题分润里;逐场写出来源。 -->
+    <view class="section cy-fade-in" wx:if="{{summary.sessions.length}}">
+      <text class="section-title">各场次结算</text>
+      <view class="topic-row" wx:for="{{summary.sessions}}" wx:key="activityId">
+        <view class="topic-row-head">
+          <text class="topic-row-name">{{item.name}}</text>
+          <text class="topic-row-amount">{{item.netText}}</text>
+        </view>
+        <view class="topic-row-body">
+          <view class="topic-row-meta">
+            <text class="topic-row-meta-line">{{item.dateText}}</text>
+            <text wx:if="{{!summary.personal}}" class="topic-row-meta-line">销售额 {{item.grossText}}</text>
+            <text wx:if="{{!summary.personal}}" class="topic-row-meta-line">{{item.feeLabel}} {{item.feeText}}</text>
+            <text wx:if="{{item.merchantFeeText}}" class="topic-row-meta-line">商家核销费 {{item.merchantFeeText}}</text>
+            <text class="topic-row-meta-line">{{item.payeeText}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="section cy-fade-in" wx:if="{{summary.topics.length}}">
+      <text class="section-title">各主题结算</text>
+      <view class="topic-row" wx:for="{{summary.topics}}" wx:key="id"
+        data-topic-id="{{item.topicId}}" data-id="{{item.id}}" bindtap="goTopicSettlement" aria-role="button" hover-class="cy-pressed" hover-stay-time="80">
+        <view class="topic-row-head">
+          <text class="topic-row-name">{{item.name}}</text>
+          <text class="topic-row-amount">{{item.amountStatus === 'unverified' ? '待核验' : item.amountText}}</text>
+        </view>
+        <view class="topic-row-body">
+          <view class="topic-row-meta">
+            <text class="topic-row-meta-line">原始应结 {{item.originalAmountText}}</text>
+            <text class="topic-row-meta-line">已执行调整 {{item.executedAdjustmentText}}</text>
+            <text class="topic-row-meta-line">核算净额 {{item.netAmountText}}</text>
+            <text class="topic-row-meta-line">{{item.arrivedText}}</text>
+            <!-- CU-C-93:右侧 chip 本来就是状态徽标,同一状态不再在 meta 行里再说一遍
+                 (pending 两处都写「待入账」、settled+已核验两处都写「已入账」);
+                 只在 chip 说不全(作废细节、入账金额待核验)时补这一行。 -->
+            <text class="topic-row-meta-line" wx:if="{{item.status === 'void' || item.amountStatus !== 'verified'}}">{{item.paidText}}</text>
+          </view>
+          <text class="topic-row-chip {{item.status === 'settled' && item.amountStatus === 'verified' ? 'topic-row-chip--settled' : ''}}">{{item.status === 'void' ? '已作废' : item.status === 'pending' ? '待入账' : item.amountStatus === 'unverified' ? '待核验' : '已入账'}}</text>
+          <cy-icon class="topic-row-arrow" name="arrow-right" size="24" />
+        </view>
+      </view>
+      
+    </view>
+  </block>
+</view>
+</view>

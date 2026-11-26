@@ -1,0 +1,91 @@
+// 章节翻转过场的数据(纯函数,已单测)。只写拿得到的真读数:没有的格子整格不出,不拿 0 凑。
+const { summarizePuzzleScores } = require('./play-puzzle-summary.js');
+
+const STYLES = ['riso', 'engrave'];
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+function firstImg(v) { return v ? String(v).split(/[,;]/)[0].trim() : ''; }
+/** 面上的小标签:「01 · 提篮桥」—— 章节名「 · 」前那段,太长截到 6 字 */
+function faceLabel(num, title) {
+  const head = String(title || '').split(/[·・]/)[0].trim().slice(0, 6);
+  return head ? num + ' · ' + head : num;
+}
+function chapterNodes(nodes, id) { return (nodes || []).filter((n) => n && id != null && String(n.chapterId) === String(id)); }
+function face(card, i, nodes) {
+  return {
+    cover: firstImg(card && card.cover),
+    style: STYLES[i % 2],
+    label: faceLabel(pad2(i + 1), card && card.title),
+    // F07:只取本局已到达或已完成的站 —— 后面站点的照片到站前不露
+    photos: chapterNodes(nodes, card && card.id).filter((n) => n.done || n.arrived).map((n) => firstImg(n.imgUrl)).filter(Boolean).slice(0, 3),
+  };
+}
+function goldFace(cover, topicName) { return { cover: firstImg(cover), style: 'gold', label: topicName ? '通关 · ' + String(topicName).slice(0, 6) : '通关', photos: [] }; }
+
+/**
+ * 章节开场:cards 是不含序章的章节卡,chapterId 是正要打开的那章。
+ * 上一章在本局里玩过(至少一个节点完成)才先出「上一章完成」那一屏。
+ */
+function buildGateFlip({ cards, chapterId, nodes, topicCover, topicName, desc, elapsed }) {
+  const list = (cards || []).filter((c) => c && !c.opening);
+  const idx = list.findIndex((c) => String(c.id) === String(chapterId));
+  const cur = idx >= 0 ? list[idx] : null;
+  const prev = idx > 0 ? list[idx - 1] : null;
+  const curFace = face(cur, Math.max(idx, 0), nodes);
+  const prevNodes = prev ? chapterNodes(nodes, prev.id) : [];
+  const prevDone = prevNodes.filter((n) => n.done).length;
+  let endInfo = null;
+  if (prev && prevDone > 0) {
+    const puzzle = summarizePuzzleScores(prevNodes);
+    // r2-finish 章节完成卡(Questo B1 结构):第 N 章完成 → 用时 / 本章得分 → 「下一站:…」。
+    // 用时是本局到此刻的跑表(读不到就整行不出),本章得分只在本章有计分题时出;下一站 = 这一章第一个没完成的节点。
+    const curNodes = cur ? chapterNodes(nodes, cur.id) : [];
+    const nextNode = curNodes.find((n) => !n.done) || null;
+    endInfo = {
+      number: pad2(idx),
+      kicker: '第 ' + idx + ' 章完成',
+      title: prev.title || '',
+      cover: firstImg(prev.cover),   // l-play:完成整屏顶部的本章照片(没有就只留底色)
+      desc: '',
+      stats: [{ v: prevDone + '/' + prevNodes.length, k: '站' }].concat(puzzle.count ? [{ v: String(puzzle.score), k: '解谜分' }] : []),
+      rows: [
+        elapsed ? { k: '用时', v: String(elapsed) } : null,
+        puzzle.count ? { k: '本章得分', v: String(puzzle.score) } : null,
+        { k: '站', v: prevDone + '/' + prevNodes.length },
+      ].filter(Boolean),
+      next: nextNode && nextNode.name ? String(nextNode.name) : '',
+      reward: prev.reward || '',   // D-82 章节级奖励:没设就不出那一行
+    };
+  }
+  const n = cur && cur.nodeCount ? cur.nodeCount : chapterNodes(nodes, cur && cur.id).length;
+  const info = {
+    number: idx < 0 ? '' : pad2(idx + 1),   // l-play:开场屏星点锁成的方块章节号(序章 / 找不到的章不出数字)
+    kicker: idx < 0 ? '' : '第 ' + (idx + 1) + ' 章 / 共 ' + Math.max(list.length, 1) + ' 章',
+    title: (cur && cur.title) || '',
+    desc: desc || '',
+    stats: [
+      n ? { v: String(n), k: '站' } : null,
+      cur && cur.mileage ? { v: String(cur.mileage).replace(/km$/, ' km'), k: '距离' } : null,
+      cur && cur.timeText ? { v: String(cur.timeText).replace(/\s*分钟$/, ' 分'), k: '预计' } : null,
+    ].filter(Boolean),
+  };
+  const faces = [prev ? face(prev, idx - 1, nodes) : Object.assign({}, curFace, { style: STYLES[(Math.max(idx, 0) + 1) % 2] }), curFace, goldFace(topicCover, topicName)];
+  return { faces, endInfo, info };
+}
+
+/** 通关:三面 = 倒数第二章、最后一章、金色通关面;数据只写拿得到的合计。 */
+function buildFinale({ cards, nodes, topicCover, topicName, doneCount, elapsed, score, puzzle }) {
+  const list = (cards || []).filter((c) => c && !c.opening);
+  const last = list.length - 1;
+  const b = last >= 0 ? face(list[last], last, nodes) : face(null, 0, nodes);
+  // L02-056: 只有一章时 A 面不再冒充「第 2 章」,用同一封面换另一种印刷风格(与 buildGateFlip 同做法)
+  const a = last > 0 ? face(list[last - 1], last - 1, nodes) : Object.assign({}, b, { style: STYLES[1] });
+  const stats = [
+    doneCount ? { v: String(doneCount), k: '站' } : null,
+    elapsed ? { v: elapsed, k: '用时' } : null,
+    score ? { v: String(Math.round(Number(score))).replace(/\B(?=(\d{3})+(?!\d))/g, ','), k: '探索值' } : (puzzle && puzzle.count ? { v: String(puzzle.score), k: '解谜分' } : null),
+  ].filter(Boolean);
+  return { faces: [a, b, goldFace(topicCover || (b && b.cover), topicName)], info: { kicker: '全部完成', title: topicName || '主题通关', desc: '', stats } };  // 拿不到主题名时与通关勋章页同口径
+}
+
+module.exports = { buildGateFlip, buildFinale, faceLabel };

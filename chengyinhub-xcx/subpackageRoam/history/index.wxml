@@ -1,0 +1,14 @@
+<!-- 漫游记录页:护照「漫游记录」方卡与分享/外部直达都进这里;正文在 scene-roam-history。 -->
+<view class="theme-dark">
+  <cy-toast id="cy-toast" />
+  <cy-access-gate kind="login" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+<view class="hs-shell" style="padding-top: {{statusBarHeight + navBarHeight}}px;">
+  <cy-nav-bar plain custom-back bind:back="goBack" />
+  <cy-page-title title="漫游记录" safe-top="{{false}}" />
+  <view class="hs-shell__body">
+    <cy-scene-roam-history wx:if="{{!guest}}" id="roamHistory" tools bind:tool="openRoamTool" bind:open="openSession" bind:close="goBack" />
+  </view>
+</view>
+</view>

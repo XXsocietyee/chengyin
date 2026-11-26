@@ -1,0 +1,150 @@
+/* style/play-surface.wxss —— 玩法整屏台面的共享样式
+ * 真源:交互原型「模板编辑页 v2」的 playkit([外部原型链接已移除])
+ *
+ * ⚠️ 这份**不是** style/playkit.wxss 的替代品,两者是两套东西,别混:
+ *   · playkit.wxss = v5.1 那批半屏 sheet 玩法的语言(pk-eyebrow / pk-option / pk-foot);
+ *   · 这一份       = 这批整屏玩法的语言(眉标 / 大数字 / 底部主按钮 / 说明行)。
+ * 混用会让同一个玩法半身是 sheet、半身是整屏。
+ *
+ * 原型是 375px 画布,小程序 1px = 2rpx。能映射到既有 token 的一律映射,不新造档位;
+ * 各玩法自己的皮肤色(红等待、绿变色、白底黑油、骰面米白)留在各自文件里 ——
+ * 那是玩法道具色,不是界面色。
+ */
+
+/* 皮肤表(.skin-*)在 style/play-skins.wxss,只由 cy-play-stage 引入:各玩法组件隔离样式,在它们里面匹配不到,
+   变量靠台面 .st 往下继承。 */
+/* 眉标:屏幕最上面那行小字。商家填的「标题」落在这里 */
+.g-kicker {
+  font-size: var(--cy-type-caption);
+  font-weight: 800;
+  letter-spacing: 6rpx;
+  color: var(--ink);
+  opacity: .5;
+}
+
+/* 大数字:秒数 / 点数 / 毫秒。每屏只有一个,它就是这一屏的主体 */
+.g-figure {
+  font-family: var(--cy-font-numeric);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -4rpx;
+  color: var(--ink);
+}
+
+/* 说明行:大数字底下那句。没内容就别渲染这一行 —— 
+   商家没填的地方不要用一句话替他解释为什么没有 */
+.g-sub {
+  font-size: var(--cy-type-body);
+  line-height: 1.6;
+  color: var(--sub);
+}
+
+/* 底部主按钮:贴着屏幕底边,不是跟在内容后面。
+   ★ 白底深字,六个玩法统一 —— 原来它跟着每个皮肤的 accent 走,
+   而 accent 在别处还担着「错了」的意思,同一个颜色又当主按钮又当错误提示,
+   人分不清那是「点我」还是「出事了」。白色不参与语义。 */
+.g-btn {
+  /* 内嵌档(故事流里的卡片)跟在内容后面,不贴屏幕底边 —— 原型 card() 的按钮就在卡里顺着排。
+     缺省值 = 整屏档,逐字不变。 */
+  position: var(--pk-btn-pos, absolute);
+  left: var(--pk-btn-x, var(--cy-page-x));
+  right: var(--pk-btn-x, var(--cy-page-x));
+  bottom: var(--pk-btn-bottom, calc(env(safe-area-inset-bottom) + 60rpx));
+  margin-top: var(--pk-btn-mt, 0);
+  z-index: 5;
+  height: 112rpx;                                     /* ds-ok 原型 .cta 56px */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 56rpx;                               /* ds-ok 原型 28px:正好是这个高度的胶囊 */
+  background: var(--lk-a, var(--cy-comp-btn-primary-bg, #FFF));   /* ds-ok 玩法屏主按钮:无外观时走 cy 主按钮 token;R3-2 主题内取外观强调色。所有玩法只认这一颗主按钮(2026-11-21) */
+  color: var(--lk-bg, var(--cy-comp-btn-primary-fg, #111114));    /* ds-ok 同上;绝不读 --bg / --pk-embed-bg —— 内嵌时它们可能是透明,字会消失 */
+  font-size: var(--cy-type-button);
+  font-weight: 800;
+  /* 浅色皮肤上白底会糊进背景 —— 内描边和投影一起把它托起来。
+     原型 .cta 两层影子是**一直都在**的,不分深浅皮肤 */
+  box-shadow: inset 0 0 0 2rpx rgba(0, 0, 0, .10), 0 16rpx 40rpx rgba(0, 0, 0, .14);
+}
+/* 2026-09-24 用户走查:半透明的白实底在黑底上是一块发闷的灰,像坏了 —— 未激活改成描边胶囊、字跟皮肤的次要色 */
+.g-btn--disabled { background: transparent; color: var(--sub); box-shadow: inset 0 0 0 2rpx currentColor; }
+.g-btn--press { opacity: .88; }
+
+/* 玩法内容区:整屏那一列。
+   ★ 2026-09-11 改成顶对齐:原型(playkit.html)的 .phone 是 `padding:52px 20px 26px`
+   + 正常流,题面落在离顶 84px 的位置;整列居中是我们自己加的,实测把题面压到了 340px。
+   哪个玩法要把自己的内容摆到中间,由它自己那块 flex:1 决定,不由这一层统一居中。 */
+.g-col {
+  /* 内嵌档:进正常流、靠左、不留整屏那圈边距(外层故事流自己管边距)。缺省 = 整屏档。 */
+  position: var(--pk-col-pos, absolute);
+  left: 0; right: 0; top: 0; bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: var(--pk-col-align, center);
+  justify-content: flex-start;
+  gap: var(--cy-space-3);
+  /* 上边距由 stage 用真实状态栏高算,通过 --pk-top 传进来(CSS 变量能穿组件边界);
+     兜底 120rpx 是「没有 stage 也不至于顶到胶囊上」。左右和底照原型 20/26px。 */
+  padding: var(--pk-col-pad, var(--pk-top, 120rpx) 40rpx calc(env(safe-area-inset-bottom) + 52rpx));   /* ds-ok */
+  box-sizing: border-box;
+  text-align: var(--pk-col-text, center);
+}
+
+/* ===== 玩法屏入场(2026-09-22)=====
+ * 为什么用关键帧而不是 transition:这些块都由 wx:if 新建,新节点没有「前一个值」,
+ * transition 不会播 —— 实测过一版 transition,是死的。入场只能靠关键帧。
+ * 值逐条照原型「十九个玩法屏」的 rise:.34s cubic-bezier(.2,.9,.3,1),translateY(18px)+淡入。
+ * 放在这里是为了**五屏共用一条**,不让每屏各加一条把 motion 棘轮顶上去。
+ */
+.pk-in {
+  animation: pk-in var(--cy-motion-fade-swap, 200ms) cubic-bezier(.2, .9, .3, 1) both;   /* 2026-11-21 收进 200ms 档 */
+}
+.pk-in--2, .pk-in--3 { animation-delay: 0s; }               /* 2026-11-21 不再错峰:内容一起到 */
+/* 减弱动效的开关挂在**每个 kit 组件自己的外层 view** 上(.pk--reduced),不是页面根。
+ * 组件都是 styleIsolation:isolated,页面根上的 .cy-motion-reduced 根本选不到组件内部 ——
+ * 写成那样是条永不命中的死规则(2026-09-22 实测,已改)。同 playkit-random 的 .dk--reduced 做法。 */
+.pk--reduced .pk-in { animation: none; }
+/* 重播开关(behaviors/replay-motion.js):摘掉一帧再装回去,animation 从 none 变回具体值
+ * 就重新起播。节点复用、只有内容原地变的场景(重掷/第二次判定/换节点)只能这么补。 */
+.pk--reset .pk-in { animation: none; }
+@keyframes pk-in {
+  from { transform: translateY(36rpx); opacity: 0; }        /* ds-ok 原型 18px */
+  to { transform: none; opacity: 1; }
+}
+
+/* ============ 入场(2026-10-23 主人定稿「玩法入场动效」原型;2026-11-21 收短) ============
+   每个玩法屏挑自己那几个零件挂 .pe + 一种 .pe--x;cy-play-stage 每次打开把 --pe-go 从 0 翻到 1,
+   零件就从「起点」过渡回原位。
+   ★ 2026-11-21 主人「游戏要顺」:首屏必须立刻可读 —— 不再错峰、不再起步延时,也不再等故事流台面展开;
+     各屏写在零件上的 --pe-d / --pe-i / --pe-dur 一律不再生效,统一一档 --cy-motion-fade-swap(200ms)。
+     原来选项要等 1.5s+ 才露面,选项问答实测近 3 秒黑屏。
+   ★ 只用 transition(opacity / transform / filter / clip-path),不加关键帧、不动布局属性(两条动效棘轮)。
+   ★ 减少动态时 --pe-go 恒为 1,原样显示。 */
+.pe.pe {
+  --pe-t: calc(1 - var(--pe-go, 1));
+  --pe-run: var(--cy-motion-fade-swap, 200ms);
+  transition: opacity var(--pe-run) var(--cy-ease-out, ease-out),
+    transform var(--pe-run) var(--cy-ease-out, ease-out),
+    filter var(--pe-run) ease-out,
+    clip-path var(--pe-run) ease-out;
+}
+/* 不透明度单独放在低一档:各屏按下态(xx--press)是同一档、写在后面,按下变淡不能被入场盖掉 */
+.pe { opacity: var(--pe-go, 1); }
+.pe.g-btn--press { opacity: .88; }
+.pe.pe--up     { transform: translateY(calc(var(--pe-t) * 70rpx)) scale(calc(1 - var(--pe-t) * .06)); }
+.pe.pe--left   { transform: translateX(calc(var(--pe-t) * -140rpx)) rotate(calc(var(--pe-t) * -6deg)); }
+.pe.pe--right  { transform: translateX(calc(var(--pe-t) * 160rpx)) rotate(calc(var(--pe-t) * 5deg)); }
+.pe.pe--pop    { transform: scale(calc(1 - var(--pe-t) * .7)); }
+.pe.pe--blur   { filter: blur(calc(var(--pe-t) * 10px)); transform: translateY(calc(var(--pe-t) * 12rpx)); }
+.pe.pe--flipy  { transform: perspective(1200rpx) rotateY(calc(var(--pe-t) * 95deg)); }
+.pe.pe--flipx  { transform-origin: 50% 0; transform: perspective(1400rpx) rotateX(calc(var(--pe-t) * -95deg)); }
+.pe.pe--drop   { transform: translateY(calc(var(--pe-t) * -120rpx)); }
+.pe.pe--spin   { transform: rotate(calc(var(--pe-t) * -90deg)) scale(calc(1 - var(--pe-t) * .2)); }
+.pe.pe--zoom   { transform: scale(calc(1 + var(--pe-t) * .3)); filter: blur(calc(var(--pe-t) * 12px)); }
+.pe.pe--draw   { opacity: 1; transform-origin: 0 50%; transform: scaleX(var(--pe-go, 1)); }
+.pe.pe--grow   { opacity: 1; transform-origin: 50% 100%; transform: scaleY(var(--pe-go, 1)); }
+.pe.pe--corner { transform: translate(calc(var(--pe-t) * var(--pe-cx, 0rpx)), calc(var(--pe-t) * var(--pe-cy, 0rpx))) scale(calc(1 + var(--pe-t) * .4)); }
+.pe.pe--circle { opacity: 1; clip-path: circle(calc(var(--pe-go, 1) * 150%) at 50% 50%); }
+.pe.pe--flap   { transform-origin: 50% 100%; transform: perspective(800rpx) rotateX(calc(var(--pe-t) * 90deg)); }
+.pe.pe--roll   { transform: translateY(calc(var(--pe-t) * 100%)); }
+.pe.pe--tumble { transform: translateX(calc(var(--pe-t) * 160rpx)) rotate(calc(var(--pe-t) * 90deg)); }
+.pe.pe--coin   { transform: translateY(calc(var(--pe-t) * 120rpx)) rotateY(calc(var(--pe-t) * 180deg)) scale(calc(1 - var(--pe-t) * .2)); }

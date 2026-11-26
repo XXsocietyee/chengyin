@@ -1,0 +1,129 @@
+<view class="dc-page theme-merchant m-flush-nav">
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+  <cy-access-gate id="cy-access-gate" kind="merchant" need="canManageCoop" back-url="/pages/merchant/decor/index" />
+  <cy-nav-bar title="" custom-back bind:back="onNavBack" />
+  <view style="height: {{statusBarHeight + navBarHeight}}px; flex-shrink: 0;"></view>
+  <cy-skeleton type="list" count="{{3}}" wx:if="{{loadState === 'loading'}}" />
+  <view class="cs-state cy-fade-in" wx:elif="{{loadState === 'permission'}}">
+    <cy-empty
+      size="lg"
+      style="display: flex; flex-direction: column; flex: 1; min-height: 0"
+      kind="no-permission"
+      fill
+      title="当前身份不能编辑承接设置"
+      cta="返回"
+      bind:cta="onNavBack"
+    />
+  </view>
+  <view class="cs-state cy-fade-in" wx:elif="{{loadState === 'error'}}">
+    <cy-error load-failure
+      size="lg"
+      style="display: flex; flex-direction: column; flex: 1; min-height: 0"
+      icon="empty-state"
+      fill
+      title="{{loadErrorKind === 'network' ? '网络没连上' : '承接设置加载失败'}}"
+      sub="{{loadError}}"
+      retry="重新载入"
+      bind:retry="retryLoad" auto-back
+    />
+  </view>
+
+  <scroll-view scroll-y class="dc-scroll cy-fade-in" wx:elif="{{loadState === 'ok'}}">
+    <view class="dc-content">
+      <!-- 2026-10-27 业主 M-30:整页套「门店信息」版式 —— 左上大标题,行默认只读(不出箭头),
+           底部「编辑」进入编辑态后行才可点、箭头才出现,改完点「保存」。 -->
+      <text class="dc-brand-title">承接设置</text>
+      <view class="dc-card dc-fields">
+        <cy-cell arrow-icon="chevron-right" arrow="{{editing}}"
+          title="接待人数"
+          value="{{form.capacity ? form.capacity + ' 人' : '填写人数'}}"
+          data-k="capacity"
+          bind:tap="editField"
+        />
+        <cy-cell arrow-icon="chevron-right" arrow="{{editing}}"
+          title="可承接时间"
+          value="{{form.availableTime || '填写时段'}}"
+          data-k="availableTime"
+          bind:tap="editField"
+        />
+        <!-- M-30:「免费承接」与上面两行同一套右对齐 —— 行宽/对齐变量直接挂在下拉宿主上(cs-charge),
+             不依赖跨组件继承。只读态下拉禁用,只有编辑态能改。 -->
+        <cy-dropdown
+          class="cs-charge"
+          portal="{{false}}"
+          range="{{chargeOptions}}"
+          value="{{form.chargeType}}"
+          below
+          gap="4"
+          disabled="{{!editing || saving || refreshing}}"
+          bind:change="onChargeType"
+        >
+          <cy-cell arrow-icon="chevron-right" arrow="{{editing}}"
+            bubble-tap
+            title="收费方式"
+            value="{{form.chargeType === null ? '请选择' : chargeOptions[form.chargeType]}}"
+            hairline="{{false}}"
+          />
+        </cy-dropdown>
+      </view>
+      <view class="dc-card dc-inset">
+        <text class="dc-heading">合作诉求</text>
+        <view
+          class="dc-textarea cs-demand"
+          bindtap="editField"
+          data-k="demand"
+          aria-role="{{editing ? 'button' : 'text'}}"
+          hover-class="{{editing ? 'cy-pressed' : 'none'}}" hover-stay-time="80"
+        >
+          {{form.demand || '想要什么样的合作'}}
+        </view>
+      </view>
+      <cy-inline-error
+        wx:if="{{saveError}}"
+        kind="{{saveErrorKind}}"
+        title="承接设置暂未保存"
+        sub="{{saveError}}"
+        action="重新保存"
+        bind:action="onSave"
+      />
+      <cy-btn wx:if="{{editing}}" variant="primary" loading="{{saving}}" disabled="{{saving || refreshing}}" bindtap="onSave">
+        保存
+      </cy-btn>
+      <cy-btn wx:else variant="primary" disabled="{{saving || refreshing}}" bindtap="startEditing">
+        编辑
+      </cy-btn>
+    </view>
+  </scroll-view>
+  <cy-sheet show="{{editor !== null && !discardVisible}}" title="{{editor ? editor.label : ''}}" bind:close="closeEditor">
+    <view class="dc-sheet-content">
+      <textarea
+        wx:if="{{editor.key === 'demand'}}"
+        class="dc-textarea"
+        maxlength="500"
+        value="{{editor.value}}"
+        bindinput="editInput"
+        aria-label="合作诉求"
+      />
+      <input
+        wx:else
+        class="dc-input"
+        type="{{editor.key === 'capacity' ? 'number' : 'text'}}"
+        maxlength="100"
+        value="{{editor.value}}"
+        bindinput="editInput"
+        aria-label="{{editor.label}}"
+      />
+      <cy-btn bindtap="applyEditor">完成</cy-btn>
+    </view>
+  </cy-sheet>
+  <cy-sheet inset show="{{discardVisible}}" title="还没有保存" bind:close="keepEditing">
+    <view class="dc-sheet-content">
+      <view class="dc-sheet-actions">
+        <cy-btn variant="secondary" bindtap="discardChanges">放弃修改</cy-btn>
+        <cy-btn bindtap="keepEditing">继续编辑</cy-btn>
+      </view>
+    </view>
+  </cy-sheet>
+</view>

@@ -1,0 +1,22 @@
+<wxs src="../../../../utils/wxs/money.wxs" module="money" />
+<view class="txjl-scene {{theme === 'merchant' ? 'txjl-scene--merchant' : ''}}">
+  <cy-skeleton wx:if="{{loading && !list.length}}" type="list" count="{{4}}" />
+  <view class="txjl cy-fade-in" wx:elif="{{list.length > 0}}">
+    <view class="txjl_li" wx:for="{{list}}" wx:key="id">
+      <view class="txjl_li_left">
+        <text class="txjl-li__title">提现到银行卡</text>
+        <text class="txjl-li__time">{{item.createTimeText}}</text>
+      </view>
+      <view class="txjl_li_right">
+        <text class="txjl-li__amount">{{item.receivedAmountText != null ? item.receivedAmountText : money.amount2(item.receivedAmountText)}}</text>
+        <text class="txjl-st txjl-st--{{item.statusVariant}}">{{item.statusText}}</text>
+      </view>
+    </view>
+    <view class="txjl-more" wx:if="{{hasMore && !loading}}" bindtap="loadMore" aria-role="button" hover-class="cy-pressed" hover-stay-time="80">加载更多</view>
+    <cy-error load-failure="{{!authRequired && !accessDenied}}" wx:if="{{loadErr}}" title="更多提现记录加载失败" retry="重试" bind:retry="onPageRetry" />
+  </view>
+  <view wx:elif="{{loadErr}}" class="txjl-state cy-fade-in" aria-role="alert">
+    <cy-error load-failure="{{!authRequired && !accessDenied}}" fill="{{true}}" size="lg" title="{{authRequired ? '登录后查看提现记录' : accessDenied ? '当前身份不能查看提现记录' : '提现记录加载失败'}}" retry="{{authRequired ? '登录' : '重试'}}" bind:retry="onRetry" />
+  </view>
+  <cy-empty fill class="txjl-state" wx:if="{{nodata && !loadErr && !loading}}" size="lg" kind="empty" title="还没有发起提现" />
+</view>

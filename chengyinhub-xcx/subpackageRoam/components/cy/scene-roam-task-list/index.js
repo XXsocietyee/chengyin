@@ -1,0 +1,127 @@
+'use strict'
+
+const app = getApp()
+const session = require('../../../../utils/session/login-reload.js')
+const login = require('../../../../utils/auth/require-login.js')
+const { activityStatusMeta, activityStatusText } = require('../../../../utils/activity-status.js')
+const { toTimestamp } = require('../../../../utils/datetime.js')
+
+// L05-111:带时区/ISO 的串交给 utils/datetime(原来 '2026-11-22T10:00:00+08:00' 在 iOS 上解析成 NaN)
+function toTs(value) {
+  const parsed = toTimestamp(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function timeText(item) {
+  if (!item._statusKnown) return '—'
+  const now = Date.now(); const start = toTs(item.activityStart); const end = toTs(item.activityEnd)
+  if (item.status == 1 && start) return start > now ? `距开始 ${Math.max(1, Math.floor((start - now) / 3600000))} 小时` : '即将开始'
+  if ((item.status == 2 || item.status == 3) && end) return end > now ? `距结束 ${Math.max(1, Math.floor((end - now) / 3600000))} 小时` : '即将结束'
+  if (item.status >= 5) return '已结束'
+  return activityStatusText(item.status) || '—'   // 与 pages/activity/list 同一真源
+}
+
+function countText(value) {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? `${value} 人参与` : '—'
+}
+
+function progressValue(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100 ? value : -1
+}
+
+Component({
+  data: { tab: 0, tabs: ['进行中', '即将', '我的'], keyword: '', all: [], mine: [], events: [], state: 'loading', refreshing: false, staleError: '', summary: '', emptyTitle: '', emptySub: '' },
+  lifetimes: { attached() { this._disposed = false; this.load() }, detached() { this._disposed = true; this._loadToken = (this._loadToken || 0) + 1; if (this._keywordTimer) clearTimeout(this._keywordTimer) } },
+  pageLifetimes: { hide() { this._hidden = true; this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1 }, show() { this._hidden = false; if (this._readOwner !== session.identity(app)) this.load() } },
+  methods: {
+    load() {
+      const token = (this._loadToken || 0) + 1
+      this._loadToken = token
+      const owner = session.identity(app)
+      const signedIn = login.hasSession(app)
+      if (this._readOwner !== owner) {
+        this._hasLoaded = false
+        this.setData({ all: [], mine: [], events: [], tab: signedIn ? this.data.tab : 0 })
+      }
+      this._readOwner = owner
+      const hadSnapshot = this._hasLoaded === true
+      this.setData({ state: hadSnapshot ? 'ready' : 'loading', refreshing: hadSnapshot, staleError: '' })
+      let allDone = false; let mineDone = !signedIn; let all = []; let mine = []; let failed = false
+      const finish = () => {
+        if (token !== this._loadToken || owner !== session.identity(app) || !allDone || !mineDone) return
+        // 「我的」同样只保留落在这份漫游局列表里的报名：已结束 / 未绑定漫游的活动不该出现在这里。
+        const roamIds = new Set(all.map((item) => String(item.id)))
+        mine = mine.filter((item) => roamIds.has(String(item.id)))
+        if (failed) {
+          this.setData({ state: hadSnapshot ? 'stale' : 'error', refreshing: false, staleError: '活动列表更新失败，请稍后重试' }, () => this._filter())
+          return
+        }
+        this._hasLoaded = true
+        this.setData({ all, mine, state: 'ready', refreshing: false, staleError: '' }, () => this._filter())
+      }
+      /* 业主 2026-11-11 D-73：漫游任务列表只列「报名中/进行中」且「绑定漫游」的活动。
+         这份列表的真源是 /api/official/active-for-roam（服务端已按 ST_SIGNUP/ST_LIVE + isRoamBound 过滤，
+         V1/V2 同一口径合并），不再用 /api/official/events 的全量列表再在端上筛。 */
+      app.sendRequest({
+        url: '/api/official/active-for-roam', method: 'GET', data: {}, hideLoading: true, silentError: true,
+        success: (res) => { if (token !== this._loadToken) return; if (res && (res.code == 200 || res.code == '200') && Array.isArray(res.data) && res.data.every(isRecord)) all = res.data.map((item) => this._decorate(item)); else failed = true; allDone = true; finish() },
+        successStatusAbnormal: () => { if (token !== this._loadToken) return; failed = true; allDone = true; finish() },
+        fail: () => { if (token !== this._loadToken) return; failed = true; allDone = true; finish() },
+      })
+      if (signedIn) app.sendRequest({
+        url: '/api/official/my-events', method: 'GET', hideLoading: true, silentError: true,
+        success: (res) => { if (token !== this._loadToken) return; if (res && (res.code == 200 || res.code == '200') && Array.isArray(res.data) && res.data.every(isRecord)) mine = res.data.map((item) => this._decorate(item, true)); else failed = true; mineDone = true; finish() },
+        successStatusAbnormal: () => { if (token !== this._loadToken) return; failed = true; mineDone = true; finish() },
+        fail: () => { if (token !== this._loadToken) return; failed = true; mineDone = true; finish() },
+      })
+    },
+    // fromSignup:行来自 /api/official/my-events,只说明“你报过名”;报名记录不等于当前资格
+    // (资格要等 V2 participationState/eligible 字段),所以这里只标来源,不推断资格。
+    _decorate(item, fromSignup) {
+      const meta = activityStatusMeta(item.status)
+      const statusKnown = typeof item.status === 'number' && [0, 1, 2, 3, 4, 5, 6, 9].includes(item.status)
+      const decorated = { ...item, _statusKnown: statusKnown, _statusText: statusKnown ? (meta.text || '尚未开放') : '状态待确认', _statusVariant: statusKnown ? meta.variant : 'done', _live: statusKnown && meta.live, _participantsText: countText(item.participants), _pct: item.collective && item.collective.enabled === true ? progressValue(item.collective.pct) : -1 }
+      /* CU-C-59:official_event.cover_img 可空(OfficialEventV2Mapper.xml:409 无兜底表达式)。
+         原来无条件拼 background-image:url('{{item.coverImg}}') —— null 被插成字面量 'null',
+         相对路径一解析就是 /pages/roam/null,220rpx 区域只剩近黑底色。空串即「没有封面」,
+         由 wxml 走占位块。url() 加引号防 OSS 路径含空格/括号打断整条 style。 */
+      const coverImg = item.coverImg == null ? '' : String(item.coverImg).trim()
+      decorated._coverStyle = coverImg ? "background-image:url('" + coverImg.replace(/'/g, '%27') + "')" : ''
+      decorated._timeText = timeText(decorated)
+      decorated._sourceText = fromSignup === true ? '来自你的报名' : ''
+      return decorated
+    },
+    _filter() {
+      // L05-083(业主默认项 A):数据源只返回报名中 / 进行中的漫游局,「已结束」一直是空的,这个标签去掉
+      const source = this.data.tab === 2 ? this.data.mine : this.data.all
+      let events = this.data.tab === 0 ? source.filter((item) => item._live || !item._statusKnown) : this.data.tab === 1 ? source.filter((item) => item.status === 1) : source
+      const raw = this._keyword != null ? this._keyword : this.data.keyword
+      const keyword = String(raw || '').trim().toLowerCase()
+      if (keyword) events = events.filter((item) => [item.title, item.subtitle, item.city].some((value) => String(value || '').toLowerCase().includes(keyword)))
+      const copy = keyword ? [`「${keyword}」${events.length} 个结果`, '换个关键词试试'] : [[ '暂无进行中的活动', '' ], [ '暂无即将开始的活动', '' ], [ '还没有参与的活动', '' ]][this.data.tab]
+      this.setData({ keyword: raw || '', events, summary: keyword ? copy[0] : `${this.data.tabs[this.data.tab]} · 共 ${events.length} 个活动`, emptyTitle: keyword ? '没有找到相关活动' : copy[0], emptySub: copy[1] })
+    },
+    selectTab(event) {
+      const tab = Number(event.currentTarget.dataset.tab)
+      this._tabIntent = tab
+      if (tab === 2 && app.ensureLoginFor && !app.ensureLoginFor('登录后查看自己参与的活动',
+        () => this.selectTab(event), { owner: this, target: () => [this._tabIntent] })) return
+      this.setData({ tab }, () => this._filter())
+      if (this._readOwner !== session.identity(app)) this.load()
+    },
+    // L05-110:打字防抖 150 ms,停下后关键词与结果一次 setData 写回(原来每个键两次 setData + 整表过滤)
+    onKeyword(event) {
+      this._keyword = event.detail.value
+      if (this._keywordTimer) clearTimeout(this._keywordTimer)
+      this._keywordTimer = setTimeout(() => { this._keywordTimer = null; if (!this._disposed) this._filter() }, 150)
+    },
+    retry() { this.load() },
+    // 行是 official_event:交宿主开官方活动详情页。play-activity-detail 查的是 cms_activity,id 会撞到别的活动(3-18)。
+    openDetail(event) { this.triggerEvent('official', { id: event.currentTarget.dataset.id }) },
+    close() { this.triggerEvent('close') },
+  },
+})
+
+function isRecord(item) {
+  return item && typeof item === 'object' && !Array.isArray(item)
+}

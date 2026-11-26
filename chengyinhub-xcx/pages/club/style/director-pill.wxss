@@ -1,0 +1,16 @@
+/* 导演台四个半屏(广播 / 章节 / 现场事件 / 角色)共用的主按钮。组件是 isolated,
+ * 由各自 index.wxss @import 本文件(只用 class 选择器)。L08-049:原来五份逐字相同的拷贝。 */
+.cd-pill {
+  margin-top: 20rpx;
+  padding: 30rpx 0;
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-btn-solid-bg);
+  color: var(--cy-btn-solid-fg);
+  font-size: var(--cy-font-body);
+  font-weight: 600;
+  text-align: center;
+  transition: var(--cy-tr-press);
+}
+.cd-pill.is-disabled { opacity: .45; }
+/* isolated 组件内全局 .cy-pressed 进不来,本地定义一份 */
+.cy-pressed { opacity: .88; }

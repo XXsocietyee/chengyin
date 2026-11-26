@@ -1,0 +1,83 @@
+be513ef436370b9ed414600a2b70b9b913ac2d4f:chengyinhub-admin/src/test/java/com/chengyinhub/security/TomcatDependencyCanaryTest.java:generic-api-key:94
+552bdb89d51fb9b6df3fc793ed69f7de656d41f4:chengyinhub-admin/src/test/java/com/chengyinhub/business/service/impl/WechatPayCallbackForgedSignatureTest.java:generic-api-key:51
+# PR 分支历史的精确指纹；当前源码另有逐行 gitleaks:allow，确保 squash 后仍只豁免负控字面量。
+c6af232c7a2fe4b1c62f2a97ef382989550a7159:ci/secret-file-gate.py:private-key:14
+c6af232c7a2fe4b1c62f2a97ef382989550a7159:ci/test_secret_file_gate.py:private-key:19
+# 精确忽略用户消息脱敏测试里的不可用伪 JWT。
+d417bb12a173c528bcb5595203552cf9efc33373:chengyinhub-xcx/tests/unit/safe-user-message.test.js:generic-api-key:11
+
+# 精确忽略弹窗审查证据的摘要及用户提供的公开 Figma 文件标识；不放宽扫描路径或规则。
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:11973
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12175
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12303
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12318
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12334
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12348
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12376
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12420
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12422
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:11975
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12177
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12305
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12320
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12336
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12350
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12378
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12422
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12424
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/complete/source-inventory.json:generic-api-key:11955
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/complete/source-inventory.json:generic-api-key:12157
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/complete/source-inventory.json:generic-api-key:12285
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/complete/source-inventory.json:generic-api-key:12300
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/complete/source-inventory.json:generic-api-key:12316
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/complete/source-inventory.json:generic-api-key:12330
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/complete/source-inventory.json:generic-api-key:12358
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/complete/source-inventory.json:generic-api-key:12402
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/complete/source-inventory.json:generic-api-key:12404
+85d3a3197fb71dfec5232af05abff26cb0e09c9b:docs/evidence/popup-style-1003/verification.json:generic-api-key:622
+7766012bee5291746aa384711fd7478905076dfe:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12208
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12006
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12208
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12336
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12351
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12367
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12381
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12409
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12453
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/after/source-inventory.json:generic-api-key:12455
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:11975
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12177
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12305
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12320
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12336
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12350
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12378
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12422
+7986c9796abd2dc65639ce8c7846c7ca6d32fe71:docs/evidence/popup-style-1003/before/source-inventory.json:generic-api-key:12424
+
+# 精确忽略 EXTRA E06-17 回归测试的 32 位十六进制占位分享令牌（非密钥；当前源码已改为拼接构造）。随本分支变基时须同步该提交号。
+62a95c3de52ada6862a6a3671a40edc92bf10c9b:chengyinhub-admin/src/test/java/com/chengyinhub/business/longrun/E06_17Test.java:generic-api-key:28
+
+# W10b #23:分享令牌单测里的固定假令牌(32 位十六进制);源码行另有 gitleaks:allow。
+784c169222c3efce201427f68902436b5d6b0eb2:chengyinhub-admin/src/test/java/com/chengyinhub/web/controller/api/ApiRoamShareVersionTest.java:generic-api-key:24
+
+# Doc2 F1d 首个提交里 sys_config 开关键名 orient.geo.wgs84.enabled 被 generic-api-key 误判(键名不是密钥);
+# 后续提交已改名为 orient.geo.normalize.enabled,当前源码不再命中。只精确忽略该历史提交的三处指纹。
+6f74b609af105b3139d0de2edc3d31bee764c6a8:chengyinhub-system/src/main/java/com/chengyinhub/business/service/support/OrientSwitches.java:generic-api-key:14
+6f74b609af105b3139d0de2edc3d31bee764c6a8:chengyinhub-admin/sql/migration_orient_geo_ar_team_20261022.sql:generic-api-key:114
+6f74b609af105b3139d0de2edc3d31bee764c6a8:chengyinhub-admin/sql/migration_orient_geo_ar_team_20261022.sql:generic-api-key:142
+# walk-fix 1102 l1-play rig 记录(RIG-NOTES.md)里抄录的请求体:idempotencyKey 是客户端为一次玩法动作生成的幂等键
+# (adv-<会话>-v<版本>-<短哈希>),来自一次性 rig 库,不是凭据,被 generic-api-key 误判。只精确忽略该提交的这一处指纹。
+2110aafb6ffbff5988a3f2a907763783a86e3797:docs/delivery/walk-fix-20261102/l1-play/RIG-NOTES.md:generic-api-key:64
+# 第十一轮 i1:漫游大气层转场组件把本地存储键名常量叫 SEEN_KEY('cy_roam_atmos_seen_v1',设备上「已看过」标记的名字,
+# 不是凭据),被 generic-api-key 误判。当前源码已改名为 SEEN_STORAGE_NAME 不再命中;PR 扫描读 base..head 的提交历史,
+# 改名清不掉这个历史提交,只精确忽略它的这一处指纹。
+7f3ce957f8279e9876f122e1c3f6556ffaae8807:chengyinhub-xcx/subpackageRoam/components/roam-atmos-entry/index.js:generic-api-key:8
+
+# Funds14: deterministic SQL fixture row IDs, inserted and read back within the same test; no authentication use.
+chengyinhub-admin/src/test/java/com/chengyinhub/business/service/SettlementGenerateBatchMybatisIntegrationTest.java:generic-api-key:260
+chengyinhub-admin/src/test/java/com/chengyinhub/business/service/SettlementGenerateBatchMybatisIntegrationTest.java:generic-api-key:261
+
+# PublicationPreviewTest: fixed clue-key fixture in this historical commit; no authentication use.
+962ae9cfb5d331ccea9254091a94316300b0bdda:chengyinhub-admin/src/test/java/com/chengyinhub/business/service/impl/PublicationPreviewTest.java:generic-api-key:47
+26dd29b37ccb8b9157c647320953eaaac9c71e14:chengyinhub-admin/src/test/java/com/chengyinhub/business/service/impl/PublicationPreviewTest.java:generic-api-key:49

@@ -1,0 +1,621 @@
+'use strict'
+
+const datetime = require('../../../../utils/datetime.js')
+const modal = require('../../../../utils/modal.js'); const pageMotion = require('../../../../utils/page-motion.js');
+const cyLoading = require('../../../../utils/loading.js');
+function openAddress() { return require('../../../../utils/open-address.js') }
+const toast = require('../../../../utils/toast.js');
+const { recoverReadSession } = require('../../../../utils/session/login-reload.js');
+const cancellationFeedback = require('../../../../utils/cancellation-feedback.js');
+const subscribe = require('../../../../utils/subscribe.js');
+const { isUnknownHttpStatus } = require('../../../../utils/transport/failure-envelope.js');
+// H09 我的订单(方案 §5.2)。行卡沿用 D04 既有范式(订单号 + 状态 chip + 时间 + 地点 + 实付款 + 双动作)。
+//
+// ⚠️ 这里是订单列表的**唯一实现**。subpackageMember/order/order 已退化成薄壳,渲染的就是本组件 ——
+// 支付(/api/registration/pay + requestPayment + 轮询核账)和取消/退款
+// (/api/registration/cancel | cancel-refund)两条资金路径只此一份,不允许再抄一遍。
+// 页面壳与场景弹窗的差别只有一处:打开订单详情时往哪走(见 openDetail 的 open 事件)。
+const app = getApp()
+const policy = require('../../../../utils/identity/identity-policy.js')
+const { summarizeOrderState, canRequestOrderRefund, formatRefundDeadline, isSelfPlayPass, passUntilText } = require('../../../../utils/order-status.js')
+const { resolveActualPaidAmount, isFreeOrder } = require('../../../../utils/order-actual-pay.js')
+const refundAmount = require('../../../utils/order-refund-amount.js')
+const { createCheckoutWorkflow, hasCompletePaymentParams, isCompletedZeroAmountOrder } = require('../../../../utils/checkout/checkout-workflow.js')
+const xpayPay = require('../../../../utils/checkout/selfplay-xpay-pay.js')
+const { createRegistrationPaymentVerifier } = require('../../../../utils/checkout/registration-payment-verifier.js')
+
+// 6-12:退款确认弹窗的截止话术只读后端返回的 refundInfo(可退状态与截止点都由后端 RefundPolicy 判)。
+// 前端不自算、不写死规则 —— 原先那句「已核销/已过开始时间不可退」与集合前 24h 的真实规则不一致,
+// 会让还能退的单被劝退。后端没给字段时只给中性话术,绝不替后端断言不可退。
+// OR-033:支付失败提示的统一人话映射 —— SDK 原始英文(requestPayment:fail …)不直接上屏。
+const { payFailText } = require('../../../utils/pay-fail-text.js')
+
+function filterOrderTab(rows, tab) {
+  return tab === '0' ? rows : rows.filter((item) => item.orderStateKey === tab)
+}
+
+function refundDeadlineText(row) {
+  const info = row && row.refundInfo
+  if (!info) return '退款规则以提交后的平台判定为准'
+  // 2026-11-03:集合前 24 小时内只退部分(ratio<1),不是「免费取消」,照后端 reason 说。
+  const ratio = Number(info.ratio)
+  if (info.refundable && info.reason && info.ratio != null && ratio < 1) return info.reason
+  if (info.refundable && info.deadline) {
+    return '可免费取消至 ' + formatRefundDeadline(info.deadline)
+  }
+  return info.reason || '退款规则以提交后的平台判定为准'
+}
+
+// CU-M-103:空态的「去发现城市路线」只有玩家身份兑现得了 —— pages/index/index 检出商家身份会
+// 立刻跳商家工作台,商家点了只能落到收入/扫码那面。商家能不能逛玩家发现页归产品定夺,
+// 这一条先把兑现不了的按钮收掉。判据与 pages/index/index 的 viewSnap 同源:
+// role 优先、user_type 兜底、debug_user_view='user' 强制玩家展示。
+function canReachDiscoverRoutes() {
+  return !policy.isMerchantView({
+    role: wx.getStorageSync('role'),
+    userType: wx.getStorageSync('user_type'),
+    debugView: wx.getStorageSync('debug_user_view'),
+  })
+}
+
+// L09-083:ISO 带 T 的串在 iOS 上 replace 后是 Invalid Date;统一走中国时区解析,读不出返回空串
+const pad = (n) => String(n).padStart(2, '0')
+function formatDateTime(value) {
+  const p = value ? datetime.chinaParts(String(value).trim()) : null
+  return p ? `${p.year}.${pad(p.month)}.${pad(p.day)} ${pad(p.hours)}:${pad(p.minutes)}` : ''
+}
+
+function formatActivityTime(value) {
+  const p = value ? datetime.chinaParts(String(value).trim()) : null
+  if (!p) return ''
+  const day = `${pad(p.month)}.${pad(p.day)}`
+  // 第十二轮 k7 N6:只有日期的值(零点)只写日期,不写 00:00
+  return p.hours === 0 && p.minutes === 0 ? day : `${day} ${pad(p.hours)}:${pad(p.minutes)}`
+}
+
+function formatActivityTimeRange(start, end) {
+  if (!start || !end) return ''
+  return `${formatActivityTime(start)} - ${formatActivityTime(end)}`
+}
+
+Component({
+  properties: {
+    theme: { type: String, value: 'player' },
+  },
+  data: {
+    // r2 a3-v3-22:主题图是横图时封面改横版(按图片实际宽高判断,只在本机生效,不改数据)
+    wideCover: {},
+    imgOn: {}, // motion-1118 v2:封面 bindload 后在占位色上淡入(style/img-fade.wxss)
+    activeTab: '0',
+    orderTabs: [
+      { key: '0', label: '全部' },
+      { key: 'pending_payment', label: '待支付' },
+      { key: 'not_started', label: '未开始' },
+      { key: 'in_progress', label: '进行中' },
+      { key: 'completed', label: '已完成' },
+      { key: 'refunding', label: '退款中' },
+      { key: 'refunded', label: '退款成功' },
+      { key: 'non_refundable', label: '不可退款' },
+      { key: 'manual_refund', label: '人工售后' },
+    ],
+    list: [],
+    page_no: 1,
+    hasOrders: false,
+    isPaying: false,
+    loading: false,
+    errorMsg: '',
+    orderAuthRequired: false,
+    orderAccessDenied: false,
+    canDiscoverRoutes: true,
+    cancellingId: 0,
+  },
+  lifetimes: {
+    attached() {
+      this._cancelDisposed = false
+      this._cancelGeneration = (this._cancelGeneration || 0) + 1
+      this._syncCancellationAccount()
+      this._detached = false
+      this.setData({ canDiscoverRoutes: canReachDiscoverRoutes() })
+      this._initWorkflow()
+      this.getList()
+    },
+    detached() {
+      if (this._finishCancelPrompt) this._finishCancelPrompt()
+      if (this._finishCancellation) this._finishCancellation()
+      this._cancelDisposed = true
+      this._cancelGeneration = (this._cancelGeneration || 0) + 1
+      this._detached = true
+      this._listRequestId = (this._listRequestId || 0) + 1
+      this._listFetchInFlight = 0
+      this.setData({ loading: false })
+      if (this._workflow) this._workflow.destroy()
+      Object.values(this._paymentWorkflows || {}).forEach(flow => flow.destroy())
+    },
+  },
+  pageLifetimes: {
+    // 首次 attached/show single-flight；支付/退款回来后的后续 show 从第一页替换刷新。
+    show() {
+      this._syncCancellationAccount()
+      this._hidden = false
+      if (this._detached) return
+      this._syncPaymentAccount()
+      if (this._listFetchInFlight && this._listMemberId === (app.getUserID && app.getUserID())) return
+      // 返回页刷新保留已确认列表；失败时给非阻断提示，不把订单替换成整屏错误。
+      this.setData({ page_no: 1, errorMsg: '' })
+      this.getList(true, true)
+    },
+    hide() { this._hidden = true },
+  },
+  methods: {
+    _syncPaymentAccount() {
+      const owner = String(app.getUserID && app.getUserID() || '')
+      if (this._paymentOwner === owner) return
+      if (this._workflow) this._workflow.destroy()
+      Object.values(this._paymentWorkflows || {}).forEach(flow => flow.destroy())
+      this._paymentOwner = owner
+      this._paymentWorkflows = Object.create(null)
+      this._verifyingPayment = false
+      this.setData({ isPaying: false })
+    },
+    // 页面壳的 onReachBottom 转发进来。注意:后端 list 返回全量,hasMore 恒 false,
+    // 这条路径当前不会真的翻页 —— 保留是为了后端改成分页时不用再接一次线。
+    loadMore() {
+      if (!this._hasMore) return
+      this.setData({ page_no: this.data.page_no + 1 })
+      this.getList()
+    },
+
+    getList(dedupe, replace) {
+      const that = this
+      const memberId = app.getUserID && app.getUserID()
+      if (that._detached) return
+      if (!memberId) {
+        that._listRequestId = (that._listRequestId || 0) + 1
+        that._listFetchInFlight = 0
+        that.setData({ list: [], hasOrders: false, loading: false, orderAuthRequired: true, orderAccessDenied: false, errorMsg: '登录后可查看你的路线订单' })
+        return
+      }
+      if (dedupe && that._listFetchInFlight && that._listMemberId === memberId) return
+      if (that._listMemberId !== undefined && that._listMemberId !== memberId) {
+        that._allRows = null
+        that.setData({ list: [], hasOrders: false, page_no: 1 })
+      }
+      that._listMemberId = memberId
+      const requestId = (that._listRequestId || 0) + 1
+      that._listRequestId = requestId
+      that._listFetchInFlight = requestId
+      const activeTab = that.data.activeTab
+      const isCurrent = () => !that._detached && requestId === that._listRequestId && memberId === (app.getUserID && app.getUserID())
+      const settleFetch = function () {
+        if (that._listFetchInFlight === requestId) that._listFetchInFlight = 0
+      }
+      that.setData({ loading: true, errorMsg: '', orderAuthRequired: false, orderAccessDenied: false })
+      const recover = (res, statusCode) => !that._detached && requestId === that._listRequestId && recoverReadSession(that, app, res,
+        function (anonymous) { this._listRequestId++; this._listFetchInFlight = 0; this._listMemberId = undefined; this.setData({ list: [], hasOrders: false, page_no: 1, loading: false, orderAuthRequired: anonymous, orderAccessDenied: false, errorMsg: anonymous ? '登录后可查看你的路线订单' : '' }); },
+        () => that.getList(false, true), statusCode)
+      const denied = (res, statusCode) => {
+        const code = Number(statusCode || res && (res.code || res.statusCode))
+        if (!isCurrent() || (code !== 401 && code !== 403)) return false
+        that.setData({ list: [], hasOrders: false, orderAuthRequired: code === 401, orderAccessDenied: code === 403,
+          errorMsg: code === 401 ? '登录后可查看你的路线订单' : '当前身份不能查看订单' })
+        return true
+      }
+      app.sendRequest({
+        hideLoading: true,
+        url: '/api/registration/list',
+        method: 'POST',
+        data: {
+          pageNum: that.data.page_no,
+          pageSize: app.getPageSize(),
+          owner_type: 3,
+          // 后端历史 status 只有 4 档;七态由已返回的报名、退款与时间事实在客户端统一归一。
+          status: '0',
+        },
+        success(res) {
+          if (!isCurrent()) return
+          settleFetch()
+          if (denied(res)) return
+          if (res && res.code == '200') {
+            const rows = res.data && res.data.rows
+            if (!Array.isArray(rows) || rows.some((item) => !item || typeof item !== 'object' || Array.isArray(item))) {
+              that.setData({ errorMsg: '订单数据暂时不可用，请稍后重试' })
+              return
+            }
+            const allRows = rows.map((item) => {
+              const product = item.cmsActivity || item.cmsTopic || {}
+              const address = typeof product.addressName === 'string' ? product.addressName.trim() : ''
+              item.addressText = address && address.toLowerCase() !== 'null' ? address : '—'
+              // 第九轮 m1-9:地点一点开地图。活动有选点坐标;主题只有文字,走缓存的地址解析
+              item.addrTap = item.addressText !== '—'
+              item.addrLat = product.latitude
+              item.addrLng = product.longitude
+              if (item.createTime) item.createTimeFormatted = formatDateTime(item.createTime)
+              if (item.cmsActivity && item.cmsActivity.startDate && item.cmsActivity.endDate) {
+                item.cmsActivity.timeRangeFormatted = formatActivityTimeRange(item.cmsActivity.startDate, item.cmsActivity.endDate)
+              }
+              if (item.cmsTopic && item.cmsTopic.startDate && item.cmsTopic.endDate) {
+                item.cmsTopic.timeRangeFormatted = formatActivityTimeRange(item.cmsTopic.startDate, item.cmsTopic.endDate)
+              }
+              // 第十二轮 k7 N6:自玩通行证只有一个有效日期(可玩至几号),不摆主题的起止日
+              if (item.cmsTopic && isSelfPlayPass(item) && item.expiresAt) item.cmsTopic.timeRangeFormatted = passUntilText(item.expiresAt)
+              const summary = summarizeOrderState(item)
+              item.orderStateKey = summary.key
+              item.orderStateText = summary.text
+              item.refundStateText = summary.refundText
+              // RUN-43:实付款只写现金(微信实付),积分抵扣不计入;存量无拆分行按回落链兜底
+              item.actualPaidAmount = resolveActualPaidAmount(item)
+              item.pendingPayAmount = item.payableAmount === null || item.payableAmount === undefined || item.payableAmount === '' ? null : Number(item.payableAmount)
+              item.isFreeOrder = isFreeOrder(item)
+              item.canRequestRefund = canRequestOrderRefund(item)
+              return item
+            })
+            // OR-031:全量行缓存在实例上,切筛选只在本地过滤;OR-029:服务端给 total 且还有下一页才开 hasMore
+            const prior = replace || that.data.page_no <= 1 ? [] : (that._allRows || [])
+            that._allRows = prior.concat(allRows)
+            const total = Number(res.data.total)
+            const pageSize = Number(app.getPageSize()) || 0
+            const list = filterOrderTab(that._allRows, activeTab)
+            if (replace) that._cancelSubmittedIds = null // L09-019:新列表已到,按它的状态决定能否再取消
+            if (replace) pageMotion.enter(that, 'pmList', { once: true }); that.setData({ // L09-075
+              list,
+              hasOrders: that._allRows.length > 0,
+            })
+            that._hasMore = Number.isFinite(total) && pageSize > 0 && rows.length >= pageSize && that._allRows.length < total
+          } else {
+            that.setData({ errorMsg: app.getRequestErrorMessage(res, '订单加载失败') })
+          }
+        },
+        successStatusAbnormal(res, statusCode) { if (!recover(res, statusCode) && isCurrent()) { settleFetch(); if (!denied(res, statusCode)) that.setData({ errorMsg: app.getRequestErrorMessage(res, '订单加载失败') }); } },
+        fail(res, statusCode) {
+          if (recover(res, statusCode) || !isCurrent()) return
+          settleFetch()
+          if (denied(res, statusCode)) return
+          that.setData({ errorMsg: app.getRequestErrorMessage(res, '订单加载失败') })
+        },
+        complete() {
+          if (!isCurrent()) return
+          settleFetch()
+          that.setData({ loading: false })
+        },
+      })
+    },
+
+    switchTab(e) {
+      const key = e.detail.key
+      const memberId = app.getUserID && app.getUserID()
+      if (this._allRows && memberId && memberId === this._listMemberId && !this.data.errorMsg) {
+        const list = filterOrderTab(this._allRows, key)
+        this.setData({ activeTab: key, list })
+        return
+      }
+      this.setData({ activeTab: key, page_no: 1, list: [], errorMsg: '' })
+      this.getList()
+    },
+
+    retryList() {
+      if (this.data.orderAuthRequired) {
+        if (this._orderLoginPending) return
+        this._orderLoginPending = true
+        const login = app.getUserID && app.getUserID() && typeof app.reLogin === 'function' ? app.reLogin()
+          : typeof app.firstLogin === 'function' ? app.firstLogin() : null
+        Promise.resolve(login).then(result => {
+          this._orderLoginPending = false
+          if (!this._detached && app.getUserID && app.getUserID() && !(result && result.ok === false)) this.getList(false, true)
+        }).catch(() => { this._orderLoginPending = false })
+        return
+      }
+      this.setData({ page_no: 1 })
+      this.getList(false, true)
+    },
+
+    // r2 a3-v3-22 业主「如果主题图片是横图就可以把正方形的图改成横着的」:宽 ≥ 1.25 倍高才算横图
+    onCoverLoad(e) {
+      const id = e.currentTarget.dataset.id
+      const w = e.detail && e.detail.width
+      const h = e.detail && e.detail.height
+      if (!id) return
+      // 宽图换框与淡入同一次 setData:图在最终框里淡入,不先在方框里闪一下
+      if (w && h && !this.data.wideCover[id] && w >= h * 1.25) this.setData({ ['imgOn.' + id]: true, ['wideCover.' + id]: true })
+      else if (!this.data.imgOn[id]) this.setData({ ['imgOn.' + id]: true })
+    },
+
+    // 唯一与宿主形态相关的分支:场景里推 H10 子层,页面壳里由壳自己 navigateTo。
+    openDetail(e) {
+      const id = e.currentTarget.dataset.id
+      if (!id) return
+      this.triggerEvent('open', { id: 'member-order-detail', params: { id } })
+    },
+
+    // 第九轮 m1-9:地点行开地图;没有地点就照旧进订单详情
+    onAddressTap(e) {
+      if (e.currentTarget.dataset.address) openAddress().openFromEvent(e)
+      else this.openDetail(e)
+    },
+
+    goDiscoverRoutes() {
+      wx.switchTab({ url: '/pages/index/index' })
+    },
+
+    _syncCancellationAccount() {
+      const member = app.getUserID && app.getUserID()
+      if (this._cancelMemberId !== undefined && this._cancelMemberId !== member) {
+        if (this._finishCancelPrompt) this._finishCancelPrompt()
+        if (this._finishCancellation) this._finishCancellation()
+        this._cancelGeneration = (this._cancelGeneration || 0) + 1
+      }
+      this._cancelMemberId = member
+    },
+
+    cancelOrder(e) {
+      const that = this
+      that._syncCancellationAccount()
+      if (that._cancelDisposed) return
+      const generation = that._cancelGeneration
+      const member = that._cancelMemberId
+      const isCurrent = () => !that._cancelDisposed && generation === that._cancelGeneration
+        && member === (app.getUserID && app.getUserID())
+      const index = e.currentTarget.dataset.index
+      const id = e.currentTarget.dataset.id
+      const row = (that.data.list && that.data.list[index]) || {}
+      // L09-017
+      // 业主默认 A:和订单详情一样按付款状态判断。付款回调还没处理完(报名仍待付款、付款已成功)的单
+      // 也走退款取消、确认框提示退款;不可自助退款就只提示,不走普通取消。
+      const tapStatus = Number(e.currentTarget.dataset.status || 0)
+      const paid = tapStatus === 2 || Number(row.paymentStatus) === 2
+      const status = paid ? 2 : tapStatus
+      if (paid && tapStatus !== 2 && !row.canRequestRefund) {
+        toast(row.refundStateText || '当前订单不可自助退款')
+        return
+      }
+      // OR-030:支付中/确认支付结果中不允许同时取消
+      if (that.data.isPaying || that._verifyingPayment) return
+      if (that._cancelPromptOpen || that._cancelRequestInFlight || that.data.cancellingId) return
+      // L09-019:已提交(或结果未知)的那单,等刷新后的列表回来前不再受理第二次取消
+      if (that._cancelSubmittedIds && that._cancelSubmittedIds[String(id)]) return
+      if (!id) {
+        toast('获取订单信息失败')
+        return
+      }
+      that._cancelPromptOpen = true
+      const finishCancelPrompt = () => {
+        if (that._finishCancelPrompt !== finishCancelPrompt) return false
+        that._finishCancelPrompt = null
+        that._cancelPromptOpen = false
+        return true
+      }
+      that._finishCancelPrompt = finishCancelPrompt
+      modal.show({
+        dangerKey: status === 2 ? (isFreeOrder(that.data.list[index]) ? 'order.cancel-free' : 'order.cancel-refund') : 'order.cancel',   // 三段式文案在 utils/danger-actions.js
+        dangerParams: { deadline: refundAmount.cancelConfirmDeadline(that.data.list[index], refundDeadlineText(that.data.list[index])) },
+        success(res) {
+          if (!finishCancelPrompt() || !isCurrent()) return
+          if (res.confirm) {
+            // B9:退款结果(到账/被拒)订阅只在用户确认退款这一下申请;零元单没有钱可退,不弹
+            if (status === 2 && !isFreeOrder(that.data.list[index])) subscribe.request(['refund'])
+            that.cancelOrderRequest(id, index, status)
+          }
+        },
+        fail: finishCancelPrompt,
+        complete: finishCancelPrompt,
+      })
+    },
+
+    cancelOrderRequest(id, index, status) {
+      const that = this
+      that._syncCancellationAccount()
+      if (that._cancelDisposed) return
+      const generation = that._cancelGeneration
+      const member = that._cancelMemberId
+      const isCurrent = () => !that._cancelDisposed && generation === that._cancelGeneration
+        && member === (app.getUserID && app.getUserID())
+        && that._finishCancellation === finishCancellation
+      if (!id || that._cancelRequestInFlight || that.data.cancellingId) return
+      if (that._cancelSubmittedIds && that._cancelSubmittedIds[String(id)]) return
+      that._cancelRequestInFlight = true
+      cyLoading.show('处理中…')
+      that.setData({ cancellingId: Number(id) })
+      const finishCancellation = () => {
+        if (that._finishCancellation !== finishCancellation) return
+        that._finishCancellation = null
+        that._cancelRequestInFlight = false
+        cyLoading.hide()
+        that.setData({ cancellingId: 0 })
+      }
+      that._finishCancellation = finishCancellation
+      app.sendRequest({
+        // 已支付(报名成功 registrationStatus==2)走退款接口,与详情页一致;待支付订单仍用普通取消
+        url: Number(status) === 2 ? '/api/registration/cancel-refund' : '/api/registration/cancel',
+        method: 'POST',
+        data: { id },
+        success(res) {
+          if (!isCurrent()) return
+          if (res.code == '200') {
+            that._cancelSubmittedIds = Object.assign({}, that._cancelSubmittedIds, { [String(id)]: true })
+            toast.success(Number(status) === 2 ? cancellationFeedback(res) : '已取消', { duration: 5000 })
+            // 退款的实际打款状态由 refund_application 回传,刷新而不是前端猜成“已退款”。
+            that.setData({ page_no: 1 })
+            that.getList(false, true)
+          } else {
+            toast(app.getRequestErrorMessage(res, '处理失败，请联系客服'), { duration: 2000 })
+          }
+        },
+        fail(resp, statusCode) {
+          if (!isCurrent()) return
+          if (isUnknownHttpStatus(statusCode)) {
+            that._cancelSubmittedIds = Object.assign({}, that._cancelSubmittedIds, { [String(id)]: true })
+            toast('取消结果暂未确认，正在刷新订单')
+            that.setData({ page_no: 1 })
+            that.getList(false, true)
+            return
+          }
+          toast('网络错误，请重试', { duration: 2000 })
+        },
+        complete: finishCancellation,
+      })
+    },
+
+    _initWorkflow() {
+      const that = this
+      const verifyRegistrationPayment = createRegistrationPaymentVerifier(app)
+      that._workflow = createCheckoutWorkflow({
+        createOrder(payload, cb) {
+          return app.sendRequest({
+            url: '/api/registration/pay',
+            method: 'POST',
+            data: { id: payload.id },
+            success(res) {
+              if (res && res.code == '200' && xpayPay.needsSigning(res.data)) {
+                // 服务端决定走虚拟支付:wx.login 后带 jsCode 重取参数
+                xpayPay.signIntent(app, wx, payload.id, function (r) {
+                  cyLoading.hide()
+                  if (r.ok) { cb({ ok: true, data: r.data }); return }
+                  that.setData({ isPaying: false })
+                  cb({ ok: false, msg: r.msg })
+                })
+                return
+              }
+              cyLoading.hide()
+              if (res && res.code == '200' && (hasCompletePaymentParams(res.data) || isCompletedZeroAmountOrder(res.data, payload.id))) {
+                cb({ ok: true, data: res.data })
+              } else {
+                that.setData({ isPaying: false })
+                cb({
+                  ok: false,
+                  msg: res && res.code == '200' ? '支付参数不完整，请重试' : ((res && res.msg) || '支付失败'),
+                })
+              }
+            },
+            fail() {
+              cyLoading.hide()
+              that.setData({ isPaying: false })
+              cb({ ok: false, msg: '网络错误，请重试' })
+            },
+          })
+        },
+        requestPayment(orderData, cb) {
+          if (xpayPay.isIntent(orderData)) { xpayPay.pay(app, wx, orderData, cb); return }
+          const p = orderData.payParams
+          wx.requestPayment({
+            timeStamp: p.timeStamp,
+            nonceStr: p.nonceStr,
+            package: p.package,
+            signType: p.signType,
+            paySign: p.paySign,
+            success() { cb({ ok: true }) },
+            fail(res) {
+              cb({ ok: false, cancelled: res.errMsg === 'requestPayment:fail cancel', errMsg: res.errMsg })
+            },
+          })
+        },
+        verifyPayment(data, cb) {
+          const regId = data.registrationId || data.id
+          if (!regId) { cb({ ok: false, errMsg: '缺少订单编号' }); return }
+          if (xpayPay.isIntent(data)) return xpayPay.verify(app, verifyRegistrationPayment, data, cb)
+          return verifyRegistrationPayment({ registrationId: regId }, cb)
+        },
+        isPayable(d) { return d && ((d.payParams && d.payParams.package) || xpayPay.hasVirtualPayment(d)) },
+      })
+    },
+
+    payOrder(e) {
+      const that = this
+      if (that.data.isPaying) return
+      const index = e.currentTarget.dataset.index
+      const id = e.currentTarget.dataset.id
+      if (!id) {
+        toast('获取订单信息失败')
+        return
+      }
+      that.setData({ isPaying: true })
+      cyLoading.show('支付中…')
+      that.payOrderRequest(id, index)
+    },
+
+    payOrderRequest(id, index) {
+      const that = this
+      that._syncPaymentAccount()
+      const owner = that._paymentOwner
+      const current = () => !that._detached && owner === String(app.getUserID && app.getUserID() || '')
+      if (!that._paymentWorkflows[String(id)]) {
+        that._initWorkflow()
+        that._paymentWorkflows[String(id)] = that._workflow
+      }
+      that._workflow = that._paymentWorkflows[String(id)]
+      const submitted = that._workflow.submit({ id }, {
+        onOrderFail(res) {
+          if (!current()) return
+          that.setData({ isPaying: false })
+          toast((res && res.msg) || '支付失败', { duration: 2000 })
+        },
+        onFreeSuccess() {
+          if (!current()) return
+          that.setData({ isPaying: false })
+          that._updateOrderPaid(id, index)
+        },
+        onPayVerifying() {
+          if (!current()) return
+          that._verifyingPayment = true
+          cyLoading.show('确认支付结果…')
+        },
+        onPaySuccess() {
+          if (!current()) return
+          that._verifyingPayment = false
+          that.setData({ isPaying: false })
+          cyLoading.hide()
+          that._updateOrderPaid(id, index)
+        },
+        onPayCancel() {
+          if (!current()) return
+          that.setData({ isPaying: false })
+          toast('您已取消支付', { duration: 2000 })
+        },
+        onPayFail(res) {
+          if (!current()) return
+          cyLoading.hide()
+          that._verifyingPayment = false
+          that.setData({ isPaying: false })
+          toast(payFailText(res), { duration: 2000 })
+        },
+        onPayUnknown() {
+          if (!current()) return
+          cyLoading.hide()
+          that._verifyingPayment = false
+          that.setData({ isPaying: false })
+          modal.show({
+            title: '支付结果待确认',
+            content: '暂不要重复支付，请稍后刷新订单查看最终状态。',
+            showCancel: false,
+          })
+        },
+      })
+      if (!submitted) {
+        that.setData({ isPaying: false })
+        cyLoading.hide()
+        // unknown 是 workflow 故意留的闸(防重复建单扣款),但闸不能是哑巴:
+        // 关掉「支付结果待确认」弹层后再点「继续支付」,原来什么都不说。
+        if (that._workflow.getState() === 'unknown') {
+          modal.show({
+            title: '支付结果待确认',
+            content: '这笔付款还在确认中，请勿重复支付。稍后回到本页即可看到最终状态。',
+            showCancel: false,
+          })
+        }
+      }
+    },
+
+    _updateOrderPaid(id, index) {
+      // OR-032:付款成功后以服务端为准重读列表,状态键/文案/可退款一并重算,不只改 registrationStatus
+      this.setData({ page_no: 1 })
+      this.getList(false, true)
+      modal.show({
+        title: '支付成功',
+        content: '票已放入票夹，可随时出示入场码',
+        confirmText: '去票夹',
+        cancelText: '留在本页',
+        success(r) {
+          if (r.confirm) wx.navigateTo({ url: '/subpackageMember/signup/index?focusId=' + (id || '') })
+        },
+      })
+    },
+  },
+})

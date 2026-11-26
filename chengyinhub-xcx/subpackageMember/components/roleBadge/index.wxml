@@ -1,0 +1,3 @@
+<view class="rb rb-club" wx:if="{{role === 'club'}}">CLUB</view>
+<view class="rb rb-merchant" wx:elif="{{role === 'merchant'}}">商家</view>
+<view class="rb rb-official" wx:elif="{{role === 'official'}}">官方</view>

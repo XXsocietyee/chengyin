@@ -1,0 +1,183 @@
+@import '../../../../style/merchant-light-scope.wxss';
+
+/* ⚠️ 页底必须读 --cy-bg-page,不能读 --cy-bg-card:
+ * cy-nav-bar 的底色是 --cy-comp-nav-bg → --cy-color-bg-page,而 --cy-bg-card
+ * → --cy-color-bg-surface,比 bg-page 浅一档 ⇒ 顶栏下缘就是一条肉眼可见的色带,
+ * 即"顶栏与正文断层"。会话行(.conv)保留 bg-card 做表面分层,断层点因此离开顶栏。 */
+page { background: var(--cy-bg-page); }
+.im-list { position: relative; min-height: 100vh; background: var(--cy-bg-page); }
+
+/* chips 行左对齐留出页边距(48rpx,量自 210.png);右侧不设 padding,让横滑内容自然出血到屏右,
+   横滑手势自身就是溢出提示,不需要额外留白。
+   上边距:标题回到 nav-bar 居中槽后,原 .hero 的 --cy-space-5 上留白由本行承接,
+   否则 chips 会紧贴顶栏分割线。 */
+.message-tools { display: flex; align-items: center; gap: var(--cy-space-2); padding: 0 var(--cy-page-x); }
+.tabs-row { display: block; flex: 1; min-width: 0; }
+
+/* X1:刷新状态浮在内容上不占位(共用 .cy-refresh-float),列表不再被顶下去 */
+.refresh-status { padding: var(--cy-space-1) var(--cy-space-3); border-radius: var(--cy-radius-pill); background: var(--cy-color-bg-elevated); white-space: nowrap; display: flex; align-items: center; gap: var(--cy-space-1-5); color: var(--cy-color-text-secondary); font-size: var(--cy-type-caption); }
+
+/* .body 只留左侧页边距;右侧改由 .conv 自己的 padding-right 承担(见下),
+   这样 .conv-actions(position:absolute; right:0)才能顶到物理屏幕右边缘(Airbnb 215/216.png 左滑
+   按钮全出血参照)——若 .body 两侧都留白,.conv-actions 的 right:0 只能到「留白内侧」,到不了真边缘。 */
+.body {
+  width: 100%;
+  padding: 0; /* 2026-10-20 左页边距改由 .conv 自己承担:行底色左右对称铺满,左滑按钮仍顶到右边缘 */
+  box-sizing: border-box;
+}
+
+/* 会话行:Airbnb 210.png 参照——去分隔线,靠留白分组(不再用 ::before 画线)。 */
+.conv-wrap { position: relative; overflow: hidden; }
+.conv {
+  position: relative; z-index: 2; display: flex; align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  /* 行内 padding:上下从 var(--cy-legacy-22) 提到 32rpx(=var(--cy-space-4),8rpx 网格对齐)替代原分隔线的视觉分组作用;
+     右侧新增 var(--cy-page-x),补回 .body 不再兜底的右页边距(见 .body 注释),左侧仍由 .body 左 padding
+     承担,净视觉位置与改前一致。 */
+  padding: var(--cy-space-4) var(--cy-page-x);
+  background: var(--cy-bg-card);
+  transition: transform var(--cy-motion-standard) var(--cy-ease);
+}
+.conv.is-dragging { transition: none; } /* 拖拽中关掉缓动,避免每帧 setData 被补间追手指(P1-2) */
+.avatar { flex-shrink: 0; margin-right: var(--cy-legacy-22); }
+/* 头像直径 92rpx→112rpx:量自 Airbnb 210.png 头像整体(照片+人像圆图叠加)外框宽 168px=56pt=112rpx;
+   城瘾单头像用这个尺寸对齐视觉分量(用户已拍板降级为单圆头像,不做双图层)。 */
+.avatar-img {
+  width: 112rpx; height: 112rpx; border-radius: 50%;
+  background: var(--cy-bg-subtle);
+  border: 1rpx solid var(--cy-border-card);
+}
+.sys-avatar {
+  width: 112rpx; height: 112rpx; border-radius: 50%;
+  background: var(--cy-bg-card-2); display: flex; align-items: center; justify-content: center;
+  color: var(--cy-info);
+}
+
+.conv-body { flex: 1; min-width: 0; overflow: hidden; }
+.conv-top { display: flex; align-items: baseline; min-width: 0; }
+.conv-name {
+  font-size: var(--cy-font-subtitle); font-weight: 700; color: var(--cy-text-title);
+  flex: 0 1 auto; min-width: 0; max-width: 360rpx;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.conv-time { font-size: var(--cy-font-label); color: var(--cy-text-secondary); flex-shrink: 0; margin-left: auto; }
+.conv-bottom { display: flex; align-items: center; justify-content: space-between; margin-top: 8rpx; }
+.conv-preview {
+  font-size: var(--cy-font-body); color: var(--cy-text-secondary);
+  display: block; flex: 1; min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.badge {
+  flex-shrink: 0; margin-left: var(--cy-legacy-14); min-width: 40rpx; height: 40rpx; padding: 0 var(--cy-legacy-10);
+  box-sizing: border-box; border-radius: 999rpx; background: var(--cy-danger);
+  /* 2026-10-28 业主「参考 iMessage」:红底白字、数字居中(深色主题下 text-inverse 是黑字) */
+  color: #fff; font-size: var(--cy-font-caption); font-weight: 600; line-height: 1; text-align: center; font-variant-numeric: tabular-nums; /* ds-ok: 红底角标固定白字 */
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* 左滑操作 */
+.conv-actions {
+  position: absolute; z-index: 1; top: 0; right: 0; bottom: 0;
+  display: flex; align-items: stretch;
+  /* 静止态必须 opacity:0 —— automator A/B 实测:去掉它,.act-del 的红会从 .conv 边缘渗出
+     (.conv 带 transform 会另起合成层,z-index:2 + 不透明底在微信渲染器里不足以完全遮挡)。
+     拖拽跟手由 wxml 行内 style 绑 offset 实现:offset≠0 立刻置 1,不等松手判定 is-open。 */
+  opacity: 0;
+}
+.act {
+  width: 120rpx; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-size: var(--cy-font-label); gap: var(--cy-legacy-6);
+  padding: 0 8rpx; box-sizing: border-box; text-align: center;
+}
+.act + .act { border-left: 1rpx solid var(--cy-color-border-subtle); } /* 同底色三块无边界(P2-3),复用既有分隔范式 */
+.act-label {
+  display: block; width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.act-icon { width: 32rpx; height: 32rpx; }
+.act-read { background: var(--cy-color-bg-elevated); color: var(--cy-color-text-primary); }
+.act-del { background: var(--cy-danger); color: var(--cy-color-text-inverse); }
+
+/* 官方客服标签(私信 tab 内区分真人私信)。DS §2.1:蓝 = 信息/系统消息。 */
+.official-tag {
+  flex-shrink: 0;
+  margin-left: var(--cy-space-1-5);
+  padding: 2rpx var(--cy-legacy-10); /* ds-ok: 2rpx 是徽标上下留白的像素级微调，非布局间距 */
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-color-status-info-soft);
+  color: var(--cy-color-status-info);
+  font-size: var(--cy-type-micro);
+  font-weight: 700;
+}
+
+/* 免打扰:动作图标使用统一 cy-icon，动作极性由紧邻文案与读屏标签说明。 */
+.act-mute { background: var(--cy-color-bg-elevated); color: var(--cy-color-text-primary); }
+/* 会话行内静音图标。 */
+.mute-ico {
+  flex-shrink: 0;
+  width: 32rpx; height: 32rpx;
+  margin-left: var(--cy-legacy-10);
+  color: var(--cy-color-text-tertiary);
+}
+
+/* 静音会话的角标:灰化 + 去阴影(DS §3:暗底阴影 none) */
+.badge.is-muted {
+  background: var(--cy-color-text-tertiary);
+  box-shadow: none;
+}
+
+/* 合作邀请行:与会话行同一视觉(圆头像 + 名称/状态/时间 + 副行),左右走页边距。 */
+.invite-row { display: flex; align-items: center; padding: var(--cy-space-4) var(--cy-page-x); background: var(--cy-bg-card); }
+.invite-row .sys-avatar { flex-shrink: 0; margin-right: var(--cy-legacy-22); }
+.invite-status { flex-shrink: 0; margin-left: var(--cy-space-1-5); font-size: var(--cy-type-micro); font-weight: 700; color: var(--cy-color-text-secondary); }
+.invite-status.is-pending { color: var(--cy-color-status-info); }
+.invite-status.is-accepted { color: var(--cy-color-status-success); }
+
+/* pm20 */
+/* 2026-10-23 页面动效(utils/page-motion.js):容器 --pm-* 置 1 时先隐着,再依次浮上来;静止时无过渡,按压反馈不受影响;减少动态效果时从不触发 */
+.conv-wrap { filter: opacity(calc(1 - var(--pm-l, 0))); translate: 0 calc(var(--pm-l, 0) * 31rpx); transition: filter var(--pm-l-d, 0s) ease, translate var(--pm-l-d, 0s) cubic-bezier(.2,.82,.2,1), transform var(--cy-motion-press) var(--cy-ease-out), opacity var(--cy-motion-press) var(--cy-ease-out); transition-delay: calc(var(--pm-l-s, 0) * 0ms), calc(var(--pm-l-s, 0) * 0ms), 0s, 0s; }
+.conv-wrap:nth-child(2) { transition-delay: calc(var(--pm-l-s, 0) * 30ms), calc(var(--pm-l-s, 0) * 30ms), 0s, 0s; }
+.conv-wrap:nth-child(3) { transition-delay: calc(var(--pm-l-s, 0) * 60ms), calc(var(--pm-l-s, 0) * 60ms), 0s, 0s; }
+.conv-wrap:nth-child(4) { transition-delay: calc(var(--pm-l-s, 0) * 90ms), calc(var(--pm-l-s, 0) * 90ms), 0s, 0s; }
+.conv-wrap:nth-child(5) { transition-delay: calc(var(--pm-l-s, 0) * 120ms), calc(var(--pm-l-s, 0) * 120ms), 0s, 0s; }
+.conv-wrap:nth-child(6) { transition-delay: calc(var(--pm-l-s, 0) * 150ms), calc(var(--pm-l-s, 0) * 150ms), 0s, 0s; }
+.conv-wrap:nth-child(7) { transition-delay: calc(var(--pm-l-s, 0) * 180ms), calc(var(--pm-l-s, 0) * 180ms), 0s, 0s; }
+.conv-wrap:nth-child(8) { transition-delay: calc(var(--pm-l-s, 0) * 210ms), calc(var(--pm-l-s, 0) * 210ms), 0s, 0s; }
+.conv-wrap:nth-child(n+9) { transition-delay: calc(var(--pm-l-s, 0) * 240ms), calc(var(--pm-l-s, 0) * 240ms), 0s, 0s; }
+
+/* M-06 协作邀请卡片带(商家视角):横滑、卡片同宽同高,标题与页边距对齐,右侧自然出血。 */
+/* 2026-10-28 m681:Figma 393:429/442 卡片,浅色,标题加大 */
+.invite-strip { padding: var(--cy-space-4) 0 var(--cy-space-6); }
+.invite-strip__title { display: block; padding: 0 var(--cy-page-x) var(--cy-space-3); font-size: var(--cy-type-section-title); font-weight: 700; color: var(--cy-text-title); }
+.invite-strip__scroll { width: 100%; white-space: nowrap; }
+.invite-strip__track { display: inline-flex; gap: var(--cy-space-3); padding: 0 var(--cy-page-x); }
+.invite-card { width: 620rpx; flex: none; box-sizing: border-box; display: flex; flex-direction: column; padding: var(--cy-space-4); border-radius: var(--cy-radius-xl); background: var(--cy-bg-card); white-space: normal; }
+.invite-card__top { display: flex; align-items: center; justify-content: space-between; gap: var(--cy-space-2); }
+.invite-card__from { min-width: 0; font-size: var(--cy-font-caption); color: var(--cy-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.invite-card__main { display: flex; gap: var(--cy-space-3); margin-top: var(--cy-space-4); }
+.invite-card__cover { width: 168rpx; height: 128rpx; flex: none; border-radius: var(--cy-radius-md); background: var(--cy-bg-card-2); }
+.invite-card__cover--none { display: flex; align-items: center; justify-content: center; color: var(--cy-text-secondary); }
+.invite-card__info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.invite-card__date { font-size: var(--cy-font-caption); color: var(--cy-text-secondary); }
+.invite-card__name { display: block; margin-top: var(--cy-space-1); font-size: var(--cy-type-card-title); font-weight: 700; color: var(--cy-text-title); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.invite-card__sub { display: block; margin-top: var(--cy-space-1); font-size: var(--cy-font-caption); color: var(--cy-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.invite-strip__head { display: flex; align-items: center; justify-content: space-between; padding-right: var(--cy-page-x); }
+.invite-strip__head .invite-strip__title { flex: 1; min-width: 0; }
+.invite-strip--bare { padding-bottom: 0; }
+.invite-strip--bare .invite-strip__title, .invite-strip--bare .invite-alert { padding-bottom: 0; }
+.invite-alert { display: flex; align-items: center; gap: var(--cy-space-2); padding-bottom: var(--cy-space-3); }
+.invite-alert__label { font-size: var(--cy-font-label); color: var(--cy-text-body); }
+.invite-alert__sw { transform: scale(0.8); transform-origin: right center; }
+.invite-card__target { color: var(--cy-info); font-weight: 600; }
+.invite-card__msg { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: var(--cy-space-4); font-size: var(--cy-font-label); line-height: 1.5; color: var(--cy-text-body); }
+.invite-card__terms { display: block; margin-top: var(--cy-space-4); font-size: var(--cy-font-label); color: var(--cy-text-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.invite-card__acts { display: flex; justify-content: flex-end; gap: var(--cy-space-2); margin-top: var(--cy-space-4); }
+.invite-card__btn { height: 72rpx; line-height: 72rpx; padding: 0 var(--cy-space-5); border-radius: var(--cy-radius-pill); background: var(--cy-bg-card-2); color: var(--cy-text-title); font-size: var(--cy-font-label); font-weight: 600; }
+.invite-card__btn--primary { background: var(--cy-btn-solid-bg); color: var(--cy-btn-solid-fg); }
+.invite-card__time { display: block; margin-top: var(--cy-space-4); font-size: var(--cy-font-caption); color: var(--cy-text-secondary); }
+
+/* 细节打磨二期 L1/L5/L7 */
+.invite-card { transition: var(--cy-tr-press); }
+.invite-card__btn { transition: var(--cy-tr-press); }
+.act { transition: var(--cy-tr-press); }

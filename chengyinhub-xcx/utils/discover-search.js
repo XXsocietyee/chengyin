@@ -1,0 +1,271 @@
+// 发现搜索的纯数据层：六类公开对象(主题/活动/俱乐部/商家 + 主题模板/玩法模板)共用同一套「接口响应 → 结果卡」约定。
+// 页面只负责请求与跳转；这里不依赖 wx/app，便于单测且避免四处手写字段兜底。
+
+const { merchantHomeUrl } = require('./merchant-home-link.js');
+const { templateArt } = require('./template-art.js');
+const { formatDurationMinutes } = require('./template-display.js');
+const { firstCategoryName } = require('./category-icon.js');
+
+// 商家的落点是统一主页,主体 ID 是 memberId 而不是列表行 id ——「前缀 + id」这种形状拼不出来,
+// 所以它给 pathOf 而不是 path。其余三类的 path 前缀一字未改。
+const TYPE_META = {
+  post: { label: '帖文', path: '/pages/square/detail/index?id=' },
+  topic: { label: '主题', path: '/pages/topic/index/index?id=' },
+  activity: { label: '活动', sceneId: 'play-activity-detail' },
+  club: { label: '俱乐部', path: '/pages/club/detail/index?id=' },
+  merchant: { label: '商家', pathOf: function (item) { return merchantHomeUrl(item.memberId); } },
+  // 模板是主题/玩法的可复用版本。主题模板本身就是 cms_topic(is_template=1),落到公开主题页;
+  // 玩法模板落到既有模板详情页。
+  topicTemplate: { label: '主题模板', path: '/pages/topic/index/index?id=' },
+  gameTemplate: { label: '玩法模板', path: '/pages/templatedetail/templatedetail?id=' },
+};
+
+// 1121 N6:玩家只看「主题」「玩法」一个名字 —— 主题模板落地就是公开主题页,对玩家它就是主题;
+// 同名的两组结果在玩家这边合成一个页签。商家(创作视角)保留「主题模板 / 玩法模板」。
+const PLAYER_LABEL = { topicTemplate: '主题', gameTemplate: '玩法' };
+const PLAYER_TAB_KEY = { topicTemplate: 'topic' };
+
+function labelOf(type, playerView) {
+  const meta = TYPE_META[type];
+  if (!meta) return '';
+  return playerView && PLAYER_LABEL[type] ? PLAYER_LABEL[type] : meta.label;
+}
+
+function tabKeyOf(type, playerView) {
+  return playerView && PLAYER_TAB_KEY[type] ? PLAYER_TAB_KEY[type] : type;
+}
+
+// groups: [{ type, label, items }] → 页签 [{ key, label: '名字 条数' }],玩家视角同名合并、条数相加
+function resultTabs(groups, playerView) {
+  const tabs = [];
+  const byKey = {};
+  (groups || []).forEach(function (group) {
+    const key = tabKeyOf(group.type, playerView);
+    const count = (group.items || []).length;
+    if (byKey[key]) { byKey[key].count += count; return; }
+    byKey[key] = { key: key, name: labelOf(group.type, playerView) || group.label, count: count };
+    tabs.push(byKey[key]);
+  });
+  return tabs.map(function (tab) { return { key: tab.key, label: tab.name + ' ' + tab.count }; });
+}
+
+function firstImage(value) {
+  return String(value || '').split(/[,;]/).map(function (item) { return item.trim(); }).filter(Boolean)[0] || '';
+}
+
+function rowsOf(data) {
+  if (Array.isArray(data)) return data;
+  if (!data) return [];
+  if (Array.isArray(data.rows)) return data.rows;
+  if (Array.isArray(data.list)) return data.list;
+  return [];
+}
+
+function tagsOf(item) {
+  if (Array.isArray(item.sysCategoryList)) {
+    return item.sysCategoryList.map(function (tag) { return tag && tag.categoryName; }).filter(Boolean).slice(0, 2);
+  }
+  if (Array.isArray(item.tags)) return item.tags.filter(Boolean).slice(0, 2);
+  try {
+    const parsed = JSON.parse(item.tags || '[]');
+    return Array.isArray(parsed) ? parsed.filter(Boolean).slice(0, 2) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// CU-M-61:无封面时商家卡的兜底图标按品类选;取品类名与卡片图标同一份实现(L10-073)。
+
+function decorateItem(type, item, playerView) {
+  const meta = TYPE_META[type];
+  if (!meta || !item || item.id == null) return null;
+  const label = labelOf(type, playerView);
+
+  const detail = {
+    post: '公开帖文',
+    topic: item.addressName || item.description || '城市主题',
+    activity: item.topicId ? '关联主题节点' : (item.addressName || item.address || '活动地点待公布'),
+    club: item.city || item.description || '城市俱乐部',
+    merchant: item.cityRole || item.address || item.slogan || item.description || '合作商家',
+    topicTemplate: item.subtitle || item.description || label,
+    // 与模板页玩法行同一条 meta:人数 · 时长
+    gameTemplate: [item.players, formatDurationMinutes(item.duration)].filter(Boolean).join(' · ') || item.description || label,
+  }[type];
+  const image = {
+    post: firstImage(item.imgUrl),
+    topic: firstImage(item.imgArr || item.imgUrl),
+    activity: firstImage(item.imgArr || item.imgUrl),
+    club: item.cover || item.logo || '',
+    merchant: item.coverImage || item.logo || '',
+    topicTemplate: firstImage(item.imgArr || item.imgUrl),
+    gameTemplate: firstImage(item.imgUrl || item.imgArr),
+  }[type];
+
+  return {
+    id: item.id,
+    key: type + ':' + item.id,
+    type: type,
+    cityCode: item.cityCode == null ? null : String(item.cityCode),
+    typeLabel: label,
+    title: item.name || item.title || label,
+    detail: detail,
+    cover: image,
+    icon: type === 'club' ? 'users' : (type === 'merchant' ? 'poi-shop' : (type === 'topicTemplate' || type === 'gameTemplate' ? 'route' : 'map')),
+    tags: tagsOf(item),
+    // 模板结果按模板页的行样式画(cml 行):玩法模板优先用具象图标
+    tplRow: type === 'topicTemplate' || type === 'gameTemplate',
+    art: type === 'gameTemplate' ? templateArt(item) : '',
+    cardCover: type === 'merchant' ? firstImage(item.coverImage) : '',
+    cardLogo: type === 'merchant' ? firstImage(item.logo) : '',
+    cardStatus: type === 'merchant'
+      ? (item.businessStatus === 0 || item.businessStatus === '0' ? 'closed'
+        : item.businessStatus === 1 || item.businessStatus === '1' ? 'open' : 'none') : '',
+    cardCityRole: type === 'merchant' ? (item.cityRole || '') : '',
+    cardDescription: type === 'merchant' ? (item.slogan || item.description || '') : '',
+    cardServiceTag: type === 'merchant' ? (item.serviceTag || '') : '',
+    cardServiceText: type === 'merchant' ? (item.serviceText || '') : '',
+    cardAddress: type === 'merchant' ? (item.address || '') : '',
+    cardHours: type === 'merchant' ? (item.businessTime || item.availableTime || '') : '',
+    cardCategoryName: type === 'merchant' ? firstCategoryName(item) : '',
+    clubCard: type === 'club' ? Object.assign({}, item, {
+      coverUrl: firstImage(item.cover), logoUrl: firstImage(item.logo)
+    }) : null,
+    sceneId: meta.sceneId || '',
+    path: meta.pathOf ? meta.pathOf(item) : (meta.path ? meta.path + item.id : ''),
+  };
+}
+
+function ymdOf(value) {
+  const m = String(value || '').match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : '';
+}
+
+// 价格/上下限只认数字或非空数字串:Number(null)=0、Number('')=0、Number(true)=1 都不是用户给的值。
+function numericOrNull(raw) {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw !== 'string' || raw.trim() === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+// 主题模板列表接口没有 keyword(货架一次取全),按名称/副标题在客户端过;
+// 玩法模板由服务端 keyword 过滤,这里不再重复筛。
+function matchesTemplateKeyword(item, keyword) {
+  const kw = String(keyword || '').trim().toLowerCase();
+  if (!kw) return true;
+  return [item && item.name, item && item.subtitle, item && item.description].some(function (text) {
+    return String(text || '').toLowerCase().indexOf(kw) >= 0;
+  });
+}
+
+function rowPrice(item) {
+  const raw = item && (item.minAmout != null ? item.minAmout : (item.minAmount != null ? item.minAmount : item.price));
+  const n = numericOrNull(raw);
+  return n != null && n >= 0 ? n : null;
+}
+
+function matchesFilters(type, item, filters) {
+  if (type === 'topicTemplate') return matchesTemplateKeyword(item, filters && filters.keyword);
+  if (!filters || (type !== 'topic' && type !== 'activity')) return true;
+  const startBound = ymdOf(filters.startDate);
+  const endBound = ymdOf(filters.endDate);
+  const rowDay = ymdOf(item && (item.startDate || item.start_date));
+  if ((startBound || endBound) && rowDay) {
+    if (startBound && rowDay < startBound) return false;
+    if (endBound && rowDay > endBound) return false;
+  }
+  // 结果页没收到 minPrice/maxPrice 时存的是 null:null/'' 视为不限,不能变成 0 元上限把有价行全滤掉。
+  const minP = numericOrNull(filters.minPrice);
+  const maxP = numericOrNull(filters.maxPrice);
+  const useMin = minP != null && minP > 0;
+  const useMax = maxP != null && maxP >= 0 && maxP < 1000;
+  if (useMin || useMax) {
+    const price = rowPrice(item);
+    if (price != null) {
+      if (useMin && price < minP) return false;
+      if (useMax && price > maxP) return false;
+    }
+  }
+  return true;
+}
+
+function filterRows(type, data, filters) {
+  return rowsOf(data).filter(function (item) { return matchesFilters(type, item, filters); });
+}
+
+function decorateRows(type, data, filters) {
+  const playerView = !!(filters && filters.playerView);
+  return filterRows(type, data, filters).map(function (item) { return decorateItem(type, item, playerView); }).filter(Boolean);
+}
+
+function buildRequests(keyword, categoryId, filters) {
+  const common = { keyword: keyword || '', pageNum: 1, pageSize: 12 };
+  const categoryData = categoryId ? { category_id: categoryId } : {};
+  /* CU-M-62:类别先前只拼进 topic/activity 两路 ⇒ 结果页选「咖啡」后主题/活动筛了,
+     商家与俱乐部仍是全量 —— 同一屏四份结果各按不同条件算,看起来就像筛选失效。
+     两类后端都已支持 categoryId(ClubMapper.xml:71 / MmsMerchantMapper.xml:63),
+     JSON body 里带上即可,不新增接口。 */
+  const clubData = { name: keyword || '' };
+  const merchantData = { name: keyword || '' };
+  if (categoryData.category_id) {
+    clubData.categoryId = categoryData.category_id;
+    merchantData.categoryId = categoryData.category_id;
+  }
+  // filters 仅客户端消费:后端 /api/topic/list 与 /api/activity/list 没有 minPrice/startDate 字段。
+  // CU-M-66:筛选里只剩「最近」,它就是四类列表的默认排序(create_time desc),不需要发参数。
+  // ⚠️ 别把它映射成 /api/activity/list 的 sort_type=1 —— 那个值是「附近的活动」(带经纬度按距离排)。
+  void filters;
+  return [
+    { type: 'topic', url: '/api/topic/list', data: Object.assign({}, common, categoryData), auth: false },
+    { type: 'activity', url: '/api/activity/list', data: Object.assign({ is_my: 0 }, common, categoryData), auth: false },
+    { type: 'club', url: '/api/club/list', data: JSON.stringify(clubData), header: { 'Content-Type': 'application/json' } },
+    { type: 'merchant', url: '/api/merchant/list', auth: false, data: JSON.stringify(merchantData), header: { 'Content-Type': 'application/json' } },
+    { type: 'topicTemplate', url: '/api/template/topic-template/list', data: {} },
+    { type: 'gameTemplate', url: '/api/template/list', data: Object.assign({ keyword: keyword || '' }, categoryData) },
+  ];
+}
+
+// Only the result-page caller opts into unified search. Other callers retain existing endpoints.
+function unifiedCompatible(keyword, categoryId, filters) {
+  const f = filters || {};
+  return !!String(keyword || '').trim() && !categoryId && !f.startDate && !f.endDate
+    && !(numericOrNull(f.minPrice) > 0)
+    && !(numericOrNull(f.maxPrice) != null && numericOrNull(f.maxPrice) < 1000);
+}
+
+function unifiedPage(data, allowedTypes) {
+  if (!data || !Array.isArray(data.rows) || !(typeof data.total === 'number' || typeof data.total === 'string' && /^[0-9]+$/.test(data.total)) || !Number.isSafeInteger(Number(data.total)) || Number(data.total) < 0) return null;
+  const items = [];
+  for (const row of data.rows) {
+    if (!row || !allowedTypes.includes(row.type)
+      || !(typeof row.id === 'string' && /^[1-9][0-9]*$/.test(row.id)
+        || typeof row.id === 'number' && Number.isSafeInteger(row.id) && row.id > 0)) return null;
+    items.push(decorateItem(row.type, row));
+  }
+  return { items, total: Number(data.total), count: data.rows.length };
+}
+
+function mergeResults(previous, incoming) {
+  const rows = new Map(previous.map(item => [item.key, item]));
+  incoming.forEach(item => rows.set(item.key, item));
+  return Array.from(rows.values());
+}
+
+function mapPointKind(activity) {
+  return activity && activity.topicId ? 'topic' : 'activity';
+}
+
+module.exports = {
+  unifiedCompatible, unifiedPage, mergeResults,
+  TYPE_META: TYPE_META,
+  labelOf: labelOf,
+  tabKeyOf: tabKeyOf,
+  resultTabs: resultTabs,
+  firstImage: firstImage,
+  decorateItem: decorateItem,
+  filterRows: filterRows,
+  rowPrice: rowPrice,
+  decorateRows: decorateRows,
+  buildRequests: buildRequests,
+  mapPointKind: mapPointKind,
+};

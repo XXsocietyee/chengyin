@@ -1,0 +1,188 @@
+'use strict'
+
+// C-38:券类型只有一份真源(utils/coupon-form.js),独立新建页 / 发布流 sheet / 商家券列表都读它,
+// 体验卡(couponType=3)不能在独立页显示成「优惠券」、也不能在独立新建页选不到。
+// C-37:发布接口不写批次码,商家券详情不能摆一行「发布批次券码 —」。
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const test = require('node:test')
+
+const ROOT = path.resolve(__dirname, '../..')
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')
+const { COUPON_TYPE_LABELS } = require(path.join(ROOT, 'utils/coupon-form.js'))
+
+function loadCouponPage(source) {
+  const pagePath = path.join(ROOT, 'subpackageMember/coupon/coupon.js')
+  const previous = { Page: global.Page, getApp: global.getApp, wx: global.wx }
+  let owner = 1
+  const modals = []
+  const requests = []
+  global.getApp = () => ({ getUserID: () => owner, sendRequest(options) { requests.push(options) } })
+  global.wx = { setNavigationBarColor() {}, showModal: options => modals.push(options) }
+  let definition
+  global.Page = (config) => { definition = config }
+  if (source) {
+    // COUPON-RPT-18 负控:按变异源码建模块,不污染 require 缓存
+    const Module = require('node:module')
+    const m = new Module(pagePath, module)
+    m.filename = pagePath
+    m.paths = Module._nodeModulePaths(path.dirname(pagePath))
+    m._compile(source, pagePath)
+  } else {
+    delete require.cache[require.resolve(pagePath)]
+    require(pagePath)
+  }
+  const page = Object.assign({}, definition, {
+    data: JSON.parse(JSON.stringify(definition.data)),
+    setData(patch) { Object.assign(this.data, patch) },
+  })
+  const restore = () => {
+    for (const key of Object.keys(previous)) {
+      if (previous[key] === undefined) delete global[key]; else global[key] = previous[key]
+    }
+    delete require.cache[require.resolve(pagePath)]
+  }
+  return { page, requests, modals, setOwner: id => { owner = id }, restore }
+}
+
+test('C-38 券类型真源含体验卡,下标 = 后端 couponType + 1', () => {
+  assert.deepEqual(COUPON_TYPE_LABELS, ['请选择', '礼品券', '9折券', '8折券', '体验卡'])
+})
+
+// PG-040:独立新建页 couponInfo 下线,只剩发布流 sheet 一处消费真源。
+test('C-38 发布流 sheet 的类型选项来自同一真源', () => {
+  assert.match(read('pages/publishkit/components/reward-selector/index.js'),
+    /const COUPON_TYPE_LABELS = couponForm\.COUPON_TYPE_LABELS;/)
+})
+
+test('C-38 商家券列表把 couponType=3 显示为体验卡,已有三类不变', () => {
+  const env = loadCouponPage()
+  try {
+    env.page.getList()
+    env.requests[0].success({
+      code: 200,
+      data: [0, 1, 2, 3].map((couponType) => ({ id: couponType + 1, name: 'n' + couponType, couponType })),
+    })
+    assert.deepEqual(env.page.data.list.map((c) => c.couponTypeText), ['礼品券', '9折券', '8折券', '体验卡'])
+  } finally {
+    env.restore()
+  }
+})
+
+test('C-37 批次券码为空(—)时整行不渲染', () => {
+  const wxml = read('subpackageMember/coupon/coupon.wxml').replace(/<!--[\s\S]*?-->/g, '')
+  assert.match(wxml,
+    /<block wx:if="\{\{currentCoupon\.code !== '—'\}\}">\s*<view class="coupon-batch-label">发布批次券码<\/view>\s*<view class="coupon-batch-code">\{\{currentCoupon\.code\}\}<\/view>\s*<\/block>/)
+})
+
+test('COUPON-RPT-18 couponType=-1(存量无类型)显示为「优惠券」,不再落成表单占位「请选择」', () => {
+  const env = loadCouponPage()
+  try {
+    env.page.getList()
+    env.requests[0].success({
+      code: 200,
+      data: [
+        { id: 1, name: '无类型老券', couponType: -1 },
+        { id: 2, name: '礼品券', couponType: 0 },
+      ],
+    })
+    assert.deepEqual(env.page.data.list.map((c) => c.couponTypeText), ['优惠券', '礼品券'])
+  } finally {
+    env.restore()
+  }
+
+  // 负控:退回「直接 [type+1] 取下标」时,-1 必然落回「请选择」
+  const source = read('subpackageMember/coupon/coupon.js')
+  const broken = source.replace(
+    /    couponTypeText: Number\(item\.couponType\) < 0\n      \? '优惠券'\n      : \(COUPON_TYPE_LABELS\[Number\(item\.couponType\) \+ 1\] \|\| '优惠券'\),/,
+    "    couponTypeText: COUPON_TYPE_LABELS[Number(item.couponType) + 1] || '优惠券',",
+  )
+  assert.notEqual(broken, source, '负控锚点失效:负类型分支未命中')
+  const mutated = loadCouponPage(broken)
+  try {
+    mutated.page.getList()
+    mutated.requests[0].success({ code: 200, data: [{ id: 1, name: '无类型老券', couponType: -1 }] })
+    assert.deepEqual(mutated.page.data.list.map((c) => c.couponTypeText), ['请选择'], '负控必须复现「请选择」')
+  } finally {
+    mutated.restore()
+  }
+})
+
+test('RUN-017 同日不同小时的券保留中国时间起止时刻', () => {
+  const env = loadCouponPage()
+  try {
+    env.page.getList()
+    env.requests[0].success({ code: 200, data: [{ id: 1, name: '当日券', startTime: '2026-09-25T01:00:00Z', endTime: '2026-09-25 18:00:00' }] })
+    assert.equal(env.page.data.list[0].startDay, '2026.09.25 09:00')
+    assert.equal(env.page.data.list[0].endDay, '2026.09.25 18:00')
+  } finally { env.restore() }
+})
+
+function couponReply(request, id, status = 1) {
+  request.success({ code: 200, data: [{ id, name: 'owned coupon', status, couponType: 0 }] })
+}
+test('published coupon list rejects old-account success and failure after the new owner has loaded', () => {
+  const h = loadCouponPage()
+  try {
+    h.page.getList(); h.setOwner(2); h.page.getList()
+    couponReply(h.requests[1], 2); couponReply(h.requests[0], 1)
+    assert.deepEqual(h.page.data.list.map(item => item.id), [2])
+    h.requests[0].fail()
+    assert.equal(h.page.data.loadState, 'ready')
+  } finally { h.restore() }
+})
+test('coupon owner change clears existing private list and popup even if the new load fails', () => {
+  const h = loadCouponPage()
+  try {
+    h.page.getList(); couponReply(h.requests[0], 1)
+    h.page.tpClick({ currentTarget: { dataset: { item: h.page.data.list[0] } } })
+    h.setOwner(2); h.page.onShow()
+    assert.deepEqual(h.page.data.list, [])
+    assert.equal(h.page.data.tpShow, false)
+    assert.deepEqual(h.page.data.currentCoupon, {})
+    h.requests[1].fail(); assert.deepEqual(h.page.data.list, [])
+  } finally { h.restore() }
+})
+for (const lifecycle of ['onHide', 'onUnload']) {
+  test(`coupon list ${lifecycle} rejects late responses`, () => {
+    const h = loadCouponPage()
+    try {
+      h.page.getList(); h.page[lifecycle](); const before = JSON.stringify(h.page.data)
+      couponReply(h.requests[0], 1); h.requests[0].fail()
+      assert.equal(JSON.stringify(h.page.data), before)
+    } finally { h.restore() }
+  })
+}
+test('same-owner show after hide takes authoritative expired status and rejects the pre-hide reply', () => {
+  const h = loadCouponPage()
+  try {
+    h.page.getList(); h.page.onHide(); h.page.onShow()
+    couponReply(h.requests[1], 1, 2); couponReply(h.requests[0], 1, 1)
+    assert.equal(h.page.data.list[0].status, 2)
+    assert.equal(h.page.data.list[0].canStop, false)
+  } finally { h.restore() }
+})
+test('stop confirmation cannot submit after the actor changes', () => {
+  const h = loadCouponPage()
+  try {
+    h.page.getList(); couponReply(h.requests[0], 1)
+    h.page.stopCoupon({ currentTarget: { dataset: { item: h.page.data.list[0] } } })
+    assert.equal(h.modals.length, 1)
+    h.setOwner(2); h.modals[0].success({ confirm: true })
+    assert.equal(h.requests.length, 1)
+  } finally { h.restore() }
+})
+
+test('coupon list accepts existing high string owner and rejects empty owner without private data', () => {
+  const h=loadCouponPage()
+  try {
+    h.setOwner('9223372036854775807'); h.page.getList()
+    assert.equal(h.requests.length,1)
+    h.requests[0].success({code:200,data:[{id:7,name:'owned'}]})
+    h.setOwner(''); h.page.getList()
+    assert.equal(h.requests.length,1); assert.deepEqual(h.page.data.list,[])
+    h.requests[0].success({code:200,data:[{id:8,name:'late'}]})
+    assert.deepEqual(h.page.data.list,[])
+  } finally {h.restore()}
+})

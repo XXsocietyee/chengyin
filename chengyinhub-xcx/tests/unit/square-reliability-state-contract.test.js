@@ -1,0 +1,269 @@
+'use strict'
+
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const { createRequire } = require('node:module')
+const path = require('node:path')
+const test = require('node:test')
+const vm = require('../helpers/ui-sandbox-vm.js') // node:vm + 沙箱里装真 utils/toast.js·loading.js
+
+const ROOT = path.resolve(__dirname, '../..')
+
+function read(relativePath) {
+  return fs.readFileSync(path.join(ROOT, relativePath), 'utf8')
+}
+
+function setByPath(target, dotted, value) {
+  const parts = dotted.replace(/\[(\d+)\]/g, '.$1').split('.')
+  let cursor = target
+  parts.slice(0, -1).forEach((part) => {
+    if (!cursor[part] || typeof cursor[part] !== 'object') cursor[part] = {}
+    cursor = cursor[part]
+  })
+  cursor[parts[parts.length - 1]] = value
+}
+
+function loadPage(relativePath) {
+  const requests = []
+  const requestTasks = []
+  const toasts = []
+  let pullStops = 0
+  let definition
+  const absolutePath = path.join(ROOT, relativePath)
+  const app = {
+    canUseCommunity: () => true, // Current-account server-open fixture.
+    globalData: { statusBarHeight: 20, navBarHeight: 44 },
+    getAvatar: () => '',
+    getNickname: () => '',
+    getPageSize: () => 10,
+    getRequestErrorMessage: (res, fallback) => (res && res.msg) || fallback,
+    getTotalPage: (total, size) => Math.ceil(Number(total || 0) / size),
+    getUserID: () => 7,
+    sendRequest(options) {
+      requests.push(options)
+      const task = { aborted: false, abort() { this.aborted = true } }
+      requestTasks.push(task)
+      return task
+    },
+    tips(message) { toasts.push(message) },
+  }
+  const wxApi = {
+    getSystemInfoSync: () => ({ windowWidth: 375, windowHeight: 812, statusBarHeight: 20 }),
+    getMenuButtonBoundingClientRect: () => ({ bottom: 64 }),
+    hideTabBar() {},
+    navigateBack() {},
+    navigateTo() {},
+    pageScrollTo() {},
+    reLaunch() {},
+    showToast(options) { toasts.push(options && options.title) },
+    stopPullDownRefresh() { pullStops += 1 },
+  }
+  vm.runInNewContext(read(relativePath), {
+    console,
+    getApp: () => app,
+    Page: (config) => { definition = config },
+    require: (id) => id.includes('community-post-api') ? require('../helpers/community-page-seam') : createRequire(absolutePath)(id),
+    setTimeout() {},
+    clearTimeout() {},
+    wx: wxApi,
+  }, { filename: absolutePath })
+
+  const page = Object.assign({}, definition, {
+    data: JSON.parse(JSON.stringify(definition.data)),
+    setData(patch, done) {
+      Object.entries(patch).forEach(([key, value]) => setByPath(this.data, key, value))
+      if (done) done.call(this)
+    },
+  })
+  return {
+    page,
+    requests,
+    requestTasks,
+    toasts,
+    get pullStops() { return pullStops },
+  }
+}
+
+// 2026-10-29:广场列表页(pages/square/list)已删,列表刷新/分页/点赞关注用例随页撤走;发现页全站流见 discover-feed 单测。
+// 2026-10-27 P-20 owner:广场行内发布框撤掉,新建帖统一走全屏发帖弹窗 cy-post-compose。
+// 原「广场发布有可见忙碌态，失败保留草稿并能重试」「广场发布成功关闭编辑层…」两条钉的是页内发布流水,
+// 随之撤走;组件侧的单飞 / 失败保留 / 关闭即存由 square-post-compose-context 与 club-post-compose-unified 覆盖。
+
+test('帖子与评论的点赞、关注微操作单飞，失败不会提前改写界面状态', () => {
+  const event = { currentTarget: { dataset: { index: 0, type: 1 } } }
+  const detail = loadPage('pages/square/detail/index.js')
+  Object.assign(detail.page.data, {
+    id: 3,
+    info: { id: 3, memberId: 8, isLiked: 0, likeCount: 4, isFollowTheUser: 0 },
+  })
+  detail.page.lickClick(event)
+  detail.page.lickClick(event)
+  assert.equal(detail.requests.length, 1)
+  detail.page.followClick(event)
+  detail.page.followClick(event)
+  assert.equal(detail.requests.length, 2)
+
+  const comments = loadPage('pages/square/detail/index.js')
+  Object.assign(comments.page.data, {
+    id: 3,
+    list: [{ id: 11, memberId: 8, isLiked: 0, likeCount: 2, isFollowTheUser: 0 }],
+  })
+  comments.page.commentLikeClick(event)
+  comments.page.commentLikeClick(event)
+  assert.equal(comments.requests.length, 1)
+  comments.requests[0].complete()
+  comments.page.commentFollowClick(event)
+  comments.page.commentFollowClick(event)
+  assert.equal(comments.requests.length, 2)
+})
+
+test('动态评论首载、空态和分页失败都有独立且可恢复的状态', () => {
+  const h = loadPage('pages/square/detail/index.js')
+  h.page.data.id = 9
+
+  h.page.getList()
+  assert.equal(h.page.data.commentsState, 'loading')
+  h.requests[0].success({ code: '200', data: { rows: [], total: 0, hasMore: false } })
+  h.requests[0].complete()
+  assert.equal(h.page.data.commentsState, 'ready')
+  assert.equal(h.page.data.nodata, true)
+
+  Object.assign(h.page.data, {
+    list: [{ id: 11, contents: '已有评论' }],
+    page_no: 1,
+    hasMore: true,
+    nodata: false,
+  })
+  h.page.onReachBottom()
+  h.page.onReachBottom()
+  assert.equal(h.requests.length, 2)
+  assert.equal(h.requests[1].data.pageNum, 2)
+  h.requests[1].fail({ errMsg: 'request:fail timeout' })
+  h.requests[1].complete()
+  assert.equal(h.page.data.page_no, 1)
+  assert.equal(h.page.data.hasMore, true)
+  assert.match(h.page.data.commentLoadMoreError, /网络/)
+
+  h.page.retryCommentLoadMore()
+  assert.equal(h.requests.length, 3)
+  assert.equal(h.requests[2].data.pageNum, 2)
+})
+
+test('动态详情缺参零请求，详情请求单飞且旧响应不能覆盖重试结果', () => {
+  const missing = loadPage('pages/square/detail/index.js')
+  missing.page.onLoad({})
+  assert.equal(missing.page.data.detailState, 'missing-param')
+  assert.equal(missing.requests.length, 0)
+
+  const h = loadPage('pages/square/detail/index.js')
+  h.page.data.id = 9
+  h.page.getData()
+  h.page.getData()
+  assert.equal(h.requests.length, 1)
+
+  const first = h.requests[0]
+  first.fail({ errMsg: 'request:fail timeout' })
+  first.complete()
+  h.page.onRetryDetail()
+  assert.equal(h.requests.length, 2)
+  assert.equal(h.page.data.detailState, 'loading')
+
+  first.success({ code: '200', data: { id: 9, contents: '迟到的旧详情' } })
+  assert.notEqual(h.page.data.info.contents, '迟到的旧详情')
+  h.requests[1].success({ code: '200', data: { id: 9, contents: '最新详情' } })
+  assert.equal(h.page.data.info.contents, '最新详情')
+  assert.equal(h.page.data.detailState, 'ready')
+})
+
+test('评论和回复提交单飞，失败保留输入并展示持久恢复入口', () => {
+  const h = loadPage('pages/square/detail/index.js')
+  Object.assign(h.page.data, { id: 9, commentContent: '这条评论要保留' })
+
+  h.page.addComment()
+  h.page.addComment()
+  assert.equal(h.requests.length, 1)
+  assert.equal(h.page.data.commentSubmitting, true)
+  h.requests[0].fail({ errMsg: 'request:fail timeout' })
+  h.requests[0].complete()
+  assert.equal(h.page.data.commentSubmitting, false)
+  assert.equal(h.page.data.commentContent, '这条评论要保留')
+  assert.match(h.page.data.commentSubmitError, /网络/)
+
+  h.page.retryCommentSubmit()
+  assert.equal(h.requests.length, 2)
+
+  Object.assign(h.page.data, { replyContent: '这条回复要保留', replyId: 12 })
+  h.page.addReplyComment()
+  h.page.addReplyComment()
+  assert.equal(h.requests.length, 3)
+  assert.equal(h.page.data.replySubmitting, true)
+  h.requests[2].success({ code: 500, msg: '回复暂时失败' })
+  h.requests[2].complete()
+  assert.equal(h.page.data.replyContent, '这条回复要保留')
+  assert.equal(h.page.data.replySubmitError, '回复暂时失败')
+})
+
+test('广场详情页把恢复状态和按钮忙碌语义呈现在界面上', () => {
+  const detailWxml = read('pages/square/detail/index.wxml')
+  const detailJson = JSON.parse(read('pages/square/detail/index.json'))
+
+  assert.equal(detailJson.usingComponents['cy-inline-error'], '/components/cy/inline-error/index')
+  assert.match(detailWxml, /<cy-skeleton[^>]*wx:if="\{\{commentsState === 'loading' && !list\.length\}\}"/s)
+  assert.match(detailWxml, /<cy-empty[^>]*wx:if="\{\{commentsState === 'ready' && nodata\}\}"/s)
+  assert.match(detailWxml, /<cy-inline-error[^>]*wx:if="\{\{commentLoadMoreError\}\}"[^>]*bind:action="retryCommentLoadMore"/s)
+  // 2026-09-02 Figma 379:2571:评论条按稿只剩 头像 + 输入框,发送圆钮删除。
+  // 忙碌语义因此不再有可挂的按钮 —— 契约改为守住「提交路径没消失」:
+  // 键盘发送键(confirm-type="send" + bindconfirm="addComment")是现在唯一的提交入口,
+  // 且失败后仍有 comment-submit-feedback 里的原位重试。少任何一条都判红。
+  assert.doesNotMatch(detailWxml, /class="comment-submit"/, '发送圆钮已按稿删除，不许回流')
+  // 2026-09-02:删掉发送键后 commentSubmitting / canComment 会变成孤儿状态(setData 了但没人消费),
+  // 用户按完软键盘发送屏幕上毫无反馈。反馈改挂到输入框自己身上,这三条钉住它不再丢。
+  assert.match(detailWxml, /class="david_npl_right[^"]*\{\{commentSubmitting \? 'is-sending'/,
+    '发送中必须有可见反馈:输入框要消费 commentSubmitting')
+  assert.match(detailWxml, /class="david_npl_right[^"]*\{\{canComment \? '' : 'is-idle'\}\}/,
+    '空输入的禁用视觉必须有人消费 canComment,否则等于没有禁用态')
+  assert.match(detailWxml, /class="comment-sending"[\s\S]*?aria-live="polite"[\s\S]*?aria-label="正在发送评论"/,
+    '提交态必须能被读屏念出来(原来挂在已删按钮的 accessibility-label 上)')
+  assert.match(detailWxml, /<input[^>]*bindconfirm="addComment"[^>]*confirm-type="send"/s,
+    '删掉发送键后，评论提交只剩键盘发送键这一条路，它必须还在')
+  assert.match(detailWxml, /<cy-inline-error[^>]*action="重试"[^>]*bind:action="retryCommentSubmit"/s,
+    '提交失败仍要有原位重试入口')
+  assert.match(detailWxml, /<cy-inline-error[^>]*wx:if="\{\{replySubmitError\}\}"[^>]*bind:action="retryReplySubmit"/s)
+})
+
+test('发布附件、帖子操作和评论操作均保留至少 88rpx 触达区', () => {
+  const postCardWxss = read('components/cy/post-card/index.wxss')
+  const detailWxss = read('pages/square/detail/index.wxss')
+
+  assert.match(postCardWxss, /\.post-card__action\s*\{[^}]*min-width:\s*88rpx[^}]*min-height:\s*88rpx/s)
+  assert.match(postCardWxss, /\.post-card__share\s*\{[^}]*min-width:\s*88rpx[^}]*min-height:\s*88rpx/s)
+  assert.match(detailWxss, /\.item-link button\s*\{[^}]*min-height:\s*88rpx/s)
+  assert.match(detailWxss, /\.actions \.act\s*\{[^}]*min-height:\s*88rpx/s)
+  assert.match(detailWxss, /\.actions \.act-share\s*\{[^}]*min-width:\s*88rpx[^}]*min-height:\s*88rpx/s)
+  // PG-051:评论条贴底(bottom:0),安全区并进条内 padding-bottom,不再露缝
+  assert.match(detailWxss, /\.david_npl\s*\{[^}]*bottom:\s*0;[^}]*display:\s*flex[^}]*padding:[^;}]*env\(safe-area-inset-bottom\)/s)
+})
+
+test('广场评论与举报入口有准确可读名称，举报不再错用默认头像', () => {
+  const postCardWxml = read('components/cy/post-card/index.wxml')
+  const postActionsWxml = read('pages/square/components/cy/post-actions/index.wxml')
+  // 正文输入在 cy-post-compose 里(带「帖文内容」可读名称)
+  assert.match(read('pages/square/components/cy/post-compose/index.wxml'), /<textarea[^>]*aria-label="帖文内容"/s)
+  assert.match(postCardWxml, /catchtap="emitComment"[^>]*aria-role="button"[^>]*aria-label="查看评论，当前 \{\{post\.commentCount \|\| 0\}\}"/s)
+  // 2026-09-16(H050/H051 收口):举报行从列表页自绘弹层退役,搬进三合一 cy-post-actions
+  // (编辑/删除/举报)。守的判据不变:举报必须有可读名称,且不许顶一张默认头像冒充。
+  assert.match(postActionsWxml, /aria-label="举报这条帖文"/s)
+})
+
+test('负控：移除原位错误或单飞状态时契约会判红', () => {
+  const source = read('pages/square/detail/index.wxml')
+  const mutated = source.replace(/<cy-inline-error[^>]*wx:if="\{\{commentLoadMoreError\}\}"[^>]*\/>/, '')
+  assert.notEqual(mutated, source, '负控锚点失效：评论加载更多错误组件不存在')
+  assert.throws(() => assert.match(mutated, /<cy-inline-error[^>]*wx:if="\{\{commentLoadMoreError\}\}"[^>]*bind:action="retryCommentLoadMore"/s), assert.AssertionError)
+
+  const detailSource = read('pages/square/detail/index.js')
+  const dataSource = detailSource.slice(detailSource.indexOf('data:'), detailSource.indexOf('_captureCommunityContext()')) // L06-171:onImageLoad 已删,锚点改为 data 之后的首个方法
+  const withoutBusy = dataSource.replace(/\n\s*commentSubmitting:\s*false,/, '')
+  assert.notEqual(withoutBusy, dataSource, '负控锚点失效：评论忙碌状态不存在')
+  assert.throws(() => assert.match(withoutBusy, /commentSubmitting:\s*false/), assert.AssertionError)
+})

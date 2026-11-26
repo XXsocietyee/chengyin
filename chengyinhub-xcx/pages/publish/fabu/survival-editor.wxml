@@ -1,0 +1,35 @@
+<!-- 结果卡编辑层(主题详情「结果卡」进入)。「完成」= 保存回主题草稿;「退出」= 放弃本次改动;底部红卡恢复默认。
+     旧版恢复/配给/设施配置已无编辑入口,保存时原样保留(L03-108)。 -->
+<cy-sheet show="{{survivalEditor.show}}" back-guard="{{false}}" fixed="full" bind:close="closeSurvivalEditor" style="--cy-comp-sheet-max-h:calc(100vh - {{chrome.sheetTop + 18}}px);--cy-comp-sheet-role-glass:#f3f4f5">
+ <view class="rt-editor">
+  <view class="node-sheet__top"><view class="node-sheet__close" bindtap="closeSurvivalEditor" aria-role="button" aria-label="关闭且不保存" hover-class="cy-pressed" hover-stay-time="80">退出</view>
+   <view class="node-sheet__done" bindtap="saveSurvivalEditor" aria-role="button" aria-label="保存并关闭" hover-class="cy-pressed" hover-stay-time="80">完成</view>
+  </view>
+  <view class="rt-title">
+   <text>结果卡</text>
+  </view>
+  <cy-inline-error kind="error" wx:if="{{survivalEditor.error}}" title="{{survivalEditor.error}}" />
+
+  <!-- 结果卡（无列表层） -->
+  <block wx:if="{{survivalEditor.section === 'card'}}">
+   <view class="node-card">
+    <view class="rt-photo-name">
+     <view class="rt-image" bindtap="uploadSurvivalCover" aria-role="button" aria-label="{{survivalEditor.row.cover ? '更换结果卡封面' : '上传结果卡封面'}}" hover-class="cy-pressed" hover-stay-time="80"><image wx:if="{{survivalEditor.row.cover}}" src="{{survivalEditor.row.cover}}" mode="aspectFill" /><block wx:else><cy-icon name="image" size="32" /><text>上传封面</text></block></view>
+     <view class="node-card__main"><text class="node-card__title">结果卡封面</text><text class="node-card__value">{{survivalEditor.row.cover ? '点图片更换' : '不上传则用主题封面'}}</text></view>
+     <view wx:if="{{survivalEditor.row.cover}}" class="rt-delete" data-field="cover" bindtap="clearSurvivalField" aria-role="button" aria-label="移除结果卡封面" hover-class="cy-pressed" hover-stay-time="80">移除</view>
+    </view>
+   </view>
+   <view class="node-card">
+    <view class="rt-card-head"><text>卡片上显示</text></view>
+    <view wx:for="{{survivalCardFields}}" wx:key="value" class="node-card__row rt-check-row" data-value="{{item.value}}" bindtap="toggleSurvivalCardField" aria-role="checkbox" aria-checked="{{item.checked}}" hover-class="cy-pressed" hover-stay-time="80">
+     <view class="node-card__main"><text class="node-card__title">{{item.label}}</text></view>
+     <view class="rt-check {{item.checked ? 'is-on' : ''}}" aria-hidden="true"><cy-icon wx:if="{{item.checked}}" name="check" size="24" /></view>
+    </view>
+    <view class="node-card__hr"></view>
+    <view class="node-card__row"><view class="node-card__main"><text class="node-card__title">显示已解锁内容</text></view><cy-switch checked="{{survivalEditor.row.showUnlocks}}" bindchange="toggleSurvivalCardUnlocks" accessibility-label="显示已解锁内容" /></view>
+   </view>
+  </block>
+
+  <view wx:if="{{survivalEditor.section === 'card' && survivalEditor.customized}}" class="node-card node-card--danger" bindtap="removeSurvivalRow" aria-role="button" aria-label="恢复默认结果卡" hover-class="cy-pressed" hover-stay-time="80">恢复默认结果卡</view>
+ </view>
+</cy-sheet>

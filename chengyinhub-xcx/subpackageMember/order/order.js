@@ -1,0 +1,71 @@
+// 我的订单 = 二级大功能,正常页面。列表实现在 components/cy/scene-member-order-history。
+// 本页同时是「订单详情」这一三级场景的宿主 —— 详情是查看状态,不值得单独占一页。
+const app = getApp();
+const { activityShareFromEvent } = require('../../utils/activity-share.js');
+const { getScene } = require('../../utils/scene-registry.js');
+const roleGuard = require('../../utils/roleGuard.js');
+
+Page({
+  data: {
+    // 自定义导航:页面自留同高占位,内容不被 fixed 顶栏压住
+    statusBarHeight: (app.globalData || {}).statusBarHeight || 20,
+    navBarHeight: (app.globalData || {}).navBarHeight || 44,
+    sceneStack: [],
+    sceneCurrent: null,
+  },
+  onLoad(options) {
+    // PG-094:私人订单列表不可从右上角菜单转发;页面上的 onShareAppMessage 只服务宿主活动详情场景里的分享按钮
+    if (wx.hideShareMenu) wx.hideShareMenu({ menus: ['shareAppMessage', 'shareTimeline'] });
+    // M-25(2026-10-27 业主):商家不报名游玩、没有订单 —— 商家视角从任何入口进订单页都直接换成「我的项目」
+    if (roleGuard.isMerchantView()) {
+      wx.redirectTo({ url: '/subpackageA/pages/myproject/index?scope=MERCHANT' });
+      return;
+    }
+    const detailId = options && options.detailId;
+    if (!detailId) return;
+    const scene = getScene('member-order-detail', { id: detailId });
+    if (!scene) return; // L09-116:与 openScene 同口径的空值保护
+    this.setData({ sceneStack: [scene], sceneCurrent: scene });
+  },
+  goBack() {
+    wx.navigateBack({
+      delta: 1,
+      fail() { wx.switchTab({ url: '/pages/member/index/index' }); },
+    });
+  },
+  onReachBottom() {
+    const content = this.selectComponent('#orderHistory');
+    if (content && typeof content.loadMore === 'function') content.loadMore();
+  },
+  blockSceneTouch() {},
+  openScene(e) {
+    const detail = (e && e.detail) || {};
+    if (!detail.id) return;
+    const scene = getScene(detail.id, detail.params || {});
+    if (!scene) return;
+    const sceneStack = this.data.sceneStack.concat(scene);
+    this.setData({ sceneStack: sceneStack, sceneCurrent: scene });
+  },
+  backScene() {
+    if (this.data.sceneStack.length <= 1) {
+      this.closeScene();
+      return;
+    }
+    const sceneStack = this.data.sceneStack.slice(0, -1);
+    this.setData({ sceneStack: sceneStack, sceneCurrent: sceneStack[sceneStack.length - 1] });
+  },
+  closeScene() {
+    this.setData({ sceneStack: [], sceneCurrent: null });
+  },
+  onOrderChanged(e) {
+    const scene = this.data.sceneCurrent;
+    if (!scene || scene.id !== 'member-order-detail'
+      || String(scene.params.id) !== String(e.detail && e.detail.id)) return;
+    const content = this.selectComponent('#orderHistory');
+    if (content) content.retryList();
+  },
+  onShareAppMessage(event) {
+    // 只接活动分享按钮(event.from === 'button');菜单转发已隐藏,不分享订单列表本身
+    return activityShareFromEvent(event) || { title: '城瘾', path: '/pages/index/index' };
+  },
+});

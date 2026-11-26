@@ -1,0 +1,99 @@
+@import '../../style/merchant-light-scope.wxss';
+
+/* ============================================
+   模板页外壳：顶栏 + 发布入口 + 底栏。
+   货架本体(2026-10-28 业主定稿原型 v21)在 pages/templatedetail/shelf/。
+   ============================================ */
+
+/* 页面外露区域也跟随当前主题:merchant-day 灰底 / consumer-night 深空底。
+   旧 --cy-bg-card 在 page 节点先求值,共享页商家作用域无法覆盖,会形成横向色带。 */
+page { background: var(--cy-color-bg-page) !important; }
+/* 共享发布页:商家(.theme-merchant)时根容器撑满并吃浅底,盖住 page{} 的暗底 */
+.tpl-page {
+  min-height: 100vh;
+  background: var(--cy-color-bg-page);
+  color: var(--cy-color-text-primary);
+  display: flex;
+  flex-direction: column;
+}
+
+
+/* ========== TOP BAR (胶囊避让) ========== */
+.topbar {
+  width: 100%; position: fixed; left: 0; top: 0; z-index: 22;
+  background: var(--cy-color-bg-page);
+}
+/* V3-43(2026-11-09 业主「顶部是黑色的 看起来没有全屏覆盖」):玩家态货架的封面光晕要铺到状态栏和导航栏底下。
+   未滚动时顶栏透明;一滚动(topbarSolid)才恢复页面底色,免得内容从铃铛后面透出来。商家浅色态不变。 */
+.tpl-page.theme-dark .topbar { transition: background-color var(--cy-motion-standard) var(--cy-ease-standard); }
+.tpl-page.theme-dark .topbar:not(.topbar--solid) { background: transparent; }
+.titBar {
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 var(--cy-page-x);
+  position: relative;
+}
+
+/* ========== PAGE HEADER(画板05 2026-08-20:头像+铃铛+搜索+分类,玩家态页标题撤销;
+   商家态 2026-08-25 补回居中标题,见 .tpl-hd-title。头像 2026-09-19 两态均撤) ========== */
+.tpl-hd-space { flex: 1; }
+/* 商家「模板」tab 的居中标题:绝对定位跨满 .titBar 的 padding box ⇒ 几何居中,
+   头像/铃铛再宽也推不偏(与 cy-nav-bar 的 .nav__title 同度量:36rpx / 700)。
+   左右留 96rpx 让位给头像与铃铛的命中区。 */
+.tpl-hd-title {
+  position: absolute;
+  left: 96rpx;
+  right: 96rpx;
+  text-align: center;
+  font-size: var(--cy-font-title);
+  font-weight: 700;
+  color: var(--cy-text-title);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.tpl-bell { width: 44rpx; height: 44rpx; box-sizing: content-box; padding: 22rpx; flex-shrink: 0; }
+.tpl-page.theme-dark .tpl-bell { filter: invert(1); }
+
+/* P2-16:页尾安全占位。原 120rpx 比 tabBar(104rpx + 安全区)还矮,末条内容必被压住;
+   这里 = tabBar 占位 + 上下各一个 float-gap + 悬浮发布钮自身高度(84rpx,同 .fab),
+   保证滚到底时最后一行既不进 tabBar 也不进浮钮的覆盖带。 */
+.tpl-bottom-safe {
+  height: calc(var(--cy-tabbar-h) + var(--cy-float-gap) * 2 + 84rpx);
+}
+
+/* ===== 悬浮发布按钮(C3:原 components/touch 胶囊收编进页面,弹窗换 cy-publish-sheet) ===== */
+.fab {
+  position: fixed;
+  width: var(--cy-comp-publish-trigger);
+  height: var(--cy-comp-publish-trigger);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cy-color-text-inverse);
+  background: var(--cy-color-text-primary);
+  border-radius: var(--cy-radius-pill);
+  bottom: calc(var(--cy-tabbar-h) + var(--cy-float-gap));
+  right: var(--cy-page-x);
+  z-index: var(--cy-z-tabbar);
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+  transition: transform var(--cy-comp-publish-float) var(--cy-comp-publish-ease), opacity var(--cy-motion-standard) var(--cy-ease-out);
+}
+.fab--open {
+  opacity: 0;
+  transform: translate3d(0, var(--cy-space-3), 0) scale(.55);
+  pointer-events: none;
+  transition: transform var(--cy-motion-standard) var(--cy-ease-out), opacity var(--cy-motion-standard) var(--cy-ease-out);
+}
+.fab--reduced { transition: none; }
+
+.merchant-readonly-note {
+  margin: 12rpx 32rpx 8rpx;
+  padding: 18rpx 22rpx;
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-bg-card-2);
+  color: var(--cy-text-secondary);
+  font-size: var(--cy-font-label);
+  line-height: 1.45;
+}

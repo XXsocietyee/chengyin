@@ -1,0 +1,7 @@
+{
+  "component": true,
+  "usingComponents": {
+    "cy-fe-reference-settlement": "/components/cy/fe-reference-settlement/index",
+    "cy-date-field": "/components/cy/date-field/index"
+  }
+}

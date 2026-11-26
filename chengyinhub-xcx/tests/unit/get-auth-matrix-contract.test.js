@@ -1,0 +1,1062 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { maskJsNonCode } = require('../../../ci/api-existence-gate.js');
+
+const XCX_ROOT = path.resolve(__dirname, '../..');
+const SECURITY = path.resolve(
+  XCX_ROOT,
+  '../chengyinhub-framework/src/main/java/com/chengyinhub/framework/config/SecurityConfig.java'
+);
+const CLUB_LEAD_CONTROLLER = path.resolve(
+  XCX_ROOT,
+  '../chengyinhub-admin/src/main/java/com/chengyinhub/web/controller/api/ApiClubLeadController.java'
+);
+const ROAM_CONTROLLER = path.resolve(
+  XCX_ROOT,
+  '../chengyinhub-admin/src/main/java/com/chengyinhub/web/controller/api/ApiRoamController.java'
+);
+const PLAY_PROGRESS_CONTROLLER = path.resolve(
+  XCX_ROOT,
+  '../chengyinhub-admin/src/main/java/com/chengyinhub/web/controller/api/ApiPlayProgressController.java'
+);
+// W8 起控制器只把 currentMemberId() 交给应用服务，会员/游玩事实校验在应用服务内完成。
+const PLAY_PREFERENCE_APPLICATION = path.resolve(
+  XCX_ROOT,
+  '../chengyinhub-admin/src/main/java/com/chengyinhub/web/service/play/PlayPreferenceApplication.java'
+);
+const PLAY_PLAYER_QUERY_APPLICATION = path.resolve(
+  XCX_ROOT,
+  '../chengyinhub-admin/src/main/java/com/chengyinhub/web/service/play/PlayPlayerQueryApplication.java'
+);
+
+// GET调用点显式权限清单；新增调用逐条复核。static = /profile/** 已公开的平台相册元数据。
+// optional = 后端允许匿名，但登录时会按 uid 返回个人态，所以仍使用默认认证；
+// required = 后端 anyRequest().authenticated()，绝不能 auth:false。
+const MATRIX = [
+  // 2026-11-14 owner：公开 GET 精确放行，保留登录态以读取个性投影；本人订单等仍保持 required。
+  ['subpackageP3/pages/growthcenter/leaderboard/index.js', "url: '/api/growth/leaderboard'", 'optional', 'visitor/member', 'public-list+viewer-personalization'],
+  ['pages/search2/result/index.js', "url: '/api/search/unified'", 'optional', 'visitor/member', 'public-list+viewer-personalization'],
+  // 2026-11-10 l-pass 通行证(ApiPlatformPassController,不在 SecurityConfig 放行清单,落 anyRequest().authenticated();
+  //   requireMemberId 只取登录态):概览 = 在售套餐 + 本人有效期;公开主题库已改用匿名 POST,不属于 GET 矩阵;
+  //   订单详情按订单号 + 本人归属,他人订单回「订单不存在」。
+  ['subpackageMember/market/membership/index.js', "url, method: 'GET', data: data || {}", 'required', 'member', 'self-account'],
+  ['subpackageMember/market/passes/index.js', "url: '/api/platform-pass'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 2026-11-22 平台兑换码(owner 方案 B):通行证页入口与礼品页兑换码模式读开关 GET /api/channel/redeem/status
+  //   (ApiChannelRedemptionController,不在放行清单,requireAppMemberId;只回全局开关布尔,不含码/批次/他人信息)。
+  ['subpackageMember/market/passes/index.js', "url: '/api/channel/redeem/status', method: 'GET'", 'required', 'member', 'global-authenticated-read'],
+  ['subpackageMember/market/gift/index.js', "url: '/api/channel/redeem/status', method: 'GET'", 'required', 'member', 'global-authenticated-read'],
+  ['subpackageMember/utils/platform-pass-pay.js', "url: '/api/platform-pass/orders/' + orderNo, method: 'GET'", 'required', 'member', 'self-account'],
+  // 2026-11-13 pass-mini:回到订单继续支付先读本人订单;订单详情页读本人订单(同 ApiPlatformPassController.order,按订单号 + 本人归属);我的订单读 /api/platform-pass/orders 走 passes 页既有 get 封装。
+  ['subpackageMember/utils/platform-pass-pay.js', "url: '/api/platform-pass/orders/' + encodeURIComponent(orderNo), method: 'GET'", 'required', 'member', 'self-account'],
+  ['subpackageMember/market/pass-order/index.js', "url: '/api/platform-pass/orders/' + encodeURIComponent(this._orderNo), method: 'GET'", 'required', 'member', 'self-account'],
+  // 2026-11-19 OR-024:退款页须知读通行证概览 terms(公开概览,同 passes 页入口卡)。
+  ['subpackageMember/market/pass-order/index.js', "url: '/api/platform-pass', method: 'GET'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 2026-11-10 qx-b5(qx-c3 补登,按服务端实际守卫;以下路径均不在 SecurityConfig 放行清单,落 anyRequest().authenticated()):
+  //   报名页促销目录 ApiMarketingPromotionController /catalog:requireAppMemberId,按场次回目录并带本人可用性。
+  ['pages/activity/baoming/baoming.js', "url: '/api/marketing/promotions/catalog'", 'required', 'member', 'public-detail+viewer-personalization'],
+  //   收益明细分佣(cy-revenue-allocations 组件) ApiMarketingRevenueController /author/mine:listByAuthor(requireAppMemberId),只回本人分项。
+  ['subpackageA/components/revenue-allocations/index.js', "url: '/api/marketing/revenue/author/mine'", 'required', 'member', 'self-account'],
+  //   视频悬赏 get() 只服务 /submission/mine 与 /accrual/mine,ApiVideoBountyController 均按 requireAppMemberId 本人过滤。
+  ['subpackageA/pages/video-bounty/index.js', "url, method: 'GET', data: data || {}", 'required', 'member', 'self-account'],
+  // 2026-11-21 1121 N5:我的页只取本人投稿条数决定「视频悬赏」入口是否收起(同 /submission/mine 端点与权限档)。
+  ['subpackageMember/components/cy/profile/index.js', "url: '/api/video-bounty/submission/mine', method: 'GET'", 'required', 'member', 'self-account'],
+  //   通行证详情 ApiMarketingProductController /{productId}:catalogService.detail,无会员维度;/orders 按 requireAppMemberId 本人。
+  ['subpackageMember/market/pass/index.js', "url: '/api/marketing/product/' + encodeURIComponent(this._id)", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 1122 OR-009:支付回跳按单号读本人一单(ApiMarketingProductController /orders/{orderNo},requireAppMemberId + 本人归属)。
+  ['subpackageMember/market/pass/index.js', "url: '/api/marketing/product/orders/' + encodeURIComponent(orderNo), method: 'GET'", 'required', 'member', 'self-account'],
+  // 2026-11-10 r2-store:主题结账层列覆盖本主题的通票、发现页通票入口卡,同通行证列表一个在售目录端点(需登录)。
+  ['pages/topic/index/index.js', "url: '/api/marketing/product/list'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 2026-11-22 biz/finish-offer-1122 R4:同页分享层「送礼」再读一次同一在售目录(只挑可赠送且覆盖本主题的商品),同端点同权限档。
+  ['pages/topic/index/index.js', "url: '/api/marketing/product/list'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 2026-11-22 biz/group-ticket-1122:购买层双人票 / 小队票按 topicId 读同一在售目录(listSellable 公开,无会员维度),同端点同权限档。
+  ['pages/topic/index/index.js', "url: '/api/marketing/product/list'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['pages/talent/list/index.js', "url: '/api/marketing/product/list'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 2026-11-24 DEC-F12 A:主题页结算层买多人票,付款回跳按单号读本人一单(同 /orders/{orderNo},requireAppMemberId + 本人归属)。
+  ['pages/topic/index/index.js', "url: '/api/marketing/product/orders/' + encodeURIComponent(orderNo), method: 'GET'", 'required', 'member', 'self-account'],
+  // 2026-11-24 DEC-F12 B:票夹读本人已领取的同伴席位(ApiRegistrationSeatInvitationController /mine,requireMember + invitee_member_id = 本人)。
+  ['subpackageMember/signup/index.js', "url: '/api/play/seat-invitations/mine', method: 'GET'", 'required', 'member', 'self-account'],
+  //   通行证列表 get() 服务 /list(listSellable,无会员维度)与 /orders、/gifts/bought、/gifts/received(均 requireAppMemberId 本人);
+  //   同一调用点按其中最严的本人档登记,四个端点都必须登录。
+  ['subpackageMember/market/passes/index.js', "url, method: 'GET', data: data || {}", 'required', 'member', 'self-account'],
+  // 原写入回执仅按登录态actor读取，operation和requestId不接受会员ID。
+  ['utils/author-write-recovery.js', "url: '/api/author-write/receipt'", 'required', 'member', 'self-account'],
+  // Team board reads retain authenticated access; detail additionally enforces active team membership.
+  ['pages/team/detail/index.js', "url: '/api/orient/team/detail'", 'required', 'member', 'active-team-member'],
+  ['pages/team/detail/index.js', "url: '/api/orient/team/ranking'", 'required', 'member', 'global-authenticated-read'],
+  // 2026-10-28 L6 本场招募:我的队伍按场次读公开队伍(OrientTeamBoardServiceImpl.lobby requireLogin,只列公开招募中的队伍)。
+  ['subpackageRoam/my-teams/index.js', "url: '/api/orient/team/lobby'", 'required', 'member', 'global-authenticated-read'],
+  // 契约 §1.3 / §4:主题详情开局前准备读 /api/play/setup(requireLogin,只读已发布主题);活动详情联系主办读 /api/play/contact(requireLogin,只回俱乐部名称与电话)。
+  ['pages/topic/index/index.js', "url: '/api/play/setup'", 'required', 'member', 'public-detail+viewer-personalization'],
+  ['pages/topic/index/index.js', "url: '/api/free-explore/bundle/catalog'", 'required', 'member', 'public-detail+viewer-personalization'],
+  ['pages/activity/components/event-attendance/index.js', "url:'/api/play/contact'", 'required', 'member', 'public-detail+viewer-personalization'],
+  ['subpackageMember/orient-score/index.js', "url: '/api/play/orient/session/current'", 'required', 'member', 'self-account'],
+  ['subpackageMember/orient-score/index.js', "url: BASE + '/session/'", 'required', 'member', 'self-account'],
+  ['subpackageMember/orient-score/index.js', "url: BASE + '/receipt'", 'required', 'member', 'self-account'],
+  ['subpackageMember/character/index.js', "url: '/api/play/character'", 'required', 'member', 'self-account'],
+  ['subpackageMember/components/scene-member-participation-detail/index.js', "url: '/api/play/character'", 'required', 'member', 'self-account'],
+  // 原发送结果只读恢复：本人请求回执，且服务端再次校验当前发布主体/岗位；两端均保留默认认证。
+  ['pages/coop/invite/index.js', "url: '/api/coop/invite/request'", 'required', 'member/merchant-operator/club-owner', 'self-account'],
+  ['pages/coop/invite/index.js', "url: '/api/coop/invite/requests'", 'required', 'member/merchant-operator/club-owner', 'self-account'],
+  ['subpackageMember/components/cy/coop-invite-sheet/index.js', "url: '/api/coop/invite/request'", 'required', 'member/merchant-operator/club-owner', 'self-account'],
+  ['subpackageMember/components/cy/coop-invite-sheet/index.js', "url: '/api/coop/invite/requests'", 'required', 'member/merchant-operator/club-owner', 'self-account'],
+  // 两处目录许可读取已合并为同一受限相对路径 reader，保持公开静态资源权限。
+  ['utils/roam-place-detail.js', "url, data, method: 'GET'", 'optional', 'visitor/member', 'public-catalog-place'],
+  ['utils/roam-place-media.js', "url, method: 'GET', auth: false", 'static', 'visitor/member', 'public-profile-gallery'],
+  // 实际作者页面的受控requestOwnMedia不属于req简写；五个caller逐个归真实本人资产。
+  ['pages/privacy/index.js', "this.requestOwnMedia('/api/media/asset/list', 'GET'", 'required', 'author', 'owned-media-asset'],
+  ['pages/privacy/index.js', 'loadOlderMedia() {', 'required', 'author', 'owned-media-asset'],
+  ['pages/privacy/index.js', 'checkOwnMedia(event) {', 'required', 'author', 'owned-media-asset'],
+  ['pages/privacy/index.js', 'previewOwnMedia(event) {', 'required', 'author', 'owned-media-asset'],
+  ['pages/privacy/index.js', 'copyApprovedMedia(event) {', 'required', 'author', 'owned-media-asset'],
+  // 媒体上传重试先回读自己本次pending asset：ApiMediaAssetController.status→owned严格作者uid。
+  ['utils/transport/upload-client.js', "sender({ url: '/api/media/asset/' + pendingId, method: 'GET'", 'required', 'author', 'owned-media-asset'],
+  // U04：本人主题历史、结果卡与四处重玩许可/新局核对；默认认证，服务端按登录会员校验归属。
+  ['utils/theme-records.js', "req('/api/play/theme/history'", 'required', 'member', 'self-member-history'],
+  ['utils/theme-records.js', "req('/api/play/theme/card'", 'required', 'member', 'self-member-history'],
+  ['utils/theme-records.js', "req('/api/play/theme/state', 'GET', { topicId: view.topicId", 'required', 'member', 'self-member-history'],
+  ['utils/theme-records.js', "req('/api/play/theme/state', 'GET', { topicId: old.topicId,", 'required', 'member', 'self-member-history'],
+  ['utils/theme-records.js', "req('/api/play/theme/state', 'GET', { topicId: old.topicId ||", 'required', 'member', 'self-member-history'],
+  ['utils/theme-records.js', "req('/api/play/theme/state', 'GET', { topicId: this._themeReplayAttempt.topicId", 'required', 'member', 'self-member-history'],
+  // 共享控制台按本场关联俱乐部 EVENT_OPERATE 校验，保留默认认证。
+  ['pages/club/topic-detail/plan-fallback.js', "url: '/api/game/session/shared/control'", 'required', 'club/EVENT_OPERATE', 'club-owned-activity'],
+  ['pages/club/topic-detail/plan-fallback.js', 'loadPlanFallback() {', 'required', 'club/EVENT_OPERATE', 'club-owned-activity'],
+  ['pages/publish/utils/publish/gameplay-support-matrix.js', "url: '/api/play/theme/support-matrix'", 'required', 'author', 'global-authenticated-read'],
+  // 俱乐部直付应收只读：商家岗位 FINANCE_READ 派生店主，俱乐部按当前主理人归属校验。
+  ['components/cy/club-direct-ledger/index.js', "url: scope.kind === 'club'", 'required', 'merchant/club', 'owned-merchant-or-club-receivable'],
+  // 2026-10-29 M-32:俱乐部计酬并进账户收益「本月收入明细」,同端点同权限档(商家 FINANCE_READ 派生店主)。
+  ['subpackageA/components/earnings-overview/index.js', "url: '/api/club-direct-merchant/merchant'", 'required', 'merchant', 'owned-merchant-or-club-receivable'],
+  // 2026-11-18 F11 自由探索参考结算:店铺按商家岗位 FINANCE_READ 派生店主只读本店;收款人按场次收款人规则只读本人场次。
+  ['components/cy/fe-reference-settlement/index.js', "url: kind === 'payer'", 'required', 'merchant/session-payee', 'owned-merchant-or-club-receivable'],
+  // 2026-11-22 P1-10 参考结算 CSV 导出:与上一条列表同一控制器同一归属(店铺 FINANCE_READ 派生店主 / 场次收款人本人),复用同一条查询。
+  ['pages/merchant/components/cy/fe-reference-range/index.js', "url: (kind === 'payer' ? '/api/fe/reference-settlement/payer' : '/api/fe/reference-settlement/merchant') + '/export'", 'required', 'merchant/session-payee', 'owned-merchant-or-club-receivable'],
+  ['pages/club/components/cy/fe-reference-range/index.js', "url: (kind === 'payer' ? '/api/fe/reference-settlement/payer' : '/api/fe/reference-settlement/merchant') + '/export'", 'required', 'merchant/session-payee', 'owned-merchant-or-club-receivable'],
+  // 2026-11-18 F11 权益卡表单线下结算说明:登录即可读,只回自由探索章节的主办方名(已在店铺核销记录公开展示)。
+  ['pages/topic/components/cy/chapter-node-form/index.js', "url: '/api/fe/reference-settlement/note'", 'required', 'merchant/author', 'global-authenticated-read'],
+  // 自由探索定价后状态/结算待处理：服务端按主题发布者(商家岗位解析店主)校验，只返回本人主题/本人场次。
+  ['pages/topic/pricing/index.js', "url: '/api/topic/pricing/sale-status'", 'required', 'author/merchant', 'owned-merchant-resource'],
+  ['pages/topic/pricing/index.js', "url: '/api/topic/pricing/settlement-pending'", 'required', 'author/merchant', 'owned-merchant-resource'],
+  // 2026-11-18 F10:自由探索作者位置承接进度,服务端按 topic.member_id 校验,只读作者本人主题。
+  ['utils/fe-author-sale.js', "url: '/api/topic/fe/sale-readiness'", 'required', 'author', 'self-publisher'],
+  // 商家套票预约：VERIFY 岗位派生店主，只读本店预约。
+  ['pages/merchant/bundle-reservations/index.js', "url: '/api/free-explore/bundle/merchant/reservations'", 'required', 'merchant/VERIFY', 'owned-merchant-or-club-receivable'],
+  ['pages/deregister/deregister-flow.js', "sendUiStateRequest(app, '/api/user/deregister/status'", 'required', 'member', 'self-account'],
+  ['pages/deregister/deregister-flow.js', "sendUiStateRequest(app, '/api/user/deregister/status', { method: 'GET',", 'required', 'member', 'self-account'],
+  // D-73：漫游任务列表改读 active-for-roam（服务端已按报名中/进行中 + 绑定漫游过滤），权限档不变
+  ['subpackageRoam/components/cy/scene-roam-task-list/index.js', "url: '/api/official/active-for-roam'", 'optional', 'visitor/member', 'public-list+viewer-personalization'],
+  ['subpackageRoam/components/cy/scene-roam-task-list/index.js', "url: '/api/official/my-events'", 'required', 'member', 'self-registration'],
+  ['pages/activity/official-inbox/index.js', "url: '/api/official/v2/party-inbox'", 'required', 'member', 'self-party'],
+  ['pages/merchant/coop-center/index.js', "url: '/api/official/events'", 'optional', 'visitor/member', 'public-list+viewer-personalization'],
+  ['pages/coop/list/index.js', "url: '/api/official/merchant-invites'", 'required', 'merchant', 'self-merchant'],
+  // 已认证主题 owner / 商家 PROJECT_MANAGE 派生 owner，仅查该主题和指定商家的合法未占用站点。
+  ['pages/coop/invite/index.js', "url: '/api/coop/supply-stations'", 'required', 'topic-owner/merchant-PROJECT_MANAGE', 'owned-topic-target-merchant-stations'],
+  ['pages/activity/list/index.js', "url: '/api/official/can-publish'", 'required', 'publisher', 'self-capability'],
+  ['pages/activity/list/index.js', "url: '/api/official/events'", 'optional', 'visitor/member', 'public-list+viewer-personalization'],
+  ['pages/activity/list/index.js', "url: '/api/official/my-events'", 'required', 'member', 'self-registration'],
+  ['pages/activity/official-mine/index.js', "url: '/api/official/my-published'", 'required', 'publisher', 'self-publisher'],
+  // CL4 主办控制台:publish-check 由后端 canPublish(白名单)+ canReadControlledEvent(本场主办/协办)双重校验,
+  //   非主办一律拒绝;本页与详情页只拿它判断「是否显示主办控件」,不接受前端传身份。
+  ['pages/activity/official-organizer/index.js', "url: `/api/official/v2/events/${this._id}/publish-check`", 'required', 'publisher', 'controlled-event-operator'],
+  ['pages/activity/official-organizer/index.js', "url: '/api/official/events/' + this._id", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['pages/activity/official-organizer/index.js', "url: '/api/official/my-published'", 'required', 'publisher', 'self-publisher'],
+  ['pages/activity/official-detail/index.js', "url: `/api/official/v2/events/${this.data.id}/publish-check`", 'required', 'publisher', 'controlled-event-operator'],
+  // CL4 N5:NPC 对话导出,身份只取登录态(getAppUserId),端点不收任何用户 ID。
+  ['subpackageMember/components/cy/npc-chat/index.js', "url: '/api/ai/npc/chat/data/export'", 'required', 'member', 'self-account'],
+  // f-compliance OFF-AI-DEL-01:设置页「AI 对话记录」导出同一接口,身份只取登录态。
+  ['subpackageMember/components/cy/ai-chat-records/index.js', "url: '/api/ai/npc/chat/data/export'", 'required', 'member', 'self-account'],
+  ['pages/activity/official-detail/index.js', "url: '/api/official/events/' + id", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // f-pages OFF-FAV-01:我的收藏「据点」页签读本人收藏的据点;服务端 uid() 取登录身份,未登录拒绝,不收任何用户 ID。
+  // club-payout-binding:个人收款状态;服务端只认登录人且须为俱乐部主,clubId 仅用于归属校验。
+  ['pages/club/payout-receiver/index.js', "url: '/api/club/personal-receiver/status'", 'required', 'member', 'self-account'],
+  ['pages/mylike/mylike.js', "url: '/api/city/nodes/favorites'", 'required', 'member', 'self-account'],
+  ['pages/searchmap/index.js', "url: '/api/city/nodes'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 2026-10-29 V-06:漫游顶部搜地点在腾讯地点搜索回空/失败时查商家节点库兜底(同 searchmap 一档)
+  ['components/cy/map-address-search/index.js', "url: '/api/city/nodes'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 2026-11-04 第九轮 m4(owner 批准):分享来的据点游客可读(SecurityConfig 精确 GET 数字 id),游客走 CityNodeGuestProjection。
+  ['subpackageMember/components/cy/scene-roam-poi-detail/index.js', "url: '/api/city/nodes/' + this.data.poiId", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['subpackageMember/components/cy/scene-roam-poi-detail/index.js', "url: '/api/city/nodes/' + ratingPoiId", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 第九轮 m1 第 3 项:漫游地点卡只读同一个节点详情接口里的评分(与上一条同一后端、同一权限)
+  ['subpackageRoam/components/roam-place-card/index.js', "url: '/api/city/nodes/' + p.shareId", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 2026-10-25 官方地点:地图点位卡展开读节点(相册 / 玩法 / 完成状态),挑战页读同一节点,与据点详情同端点同权限档。
+  ['subpackageRoam/nearby/index.js', "url: '/api/city/nodes/' + id", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['pages/play/poi-challenge/index.js', "url: '/api/city/nodes/' + this._poiId", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['utils/game-session-client.js', "url: '/api/game/session/view'", 'required', 'player/merchant/club', 'activity-perspective-access'],
+  ['utils/game-session-client.js', "url: '/api/game/session/merchant/entries'", 'required', 'merchant', 'self-merchant-game-entry'],
+  /* 2026-09-11 本分支新增:承接页的「本站」入口自己也要按 topicId 过滤一遍本商家的场次
+     —— 与上面 game-session-client 那处同一个端点、同一套权限(required/merchant),
+     区别只是调用方。后端按当前登录商家派生 activityId,前端不传也不能传别人的。 */
+  ['pages/topic/merchantinfo/merchantinfo.js', "url: '/api/game/session/merchant/entries'", 'required', 'merchant', 'self-merchant-game-entry'],
+  // 2026-11-22 P1-2 已生效供给改说明前读回展示条款:COOP_MANAGE 派生店主,service + mapper where 双层按 merchant_id 归属。
+  ['pages/topic/merchantinfo/merchantinfo.js', "url: '/api/coop/offer/display-terms'", 'required', 'merchant', 'owned-merchant-resource'],
+  /* 2026-09-24 CU-C-68:开「更多」抽屉时用**同一端点**预探一次「本人是否承接了本站」,
+     没入口就把那四行置灰(原来主办方账号点下去只会得到「当前商家不负责本场站点」)。
+     权限档与上面那条逐字相同(required/merchant,后端按登录商家派生),只是第二个调用点;
+     marker 带上 silentError 让两条各自可定位。 */
+  ['pages/topic/merchantinfo/merchantinfo.js', "url: '/api/game/session/merchant/entries', method: 'GET', hideLoading: true, silentError: true", 'required', 'merchant', 'self-merchant-game-entry'],
+  ['utils/game-session-client.js', "url: '/api/game/session/recap/export'", 'required', 'club', 'club-owned-activity'],
+  ['utils/game-session-client.js', "url: '/api/game/session/receipt'", 'required', 'player/merchant/club', 'activity-perspective-access'],
+  ['utils/game-session-client.js', "url: exported ? '/api/game/session/shared/export'", 'required', 'club/EVENT_OPERATE', 'club-owned-activity'],
+  ['pages/play/index.js', "req('/api/play/nodes'", 'required', 'member', 'current-session'],
+  // R29C:只读登录会员的原会话快照，服务端逐项校验会话/会员/场次/主题及历史可读性。
+  ['pages/play/index.js', "req('/api/play/history'", 'required', 'member', 'current-session'],
+  /* 2026-11-18 FE-STORY 7.4 票过期只读集章册:同一 ApiPlayProgressController.history,不带 routeSessionId 时
+     走 freeExploreVisitedHistory —— 未登录拒,只下发本人(或同票同队)到访过的章节与地点,非自由探索拒。 */
+  ['pages/play/utils/fe-story-gate.js', "req('/api/play/history'", 'required', 'member', 'current-session'],
+  // qx-b1 UG-05/07:提示阶梯层级与只读分数明细。服务端按 topic_route_session.id 解析原局并校验本人、主题与节点,不含正文。
+  ['pages/play/index.js', "req('/api/play/help', 'GET'", 'required', 'member', 'current-session'],
+  ['pages/play/index.js', "req('/api/play/help/receipt', 'GET'", 'required', 'member', 'current-session'],
+  /* 2026-09-18 R14/故事变量:profile 提交成功后的补拉 —— 与首屏同端点同权限档,只是第二处调用点。
+     行尾「// 补拉」让 marker 唯一,不然两条都会 resolve 到首屏那一处。 */
+  ['pages/play/index.js', "req('/api/play/nodes', 'GET', params).then((res) => { // 补拉", 'required', 'member', 'current-session'],
+  /* 2026-09-18 R14 旅程检定:节点卡打开时探测这一拍有没有检定。后端 ApiPlayEncounterController
+     currentMemberId()<=0 直接拒,resolve(memberId, topicId, nodeId) 读的是本人这一局的 run —— 与 /api/play/nodes 同档。 */
+  ['pages/play/index.js', "req('/api/play/encounter'", 'required', 'member', 'current-session'],
+  /* 2026-09-24 结局 + 这一生的档案:ApiPlayJourneyController.ending currentMemberId()<=0 直接拒,
+     读的是本人本局(完成后才给)的结局与本人各站留下的东西 —— 与 /api/play/nodes 同档。 */
+  ['pages/play/index.js', "req('/api/play/journey/ending'", 'required', 'member', 'current-session'],
+  /* 2026-10-22 L21 BL-186 章节阶段结算:ApiPlayJourneyController.stageEnd 同一控制器,currentMemberId()<=0 直接拒,
+     读本人本局 session 的本章结算 —— 与 /journey/ending 同档。 */
+  ['pages/play/index.js', "req('/api/play/journey/stage-end'", 'required', 'member', 'current-session'],
+  /* 2026-11-19 角色 Cast v1:台词配音地址 ApiTopicController.castVoice(GET /api/topic/cast/voice),memberId<=0 直接拒;
+     已发布主题登录即可听、草稿只有主题主人,按 runId 只读本人本局的名字代入 {玩家} —— 点了才读,不写。 */
+  ['pages/play/utils/cast-play.js', "req('/api/topic/cast/voice', 'GET'", 'required', 'member', 'public-detail+viewer-personalization'],
+  /* 2026-10-22 L21 BL-185 主题发布前试检查:ApiTopicStateKeyController.publishCheck 走 editableDenial ——
+     登录 →(scope=MERCHANT 时 PROJECT_MANAGE 取 Owner 主体)→ 主题本人;只读不改状态。 */
+  ['pages/publish/fabu/index.js', "url: '/api/topic/publish-check'", 'required', 'publisher', 'self-publisher'],
+  /* 2026-11-18 FE-STORY 7.10 地点到访方式:主题控制器下的到访方式读取 → FreeExploreVisitConfigApplication.authorGate ——
+     未登录拒(401),非主题作者本人 403,非自由探索主题拒;只读本主题地点的到访方式。 */
+  ['pages/publish/fabu/theme-fe-visit.js', "url: '/api/topic/free-explore/visit-config', method: 'GET'", 'required', 'publisher', 'self-publisher'],
+  // unknown 回执的权威回读：与 play/index 同一接口、同一 session 参数，权限档位一致。
+  ['pages/play/merchant/index.js', "url: '/api/play/nodes'", 'required', 'member', 'current-session'],
+  ['pages/play/utils/theme-backpack.js', "req('/api/play/theme/state'", 'required', 'member', 'current-session'],
+  ['pages/play/index.js', "req('/api/play/route-state'", 'required', 'member', 'current-session'],
+  ['pages/play/index.js', "req('/api/club/lead/team-progress'", 'required', 'leader/paid-member', 'activity-lead-access'],
+  ['pages/play/index.js', "req('/api/play/companionLine'", 'required', 'member', 'current-session'],
+  ['pages/play/index.js', "req('/api/play/preference/' + nodeId", 'required', 'member', 'current-session'],
+  ['pages/play/index.js', "req('/api/play/ending'", 'required', 'member', 'current-session'],
+  ['pages/play/index.js', "req('/api/play/leaderboard'", 'required', 'member', 'current-session'],
+  ['pages/play/index.js', "req('/api/play/os/' + topicId", 'required', 'member', 'self-member-history'],
+  // 2026-09-05 漫游·附近的局:走默认认证(后端 anyRequest().authenticated()),viewer 视角决定 isMember 与拉黑过滤。
+  //   (原文写「两条 GET」——另一条 /api/roam/hangout/detail 同日随组局下线撤走,这里只剩 nearby 一条。)
+  ['subpackageRoam/nearby/index.js', "url: '/api/roam/hangout/nearby'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 2026-09-17 第二轮拍板 22:首页「继续游戏」只列本人仍可继续的游戏会话(服务端按 uid 取,不收 memberId 参数)。
+  // 2026-09-17 第二轮拍板 17:朋友分享的足迹快照,未登录可读;只凭随机 32 位令牌取已裁剪/平移的快照,不带分享者身份。
+  ['utils/roam-share-snapshot.js', "url: '/api/roam/share/snapshot', method: 'GET'", 'optional', 'visitor/member', 'share-token-snapshot'],
+  // 2026-11-03 第九轮 m-rain:漫游地图天气氛围,匿名可读(SecurityConfig 精确 GET),只回 kind/intensity,按 IP 限流。
+  ['subpackageRoam/components/map-weather/index.js', "url: '/api/map/weather', method: 'GET'", 'optional', 'visitor/member', 'public-map-weather'],
+  // 2026-09-15 地图组队 P 方案:附近公开队伍。ApiPlayTeamController#nearby 走 getAppUserId 未登录即拒;viewerStatus/pendingCount 按 viewer 算。
+  // (同日下线组局的 /api/roam/pois 与 /api/roam/hangout/detail 两条 GET:地图上不再有局卡与打卡点列表。
+  //  同日撤掉漫游地图 f-hangout 一档:roam 不再调 /api/roam/hangout/nearby,搭子局已下线,该卡整卡退场。)
+  ['subpackageRoam/nearby/index.js', "url: '/api/team/nearby'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 2026-10-14 漫游上线:我的队伍页「附近招募」读同一端点(同一权限档);那年今日 / 月度回顾只读本人完成记录(归档已审分类)。
+  ['subpackageRoam/my-teams/index.js', "url: '/api/team/nearby'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['subpackageTools/utils/features/exploration-anniversary.js', "url: '/api/exploration-anniversary'", 'required', 'member', 'self-member-history'],
+  ['subpackageTools/utils/features/monthly-recap-client.js', "url: '/api/monthly-recap'", 'required', 'member', 'self-member-history'],
+  // 2026-10-19 移植共享基线(W2):认领门店状态只读本人认领(ApiMerchantClaimController#status 按 getAppUserId);
+  //   主题状态键只读本人可编辑主题(ApiTopicStateKeyController 校验发布者);官方路线列表/详情走 /api/preset 已登录读(非 permitAll)。
+  ['pages/merchant/components/merchant-claim-sheet/index.js', "url: '/api/merchant/claims/status', method: 'GET'", 'required', 'member', 'self-account'],
+  ['pages/publishkit/components/topic-state-keys/index.js', "url: '/api/topic/state-keys', method: 'GET'", 'required', 'publisher', 'self-publisher'],
+  // 文档二 L3：下一站条件与效果读同一个注册表补名字（主题本人或商家代管 scope）。
+  ['pages/publish/fabu/theme-route-names.js', "url: '/api/topic/state-keys', method: 'GET'", 'required', 'publisher', 'self-publisher'],
+  // 2026-11-19 cast-contract-1119:编辑角色弹窗「试听」预设声音。同一 GET /api/topic/cast/voice 的试听模式(只给 preset):登录即可,念服务端固定示例句(ApiTopicController.castVoice,MEMBER 限流)。
+  ['pages/publish/fabu/theme-cast.js', "url: '/api/topic/cast/voice', method: 'GET'", 'required', 'publisher', 'self-publisher'],
+  ['pages/publish/fabu/theme-d20-page.js', "url: '/api/topic/play-setup', method: 'GET'", 'required', 'publisher', 'self-publisher'],
+  // 2026-11-04 第九轮 m4(owner 批准):官方路线列表与详情游客可读,只回已上架路线,游客走 PresetRouteGuestProjection。
+  // f-pages P0-79:漫游护照探一次官方路线目录决定是否摆「官方路线」大卡;同一公开只读端点(permitAll,只回已上架路线)。
+  ['pages/roam/index.js', "req('/api/preset/route/list', 'GET'", 'optional', 'visitor/member', 'public-official-route'],
+  ['subpackageRoam/official-routes/index.js', "url: '/api/preset/route/list'", 'optional', 'visitor/member', 'public-official-route'],
+  ['subpackageRoam/official-route/index.js', "url: '/api/preset/route/info'", 'optional', 'visitor/member', 'public-official-route'],
+  ['pages/roam/index.js', "req('/api/ai/npc/profile'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['pages/roam/index.js', "req('/api/ai/npc/event'", 'required', 'member', 'global-authenticated-read'],
+  ['pages/roam/index.js', "req('/api/roam/tiles/page'", 'required', 'member', 'self-member-history'],
+  // 8b0871d2e 漫游恢复核对:后端 ApiRoamController#session 未登录即拒,RoamRecoveryService.read 只按 uid 查本人会话
+  ['pages/roam/index.js', "req('/api/roam/session'", 'required', 'member', 'self-member-history'],
+  ['pages/roam/index.js', "req('/api/roam/pois'", 'optional', 'visitor/member', 'global-read+viewer-personalization'],
+  ['pages/roam/index.js', "req('/api/official/events/' + eventId", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['pages/roam/index.js', "req('/api/roam/nearby-exploreday'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['pages/roam/index.js', "req('/api/roam/entry/nearby'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 2026-10-28 p74:附近 3km 为空时 20km 兜底,同端点同权限档
+  ['pages/roam/index.js', "req('/api/roam/entry/nearby', 'GET', { lat: c.lat, lng: c.lng, radius: 20000 }", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['pages/roam/index.js', "req('/api/team/nearby'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 2026-11-09 V3-35:入口地图目录地点图钉,同 /api/roam/pois 权限档
+  ['pages/roam/index.js', "req('/api/roam/pois', 'GET', { lat: c.lat, lng: c.lng, radius }", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['pages/merchant/customer/index.js', 'loadSavedSegments() {', 'required', 'merchant/merchant:crm:segment', 'self-merchant'],
+  ['pages/shezhi/components/marketing-consent/index.js', "url: '/api/merchant/crm/marketing-consents'", 'required', 'member', 'self-marketing-consent'],
+  // 2026-09-17 商家营销同意入口(拍板第 40 条 A):与设置页同一端点、同一权限档 ——
+  //   GET 只读本人可管理的商家行,失败即不出现(fail-closed),账号身份由后端 principal 定。
+  ['utils/marketing-consent-entry.js', "url: '/api/merchant/crm/marketing-consents'", 'required', 'member', 'self-marketing-consent'],
+  // 2026-10-20 FOLLOWUP-A-1:主题/玩法举报先读平台举报原因,与动态举报同一端点(默认认证,无个人态)。
+  ['pages/topic/utils/content-report.js', "url: '/api/v1/community/capabilities'", 'required', 'member', 'global-authenticated-read'],
+  // 2026-10-20 FOLLOWUP-A-2:作者本人内容的审核时间线,ApiAuditController.timeline 按内容 owner 校验。
+  ['subpackageA/pages/myproject/index.js', "url: '/api/audit/timeline'", 'required', 'author', 'self-publisher'],
+  // 2026-10-19 Claude 小程序线移植到 master:本线新增 20 处 GET 逐条归类(收藏据点页暂不进 master)。全部不在 SecurityConfig permitAll 清单 ⇒ required;
+  //   本人记录(举报/纠错/收藏/通知/审核回读)= self-account;原因表/安全感受摘要/据点公开信息 = global-authenticated-read;
+  //   商家触达 = owned-merchant-resource(MARKETING_READ);开通前置 = self-merchant;复盘统计 = self-publisher。
+  ['subpackageMember/components/cy/report-sheet/index.js', "url: '/api/community-trust/reports/taxonomy'", 'required', 'member', 'global-authenticated-read'],
+  ['pages/activity/official-mine/index.js', "url: '/api/official/broadcast/' + encodeURIComponent(String(id)) + '/stats'", 'required', 'publisher', 'self-publisher'],
+  ['pages/merchant/crm-campaigns/index.js', "url: '/api/merchant/crm/campaigns'", 'required', 'merchant', 'owned-merchant-resource'],
+  ['pages/merchant/customer/index.js', "url: '/api/merchant/crm/campaigns'", 'required', 'merchant', 'owned-merchant-resource'],
+  ['pages/merchant/crm-campaigns/index.js', 'url: `/api/merchant/crm/campaigns/${id}`', 'required', 'merchant', 'owned-merchant-resource'],
+  ['pages/play/merchant/components/safety-rating-sheet/index.js', "url: '/api/community-trust/safety/taxonomy'", 'required', 'member', 'global-authenticated-read'],
+  ['pages/roam/index.js', "req('/api/official/active-for-roam'", 'required', 'member', 'global-authenticated-read'],
+  ['subpackageB/pages/im/chat/index.js', 'url: `/api/audit/${auditTaskId}/detail`', 'required', 'member', 'self-account'],
+  ['subpackageB/pages/im/chat/index.js', "url: '/api/v1/community/notifications'", 'required', 'member', 'self-account'],
+  ['pages/shezhi/components/post-governance/index.js', "url: '/api/v1/community/me/enforcements'", 'required', 'member', 'self-account'],
+  ['subpackageMember/components/cy/merchant-correction-sheet/index.js', "url: '/api/community-trust/contributions/taxonomy'", 'required', 'member', 'global-authenticated-read'],
+  ['subpackageMember/components/cy/profile/index.js', 'url: `/api/community-trust/safety/merchants/${id}`', 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['subpackageMember/components/cy/profile/index.js', "url: '/api/city/nodes/merchant/' + id", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['subpackageMember/report-detail/index.js', 'url: `/api/community-trust/reports/${id}`', 'required', 'member', 'self-account'],
+  ['subpackageMember/report-detail/index.js', 'confirmByReadBack(accepted, receipt) {', 'required', 'member', 'self-account'],
+  ['subpackageMember/report-mine/index.js', "url: '/api/community-trust/reports/mine'", 'required', 'member', 'self-account'],
+  ['subpackageMember/report-common/taxonomy.js', "url: '/api/community-trust/reports/taxonomy'", 'required', 'member', 'global-authenticated-read'],
+  // 2026-10-28 原型 C 我的申诉：本人跨局申诉列表 + 本人账号信誉（两条均为「需后端」新接口，按本人过滤）。
+  ['subpackageMember/appeal-mine/index.js', "url: '/api/orient/scoring/mine'", 'required', 'member', 'self-account'],
+  ['subpackageMember/appeal-mine/index.js', "url: '/api/member/reputation'", 'required', 'member', 'self-account'],
+
+  // 2026-10-22 W10b #27:NPC 对话原请求只读回读,ApiAiNpcController.chatRequest 只按登录态 + 原会话 + requestId 读本人记录。
+  ['subpackageMember/components/cy/npc-chat/index.js', "url: '/api/ai/npc/chat/request'", 'required', 'member', 'self-account'],
+  // W10b #22:简易 AI 起草按 requestId 只读回读,ApiAiController.themeDraftRequest 键按登录会员隔离。
+  // W10b #25:本人资料审核回执(只取登录态)与门店 AI 形象审核回执(商家 PROFILE_WRITE,按登录商家派生)。
+  ['pages/gerenziliao/gerenziliao.js', "url: '/api/user/profile/review'", 'required', 'member', 'self-account'],
+  ['pages/merchant/decor/ai-npc/index.js', "url: '/api/merchant/npc/review'", 'required', 'merchant', 'self-merchant'],
+  // 2026-10-23 v13 动效落地(PR #528,用户批准更新冻结数值):主题页角色卡读 NPC 资料、路线页读附近队伍与站点、地图页读据点,四处直接 GET,
+  //   端点与既有登记同一权限档(npc/profile、team/nearby = global-authenticated-read;play/nodes = current-session;roam/pois = global-read+viewer-personalization)。
+  ['pages/topic/index/index.js', "url: '/api/ai/npc/profile'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['pages/topic/index/index.js', "url: '/api/team/nearby'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['pages/topic/index/index.js', "url: '/api/play/nodes'", 'required', 'member', 'current-session'],
+  // RECHECK-1122 FE-G9:订单详情读本主题 nodes 只取 perkOnly(同 /api/play/nodes 权限档,本人会话)。
+  ['subpackageMember/components/cy/scene-member-order-detail/index.js', "url: '/api/play/nodes'", 'required', 'member', 'current-session'],
+  ['subpackageRoam/nearby/index.js', "url: '/api/roam/pois'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 2026-10-27 W8 收口逐条复核后端(均未进 SecurityConfig permitAll，全部默认认证)：
+  //   赛事联络/签到:玩家读 OfficialEventAttendanceService.read(id, uid, false) 仅公开可见赛事 + 本人 mine 投影;
+  //   管理读先 canPublish(uid) 再 organizer(e, uid)。
+  ['pages/activity/components/event-attendance/index.js', "url:'/api/official/events/'+id+'/attendance/manage'", 'required', 'publisher', 'controlled-event-operator'],
+  ['pages/activity/components/event-attendance/index.js', "url:'/api/official/events/'+id+'/attendance'}", 'required', 'member', 'public-detail+viewer-personalization'],
+  //   注册属性绑定:AuthorAttributeRegistryReader.read 校验主题 memberId == 登录人(商家 scope 先换 PROJECT_MANAGE 主体)。
+  ['pages/publish/fabu/index.js', "url: '/api/topic/attribute-binding'", 'required', 'publisher', 'self-publisher'],
+  //   公共玩法采用来源/原请求结果/采用详情:TemplateAdoptionService principal(actor, owner) + 按 actor 读原请求。
+  ['pages/publish/fabu/index.js', "url: '/api/template/adoption-source'", 'required', 'publisher', 'self-publisher'],
+  ['pages/publish/fabu/index.js', "url: '/api/template/adoption-receipt'", 'required', 'publisher', 'self-publisher'],
+  ['pages/publish/fabu/index.js', "url: '/api/template/adoption-detail'", 'required', 'publisher', 'self-publisher'],
+  ['pages/publish/utils/publish/template-adoption.js', "url:'/api/template/adoption-detail'", 'required', 'publisher', 'self-publisher'],
+  ['pages/publish/utils/publish/template-adoption.js', "url:'/api/template/adoption-receipt'", 'required', 'publisher', 'self-publisher'],
+  ['pages/publish/utils/publish/template-adoption.js', "url:'/api/template/adoption-source'", 'required', 'publisher', 'self-publisher'],
+  //   原申诉请求结果:AuditTaskServiceImpl.appealReceipt 按 bizType/bizId/登录 memberId 查本人申诉。
+  ['subpackageA/pages/myproject/index.js', "url: '/api/audit/appeal/receipt'", 'required', 'author', 'self-publisher'],
+  //   定向计分排名:OrientScoringServiceImpl.leaderboard 先 readOwned(memberId, sessionId) 再 requireLeaderboardAccess。
+  ['subpackageMember/orient-score/index.js', "url: BASE + '/session/' + sessionId + '/leaderboard'", 'required', 'member', 'self-account'],
+  ['pages/play/index.js', "req('/api/orient/scoring/session/' + originalSessionId + '/leaderboard'", 'required', 'member', 'self-account'],
+  //   漫游护照 history/summary/record:ApiRoamPassportController 只取登录 owner，不接收客户端 owner。
+  ['utils/roam-passport-read.js', "url: path, method: 'GET'", 'required', 'member', 'self-member-history'],
+  //   基础动作上下文/原动作结果:PlayBasicIntentApplication 以 currentMemberId + basicIntentScope 限定本人当前游玩局。
+  ['pages/play/index.js', "req('/api/play/action-receipt', 'GET', receiptQuery", 'required', 'member', 'current-session'],
+  ['pages/play/index.js', "req('/api/play/action-receipt', 'GET', { activityId: body.activityId", 'required', 'member', 'current-session'],
+  ['pages/play/index.js', "req('/api/play/action-context'", 'required', 'member', 'current-session'],
+  ['pages/play/index.js', "req('/api/club/lead/unlock-chapter-receipt'", 'required', 'leader', 'current-session'],
+  //   定向计分明确不适用时回退原排行榜(与上一条 /api/play/leaderboard 同端点同权限档)。
+  ['pages/play/index.js', "req('/api/play/leaderboard', 'GET', params);\n    loadBoard", 'required', 'member', 'current-session'],
+  // 2026-10-28 文档二 L5 游玩页:状态栏第二行 / 全屏角色卡读本人角色卡(后端按登录会员只读自己),
+  //   「…」用时得分 / 全屏本局成绩读本局计分与本场排名(后端 lockOwned 按本人校验对局归属)。
+  ['pages/play/utils/play-hud-overlays.js', "req('/api/play/character'", 'required', 'member', 'self-account'],
+  ['pages/play/utils/play-hud-overlays.js', "req(base, 'GET'", 'required', 'member', 'self-account'],
+  ['pages/play/utils/play-hud-overlays.js', "req(base + '/leaderboard'", 'required', 'member', 'self-account'],
+  ['pages/play/utils/play-hud-overlays.js', "req('/api/play/contact'", 'required', 'member', 'self-account'],
+  // 2026-10-30 #686 故事流顶栏:案件册(进页静默探测 + 打开)与各站奖励,ApiPlayJourneyReadController 按当前会员读本人本局,同 /ending 档。
+  ['pages/play/utils/play-topbar.js', "req('/api/play/journey/casebook'", 'required', 'member', 'current-session'],
+  ['pages/play/utils/play-topbar.js', "req('/api/play/journey/casebook', 'GET', this._scope(), undefined, true).then", 'required', 'member', 'current-session'],
+  ['pages/play/utils/play-topbar.js', "req('/api/play/journey/backpack'", 'required', 'member', 'current-session'],
+  // 2026-11-04 第九轮 m2 第 2 项:同场路线表态读取。只认登录本人,服务端再核这一场已付费、作者没关(ApiPlayTeamController /trail/state)。
+  ['pages/play/index.js', "req('/api/team/trail/state', 'GET'", 'required', 'member', 'current-session'],
+  // 2026-11-09 qx-b8 U08-01:完成页结果词读本局战报。ApiPlayerJourneyController /report 只取登录会员,
+  //   PlayerRunReportApplication 按本人报名/路线会话校验 runId 归属(非本人局 403「无权查看该局」),只读不建局不发奖。
+  ['pages/play/index.js', "req('/api/play/player-journey/report', 'GET'", 'required', 'member', 'current-session'],
+  // 2026-11-10 qx-c3 为 qx-b4 补登(按服务端实际守卫):两者都不在 SecurityConfig 放行清单,落 anyRequest().authenticated()。
+  //   预设库 ApiPresetController /gameplay/list 只回平台自带声明(GameplayPresetCatalog.publicView,无会员维度);
+  //   素材署名 ApiMediaAssetController /attribution 经 AppMediaReferenceGuard.publicAttribution 只回已审核/官方素材的公开来源视图,不按本人过滤。
+  ['pages/templatedetail/topic-detail/index.js', "url: '/api/media/asset/attribution'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 2026-11-14 合 master #840：封面署名与节点图署名复用同一公开只读接口。
+  ['pages/templatedetail/topic-detail/index.js', "data: { reference: g.img }", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+];
+
+const VALID_SCOPES = new Set([
+  'self-account', 'public-list+viewer-personalization', 'self-registration',
+  'self-party', 'self-merchant', 'self-capability', 'self-publisher',
+  'public-detail+viewer-personalization', 'global-read+viewer-personalization',
+  'current-session', 'activity-lead-access', 'global-authenticated-read',
+  'self-member-history', 'activity-perspective-access',
+  'self-merchant-game-entry', 'club-owned-activity',
+  'owned-merchant-resource', 'self-marketing-consent',
+  'share-token-snapshot', 'public-map-weather', 'public-official-route', 'owned-merchant-or-club-receivable', 'owned-media-asset',
+  'public-catalog-place', 'controlled-event-operator', 'public-profile-gallery', 'active-team-member', 'owned-topic-target-merchant-stations',
+]);
+
+function productionJsFiles(dir) {
+  const out = [];
+  fs.readdirSync(dir, { withFileTypes: true }).forEach((entry) => {
+    // 构建台账的 requiredRequests 是合同元数据，不是小程序运行时的 GET 调用。
+    if (['tests', 'scripts', 'node_modules', 'miniprogram_npm'].includes(entry.name)) return;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...productionJsFiles(full));
+    else if (entry.isFile() && entry.name.endsWith('.js')) out.push(full);
+  });
+  return out;
+}
+
+function registeredCallSource(source, marker, markerAt) {
+  const masked = maskJsNonCode(source);
+  let callAt;
+  let scanEnd = masked.length;
+  if (/\([^)]*\) \{$/.test(marker)) {
+    const functionOpenAt = masked.indexOf('{', markerAt);
+    assert.ok(functionOpenAt >= 0, `找不到 ${marker} 的函数体`);
+    let braceDepth = 0;
+    let functionEnd = -1;
+    for (let i = functionOpenAt; i < masked.length; i += 1) {
+      if (masked[i] === '{') braceDepth += 1;
+      else if (masked[i] === '}') {
+        braceDepth -= 1;
+        if (braceDepth === 0) {
+          functionEnd = i;
+          break;
+        }
+      }
+    }
+    assert.ok(functionEnd >= 0, `${marker} 的函数体没有闭合`);
+    scanEnd = functionEnd;
+    const candidates = [masked.indexOf('sendRequest(', markerAt), masked.indexOf('this.requestOwnMedia(', markerAt)].filter(at => at >= 0 && at < scanEnd);
+    callAt = candidates.length ? Math.min(...candidates) : -1;
+    if (callAt >= scanEnd) callAt = -1;
+  }
+  else if (/^(?:(?:sendUiStateRequest|req|sender)\(|this\.requestOwnMedia\()/.test(marker)) callAt = markerAt;
+  else callAt = masked.lastIndexOf('sendRequest(', markerAt);
+  assert.ok(callAt >= 0, `找不到 ${marker} 所属请求调用`);
+
+  const openAt = masked.indexOf('(', callAt);
+  let depth = 0;
+  for (let i = openAt; i < scanEnd; i += 1) {
+    if (masked[i] === '(') depth += 1;
+    else if (masked[i] === ')') {
+      depth -= 1;
+      if (depth === 0) return source.slice(callAt, i + 1);
+    }
+  }
+  assert.fail(`${marker} 所属请求调用没有闭合`);
+}
+
+test('GET 矩阵窗口覆盖完整当前调用且不跨到下一请求', () => {
+  const afterSuccess = `loadItems() {
+    app.sendRequest({ method: 'GET', success() {}, auth: false });
+  },
+  loadNext() { app.sendRequest({ url: '/api/next', method: 'POST', success() {} }); }`;
+  const current = registeredCallSource(afterSuccess, 'loadItems() {', afterSuccess.indexOf('loadItems() {'));
+  assert.match(current, /auth\s*:\s*false/, 'success 后的 auth:false 也必须留在当前调用窗口');
+  assert.throws(() => assert.doesNotMatch(current, /auth\s*:\s*false/),
+    '把 success 后的 auth:false 放进真实门禁断言时必须判红');
+  assert.doesNotMatch(current, /\/api\/next/, '当前调用窗口不得跨进下一请求');
+
+  const withoutSuccess = `loadItems() {
+    app.sendRequest({ method: 'POST', fail() {} });
+  },
+  loadNext() { app.sendRequest({ url: '/api/next', method: 'GET', success() {} }); }`;
+  const noSuccessCall = registeredCallSource(withoutSuccess, 'loadItems() {', withoutSuccess.indexOf('loadItems() {'));
+  assert.match(noSuccessCall, /fail\(\)/);
+  assert.throws(() => assert.match(noSuccessCall, /['"]GET['"]/),
+    '当前 POST 没有 success 时不得借下一请求的 GET 假绿');
+  assert.doesNotMatch(noSuccessCall, /\/api\/next/, '当前请求没有 success 时也不得借下一请求过门禁');
+
+  const withoutCurrentRequest = `loadItems() {
+    this.setData({ loading: false });
+  },
+  loadNext() { app.sendRequest({ url: '/api/next', method: 'GET', success() {} }); }`;
+  assert.throws(
+    () => registeredCallSource(
+      withoutCurrentRequest,
+      'loadItems() {',
+      withoutCurrentRequest.indexOf('loadItems() {')
+    ),
+    /找不到 .* 所属请求调用/,
+    '当前函数没有请求时必须判红，不能借下一函数的 GET 假绿'
+  );
+});
+
+test('全部 GET 调用点都有 URL + method + auth/角色/scope 分类，新增调用必须先入矩阵', () => {
+  let directCount = 0;
+  let wrapperCount = 0;
+  let ownMediaWrapperCount = 0;
+  productionJsFiles(XCX_ROOT).forEach((file) => {
+    const source = fs.readFileSync(file, 'utf8');
+    directCount += (source.match(/method\s*:\s*['"]GET['"]/g) || []).length;
+    ownMediaWrapperCount += (source.match(/\bthis\.requestOwnMedia\([^\n]*?,\s*['"]GET['"]\s*,/g) || []).length;
+    wrapperCount += (source.match(/\breq\([\s\S]{0,180}?,\s*['"]GET['"]\s*,/g) || []).length;
+  });
+  // 2026-09-15 合拢收尾:漫游页 f-hangout 死卡退场,roam 少一条 /api/roam/hangout/nearby GET,28 → 27。
+  // 2026-09-17 第二轮拍板 17/22:首页 run-session/list + 足迹分享快照读取,27 → 29。
+  // 2026-09-17 商家营销同意入口(拍板第 40 条 A):utils/marketing-consent-entry.js 新增一条
+  //   GET /api/merchant/crm/marketing-consents(与设置页同一端点/同一权限档),27 → 28。
+  // 2026-09-17 发布版本 release-0917 再合 fix-consent:合并树 29(续玩 list + 足迹快照)+ 营销同意 GET 1 ⇒ 30(测试实跑实测)。
+  // 2026-09-18 R14/故事变量:pages/play 新增两处 req 包装 GET —— encounter 探测一条、
+  //   profile 提交后补拉 nodes 一条(wrapper 16 → 18);端点权限档与既有 /api/play/nodes 相同。
+  // 2026-09-24 CU-C-68:merchantinfo 新增第二处 /api/game/session/merchant/entries GET
+  //   (抽屉资格预探,权限档与上一处相同:required/merchant)⇒ 30 → 31。
+  // 客户页退役触达：移除券候选、任务列表、任务详情三处 GET，31 → 28。
+  // UI 门禁固定默认适配器路径和 GET 方法；适配器与注入调用点均归原 EVENT_OPERATE 权限。
+  // 2026-10-12 作者媒体审核pending查询增加1个真实sender GET，33→34。
+  // 2026-10-13 注销申请结果未知时只读回查本人 /api/user/deregister/status,同端点同权限档,34→35。
+  // 2026-10-14 漫游上线:我的队伍附近招募 + 那年今日 + 月度回顾三处 GET,35 → 38(权限档见 MATRIX 同日注释)。
+  // 2026-10-20 合并举报原因与作者审核时间线两处 GET；保留小程序线新增24处逐项权限登记，62 → 64。
+  // 2026-10-19 移植共享基线(W2):认领状态、主题状态键、官方路线列表/详情四处直接 GET,38 → 42(权限档见 MATRIX 同日注释)。
+  // 合并两线逐项新增：本线64 + 共享基线4 = 68，权限矩阵保留双方全部条目。
+  // 2026-10-20 用户要求删掉「我的纠错 / 纠错进度」两页、消息页改收件箱/发件箱(合并 master 584470ad 后按重建实测):contributions/mine 1 处 + contributions/{id} 2 处退场,68 → 65;举报进度通知读取从消息列表移到城瘾小助手(同端点同权限档)。
+  // 2026-10-22 W10b:NPC 原请求回读 / AI 起草回读 / 资料审核回执 / 门店形象审核回执四处直接 GET,65 → 69(权限档见 MATRIX 同日注释)。
+  // 2026-10-22 W9 帖子处置(F0521):设置页本人处置列表 GET /api/v1/community/me/enforcements(后端 withAuthenticatedPrincipal,按本人过滤),69 → 70(batch2 集成在 W10b 的 69 上叠加)。
+  // 2026-10-22 L21 BL-185:fabu 云端草稿发布前 GET /api/topic/publish-check(本人主题/商家 Owner),70 → 71(batch3 集成在 batch2 的 70 上叠加;L21 原写 65 → 66)。
+  // 2026-10-23 v13 动效落地(PR #528):主题页 NPC 资料 / 附近队伍 / 站点 + 地图页据点四处直接 GET,71 → 75(权限档见 MATRIX 同日注释)。
+  // 2026-10-24 地点详情和地图新增两处已公开 /profile/** 相册元数据 GET。
+  // 2026-10-25 官方地点卡片 + 地点挑战页各一处 GET /api/city/nodes/{id}(已入 MATRIX),77 → 79。
+  // 上述两端各新增单笔与分页 GET，共四处，79 → 83。
+  // 本人角色卡及计分会话列表、明细、回执增加四处认证 GET，83 → 87。
+  // Existing team detail adds two authenticated board reads, 87 → 89.
+  // 2026-10-27 W8 收口:赛事联络/签到两处、注册属性绑定一处、公共玩法采用六处、原申诉结果一处、定向计分排名一处、
+  //   漫游护照读取一处，共 12 处直接 GET(权限档见 MATRIX 同日注释)，89 → 101。
+  // 2026-10-28 文档二 L3:下一站名单读状态键注册表一处(同 topic-state-keys 权限档),101 → 102。
+  // 2026-10-28 L6:我的队伍「本场招募」GET /api/orient/team/lobby 一处(已入 MATRIX),102 → 103。
+  // 2026-10-28 L6:主题详情 /api/play/setup、签到组件 /api/play/contact 各一处(已入 MATRIX),103 → 105。
+  // 2026-10-28 原型 C 我的申诉：本人申诉列表、本人账号信誉两处认证 GET(已入 MATRIX)，105 → 107。
+  // 2026-10-28 L9 集成:主题详情可玩时段 / 开局前准备读 L8 GET /api/topic/play-setup(创作者,同 state-keys 档),107 → 108。
+  // 2026-10-27 真机走查 P-08(owner 要求删除首页「继续探索」卡):首页 /api/play/run-session/list 退场,79 → 78。
+  // 2026-10-28 L9 再并 master:P-08 首页 run-session/list 退场 −1,108 → 107。
+  // Frozen-master calls + creator-scoped supply stations + V2 original-request recovery.
+  // Source accounting only; this merged tree has NOT_RUN validation.
+  // 2026-10-29 M-32:账户收益本月收入明细读俱乐部计酬一处(同 club-direct-ledger 端点与权限档,已入 MATRIX),109 → 110。
+  // R03/R12 原写入结果仅按登录actor、操作种类和原请求号回读；新增一条本人回执GET。
+  // 2026-11-01:商家工作台删除开通前置检查,少一处 GET(/api/merchant/ops/prerequisites) 111 → 110
+  // 2026-11-03 第九轮 m-rain:漫游地图天气氛围一处匿名 GET /api/map/weather(已入 MATRIX),110 → 111。
+  // 2026-11-04 第九轮 m-card:漫游地点卡读节点评分一处 GET /api/city/nodes/{id}(与据点详情同一接口,已入 MATRIX),111 → 112。
+  // 2026-11-04 第十一轮 g3 p1 F-7:参与详情探一次本人角色卡(同 GET /api/play/character,本人账号、只读),只在主题真有角色属性时摆入口,112 → 113。
+  // 2026-11-10 staging 合流(qx-b1..b8):各线已入 MATRIX 的直接 GET 合计,合并树实测 113 → 122。
+  // 2026-11-10 qx-b5(qx-c3 补登):报名促销目录、收益分佣、视频悬赏、通行证详情两处、通行证列表两处,均已按服务端守卫入 MATRIX,113 → 120。
+  // 2026-11-10 qx-c3 staging 重建:b4/b5 各自补登的行均已在 MATRIX,合并树实测仍 122。
+  // 2026-11-10 qx-b4(qx-c3 补登):固定玩法预设库一处、模板详情素材署名一处,均已按服务端守卫入 MATRIX,113 → 115。
+  // 2026-11-10 r2-store:主题结账层与发现页各读一次在售通票目录(已入 MATRIX),122 → 124。  
+  // 2026-11-10 qx-s2 staging 合并树:r2-create(b4-21)撤掉预设页,qx-b4 的「固定玩法预设库」一处直接 GET 随页退场,124 → 123(实测)。
+  // 2026-11-10 l-pass:通行证页概览/主题库读取、游戏主题库、通行证与礼品入口卡、开通后订单轮询四处直接 GET(已入 MATRIX),123 → 127。
+  // 2026-11-11 f-compliance:设置页 AI 对话记录导出一处直接 GET(同 NPC 面板接口,已入 MATRIX),127 → 128。
+  // 2026-11-11 f-pages:我的收藏「据点」页签读本人收藏据点一处直接 GET(已入 MATRIX),128 → 129。
+  // x-design1 D6:通行证页删掉 /api/workshop/capabilities 的无人消费请求,129 → 128。
+  // D113:游戏主题库改读公开目录 POST,移除其原认证 GET,128 → 127。
+  // 2026-11-12 club-payout-binding:个人收款页读本人收款状态一处直接 GET(已入 MATRIX),127 → 128。
+  // 2026-11-13 pass-mini:通行证回到订单继续支付一处、订单详情页一处(已入 MATRIX),128 → 130。
+  // 2026-11-14 free-explore-1114:定价页两处(已锁价状态、结算待处理)+商家套票预约一处,均已入 MATRIX,130 → 133。
+  // 2026-11-14：公开成长榜与合并搜索 POST → GET，已登记两处调用，133 → 135。
+  // 2026-11-14 合 master #840：封面署名新增一处直接 GET，135 → 136。
+  // 2026-11-18 FE-STORY 7.10:fabu 节点抽屉读本主题地点到访方式一处(作者本人,已入 MATRIX),136 → 137。
+  // 2026-11-18 F11:自由探索参考结算组件一处、权益卡表单线下结算说明一处(均已入 MATRIX),137 → 139。
+  // 2026-11-18 F10:作者编辑器读位置承接进度 /api/topic/fe/sale-readiness,139 → 140。
+  // 2026-11-19 FE-G4:主题详情自由探索参与商家卡读套票目录逐店权益一处(同 free-explore 页 catalog,已入 MATRIX),140 → 141。
+  // 2026-11-19 OR-024:通行证退款页读概览 terms 一处(已入 MATRIX),140 → 141。
+  // 2026-11-19 合流:FE-G4 +1 与 OR-024 +1 叠加,140 → 142。
+  // 2026-11-19 PG-021:简易发布页删除,其 AI 草稿 request / recovery 两处直接 GET 随页删除,140 → 138。
+  // 2026-11-19 三线合流:142 − 2 = 140。
+  // 2026-11-19 cast-contract-1119:角色弹窗试听 GET /api/topic/cast/voice 一处(已入 MATRIX),140 → 141。
+  // 2026-11-21 1121 N5:我的页读本人视频悬赏投稿条数一处(同 /submission/mine,已入 MATRIX),141 → 142。
+  // 2026-11-22 RECHECK-1122 FE-G9:订单详情读 /api/play/nodes 的 perkOnly 一处(已入 MATRIX),142 → 143。
+  // 2026-11-22 业主拍板 B:客户页探测有没有触达记录(GET /api/merchant/crm/campaigns,与触达记录页同端点同权限,已入 MATRIX),143 → 144。
+  // 2026-11-22 biz/finish-offer-1122 R4:主题详情分享层「送礼」读在售商品目录一处(同文件 /api/marketing/product/list 已入 MATRIX,公开目录),144 → 145。
+  // 2026-11-22 P1-10:参考结算 CSV 导出 GET 两处(pages/merchant 与 pages/club 各一份逐字相同的 cy-fe-reference-range,已入 MATRIX),145 → 147。
+  // 2026-11-22 P1-2:已生效供给改说明前读回展示条款 GET /api/coop/offer/display-terms 一处(已入 MATRIX),147 → 148。
+  // 2026-11-22 biz/group-ticket-1122:主题购买层按 topicId 读在售双人票 / 小队票一处(同文件同端点已入 MATRIX,公开目录),148 → 149。
+  // 2026-11-23 F09 L09-026:据点详情写/删评价后只重读评分,同一公开 GET /api/city/nodes/{id}(已入 MATRIX),149 → 150。
+  // 2026-11-22 平台兑换码:通行证页入口与礼品页兑换码模式各读一次开关(已入 MATRIX),150 → 152。
+  // 2026-11-24 F09b L09-110:举报列表 / 详情两处原因字典读取收进 report-common/taxonomy.js 一处(同端点同权限档),152 → 151。
+  // 2026-11-24 DEC-F12:主题页多人票付款回查本人一单 + 票夹读本人已领同伴席位(均已入 MATRIX),151 → 153。
+  assert.equal(directCount, 153, '直接 GET 数量变化时必须逐条复核权限并更新矩阵');
+  // 2026-10-09 U04 只读主题请求增加6处，22 → 28。
+  // 2026-10-19 Claude 小程序线移植到 master(用户批准冻结数值更新):漫游 BL-41 可参与官方活动 req 包装 GET +1(已入 MATRIX),28 → 29。
+  // 2026-10-22 L21 BL-186:pages/play 本章结算 GET /api/play/journey/stage-end(与 /ending 同档),29 → 30。
+  // 2026-10-28 p74:漫游「附近活动」为空时按 20km 再读一次 /api/roam/entry/nearby(同端点同权限档,已入 MATRIX),30 → 31。
+  // 2026-10-27 W8 收口:pages/play 基础动作原结果两处、动作上下文一处、定向计分排名一处、其回退排行榜一处，30 → 35。
+  // 2026-10-28 文档二 L5:pages/play 角色卡一处、本局计分与本场排名两处(权限档见 MATRIX 同日注释)，35 → 38。
+  // 2026-10-28 L9 集成:游玩菜单联系主办 / 商家改读 L8 GET /api/play/contact(已入 MATRIX),38 → 39。
+  // 2026-10-28 并 master(#658 后)合流 integrate/devfix-20261027:master 39 叠加本线 p74 20km 兜底读一处,39 → 40。
+  // 2026-10-30 #686 故事流顶栏:案件册两处 + 各站奖励一处 req 包装 GET(本人本局,已逐条入 MATRIX),41 → 44。
+  // 2026-11-04 第九轮 m2 第 2 项:同场路线表态读取一条(本人、本场、已付费),44 → 45。
+  // R29C:原会话历史 GET /api/play/history 一处，按登录会员与原会话归属只读，45 → 46。
+  // qx-b1:提示阶梯 GET /api/play/help 与 /api/play/help/receipt 两处(本人原局,已入 MATRIX),46 → 48。
+  // 2026-11-09 qx-b8 U08-01:完成页本局战报 GET /api/play/player-journey/report 一处(本人本局,已入 MATRIX),46 → 47。
+  // 2026-11-10 staging 合流:qx-b1 +2 与 qx-b8 +1 叠加,46 → 49。
+  // 2026-11-09 V3-35:漫游入口地图把目录地点画成图钉,另读一次 /api/roam/pois(与地图页同端点同权限档),46 → 47。
+  // 2026-11-10 staging 合流:再叠加 qx-a4 +1,49 → 50。
+  // 2026-11-11 f-pages:漫游护照「官方路线」大卡探一次公开路线目录(已入 MATRIX),50 → 51。
+  // 2026-11-18 FE-STORY 7.4:自由探索票过期后读只读历史一处(同 /api/play/history 权限档,已入 MATRIX),51 → 52。
+  // 2026-11-19 角色 Cast v1:游玩页点台词才读一次配音地址 /api/topic/cast/voice(已入 MATRIX),52 → 53。
+  // 2026-11-24 L05-026/038 业主默认项 A:漫游页进页那次 /api/roam/badge/shop-streak 随三店徽章弹窗删除(矩阵同删),53 → 52。
+  assert.equal(wrapperCount, 52, 'req 包装 GET 数量变化时必须逐条复核权限并更新矩阵');
+  assert.equal(ownMediaWrapperCount, 5, '作者媒体实际GET调用点变化需显式复核');
+  assert.equal(MATRIX.length, directCount + wrapperCount + ownMediaWrapperCount);
+
+  MATRIX.forEach(([file, marker, mode, role, scope]) => {
+    const source = fs.readFileSync(path.join(XCX_ROOT, file), 'utf8');
+    const at = source.indexOf(marker);
+    assert.notEqual(at, -1, `${file} 缺少已登记 GET: ${marker}`);
+    const call = registeredCallSource(source, marker, at);
+    assert.match(call, /['"]GET['"]/, `${file} 的 ${marker} method 已漂移`);
+    if (mode === 'static') {
+      assert.equal(scope, 'public-profile-gallery');
+      assert.match(call, /auth\s*:\s*false/, '公开静态资源不携带会话');
+      assert.match(source, /(?:url: '\/profile\/'|L\.poiGalleryPath\(poi\.coverImg\)|\? '\/profile\/' \+ key\.replace)/);
+    } else {
+      assert.doesNotMatch(call, /auth\s*:\s*false/, `${file} 的 ${marker} 不能降为匿名请求`);
+      assert.ok(mode === 'required' || mode === 'optional');
+    }
+    assert.ok(role.length > 0, `${file} 的 ${marker} 缺角色分类`);
+    assert.ok(VALID_SCOPES.has(scope), `${file} 的 ${marker} scope 未进入受控枚举: ${scope}`);
+  });
+});
+
+// 仅接受两种完整 DSL；参数中不允许嵌套调用，括号必须成对。
+// 固定全部 19 条 matcher 的参数、HTTP 方法、权限及顺序，避免跨规则匹配假绿。
+const SECURITY_RULES = [
+  'url=>permitAll',
+  '"/login","/register","/captchaImage"=>permitAll',
+  'HttpMethod.GET,"/","/*.html","/**/*.html","/**/*.css","/**/*.js","/profile/**"=>permitAll',
+  '"/swagger-ui.html","/swagger-resources/**","/webjars/**","/*/api-docs","/druid/**"=>permitAll',
+  '"/dev-api/v3/api-docs/**","/dev-api/swagger-ui/**","/dev-api/webjars/**","/v3/api-docs/**","/swagger-ui/**","/webjars/**"=>permitAll',
+  '"/api/common/upload","/api/common/upload/","/api/common/uploads","/api/common/uploads/","/api/common/uploadOSS","/api/common/uploadOSS/"=>authenticated',
+  '"/api/creativesquare/list","/api/product/list"=>permitAll',
+  '"/api/activity/list","/api/topic/list"=>permitAll',
+  'HttpMethod.POST,"/api/template/homeData","/api/template/list","/api/template/info","/api/template/topic-template/list","/api/template/topic-template/info","/api/category/list"=>permitAll',
+  'HttpMethod.GET,"/api/official/events","/api/official/events/*"=>permitAll',
+  '"/api/common/**","/api/register","/api/login/code","/api/openid","/api/login","/api/login/phone","/api/login/wechat/app","/api/login/apple","/api/sms/send","/api/findpass","/api/comment/list"=>permitAll',
+  '"/api/merchant/public-detail"=>permitAll',
+  '"/api/merchant/public-home","/api/user/public-info"=>permitAll',
+  'HttpMethod.GET,"/api/roam/share/snapshot"=>permitAll',
+  'HttpMethod.GET,"/api/map/weather"=>permitAll',
+  'HttpMethod.POST,"/api/merchant/list"=>permitAll',
+  'HttpMethod.GET,"/api/preset/route/list","/api/preset/route/info","/api/city/nodes/{id:\\\\d+}"=>permitAll',
+  'HttpMethod.GET,"/api/city/places/{id:\\\\d+}"=>permitAll',
+  // 2026-11-14：owner 批准的十六条公开读，只允许精确 GET。
+  "HttpMethod.GET,\"/api/roam/entry/nearby\",\"/api/roam/hangout/nearby\",\"/api/team/nearby\",\"/api/roam/pois\",\"/api/roam/nearby-exploreday\",\"/api/city/nodes\",\"/api/city/nodes/merchant/{merchantId:\\\\d+}\",\"/api/marketing/product/list\",\"/api/marketing/product/{productId:\\\\d+}\",\"/api/platform-pass\",\"/api/ai/npc/profile\",\"/api/official/active-for-roam\",\"/api/growth/leaderboard\",\"/api/search/unified\",\"/api/media/asset/attribution\",\"/api/community-trust/safety/merchants/{merchantId:\\\\d+}\"=>permitAll"
+];
+
+function assertSecurityRules(source) {
+  // 保留字符串（含路径里的 /*），只移除 Java 注释，注释不能充当放行证据。
+  const code = source.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
+    (token) => token.startsWith('"') ? token : '');
+  const matcher = /\.(?:antMatchers\(([^()]*)\)|requestMatchers\(legacyMatchers\(([^()]*)\)\))\s*\.\s*(permitAll|authenticated)\(\)/g;
+  const rules = [...code.matchAll(matcher)].map((match) =>
+    (match[1] ?? match[2]).replace(/"(?:\\.|[^"\\])*"|\s+/g, (token) => token.startsWith('"') ? token : '') + '=>' + match[3]);
+  assert.equal(rules.length, (code.match(/\.(?:antMatchers|requestMatchers)\s*\(/g) || []).length,
+    '每条 matcher 必须以完整且受支持的 DSL 解析，不能忽略未知规则');
+  assert.deepEqual(rules, SECURITY_RULES, '权限规则、顺序或 HTTP 方法漂移');
+  assert.equal((code.match(/\.anyRequest\(\)/g) || []).length, 1);
+  assert.match(code, /\.anyRequest\(\)\.authenticated\(\)/);
+}
+
+test('后端权限真源：公开目录仅精确 GET 匿名，私人与写兄弟路由保留认证', () => {
+  assertSecurityRules(fs.readFileSync(SECURITY, 'utf8'));
+});
+
+for (const dsl of ['legacy', 'boot4']) {
+  const current = fs.readFileSync(SECURITY, 'utf8');
+  const source = dsl === 'boot4'
+    ? current.replace(/\.antMatchers\(([^()]*)\)/g, '.requestMatchers(legacyMatchers($1))')
+    : current.replace(/\.requestMatchers\(legacyMatchers\(([^()]*)\)\)/g, '.antMatchers($1)');
+  const rule = (args) => dsl === 'boot4'
+    ? `.requestMatchers(legacyMatchers(${args})).permitAll()`
+    : `.antMatchers(${args}).permitAll()`;
+
+  test(`${dsl} DSL 正例保留全部 19 条权限规则`, () => assertSecurityRules(source));
+  const mutations = [
+    ['official POST 改写 GET', (s) => s.replace('HttpMethod.GET, "/api/official/events"', 'HttpMethod.POST, "/api/official/events"')],
+    ['official 移除 GET 限制', (s) => s.replace('HttpMethod.GET, "/api/official/events"', '"/api/official/events"')],
+    ['official 额外 POST 放行', (s) => s.replace('.anyRequest().authenticated()', rule('HttpMethod.POST, "/api/official/events"') + '.anyRequest().authenticated()')],
+    ['official 扩大通配符', (s) => s.replace('"/api/official/events/*"', '"/api/official/events/**"')],
+    ['city nodes 通配 GET 放行', (s) => s.replace('.anyRequest().authenticated()', rule('HttpMethod.GET,\n "/api/city/nodes", "/api/city/nodes/*"') + '.anyRequest().authenticated()')],
+    ['city nodes 所有方法放行', (s) => s.replace('.anyRequest().authenticated()', rule('"/api/city/nodes/**"') + '.anyRequest().authenticated()')],
+    ['roam share POST 放行', (s) => s.replace('HttpMethod.GET, "/api/roam/share/snapshot"', 'HttpMethod.POST, "/api/roam/share/snapshot"')],
+    ['roam share 扩大通配符', (s) => s.replace('"/api/roam/share/snapshot"', '"/api/roam/share/**"')],
+    ['map weather 不限方法', (s) => s.replace('HttpMethod.GET, "/api/map/weather"', '"/api/map/weather"')],
+    ['map weather 扩大通配符', (s) => s.replace('"/api/map/weather"', '"/api/map/**"')],
+    ['city node 详情放成单层通配', (s) => s.replace('"/api/city/nodes/{id:\\\\d+}"', '"/api/city/nodes/*"')],
+    ['catalog place POST 放行', (s) => s.replace('HttpMethod.GET, "/api/city/places/', 'HttpMethod.POST, "/api/city/places/')],
+    ['catalog place 不限方法', (s) => s.replace('HttpMethod.GET, "/api/city/places/', '"/api/city/places/')],
+    ['catalog place 详情放成单层通配', (s) => s.replace('"/api/city/places/{id:\\\\d+}"', '"/api/city/places/*"')],
+    ['preset 列表不限方法', (s) => s.replace('HttpMethod.GET, "/api/preset/route/list"', '"/api/preset/route/list"')],
+    ['preset 扩大通配符', (s) => s.replace('"/api/preset/route/list", "/api/preset/route/info"', '"/api/preset/**"')],
+    ['兜底匿名', (s) => s.replace('.anyRequest().authenticated()', '.anyRequest().permitAll()')],
+    ['GET 正例藏入注释', (s) => s.replace(rule('HttpMethod.GET, "/api/roam/share/snapshot"'), (r) => `/* ${r} */`)],
+  ];
+  for (const [name, mutate] of mutations) {
+    test(`${dsl} DSL 负面控制：${name} 必须判红`, () => {
+      const changed = mutate(source);
+      assert.notEqual(changed, source, '负面控制必须实际改变输入');
+      assert.throws(() => assertSecurityRules(changed), assert.AssertionError);
+    });
+  }
+}
+
+test('team-progress 后端必须同时校验登录身份与本场资源归属', () => {
+  const controller = fs.readFileSync(CLUB_LEAD_CONTROLLER, 'utf8');
+  const method = controller.slice(controller.indexOf('@GetMapping("/team-progress")'), controller.indexOf('@PostMapping("/settle")'));
+  const ownership = controller.slice(controller.indexOf('private boolean canAccessLeadActivity'), controller.indexOf('@PostMapping("/settle")'));
+
+  assert.match(method, /Long memberId = uid\(\)/);
+  assert.match(method, /canAccessLeadActivity\(activityId, memberId, st\)/);
+  assert.match(ownership, /memberId\.equals\(state\.getLeaderMemberId\(\)\)/);
+  assert.match(ownership, /probe\.setOwnerId\(activityId\)/);
+  assert.match(ownership, /probe\.setMemberId\(memberId\)/);
+  assert.match(ownership, /probe\.setPaymentStatus\(2\)/);
+  assert.match(ownership, /probe\.setRegistrationStatus\(2\)/);
+});
+
+// Java owners moved out of the HTTP adapter. Inspect complete, comment-free methods
+// along the real call chain; another endpoint/comment cannot stand in for a guard.
+function playGetSources() {
+  const java = (file) => fs.readFileSync(path.resolve(XCX_ROOT, '..', file), 'utf8');
+  const app = 'chengyinhub-admin/src/main/java/com/chengyinhub/web/service/';
+  const support = 'chengyinhub-system/src/main/java/com/chengyinhub/business/service/support/';
+  return {
+    controller: fs.readFileSync(PLAY_PROGRESS_CONTROLLER, 'utf8'),
+    history: java(app + 'play/PlayHistoryQueryApplication.java'),
+    preference: java(app + 'play/PlayPreferenceApplication.java'),
+    player: java(app + 'play/PlayPlayerQueryApplication.java'),
+    context: java(app + 'play/PlayNodeContext.java'),
+    facts: java(app + 'play/PlayCompletionFacts.java'),
+    access: java(support + 'PlayNodeAccessService.java'),
+    registration: java(support + 'CurrentPlayRegistration.java'),
+    preferenceService: java(app + 'PreferencePlayService.java'),
+    giftFact: java('chengyinhub-system/src/main/java/com/chengyinhub/business/domain/GiftPlayFact.java'),
+    giftEligibility: java('chengyinhub-system/src/main/java/com/chengyinhub/business/service/impl/MarketingGiftPlayEligibility.java'),
+    seatEligibility: java('chengyinhub-system/src/main/java/com/chengyinhub/business/service/impl/RegistrationSeatRecipientEligibility.java'),
+    giftSql: java('chengyinhub-system/src/main/resources/mapper/business/GiftEntitlementMapper.xml'),
+    seatSql: java('chengyinhub-system/src/main/resources/mapper/business/RegistrationSeatInvitationMapper.xml'),
+  };
+}
+
+function mapperSelect(xml, id) {
+  const open = `<select id="${id}"`;
+  assert.equal(xml.split(open).length, 2, `必须唯一定位 Mapper 查询 ${id}`);
+  const start = xml.indexOf(open);
+  return xml.slice(start, xml.indexOf('</select>', start));
+}
+
+// 业主 2026-11-09 批准的放宽准入：礼品/席位受让人事实只读，且必须绑定当前会员+同一主题/活动，撤销/取消/过期不放行。
+function assertWidenedAdmissionBinding(s) {
+  const gift = mapperSelect(s.giftSql, 'selectPlayFactsByOwner');
+  for (const clause of ['r.owner_type = #{ownerType}', 'r.owner_id = #{ownerId}', 'g.status in (0, 1)',
+    '(r.member_id = #{memberId} or g.claimed_member_id = #{memberId})']) assert.ok(gift.includes(clause), clause);
+  const seat = mapperSelect(s.seatSql, 'selectClaimedFactsByRecipient');
+  for (const clause of ['where i.status = 1', 'i.invitee_member_id = #{memberId}', 'r.owner_type = #{ownerType}',
+    'r.owner_id = #{ownerId}', 'i.owner_type = r.owner_type and i.owner_id = r.owner_id',
+    'r.registration_status = 2', 'r.payment_status = 2']) assert.ok(seat.includes(clause), clause);
+  assert.match(javaMethod(s.giftFact, 'public boolean claimedBy('),
+    /return Integer\.valueOf\(STATUS_CLAIMED\)\.equals\(status\) && memberId != null\s*&& memberId\.equals\(claimedMemberId\);/);
+  for (const [source, query] of [[s.giftEligibility, 'giftMapper.selectPlayFactsByOwner(memberId, OWNER_TOPIC, ownerId)'],
+    [s.seatEligibility, 'invitations.selectClaimedFactsByRecipient(memberId, ownerType, ownerId)']]) {
+    const facts = javaMethod(source, 'public List<');
+    assert.ok(facts.includes(query), query);
+    assert.match(source, /@Transactional\(readOnly = true\)\s*public List</);
+  }
+  const locked = javaMethod(s.seatEligibility, 'public boolean claimedUnderRegistrationLock(');
+  for (const predicate of ['invitations.selectByIdForUpdate(fact.getInvitationId())', 'row.claimed()',
+    'Objects.equals(row.getRegistrationId(), registration.getId())', 'Objects.equals(row.getInviteeMemberId(), memberId)',
+    'Objects.equals(row.getOwnerType(), registration.getOwnerType())', 'Objects.equals(row.getOwnerId(), registration.getOwnerId())'])
+    assert.ok(locked.includes(predicate), predicate);
+  assert.doesNotMatch(s.giftSql + s.seatSql, /<(?:update|insert|delete) id="(?:selectPlayFactsByOwner|selectClaimedFactsByRecipient)"/);
+}
+
+function javaMethod(source, declaration) {
+  const code = source.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
+    (token) => token.startsWith('"') || token.startsWith("'") ? token : ' '.repeat(token.length));
+  assert.equal(code.split(declaration).length, 2, `必须唯一定位 Java 方法 ${declaration}`);
+  const start = code.indexOf(declaration);
+  const open = code.indexOf('{', start);
+  assert.ok(open >= 0, `缺少方法体 ${declaration}`);
+  const braces = code.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, token => ' '.repeat(token.length));
+  let depth = 0;
+  for (let i = open; i < braces.length; i += 1) {
+    if (braces[i] === '{') depth += 1;
+    else if (braces[i] === '}' && --depth === 0) return code.slice(start, i + 1);
+  }
+  assert.fail(`Java 方法未闭合 ${declaration}`);
+}
+
+function inOrder(method, ...statements) {
+  let after = -1;
+  for (const statement of statements) {
+    const at = method.indexOf(statement, after + 1);
+    assert.ok(at > after, `实际可达方法必须按原顺序包含 ${statement}`);
+    after = at;
+  }
+}
+
+function actorEntry(source, methodName) {
+  const method = javaMethod(source, `public AjaxResult ${methodName}(`);
+  inOrder(method, 'Long memberId = actorMemberId;', 'if (memberId <= 0) return error("请先登录");');
+  return method;
+}
+
+function assertHistoryGetContract(s) {
+  assert.match(javaMethod(s.controller, 'public AjaxResult history('),
+    /return playHistoryQueryApplication\.history\(currentMemberId\(\), activityId, topicId, routeSessionId\);/);
+  const method = javaMethod(s.history, 'public AjaxResult history(');
+  inOrder(method,
+    'if (memberId == null || memberId <= 0) return error("请先登录");',
+    'TopicRouteSession session = historySessionMapper.selectAccessibleById(routeSessionId, memberId);',
+    'if (session == null || !routeSessionId.equals(session.getId()) || !memberId.equals(session.getMemberId())',
+    '|| !activityId.equals(session.getActivityId()) || !topicId.equals(session.getTopicId()))',
+    'return error("本局不存在或无权查看");',
+    'if (topic == null || playCompletionFacts.topicHistoryBlocked(topic)) return error("历史内容不可用");',
+    'snapshot = json.readTree(session.getConfigSnapshotJson());');
+}
+
+test('原会话历史 GET 绑定登录会员、原会话归属及主题历史可读性，缺任一守卫判红', () => {
+  const source = playGetSources();
+  assertHistoryGetContract(source);
+  for (const [file, guard] of [
+    ['controller', 'currentMemberId(), activityId, topicId, routeSessionId'],
+    ['history', 'memberId == null || memberId <= 0'],
+    ['history', 'selectAccessibleById(routeSessionId, memberId)'],
+    ['history', '!routeSessionId.equals(session.getId())'],
+    ['history', '!memberId.equals(session.getMemberId())'],
+    ['history', '!activityId.equals(session.getActivityId())'],
+    ['history', '!topicId.equals(session.getTopicId())'],
+    ['history', 'playCompletionFacts.topicHistoryBlocked(topic)'],
+  ]) {
+    const changed = { ...source, [file]: source[file].replace(guard, 'false') };
+    assert.notEqual(changed[file], source[file]);
+    assert.throws(() => assertHistoryGetContract(changed), assert.AssertionError);
+  }
+});
+
+function assertPreferenceGetContract(s) {
+  const controller = javaMethod(s.controller, 'public AjaxResult preference(');
+  assert.match(controller, /return playPreferenceApplication\.preference\(currentMemberId\(\), nodeId, activityId, topicId\);/);
+  const osController = javaMethod(s.controller, 'public AjaxResult newLifeOperatingSystem(');
+  assert.match(osController, /return playPreferenceApplication\.newLifeOperatingSystem\(currentMemberId\(\), topicId\);/);
+  const principal = javaMethod(s.controller, 'private Long currentMemberId(');
+  assert.match(principal, /Long id = getAppUserId\(\);/);
+  assert.match(principal, /return id == null \? 0L : id;/);
+  assert.match(s.controller, /private PlayPreferenceApplication playPreferenceApplication;/);
+  assert.match(s.preference, /private PlayNodeContext playNodeContext;/);
+  assert.match(s.preference, /private PreferencePlayService preferencePlayService;/);
+  inOrder(actorEntry(s.preference, 'preference'),
+    'resolvePreferencePlayCtx(memberId, nodeId, activityId, topicId, null)',
+    'if (pctx.error != null) return pctx.error;',
+    'preferencePlayService.load(', 'memberId, pctx.playCtx.topicId, nodeId, pctx.template');
+  const resolverEntry = javaMethod(s.preference, 'public PreferencePlayCtx resolvePreferencePlayCtx(');
+  assert.match(resolverEntry, /return resolvePreferencePlayCtx\(memberId, nodeId, activityId, topicId, routeActionId, null\);/);
+  // The public GET overload delegates to the same guarded resolver used by original-run submission.
+  const resolver = javaMethod(s.preference, 'private PreferencePlayCtx resolvePreferencePlayCtx(');
+  inOrder(resolver, 'playNodeContext.resolveCtx(memberId, activityId, topicId, out.node)',
+    'if (out.playCtx.error != null) { out.error = out.playCtx.error; return out; }',
+    'playNodeContext.leadGateError(out.playCtx.actId, out.node)',
+    'if (leadErr != null) { out.error = error(leadErr); return out; }',
+    'playNodeContext.unlockGateError(memberId, out.playCtx.actId, out.node)',
+    'playNodeContext.routeAccessError(memberId, out.playCtx.actId, out.playCtx.topicId, out.node, routeActionId)',
+    'if (unlockErr != null) { out.error = PlayCommandErrorContract.routeLocked(unlockErr); return out; }');
+  assert.match(resolver, /playNodeContext\.frozenAnswer\(memberId, out\.playCtx\.topicId, out\.playCtx\.actId, out\.node\.getId\(\), originalRun\)/);
+  const context = javaMethod(s.context, 'public PlayCtx resolveCtx(Long memberId, String activityId, String topicId, CmsTopicNode node)');
+  assert.match(context, /playNodeAccessService\.resolveContext\(memberId, activityId, topicId, nodeScope\(node\)\)/);
+  const access = javaMethod(s.access, 'public Context resolveContext(Long actor, String activityId, String topicId, NodeScope node)');
+  assert.match(access, /resolveCtx\(actor,activityId,topicId,nodeEntity\(node\)\)/);
+  const entry = javaMethod(s.access, 'private PlayCtx resolveCtx(Long memberId, String activityId, String topicId, CmsTopicNode node)');
+  assert.match(entry, /return resolveCtx\(memberId, activityId, topicId, node, null\);/);
+  const admission = javaMethod(s.access, 'private PlayCtx resolveCtx(Long memberId, String activityId, String topicId, CmsTopicNode node,');
+  assert.match(admission, /if \(!activity\.getTopicId\(\)\.equals\(node\.getTopicId\(\)\)\) \{ c\.error = error\("该节点不属于本次活动"\); return c; \}/);
+  assert.match(admission, /CurrentPlayRegistration\.require\(\s*currentPlayActivityMapper,cmsRegistrationMapper,memberId,2L,actId,registrationId,new Date\(\),false,giftPlayEligibility,seatRecipientEligibility\)/);
+  assert.match(admission, /if \(ticket == null\) \{ c\.error = error\("请先报名并完成支付"\); return c; \}/);
+  assert.match(admission, /if \(node\.getTopicId\(\) == null \|\| !node\.getTopicId\(\)\.equals\(tId\)\) \{ c\.error = error\("该节点不属于本主题"\); return c; \}/);
+  assert.match(admission, /hasRunningSession\(memberId, tId, 0L\)/);
+  for (const [port, paid] of [['requireToContinue', ''], ['require', 'false,']]) {
+    assert.match(admission, new RegExp(`CurrentPlayRegistration\\.${port}\\(\\s*currentPlayActivityMapper,cmsRegistrationMapper,memberId,1L,tId,registrationId,new Date\\(\\),\\s*${paid}giftPlayEligibility,seatRecipientEligibility(?:,\\s*codeGrantPlayEligibility)?\\)`));
+  }
+  assert.match(admission, /if \(pass == null\) \{ c\.error = new Failure\(402, "请先购买自玩通行证"\); return c; \}/);
+  const registrationArgs = 'CmsActivityMapper activities,CmsRegistrationMapper registrations,\n            Long memberId,long ownerType,Long ownerId,Long requestedId,Date now';
+  assert.match(javaMethod(s.registration, `public static CmsRegistration require(${registrationArgs})`),
+    /return require\(activities,registrations,memberId,ownerType,ownerId,requestedId,now,false\);/);
+  const admissionPorts = 'IMarketingGiftPlayEligibility gift,IRegistrationSeatRecipientEligibility seatRecipient)';
+  assert.match(javaMethod(s.registration, `public static CmsRegistration require(${registrationArgs},boolean originallyRequiresPaid,\n            ${admissionPorts}`),
+    /return collect\(activities,registrations,memberId,ownerType,ownerId,requestedId,now,originallyRequiresPaid,true,false,gift,seatRecipient\)\.get\(0\);/);
+  assert.match(javaMethod(s.registration, `public static CmsRegistration requireToContinue(${registrationArgs},\n            ${admissionPorts}`),
+    /return collect\(activities,registrations,memberId,ownerType,ownerId,requestedId,now,false,true,true,gift,seatRecipient\)\.get\(0\);/);
+  const collect = javaMethod(s.registration, 'private static List<CmsRegistration> collect(');
+  inOrder(collect, 'probe.setMemberId(memberId);probe.setOwnerType(ownerType);',
+    'probe.setOwnerId(ownerId);probe.setRegistrationStatus(2);',
+    'registrations.selectCmsRegistrationByIdForUpdate(snapshot.getId())',
+    'if(!currentOwner(current,memberId,ownerType,ownerId)) continue;');
+  assert.match(javaMethod(s.registration, 'private static boolean passesValueRules('),
+    /if\(\(originallyRequiresPaid \|\| Integer\.valueOf\(3\)\.equals\(current\.getPurchaseKind\(\)\)\)\s*&& !Integer\.valueOf\(2\)\.equals\(current\.getPaymentStatus\(\)\)\) return false;/);
+  assert.equal(collect.split('if(!passesValueRules(current,activity,ownerType,now,originallyRequiresPaid,continuing)) continue;').length, 4);
+  inOrder(collect, 'Map<Long, GiftPlayFact> giftFacts = giftFacts(gift, memberId, ownerType, ownerId);',
+    'if(fact!=null && fact.withholds(memberId)) continue;',
+    'if(!fact.claimedBy(memberId)) continue;', 'registrations.selectCmsRegistrationById(fact.getRegistrationId())',
+    'if(!ownedScope(current,ownerType,ownerId)) continue;',
+    'seatRecipient.playFacts(memberId,ownerType,ownerId)', '|| !fact.getInviteeMemberId().equals(memberId)) continue;',
+    'registrations.selectCmsRegistrationByIdForUpdate(fact.getRegistrationId())',
+    'if(!ownedScope(current,ownerType,ownerId)\n                    || !seatRecipient.claimedUnderRegistrationLock(fact,memberId,current)) continue;',
+    'if(!Integer.valueOf(2).equals(current.getPaymentStatus())) continue;');
+  const scope = javaMethod(s.registration, 'public static boolean ownedScope(');
+  for (const predicate of ['Long.valueOf(ownerType).equals(current.getOwnerType())', 'ownerId.equals(current.getOwnerId())',
+    'Integer.valueOf(2).equals(current.getRegistrationStatus())']) assert.ok(scope.includes(predicate), predicate);
+  assertWidenedAdmissionBinding(s);
+  const owner = javaMethod(s.registration, 'public static boolean currentOwner(');
+  for (const predicate of ['memberId.equals(current.getMemberId())', 'ownedScope(current,ownerType,ownerId)']) assert.ok(owner.includes(predicate), predicate);
+  assert.match(javaMethod(s.context, 'public String unlockGateError(Long memberId, Long actId, CmsTopicNode node)'),
+    /return playNodeAccessService\.unlockGateError\(memberId, actId, nodeScope\(node\)\);/);
+  assert.match(javaMethod(s.access, 'public String unlockGateError(Long actor,Long activityId,NodeScope node)'),
+    /return unlockGateError\(actor,activityId,nodeEntity\(node\)\);/);
+  const unlock = javaMethod(s.access, 'private String unlockGateError(Long memberId, Long actId, CmsTopicNode node)');
+  inOrder(unlock, 'probe.setMemberId(memberId);', 'probe.setActivityId(actId);',
+    'probe.setNodeId(node.getUnlockAfterNodeId());', 'playerNodeProgressService.selectPlayerNodeProgressList(probe)');
+  assert.match(unlock, /if \(p\.getStatus\(\) != null && p\.getStatus\(\) == 1\) return null;/);
+  inOrder(actorEntry(s.preference, 'newLifeOperatingSystem'), 'preferencePlayService.operatingSystem(memberId, topicId)');
+  const os = javaMethod(s.preferenceService, 'public Map<String, Object> operatingSystem(');
+  inOrder(os, 'attemptMapper.selectPreferenceResults(memberId, topicId)',
+    'if (!completedByMember(memberId, topicId, attempts))',
+    'throw new IllegalArgumentException("完成主题后才能生成新生活操作系统");');
+  const completed = javaMethod(s.preferenceService, 'private boolean completedByMember(');
+  for (const fact of ['probe.setMemberId(memberId);', 'probe.setOwnerType(2L);', 'probe.setRegistrationStatus(2);',
+    'registrationService.selectCmsRegistrationList(probe)', 'activityIds.contains(row.getOwnerId())',
+    'Integer.valueOf(PurchaseKind.EXPLORE_PASS).equals(row.getPurchaseKind())',
+    'perkLedgerService.isExploreCompleted(row.getId(), topicId)']) assert.ok(completed.includes(fact), fact);
+}
+
+function assertLeaderboardGetContract(s) {
+  const controller = javaMethod(s.controller, 'public AjaxResult leaderboard(');
+  assert.match(controller, /return playPlayerQueryApplication\.leaderboard\(currentMemberId\(\), activityId, topicId\);/);
+  assert.match(s.controller, /private PlayPlayerQueryApplication playPlayerQueryApplication;/);
+  assert.match(s.player, /private PlayCompletionFacts playCompletionFacts;/);
+  const board = actorEntry(s.player, 'leaderboard');
+  inOrder(board, 'if (tId > 0 && !activity.getTopicId().equals(tId)) return error("活动与主题不匹配");',
+    'boardTopicId = activity.getTopicId();',
+    'if (!playCompletionFacts.isRegistered(memberId, actId)) return error("请先报名并完成支付");',
+    '} else if (playCompletionFacts.validSelfPlayPass(memberId, tId) == null)',
+    'return new AjaxResult(402, "请先购买自玩通行证");',
+    'playerNodeProgressService.selectRouteLeaderboard(boardActivityId, boardTopicId, 50)');
+  assert.match(board, /selectActivityLeaderboard\(\s*actId > 0 \? actId : null, actId > 0 \? null : tId, 50\)/);
+  assert.match(board, /selectRouteLeaderboardRow\(boardActivityId, boardTopicId, memberId\)/);
+  const registered = javaMethod(s.facts, 'public boolean isRegistered(');
+  inOrder(registered, 'regProbe.setMemberId(memberId);', 'regProbe.setOwnerType(2L);',
+    'regProbe.setOwnerId(actId);', 'regProbe.setRegistrationStatus(2);',
+    'cmsRegistrationService.selectCmsRegistrationList(regProbe)', 'if (regs != null && !regs.isEmpty()) return true;',
+    'return hasSeatRecipientFact(memberId, 2L, actId);');
+  assert.match(javaMethod(s.facts, 'private boolean hasSeatRecipientFact('),
+    /return !seatRecipientFacts\(memberId, ownerType, ownerId\)\.isEmpty\(\);/);
+  assert.match(javaMethod(s.facts, 'private List<com.chengyinhub.business.domain.SeatRecipientFact> seatRecipientFacts('),
+    /seatRecipientEligibility\.playFacts\(memberId, ownerType, ownerId\);/);
+  assertWidenedAdmissionBinding(s);
+  const passEntry = javaMethod(s.facts, 'public CmsRegistration validSelfPlayPass(Long memberId, Long topicId)');
+  assert.match(passEntry, /return validSelfPlayPass\(memberId, topicId, null\);/);
+  const pass = javaMethod(s.facts, 'public CmsRegistration validSelfPlayPass(Long memberId, Long topicId, Long registrationId)');
+  inOrder(pass, 'probe.setMemberId(memberId);', 'probe.setOwnerType(1L);', 'probe.setOwnerId(topicId);',
+    'probe.setRegistrationStatus(2);', 'cmsRegistrationService.selectCmsRegistrationList(probe)');
+  assert.match(pass, /r\.getExpiresAt\(\) == null \|\| r\.getExpiresAt\(\)\.after\(now\)/);
+}
+
+test('偏好题组与新生活 OS GET 都绑定当前会员及其游玩/完成事实', () => {
+  assertPreferenceGetContract(playGetSources());
+});
+
+test('排行榜 GET 绑定当前会员及本场报名支付或自玩通行证', () => {
+  assertLeaderboardGetContract(playGetSources());
+});
+
+test('玩法 GET 真实身份和实际 owner 守卫被改动时合同必须判红', () => {
+  const sources = playGetSources();
+  const mutations = [
+    [assertPreferenceGetContract, 'controller', 'playPreferenceApplication.preference(currentMemberId(),', 'playPreferenceApplication.preference(999L,'],
+    [assertPreferenceGetContract, 'controller', 'playPreferenceApplication.newLifeOperatingSystem(currentMemberId(),', 'playPreferenceApplication.newLifeOperatingSystem(999L,'],
+    [assertPreferenceGetContract, 'preference', 'if (out.playCtx.error != null) { out.error = out.playCtx.error; return out; }', ''],
+    [assertPreferenceGetContract, 'preference', 'return resolvePreferencePlayCtx(memberId, nodeId, activityId, topicId, routeActionId, null);', 'return null;'],
+    [assertPreferenceGetContract, 'preference', 'return resolvePreferencePlayCtx(memberId, nodeId, activityId, topicId, routeActionId, null);', 'return resolvePreferencePlayCtx(999L, nodeId, activityId, topicId, routeActionId, null);'],
+    [assertPreferenceGetContract, 'preference', 'out.node.getId(), originalRun)', 'out.node.getId(), null)'],
+    [assertPreferenceGetContract, 'preference', 'playNodeContext.unlockGateError(memberId, out.playCtx.actId, out.node)', 'null'],
+    [assertPreferenceGetContract, 'access', 'memberId,2L,actId,registrationId,new Date()', '999L,2L,actId,registrationId,new Date()'],
+    [assertPreferenceGetContract, 'registration', 'if(!currentOwner(current,memberId,ownerType,ownerId)) continue;', ''],
+    [assertPreferenceGetContract, 'registration', 'return collect(activities,registrations,memberId,ownerType,ownerId,requestedId,now,originallyRequiresPaid,true,false,gift,seatRecipient).get(0);', 'return null;'],
+    [assertPreferenceGetContract, 'access', 'new Date(),false,giftPlayEligibility,seatRecipientEligibility', 'new Date(),false,giftPlayEligibility,null'],
+    [assertPreferenceGetContract, 'registration', 'if(!fact.claimedBy(memberId)) continue;', ''],
+    [assertPreferenceGetContract, 'registration', '|| !fact.getInviteeMemberId().equals(memberId)) continue;', ') continue;'],
+    [assertPreferenceGetContract, 'registration', 'if(!ownedScope(current,ownerType,ownerId)\n', 'if(false\n'],
+    [assertPreferenceGetContract, 'giftFact', 'return Integer.valueOf(STATUS_CLAIMED).equals(status) && ', 'return '],
+    [assertPreferenceGetContract, 'giftSql', '(r.member_id = #{memberId} or g.claimed_member_id = #{memberId})', '1 = 1'],
+    [assertPreferenceGetContract, 'giftSql', 'r.owner_id = #{ownerId}', 'r.owner_id is not null'],
+    [assertPreferenceGetContract, 'giftSql', 'g.status in (0, 1)', 'g.status in (0, 1, 2, 3)'],
+    [assertPreferenceGetContract, 'seatSql', 'where i.status = 1', 'where i.status in (1, 2, 3, 4)'],
+    [assertPreferenceGetContract, 'seatSql', 'i.invitee_member_id = #{memberId}', 'i.invitee_member_id is not null'],
+    [assertPreferenceGetContract, 'seatSql', 'r.owner_id = #{ownerId}', 'r.owner_id is not null'],
+    [assertPreferenceGetContract, 'seatEligibility', 'row != null && row.claimed()', 'row != null'],
+    [assertPreferenceGetContract, 'seatEligibility', 'Objects.equals(row.getInviteeMemberId(), memberId)', 'true'],
+    [assertPreferenceGetContract, 'giftEligibility', '@Transactional(readOnly = true)', '@Transactional'],
+    [assertPreferenceGetContract, 'access', 'if (p.getStatus() != null && p.getStatus() == 1) return null;', 'return null;'],
+    [assertPreferenceGetContract, 'preferenceService', 'if (!completedByMember(memberId, topicId, attempts))', 'if (false)'],
+    [assertLeaderboardGetContract, 'controller', 'playPlayerQueryApplication.leaderboard(currentMemberId(),', 'playPlayerQueryApplication.leaderboard(999L,'],
+    [assertLeaderboardGetContract, 'player', 'if (!playCompletionFacts.isRegistered(memberId, actId)) return error("请先报名并完成支付");', ''],
+    [assertLeaderboardGetContract, 'player', 'if (!playCompletionFacts.isRegistered(memberId, actId)) return error("请先报名并完成支付");', '/* if (!playCompletionFacts.isRegistered(memberId, actId)) return error("请先报名并完成支付"); */'],
+    [assertLeaderboardGetContract, 'player', 'playCompletionFacts.validSelfPlayPass(memberId, tId) == null', 'false'],
+    [assertLeaderboardGetContract, 'facts', 'regProbe.setOwnerId(actId);', 'regProbe.setOwnerId(999L);'],
+    [assertLeaderboardGetContract, 'facts', 'return hasSeatRecipientFact(memberId, 2L, actId);', 'return hasSeatRecipientFact(999L, 2L, actId);'],
+    [assertLeaderboardGetContract, 'facts', 'seatRecipientEligibility.playFacts(memberId, ownerType, ownerId);', 'seatRecipientEligibility.playFacts(memberId, ownerType, 999L);'],
+    [assertLeaderboardGetContract, 'seatSql', 'r.payment_status = 2', 'r.payment_status in (1, 2)'],
+    [assertLeaderboardGetContract, 'facts', 'probe.setMemberId(memberId);\n        probe.setOwnerType(1L); // 1=主题(自玩通行证)', 'probe.setMemberId(999L);\n        probe.setOwnerType(1L); // 1=主题(自玩通行证)'],
+  ];
+  for (const [check, file, before, after] of mutations) {
+    assert.ok(sources[file].includes(before), `负控必须改到真实源码 ${file}: ${before}`);
+    const changed = { ...sources, [file]: sources[file].replace(before, after) };
+    assert.throws(() => check(changed), { code: 'ERR_ASSERTION' }, `${file}: ${before}`);
+  }
+});
+
+test('roam GET scope 与后端资源模型一致：tiles 是 member-owned，pois 是全局读取+本人 found 投影', () => {
+  const controller = fs.readFileSync(ROAM_CONTROLLER, 'utf8');
+  const pois = controller.slice(controller.indexOf('@GetMapping("/pois")'), controller.indexOf('@GetMapping("/nearby-exploreday")'));
+  const tiles = controller.slice(controller.indexOf('@GetMapping("/tiles")'), controller.indexOf('@PostMapping("/reveal")'));
+  const scopeOf = (marker) => MATRIX.find((row) => row[1] === marker)[4];
+
+  // C-13(2026-09-17):/pois 仍是全局据点列表(不按会员筛资源),只是多带一列「本账号是否已发现」(found)
+  // —— 与 /api/city/nodes 同档的 global-read+viewer-personalization;uid 只喂投影,未登录(uid=0)全列 false。
+  assert.equal(scopeOf("req('/api/roam/pois'"), 'global-read+viewer-personalization');
+  assert.match(pois, /selectPoisNear\([^;]*uid\(\)/);
+  assert.equal(scopeOf("req('/api/roam/tiles/page'"), 'self-member-history');
+  assert.match(tiles, /Long memberId = uid\(\)/);
+  assert.match(tiles, /selectTilesByMember\(memberId,/);
+  assert.match(tiles, /selectTilePageByMember\(memberId, cursor, pageSize \+ 1\)/);
+});
+
+test('广场商业身份权限仍来自当前账号与授权，不以俱乐部发布角色替代', () => {
+  const app = fs.readFileSync(path.join(XCX_ROOT, 'app.js'), 'utf8');
+  const policy = app.match(/canUseCommunity:\s*function\s*\(write\)\s*\{([\s\S]*?)\n\s*\},/);
+  assert.ok(policy, '必须读取真实当前身份权限投影');
+  assert.match(policy[1], /this\._communityFeatureOwner === String\(this\.getUserID\(\) \|\| ''\)/);
+  assert.match(policy[1], /this\._communityFeatureAuthorization === this\.getAuthorization\(\)/);
+  assert.match(policy[1], /\[write \? 'communityPostWrite' : 'communityPostRead'\] === true/);
+  // 2026-10-29 R2:广场列表页已删,社区帖文改由发现页读;读资格不在时不拉社区那一路。
+  const discover = fs.readFileSync(path.join(XCX_ROOT, 'pages/talent/list/index.js'), 'utf8');
+  assert.match(discover, /if \(typeof app\.canUseCommunity === 'function' && app\.canUseCommunity\(false\)\) \{\s*sources\.push/,
+    '社区帖文那一路只在当前账号有读资格时加入');
+  assert.doesNotMatch(discover, /submitFormData\s*\(/, '不能复活 master 已迁出的旧发布写入口');
+});
+
+test('迁移到真实共用发布器的续登仍绑定原俱乐部、引用、编辑稿与内容，广场写拒绝闸不丢', () => {
+  const source = fs.readFileSync(path.join(XCX_ROOT, 'pages/square/components/cy/post-compose/index.js'), 'utf8');
+  const publish = source.slice(source.indexOf('    onPublish() {'), source.indexOf('    publishClubPost(content) {'));
+  assert.match(publish, /owner: this/);
+  assert.match(publish, /target: \(\) => \[this\.data\.clubId, !!this\.data\.editMode, this\._editId/);
+  assert.match(publish, /this\.data\.postRef && this\.data\.postRef\.refType/);
+  assert.match(publish, /this\.data\.postRef && this\.data\.postRef\.refId/);
+  assert.match(publish, /this\.composeSnapshot\(\)/);
+  assert.match(publish, /this\._editDataId, this\._editDataType, this\.data\.selectedActivity && this\.data\.selectedActivity\.activityId, this\._composeVisible/);
+  assert.match(publish, /\(!that\.data\.clubId \|\| that\.data\.editMode\)[\s\S]*?typeof app\.canUseCommunity !== 'function' \|\| !app\.canUseCommunity\(true\)/);
+  assert.ok(publish.indexOf('!app.canUseCommunity(true)') < publish.indexOf('publishIntent.begin('), '拒绝须早于原发布意图与外呼');
+  assert.match(publish, /if \(that\.data\.clubId && !that\.data\.editMode\) \{ that\.publishClubPost\(content\); return; \}/);
+  const cancel = source.slice(source.indexOf('    cancelPublish() {'), source.indexOf('    isCurrentPublish(pending) {'));
+  assert.match(cancel, /this\._loginContinuationEpoch = \(this\._loginContinuationEpoch \|\| 0\) \+ 1/);
+  assert.match(cancel, /publishIntent\.settle\(wx, 'square:compose', pending\.memberId, pending\.intent\.key, 'unknown'\)/);
+  // AUDIT-1122 L06-061/062:hide 先存草稿,俱乐部帖(无幂等键)不中断在途请求,其余照旧 cancelPublish
+  assert.match(source, /hide\(\) \{ this\._loginContinuationEpoch = \(this\._loginContinuationEpoch \|\| 0\) \+ 1;[\s\S]*?this\._composeVisible = false;[\s\S]*?if \(!\(pending && pending\.club\)\) this\.cancelPublish\(\);/);
+  const club = fs.readFileSync(path.join(XCX_ROOT, 'pages/club/detail/index.js'), 'utf8');
+  assert.match(club, /onComposePublished\(\) \{\s*this\.setData\(\{ postRef: null \}\);\s*this\.loadPosts\(\);/);
+  assert.doesNotMatch(club, /onPostSubmit\s*\(/, '原俱乐部命令只保留实际组件路径，不恢复被迁出的旧实现');
+});

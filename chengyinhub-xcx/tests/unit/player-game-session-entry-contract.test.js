@@ -1,0 +1,1206 @@
+const { test } = require('node:test')
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+
+const pageDir = path.resolve(__dirname, '../../pages/play')
+const js = fs.readFileSync(path.join(pageDir, 'index.js'), 'utf8')
+const wxml = fs.readFileSync(path.join(pageDir, 'index.wxml'), 'utf8')
+
+function setByPath(target, key, value) {
+  const parts = key.split('.')
+  let cursor = target
+  parts.slice(0, -1).forEach((part) => {
+    cursor[part] = cursor[part] || {}
+    cursor = cursor[part]
+  })
+  cursor[parts[parts.length - 1]] = value
+}
+
+function settle() {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
+function loadUnknownWritePlayer(options = {}) {
+  const pageModule = path.join(pageDir, 'index.js')
+  const client = require('../../utils/game-session-client.js')
+  const previous = {
+    Page: global.Page,
+    getApp: global.getApp,
+    getCurrentPages: global.getCurrentPages,
+    wx: global.wx,
+    submitAction: client.submitAction,
+    readReceipt: client.readReceipt,
+    loadProjection: client.loadProjection,
+  }
+  const storage = options.storage || new Map()
+  const submitCalls = []
+  const receiptCalls = []
+  const removedKeys = []
+  const modalCalls = []
+  const toastCalls = []
+  let submitResult = { status: 'unknown' }
+  let receiptResult = { status: 'pending' }
+  let projectionResult = { status: 'network-error' }
+  let definition
+  client.submitAction = (role, input) => {
+    submitCalls.push({ role, input })
+    return Promise.resolve(typeof submitResult === 'function' ? submitResult(role, input) : submitResult)
+  }
+  client.readReceipt = (activityId, requestId) => {
+    receiptCalls.push({ activityId, requestId })
+    return Promise.resolve(receiptResult)
+  }
+  client.loadProjection = () => Promise.resolve(projectionResult)
+  global.getApp = () => ({ globalData: { features: {} }, getUserID: () => '9', sendRequest() {}, chooseImage() {} })
+  global.getCurrentPages = () => []
+  global.wx = {
+    getStorageSync(key) { return storage.get(key) || '' },
+    setStorageSync(key, value) {
+      if (options.storageWriteError) throw new Error('storage unavailable')
+      storage.set(key, value)
+    },
+    removeStorageSync(key) { removedKeys.push(key); storage.delete(key) },
+    showToast(options) { toastCalls.push(options) },
+    showModal(options) {
+      modalCalls.push(options)
+      if (options && options.success) options.success({ confirm: true, cancel: false })
+    },
+  }
+  global.Page = (config) => { definition = config }
+  delete require.cache[require.resolve(pageModule)]
+  require(pageModule)
+
+  const command = {
+    activityId: 701,
+    nodeId: 31,
+    requestId: 'pg-701-exact-terminal',
+    expectedRevision: 9,
+    action: 'PLAYER_CHOICE',
+    payload: { choiceId: 'A' },
+  }
+  const page = Object.assign({}, definition, {
+    data: JSON.parse(JSON.stringify(definition.data)),
+    _playerPendingWrite: { requestId: command.requestId, action: command.action, command },
+    _reloads: 0,
+    _loadPlayerGameModule() { this._reloads += 1 },
+    setData(patch, callback) {
+      Object.entries(patch).forEach(([key, value]) => setByPath(this.data, key, value))
+      if (callback) callback.call(this)
+    },
+  })
+  page.data.activityId = 701
+  page.data.gameModule = Object.assign({}, page.data.gameModule, {
+    enabled: true,
+    activityId: 701,
+    revision: 9,
+    write: { status: 'unknown', requestId: command.requestId, message: '结果待确认' },
+  })
+
+  return {
+    page,
+    definition,
+    command,
+    submitCalls,
+    receiptCalls,
+    removedKeys,
+    modalCalls,
+    toastCalls,
+    setSubmitResult(value) { submitResult = value },
+    setReceiptResult(value) { receiptResult = value },
+    setProjectionResult(value) { projectionResult = value },
+    cleanup() {
+      client.submitAction = previous.submitAction
+      client.readReceipt = previous.readReceipt
+      client.loadProjection = previous.loadProjection
+      if (previous.Page === undefined) delete global.Page; else global.Page = previous.Page
+      if (previous.getApp === undefined) delete global.getApp; else global.getApp = previous.getApp
+      if (previous.getCurrentPages === undefined) delete global.getCurrentPages; else global.getCurrentPages = previous.getCurrentPages
+      if (previous.wx === undefined) delete global.wx; else global.wx = previous.wx
+    },
+  }
+}
+
+function terminalReceipt(command, outcome, overrides) {
+  return Object.assign({
+    receiptId: 801,
+    activityId: command.activityId,
+    requestId: command.requestId,
+    action: command.action,
+    outcome,
+    revision: outcome === 'APPLIED' ? 10 : 9,
+  }, overrides || {})
+}
+
+function readyPlayerProjection(revision = 9) {
+  return {
+    status: 'ready',
+    data: {
+      sessionId: 91,
+      activityId: 701,
+      perspective: 'PLAYER',
+      status: 'RUNNING',
+      revision,
+      availableActions: ['PLAYER_SUBMIT'],
+      player: { teamId: 8, role: {}, nodes: [] },
+    },
+  }
+}
+
+test('玩家页从共享三身份客户端读取服务端投影并提供精确回执刷新', () => {
+  assert.match(js, /require\('\.\.\/\.\.\/utils\/game-session-client\.js'\)/)
+  assert.match(js, /loadProjection\('player', activityId\)/)
+  assert.match(js, /submitAction\('player', input\)/)
+  assert.match(js, /readReceipt\(gameModule\.activityId, requestId\)/)
+  assert.match(js, /buildPlayerRoleConfirmInput\(gameModule, requestId\)/)
+  assert.match(js, /buildPlayerSubmissionInput\(/)
+  assert.match(wxml, /bindtap="submitPlayerTask"/)
+  assert.match(wxml, /核验编号 \{\{item\.submission\.submissionId\}\}/)
+  assert.match(wxml, /bindtap="confirmPlayerRole"/)
+  assert.match(js, /game_player_pending_/)
+  assert.match(js, /结果待确认，请勿重复提交/)
+  assert.match(js, /normalizePlayerPendingReceiptIndex/)
+  assert.match(js, /setStorageSync\(key, receiptIndex\)/)
+  assert.match(js, /retryPlayerUnknownWrite\s*\(\)/)
+  assert.match(js, /submitAction\('player',\s*pending\.command\)/)
+  assert.match(wxml, /bindtap="retryPlayerUnknownWrite"/)
+  assert.match(wxml, /gameModule\.write\.canRetry/)
+})
+
+test('玩家页不再内置角色秘密，角色卡和线索都来自投影', () => {
+  assert.doesNotMatch(js, /路线在你脑子里|队伍里没有第二双眼睛|谜面到你手里/)
+  assert.match(js, /myRole\.summary/)
+  // 2026-09-11 半屏脱离 cy-sheet:标题改由原型壳里的 .sheet-name 承担,title 属性没有了。
+  assert.match(wxml, /<view class="sheet-name">本局线索<\/view>/)
+  assert.match(wxml, /\{\{item\.clue\}\}/)
+  assert.match(wxml, /data-choice="\{\{choice\.id\}\}"/)
+})
+
+test('F01 弱网刷新保留旧快照时明确标注旧数据时间并可重试，首次失败仍是错误空态', async () => {
+  const retained = loadUnknownWritePlayer()
+  try {
+    retained.page._loadPlayerGameModule = retained.definition._loadPlayerGameModule
+    retained.page.rebuild = () => {}
+    retained.page.data.gameModule = Object.assign({}, retained.page.data.gameModule, {
+      enabled: true,
+      activityId: 701,
+      snapshotAt: '2026-08-23 10:30:59',
+      stale: false,
+      nodes: [{ nodeId: 31, status: 'AVAILABLE' }],
+    })
+    retained.setProjectionResult({ status: 'network-error', message: '网络连接失败' })
+
+    retained.page._loadPlayerGameModule()
+    await settle()
+
+    assert.equal(retained.page.data.gameModule.enabled, true)
+    assert.equal(retained.page.data.gameModule.snapshotAt, '2026-08-23 10:30:59')
+    assert.equal(retained.page.data.gameModule.stale, true)
+    assert.equal(retained.page.data.gameModule.error, '网络连接失败')
+  } finally {
+    retained.cleanup()
+  }
+
+  const firstLoad = loadUnknownWritePlayer()
+  try {
+    firstLoad.page._loadPlayerGameModule = firstLoad.definition._loadPlayerGameModule
+    firstLoad.page.rebuild = () => {}
+    firstLoad.page.data.gameModule = Object.assign({}, firstLoad.page.data.gameModule, {
+      enabled: false, snapshotAt: '', stale: false,
+    })
+    firstLoad.setProjectionResult({ status: 'network-error', message: '网络连接失败' })
+
+    firstLoad.page._loadPlayerGameModule()
+    await settle()
+
+    assert.equal(firstLoad.page.data.gameModule.enabled, false)
+    assert.equal(firstLoad.page.data.gameModule.stale, false)
+    assert.equal(firstLoad.page.data.gameModule.error, '网络连接失败')
+  } finally {
+    firstLoad.cleanup()
+  }
+
+  assert.match(wxml, /class="gmod__stale" wx:if="\{\{gameModule\.stale\}\}"/)
+  assert.match(wxml, /旧数据更新于 \{\{gameModule\.snapshotAt\}\}/)
+  assert.match(wxml, /class="gmod__retry" bindtap="retryGameModule"/)
+})
+
+test('暂停节点在所有进入路径共用的锁闸被阻断', () => {
+  assert.match(js, /if \(node && node\.paused\)/)
+  assert.match(js, /本站已暂停/)
+  assert.match(js, /filter\(\(o\) => !o\.x\.done && !o\.x\.paused\)/)
+})
+
+test('D05 暂停节点把服务端批准的替代行动展示给玩家', () => {
+  assert.match(wxml, /item\.status === 'PAUSED'/)
+  assert.match(wxml, /\{\{item\.fallback\.playerMessage\}\}/)
+  assert.match(wxml, /\{\{item\.fallback\.targetNodeName\}\}/)
+  // walk-fix Round5 #4/#9:备用方案代码 planCode / 版本号是后台代码,玩家只看「前往 某站」
+  assert.doesNotMatch(wxml, /\{\{item\.fallback\.planCode\}\}/)
+})
+
+test('R9-38 暂停节点无保底路线也展示暂停安排与退款去处', () => {
+  assert.match(wxml, /\{\{item\.pause\.reason\}\}/)
+  assert.match(wxml, /\{\{item\.pause\.resumeEta\}\}/)
+  assert.match(wxml, /如需退款请联系平台客服/)
+  assert.doesNotMatch(wxml, /item\.status === 'PAUSED' && item\.fallback/,
+    '暂停说明不能只在有保底路线时才渲染')
+})
+
+test('完成回执只触发上一确认节点到本节点的路线分段表现', () => {
+  assert.match(js, /completedRouteSegment\(nodes, nodeId\)/)
+  assert.match(js, /motion\.routeDraw\(segment/)
+  assert.match(js, /reducedMotion: this\.data\.reducedMotion/)
+  assert.match(js, /if \(this\._routeDrawStop\) this\._routeDrawStop\(\)/)
+  assert.match(js, /completed = projected\.status === 'COMPLETED' \|\| projected\.status === 'FALLBACK_COMPLETED'/)
+  assert.match(js, /done:\s*completed/)
+  assert.match(js, /doneAt:\s*completedAt/)
+  assert.match(js, /if \(newlyCompleted\) this\._animateCompletedSegment\(this\.data\.nodes, newlyCompleted\.nodeId\)/)
+})
+
+test('服务端结局进入现有单屏结算，不再为三身份模组叠加第二个庆祝层', () => {
+  assert.match(wxml, /finsheet__game-ending/)
+  assert.match(wxml, /\{\{gameModule\.story\.ending\.title\}\}/)
+  assert.match(wxml, /\{\{gameModule\.story\.ending\.summary\}\}/)
+})
+
+test('玩家任务不是一键通关：文字、现场码和照片都先形成真实凭证再提交', () => {
+  assert.match(wxml, /item\.playerTask\.inputType === 'TEXT'/)
+  assert.match(wxml, /bindinput="onPlayerTaskTextInput"/)
+  assert.match(wxml, /item\.playerTask\.inputType === 'SCAN'/)
+  assert.match(wxml, /bindtap="scanPlayerTaskEvidence"/)
+  assert.match(wxml, /item\.playerTask\.inputType === 'PHOTO'/)
+  assert.match(wxml, /bindtap="photoPlayerTaskEvidence"/)
+  assert.match(wxml, /!item\.taskEvidence\.ready \? 'is-disabled'/)
+  assert.match(wxml, /gameModule\.canSubmitTask/)
+  assert.doesNotMatch(wxml, /gameModule\.availableActions\.indexOf\('PLAYER_SUBMIT'\)/)
+  assert.match(js, /if \(!evidence\.ready \|\| !Array\.isArray\(evidence\.evidenceUrls\) \|\| !evidence\.evidenceUrls\.length\)/)
+  assert.match(js, /\['text:' \+ encodeURIComponent\(trimmed\)\]/)
+  assert.match(js, /\['scan:' \+ encodeURIComponent\(value\)\]/)
+  assert.match(js, /filter\(\(url\) => url\.toLowerCase\(\)\.startsWith\('https:\/\/'\)\)/)
+  assert.match(js, /buildPlayerSubmissionInput\([\s\S]*?evidence\.evidenceUrls/)
+})
+
+test('D05 提示点击前显示影响，确认后只提交服务端 nextLevel', async () => {
+  assert.match(wxml, /\{\{item\.hint\.nextImpactLabel\}\}/)
+  assert.match(wxml, /wx:for="\{\{item\.hint\.revealedTexts\}\}"/)
+  assert.match(wxml, /bindtap="requestPlayerHint"/)
+
+  const harness = loadUnknownWritePlayer()
+  try {
+    harness.page.data.gameModule = Object.assign({}, harness.page.data.gameModule, {
+      enabled: true,
+      activityId: 701,
+      revision: 9,
+      availableActions: ['PLAYER_HINT'],
+      write: { status: 'idle', requestId: '', message: '' },
+      nodes: [{
+        nodeId: 31,
+        hint: {
+          currentLevel: 1,
+          revealedTexts: [{ level: 1, text: '先看门牌第三行' }],
+          nextLevel: 2,
+          nextImpactLabel: '使用后本关解谜分上限降至 40 分',
+          revealAvailable: false,
+          revealImpactLabel: '',
+        },
+      }],
+    })
+    harness.page._playerPendingWrite = null
+    harness.setSubmitResult((role, command) => ({
+      status: 'success', requestId: command.requestId,
+      receipt: terminalReceipt(command, 'APPLIED'),
+    }))
+
+    harness.page.requestPlayerHint({ currentTarget: { dataset: { node: 31, level: 2 } } })
+    await settle()
+
+    assert.equal(harness.modalCalls.length, 1)
+    assert.equal(harness.modalCalls[0].content, '使用后本关解谜分上限降至 40 分')
+    assert.equal(harness.submitCalls.length, 1)
+    assert.equal(harness.submitCalls[0].role, 'player')
+    assert.deepEqual(harness.submitCalls[0].input, {
+      activityId: 701,
+      nodeId: 31,
+      requestId: harness.submitCalls[0].input.requestId,
+      expectedRevision: 9,
+      action: 'PLAYER_HINT',
+      payload: { level: 2 },
+    })
+    assert.equal(harness.page._reloads, 1)
+  } finally {
+    harness.cleanup()
+  }
+})
+
+test('F06 reveal 明示保底完成影响，确认后只提交空 payload', async () => {
+  assert.match(wxml, /\{\{item\.hint\.revealImpactLabel\}\}/)
+  assert.match(wxml, /bindtap="requestPlayerReveal"/)
+  assert.match(wxml, /记为保底完成，不计入榜单分/)
+  assert.match(wxml, /保底完成 · 不计入榜单分/)
+
+  const harness = loadUnknownWritePlayer()
+  try {
+    harness.page.data.gameModule = Object.assign({}, harness.page.data.gameModule, {
+      enabled: true,
+      activityId: 701,
+      revision: 9,
+      availableActions: ['PLAYER_REVEAL'],
+      write: { status: 'idle', requestId: '', message: '' },
+      nodes: [{
+        nodeId: 31,
+        hint: {
+          currentLevel: 2,
+          revealedTexts: [],
+          nextLevel: null,
+          nextImpactLabel: '',
+          revealAvailable: true,
+          revealImpactLabel: '查看答案将记为保底完成，不计正常榜单分',
+        },
+      }],
+    })
+    harness.page._playerPendingWrite = null
+    harness.setSubmitResult((role, command) => ({
+      status: 'success', requestId: command.requestId,
+      receipt: terminalReceipt(command, 'APPLIED'),
+    }))
+
+    harness.page.requestPlayerReveal({ currentTarget: { dataset: { node: 31 } } })
+    await settle()
+
+    assert.equal(harness.modalCalls.length, 1)
+    assert.equal(harness.modalCalls[0].content, '查看答案将记为保底完成，不计正常榜单分')
+    assert.deepEqual(harness.submitCalls[0].input, {
+      activityId: 701,
+      nodeId: 31,
+      requestId: harness.submitCalls[0].input.requestId,
+      expectedRevision: 9,
+      action: 'PLAYER_REVEAL',
+      payload: {},
+    })
+    assert.equal(harness.page._reloads, 1)
+  } finally {
+    harness.cleanup()
+  }
+})
+
+test('PLAYER_REVEAL 的权威答案立即展示，刷新后的保底完成节点仍保留答案', async () => {
+  const storage = new Map()
+  const harness = loadUnknownWritePlayer({ storage })
+  try {
+    harness.page.data.gameModule = Object.assign({}, harness.page.data.gameModule, {
+      enabled: true,
+      sessionId: 91,
+      activityId: 701,
+      teamId: 8,
+      revision: 9,
+      availableActions: ['PLAYER_REVEAL'],
+      write: { status: 'idle', requestId: '', message: '' },
+      nodes: [{
+        nodeId: 31,
+        hint: {
+          currentLevel: 2,
+          revealedTexts: [],
+          nextLevel: null,
+          nextImpactLabel: '',
+          revealAvailable: true,
+          revealImpactLabel: '查看答案将记为保底完成，不计正常榜单分',
+        },
+      }],
+    })
+    harness.page._playerPendingWrite = null
+    harness.setSubmitResult((role, command) => ({
+      status: 'success', requestId: command.requestId,
+      receipt: terminalReceipt(command, 'APPLIED', {
+        result: { revealText: '答案是 1998' },
+      }),
+    }))
+
+    harness.page.requestPlayerReveal({ currentTarget: { dataset: { node: 31 } } })
+    await settle()
+
+    assert.equal(harness.modalCalls.length, 2)
+    assert.deepEqual({
+      title: harness.modalCalls[1].title,
+      content: harness.modalCalls[1].content,
+      showCancel: harness.modalCalls[1].showCancel,
+    }, {
+      title: '答案已揭示',
+      content: '答案是 1998',
+      showCancel: false,
+    })
+    assert.doesNotMatch(JSON.stringify(Array.from(storage.entries())), /答案是 1998|revealText/,
+      '答案正文只能留在当前页面内存，不能写入本地 storage')
+
+    harness.setProjectionResult({
+      status: 'ready',
+      data: {
+        sessionId: 91,
+        activityId: 701,
+        perspective: 'PLAYER',
+        status: 'RUNNING',
+        revision: 10,
+        availableActions: [],
+        player: {
+          teamId: 8,
+          role: {},
+          nodes: [{
+            nodeId: 31,
+            personalState: 'FALLBACK_COMPLETED',
+            completionStatus: 'FALLBACK_COMPLETED',
+            completionSource: 'PLAYER_REVEAL',
+            hint: {
+              currentLevel: 2,
+              revealedTexts: [],
+              revealAvailable: false,
+            },
+          }],
+        },
+      },
+    })
+    harness.page._loadPlayerGameModule = harness.definition._loadPlayerGameModule
+    harness.page.rebuild = () => {}
+    harness.page._loadPlayerGameModule()
+    await settle()
+
+    assert.equal(harness.page.data.gameModule.nodes[0].revealedAnswer, '答案是 1998')
+    assert.match(wxml, /答案 · \{\{item\.revealedAnswer\}\}/)
+  } finally {
+    harness.cleanup()
+  }
+})
+
+test('敏感玩家写只在内存保留原命令，重启后仅按落盘回执索引确认且绝不自动重发', async () => {
+  const storage = new Map()
+  const first = loadUnknownWritePlayer({ storage })
+  try {
+    const evidenceUrl = 'https://cdn.example.com/private/scene.jpg'
+    first.page.data.gameModule = Object.assign({}, first.page.data.gameModule, {
+      enabled: true,
+      activityId: 701,
+      revision: 9,
+      availableActions: ['PLAYER_SUBMIT'],
+      write: { status: 'idle', requestId: '', message: '' },
+      nodes: [{
+        nodeId: 31,
+        playerTask: {
+          taskCode: 'PHOTO_SCENE', prompt: '拍下现场标记', inputType: 'PHOTO',
+          completionPolicy: 'EVIDENCE_ONLY', verificationRequired: false,
+        },
+        taskEvidence: {
+          type: 'PHOTO', ready: true, text: '', evidenceUrls: [evidenceUrl], statusText: '已上传 1 张现场照片',
+        },
+        submission: null,
+      }],
+    })
+    first.page._playerPendingWrite = null
+    first.setSubmitResult({ status: 'unknown', message: '结果待确认' })
+
+    first.page.submitPlayerTask({ currentTarget: { dataset: { node: 31, task: 'PHOTO_SCENE' } } })
+    await settle()
+
+    const command = first.submitCalls[0].input
+    assert.deepEqual(first.page._playerPendingWrite.command, command, '同页内存仍保留原命令供精确重试')
+    assert.deepEqual(storage.get('game_player_pending_m9_a701'), {
+      activityId: 701,
+      nodeId: 31,
+      requestId: command.requestId,
+      expectedRevision: 9,
+      action: 'PLAYER_SUBMIT',
+    })
+    assert.doesNotMatch(JSON.stringify(storage.get('game_player_pending_m9_a701')), /payload|PHOTO_SCENE|evidenceUrls|https:\/\//)
+  } finally {
+    first.cleanup()
+  }
+
+  const reopened = loadUnknownWritePlayer({ storage })
+  try {
+    reopened.setProjectionResult(readyPlayerProjection(9))
+    reopened.setReceiptResult({ status: 'pending', requestId: storage.get('game_player_pending_m9_a701').requestId })
+    reopened.page._loadPlayerGameModule = reopened.definition._loadPlayerGameModule
+    reopened.page.rebuild = () => {}
+    reopened.page._loadPlayerGameModule()
+    await settle()
+    await settle()
+
+    assert.equal(reopened.submitCalls.length, 0, '重启恢复只能查回执，不能重发敏感命令')
+    assert.equal(reopened.receiptCalls.length, 1)
+    assert.equal(reopened.page.data.gameModule.write.status, 'unknown')
+    assert.equal(reopened.page.data.gameModule.write.canRetry, false)
+    assert.equal(reopened.page._playerPendingWrite.command, undefined)
+    assert.equal(reopened.page.retryPlayerUnknownWrite(), false)
+    assert.equal(reopened.submitCalls.length, 0)
+
+    const pending = reopened.page._playerPendingWrite
+    reopened.setReceiptResult({
+      status: 'matched', requestId: pending.requestId,
+      receipt: terminalReceipt(pending, 'APPLIED'),
+    })
+    reopened.page.reconcilePlayerChoice()
+    await settle()
+
+    assert.equal(reopened.page.data.gameModule.write.status, 'confirmed', '精确 APPLIED 后清锁；较旧projection不能覆盖确认回执')
+    assert.equal(reopened.page._playerPendingWrite, null)
+    assert.equal(storage.has('game_player_pending_m9_a701'), false)
+    assert.equal(reopened.submitCalls.length, 0)
+  } finally {
+    reopened.cleanup()
+  }
+})
+
+test('玩家回执索引落盘失败时 fail closed，敏感任务网络请求不得发出', async () => {
+  const storage = new Map()
+  const harness = loadUnknownWritePlayer({ storage, storageWriteError: true })
+  try {
+    harness.page.data.gameModule = Object.assign({}, harness.page.data.gameModule, {
+      enabled: true,
+      activityId: 701,
+      revision: 9,
+      availableActions: ['PLAYER_SUBMIT'],
+      write: { status: 'idle', requestId: '', message: '' },
+      nodes: [{
+        nodeId: 31,
+        playerTask: {
+          taskCode: 'PHOTO_SCENE', prompt: '拍下现场标记', inputType: 'PHOTO',
+          completionPolicy: 'EVIDENCE_ONLY', verificationRequired: false,
+        },
+        taskEvidence: {
+          type: 'PHOTO', ready: true, text: '',
+          evidenceUrls: ['https://cdn.example.com/private/scene.jpg'], statusText: '已上传 1 张现场照片',
+        },
+        submission: null,
+      }],
+    })
+    harness.page._playerPendingWrite = null
+
+    harness.page.submitPlayerTask({ currentTarget: { dataset: { node: 31, task: 'PHOTO_SCENE' } } })
+    await settle()
+
+    assert.equal(harness.submitCalls.length, 0)
+    assert.equal(harness.page._playerPendingWrite, null)
+    assert.equal(harness.page.data.gameModule.write.status, 'error')
+    assert.match(harness.page.data.gameModule.write.message, /无法安全保存/)
+    assert.match(harness.toastCalls[0].title, /无法安全保存/)
+    assert.equal(storage.size, 0)
+  } finally {
+    harness.cleanup()
+  }
+})
+
+test('重启恢复的回执索引收到精确 FAILED 后清锁，仍不重发原命令', async () => {
+  const storage = new Map([['game_player_pending_m9_a701', {
+    activityId: 701,
+    nodeId: 31,
+    requestId: 'pg-submit-701-31-failed',
+    expectedRevision: 9,
+    action: 'PLAYER_SUBMIT',
+  }]])
+  const reopened = loadUnknownWritePlayer({ storage })
+  try {
+    const pending = storage.get('game_player_pending_m9_a701')
+    reopened.setProjectionResult(readyPlayerProjection(9))
+    reopened.setReceiptResult({
+      status: 'business-error', requestId: pending.requestId, message: '服务端未接受原操作',
+      receipt: terminalReceipt(pending, 'FAILED'),
+    })
+    reopened.page._loadPlayerGameModule = reopened.definition._loadPlayerGameModule
+    reopened.page.rebuild = () => {}
+    reopened.page._loadPlayerGameModule()
+    await settle()
+    await settle()
+
+    assert.equal(reopened.page.data.gameModule.write.status, 'error')
+    assert.equal(reopened.page.data.gameModule.write.message, '服务端未接受原操作')
+    assert.equal(reopened.page._playerPendingWrite, null)
+    assert.equal(storage.has('game_player_pending_m9_a701'), false)
+    assert.equal(reopened.submitCalls.length, 0)
+    assert.equal(reopened.receiptCalls.length, 1)
+  } finally {
+    reopened.cleanup()
+  }
+})
+
+test('PHOTO EVIDENCE_ONLY 提交后显示证据已记录，RECORDED 不进入商家核验语义', async () => {
+  assert.match(wxml, /item\.playerTask\.completionPolicy === 'EVIDENCE_ONLY' \? '记录现场证据'/)
+  assert.match(wxml, /item\.submission\.status === 'PENDING'/)
+  assert.match(wxml, /\{\{item\.submission\.statusLabel\}\}/)
+
+  const harness = loadUnknownWritePlayer()
+  try {
+    const photoNode = {
+      nodeId: 31,
+      playerTask: {
+        taskCode: 'PHOTO_SCENE',
+        prompt: '拍下现场标记',
+        inputType: 'PHOTO',
+        completionPolicy: 'EVIDENCE_ONLY',
+        verificationRequired: false,
+      },
+      taskEvidence: {
+        type: 'PHOTO', ready: true, text: '',
+        evidenceUrls: ['https://cdn.example.com/evidence/scene.jpg'], statusText: '已上传 1 张现场照片',
+      },
+      submission: null,
+    }
+    harness.page.data.gameModule = Object.assign({}, harness.page.data.gameModule, {
+      enabled: true,
+      activityId: 701,
+      revision: 9,
+      availableActions: ['PLAYER_SUBMIT'],
+      write: { status: 'idle', requestId: '', message: '' },
+      nodes: [photoNode],
+    })
+    harness.page._playerPendingWrite = null
+    harness.setSubmitResult((role, command) => ({
+      status: 'success', requestId: command.requestId,
+      receipt: Object.assign(terminalReceipt(command, 'APPLIED'), {
+        result: { submissionId: 303, status: 'RECORDED' },
+      }),
+    }))
+
+    harness.page.submitPlayerTask({ currentTarget: { dataset: { node: 31, task: 'PHOTO_SCENE' } } })
+    await settle()
+
+    assert.equal(harness.submitCalls.length, 1)
+    assert.equal(harness.submitCalls[0].input.action, 'PLAYER_SUBMIT')
+    assert.equal(harness.toastCalls.at(-1).title, '证据已记录')
+    assert.equal(harness.page.data.gameModule.write.message, '证据已记录')
+
+    harness.page.data.gameModule.write = { status: 'idle', requestId: '', message: '' }
+    harness.page.data.gameModule.nodes[0] = Object.assign({}, photoNode, {
+      submission: { submissionId: 303, status: 'RECORDED', statusLabel: '证据已记录' },
+    })
+    harness.page.submitPlayerTask({ currentTarget: { dataset: { node: 31, task: 'PHOTO_SCENE' } } })
+    await settle()
+    assert.equal(harness.submitCalls.length, 1, 'RECORDED 证据不能绕过页面状态重复提交')
+  } finally {
+    harness.cleanup()
+  }
+})
+
+test('D05/F06 unknown-write 只有精确动作终态 receipt 才解锁', async () => {
+  const cases = [{ action: 'PLAYER_HINT', payload: { level: 2 }, outcome: 'APPLIED' }, {
+    action: 'PLAYER_REVEAL', payload: {}, outcome: 'FAILED',
+  }]
+  for (const row of cases) {
+    const harness = loadUnknownWritePlayer()
+    try {
+      const command = {
+        activityId: 701,
+        nodeId: 31,
+        requestId: 'pg-exact-' + row.action.toLowerCase(),
+        expectedRevision: 9,
+        action: row.action,
+        payload: row.payload,
+      }
+      harness.page._playerPendingWrite = {
+        requestId: command.requestId,
+        action: command.action,
+        command,
+      }
+      harness.page.data.gameModule.write = {
+        status: 'unknown', requestId: command.requestId, message: '结果待确认',
+      }
+
+      const wrongAction = row.action === 'PLAYER_HINT' ? 'PLAYER_REVEAL' : 'PLAYER_HINT'
+      harness.setSubmitResult({
+        status: 'business-error', requestId: command.requestId,
+        receipt: terminalReceipt(command, 'FAILED', { action: wrongAction }),
+      })
+      assert.equal(harness.page.retryPlayerUnknownWrite(), true)
+      await settle()
+      assert.equal(harness.page.data.gameModule.write.status, 'unknown')
+      assert.equal(harness.page._playerPendingWrite.command, command)
+      assert.deepEqual(harness.removedKeys, [])
+
+      harness.setSubmitResult(row.outcome === 'APPLIED' ? {
+        status: 'success', requestId: command.requestId,
+        receipt: terminalReceipt(command, 'APPLIED'),
+      } : {
+        status: 'business-error', requestId: command.requestId, message: '操作未被接受',
+        receipt: terminalReceipt(command, 'FAILED'),
+      })
+      harness.page.retryPlayerUnknownWrite()
+      await settle()
+      assert.equal(harness.page.data.gameModule.write.status, row.outcome === 'APPLIED' ? 'confirmed' : 'error')
+      assert.equal(harness.page._playerPendingWrite, null)
+      assert.deepEqual(harness.removedKeys, ['game_player_pending_m9_a701'])
+      assert.ok(harness.submitCalls.every((call) => call.input === command))
+    } finally {
+      harness.cleanup()
+    }
+  }
+})
+
+test('玩家未知写精确重试：无回执业务错误和错 action 回执都继续全页锁，精确 FAILED 才解锁', async () => {
+  const harness = loadUnknownWritePlayer()
+  try {
+    harness.setSubmitResult({
+      status: 'business-error', requestId: harness.command.requestId,
+      reasonCode: 'GAME_LOGIN_REQUIRED', message: '请重新登录',
+    })
+    assert.equal(harness.page.retryPlayerUnknownWrite(), true)
+    await settle()
+    assert.equal(harness.page.data.gameModule.write.status, 'unknown')
+    assert.equal(harness.page.data.gameModule.write.requestId, harness.command.requestId)
+    assert.equal(harness.page._playerPendingWrite.command, harness.command)
+    assert.deepEqual(harness.removedKeys, [])
+
+    harness.setSubmitResult({
+      status: 'business-error', requestId: harness.command.requestId,
+      receipt: terminalReceipt(harness.command, 'FAILED', { action: 'CONFIRM_ROLE' }),
+    })
+    harness.page.retryPlayerUnknownWrite()
+    await settle()
+    assert.equal(harness.page.data.gameModule.write.status, 'unknown')
+    assert.equal(harness.page._playerPendingWrite.command, harness.command)
+    assert.deepEqual(harness.removedKeys, [])
+
+    harness.setSubmitResult({
+      status: 'business-error', requestId: harness.command.requestId,
+      message: '状态冲突', receipt: terminalReceipt(harness.command, 'FAILED'),
+    })
+    harness.page.retryPlayerUnknownWrite()
+    await settle()
+    assert.equal(harness.page.data.gameModule.write.status, 'error')
+    assert.equal(harness.page.data.gameModule.write.requestId, harness.command.requestId)
+    assert.equal(harness.page._playerPendingWrite, null)
+    assert.deepEqual(harness.removedKeys, ['game_player_pending_m9_a701'])
+    assert.equal(harness.submitCalls.length, 3)
+    assert.ok(harness.submitCalls.every((call) => call.input === harness.command))
+  } finally {
+    harness.cleanup()
+  }
+})
+
+test('玩家初次选择收到无回执业务错误也进入 unknown，精确 FAILED 才按失败收口', async () => {
+  const unknown = loadUnknownWritePlayer()
+  try {
+    unknown.page.data.gameModule.write = { status: 'idle', requestId: '', message: '' }
+    unknown.page._playerPendingWrite = null
+    unknown.setSubmitResult({ status: 'business-error', reasonCode: 'GAME_LOGIN_REQUIRED', message: '请重新登录' })
+    unknown.page.submitPlayerChoice({ currentTarget: { dataset: { node: 31, choice: 'A' } } })
+    await settle()
+    const command = unknown.submitCalls[0].input
+    assert.equal(unknown.page.data.gameModule.write.status, 'unknown')
+    assert.equal(unknown.page.data.gameModule.write.requestId, command.requestId)
+    assert.equal(unknown.page._playerPendingWrite.command.requestId, command.requestId)
+    assert.deepEqual(unknown.removedKeys, [])
+  } finally {
+    unknown.cleanup()
+  }
+
+  const failed = loadUnknownWritePlayer()
+  try {
+    failed.page.data.gameModule.write = { status: 'idle', requestId: '', message: '' }
+    failed.page._playerPendingWrite = null
+    failed.setSubmitResult((role, command) => ({
+      status: 'business-error', requestId: command.requestId, message: '状态冲突',
+      receipt: terminalReceipt(command, 'FAILED'),
+    }))
+    failed.page.submitPlayerChoice({ currentTarget: { dataset: { node: 31, choice: 'A' } } })
+    await settle()
+    assert.equal(failed.page.data.gameModule.write.status, 'error')
+    assert.equal(failed.page._playerPendingWrite, null)
+    assert.deepEqual(failed.removedKeys, ['game_player_pending_m9_a701'])
+  } finally {
+    failed.cleanup()
+  }
+})
+
+test('另一队版本推进后，持久化 FAILED 回执刷新并解锁；没有回执时仍冻结原请求', async () => {
+  const harness = loadUnknownWritePlayer()
+  try {
+    harness.page.data.gameModule.write = { status: 'idle' }
+    harness.page._playerPendingWrite = null
+    harness.setSubmitResult((role, command) => ({
+      status: 'business-error', requestId: command.requestId,
+      reasonCode: 'GAME_STATE_CONFLICT', message: '客户端版本已过期，请刷新后重试',
+      receipt: terminalReceipt(command, 'FAILED', { reasonCode: 'GAME_STATE_CONFLICT' }),
+    }))
+    harness.page.submitPlayerChoice({ currentTarget: { dataset: { node: 31, choice: 'A' } } })
+    await settle()
+    assert.equal(harness.page.data.gameModule.write.status, 'error')
+    assert.equal(harness.page._playerPendingWrite, null)
+    assert.ok(harness.page._reloads > 0)
+    assert.equal(harness.submitCalls.length, 1, '刷新不得自动重发命令')
+    harness.page.data.gameModule.revision = 10
+    harness.setSubmitResult({ status: 'business-error', reasonCode: 'GAME_STATE_CONFLICT' })
+    harness.page.submitPlayerChoice({ currentTarget: { dataset: { node: 31, choice: 'A' } } })
+    await settle()
+    assert.equal(harness.submitCalls[1].input.expectedRevision, 10)
+    assert.equal(harness.page.data.gameModule.write.status, 'unknown')
+    assert.ok(harness.page._playerPendingWrite)
+  } finally { harness.cleanup() }
+})
+
+test('新版玩法重试只委托同局同版本的真实高级玩法组件，不自行发第二请求', () => {
+  const harness = loadUnknownWritePlayer()
+  try {
+    let retries = 0
+    const game = { data: { state: { sessionId: 42, version: 3, canRetry: true } }, retry() { retries += 1 } }
+    harness.page.selectComponent = () => game
+    harness.page.data.playKit = { kit: { type: 'qa', sessionId: 42, version: 3, terminal: true, canRetry: true } }
+    harness.page.onPlayKitAction({ detail: { type: 'qa', action: 'retry' } })
+    assert.equal(retries, 1)
+    game.data.state.version = 4
+    harness.page.onPlayKitAction({ detail: { type: 'qa', action: 'retry' } })
+    assert.equal(retries, 1)
+    game.data.state.version = 3
+    game.data.state.canRetry = false
+    harness.page.onPlayKitAction({ detail: { type: 'qa', action: 'retry' } })
+    assert.equal(retries, 1)
+    assert.equal(harness.submitCalls.length, 0)
+  } finally { harness.cleanup() }
+})
+
+test('玩家未知写刷新：非终态不解锁，精确 APPLIED/FAILED 终态分别确认或驳回', async () => {
+  const failed = loadUnknownWritePlayer()
+  try {
+    failed.setReceiptResult({
+      status: 'business-error', requestId: failed.command.requestId,
+      reasonCode: 'GAME_LOGIN_REQUIRED', message: '请重新登录',
+    })
+    failed.page.reconcilePlayerChoice()
+    await settle()
+    assert.equal(failed.page.data.gameModule.write.status, 'unknown')
+    assert.equal(failed.page._playerPendingWrite.command, failed.command)
+    assert.deepEqual(failed.removedKeys, [])
+
+    failed.setReceiptResult({
+      status: 'business-error', requestId: failed.command.requestId,
+      receipt: terminalReceipt(failed.command, 'FAILED', { action: 'PLAYER_SUBMIT' }),
+    })
+    failed.page.reconcilePlayerChoice()
+    await settle()
+    assert.equal(failed.page.data.gameModule.write.status, 'unknown')
+    assert.equal(failed.page._playerPendingWrite.command, failed.command)
+
+    failed.setReceiptResult({
+      status: 'business-error', requestId: failed.command.requestId,
+      message: '状态冲突', receipt: terminalReceipt(failed.command, 'FAILED'),
+    })
+    failed.page.reconcilePlayerChoice()
+    await settle()
+    assert.equal(failed.page.data.gameModule.write.status, 'error')
+    assert.equal(failed.page._playerPendingWrite, null)
+    assert.deepEqual(failed.removedKeys, ['game_player_pending_m9_a701'])
+  } finally {
+    failed.cleanup()
+  }
+
+  const applied = loadUnknownWritePlayer()
+  try {
+    applied.setReceiptResult({
+      status: 'matched', requestId: applied.command.requestId,
+      receipt: terminalReceipt(applied.command, 'APPLIED'),
+    })
+    applied.page.reconcilePlayerChoice()
+    await settle()
+    assert.equal(applied.page.data.gameModule.write.status, 'confirmed')
+    assert.equal(applied.page._playerPendingWrite, null)
+    assert.deepEqual(applied.removedKeys, ['game_player_pending_m9_a701'])
+    assert.equal(applied.page._reloads, 1)
+  } finally {
+    applied.cleanup()
+  }
+})
+
+
+test('普通带队 ROUTE 保持路线玩法，服务端结束事实仍收掉本地行程', async () => {
+  for (const status of ['RUNNING', 'FINISHED', 'CANCELLED']) {
+    const h = loadUnknownWritePlayer()
+    try {
+      let ended = 0
+      h.page._loadPlayerGameModule = h.definition._loadPlayerGameModule
+      h.page._applyServerRunSessionEnd = () => { ended += 1 }
+      h.setProjectionResult({ status: 'ready', data: {
+        sessionId: 91, activityId: 701, perspective: 'PLAYER', status,
+        player: { playMode: 'ROUTE' },
+      } })
+      h.page._loadPlayerGameModule()
+      await settle()
+      assert.equal(h.page.data.gameModule.loading, false)
+      assert.equal(h.page.data.gameModule.enabled, false)
+      assert.equal(h.page.data.gameModule.stale, false)
+      assert.equal(h.page.data.gameModule.error, '')
+      assert.equal(ended, status === 'RUNNING' ? 0 : 1)
+    } finally { h.cleanup() }
+  }
+})
+
+test('城市定向和自由探索不弹旧导航员身份，真实剧情分配仍可确认', async () => {
+  for (const mode of [1, 2]) {
+    const h = loadUnknownWritePlayer()
+    try {
+      const legacy = { roleCode: 'NAVIGATOR', roleName: '导航员' }
+      h.page.data.mode = mode
+      h.page.data.gameModule.enabled = false
+      h.page.data.myRole = legacy
+      h.page._maybeShowRoleCard(legacy)
+      assert.equal(h.page.data.roleCard.show, false)
+      h.page._playerPendingWrite = null
+      h.page.rebuild = () => {}
+      h.page._loadPlayerGameModule = h.definition._loadPlayerGameModule
+      h.setProjectionResult(readyPlayerProjection())
+      h.page._loadPlayerGameModule()
+      await settle()
+      assert.equal(h.page.data.myRole, null)
+      assert.equal(h.page.data.roleCard.show, false)
+      const real = readyPlayerProjection()
+      real.data.player.role = { code: 'SCOUT', name: '侦察员', publicBrief: '发现线索', confirmed: false }
+      h.setProjectionResult(real)
+      h.page._loadPlayerGameModule()
+      await settle()
+      assert.equal(h.page.data.roleCard.show, true)
+      assert.equal(h.page.data.roleCard.code, 'SCOUT')
+    } finally { h.cleanup() }
+  }
+})
+
+test('玩家选择与原命令重试遇旧纪元：显示服务端提示并重读，绝不换纪元自动重发', async () => {
+  const harness = loadUnknownWritePlayer()
+  try {
+    harness.page.data.gameModule.authorityEpoch = 4
+    harness.page.data.gameModule.write = { status: 'idle' }
+    harness.setSubmitResult({ status: 'business-error', reasonCode: 'GAME_AUTHORITY_CONFLICT', message: '本局权威版本已更新，请刷新' })
+    harness.page.submitPlayerChoice({ currentTarget: { dataset: { node: 31, choice: 'A' } } })
+    await settle()
+    assert.equal(harness.submitCalls[0].input.authorityEpoch, 4)
+    assert.equal(harness.page._reloads, 1)
+    assert.equal(harness.page._playerPendingWrite, null)
+    assert.equal(harness.page.data.gameModule.write.status, 'error')
+    assert.match(harness.page.data.gameModule.write.message, /权威版本/)
+    assert.equal(harness.submitCalls.length, 1)
+    assert.equal(harness.page.retryPlayerUnknownWrite(), false)
+
+    harness.command.authorityEpoch = 2
+    harness.page._playerPendingWrite = { requestId: harness.command.requestId, action: harness.command.action, command: harness.command }
+    harness.page.data.gameModule.write = { status: 'unknown' }
+    harness.page.retryPlayerUnknownWrite()
+    await settle()
+    assert.equal(harness.submitCalls[1].input.authorityEpoch, 2, '显式重试也必须冻结旧纪元')
+    assert.equal(harness.page._reloads, 2)
+    assert.equal(harness.submitCalls.length, 2)
+  } finally { harness.cleanup() }
+})
+
+test('F-L3-07:晚到的旧投影不覆盖新状态 —— 请求纪元与同局 revision 单调双重保护', async () => {
+  const harness = loadUnknownWritePlayer()
+  const client = require('../../utils/game-session-client.js')
+  try {
+    const page = harness.page
+    page._loadPlayerGameModule = harness.definition._loadPlayerGameModule
+    page.rebuild = () => {}
+    page._maybeShowRoleCard = () => {}
+    page.data.nodes = []
+    page.data.gameModule = Object.assign({}, page.data.gameModule, { sessionId: 91, revision: 9, write: null })
+    const pending = []
+    client.loadProjection = () => new Promise((resolve) => { pending.push(resolve) })
+
+    page._loadPlayerGameModule()
+    page._loadPlayerGameModule()
+    assert.equal(pending.length, 2)
+    pending[1](readyPlayerProjection(11))
+    await settle()
+    assert.equal(page.data.gameModule.revision, 11)
+    const staleOtherSession = readyPlayerProjection(50)
+    staleOtherSession.data.sessionId = 90
+    pending[0](staleOtherSession)
+    await settle()
+    assert.equal(page.data.gameModule.revision, 11, '先发后到的请求不得回写(即使是另一局的更大 revision)')
+    assert.equal(page.data.gameModule.sessionId, 91)
+
+    page._loadPlayerGameModule()
+    pending[2](readyPlayerProjection(10))
+    await settle()
+    assert.equal(page.data.gameModule.revision, 11, '同局更低 revision 的投影不得回退状态')
+    assert.equal(page.data.gameModule.loading, false)
+  } finally {
+    harness.cleanup()
+  }
+})
+
+function deferredPlayerResult() {
+  let resolve, reject
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+
+test('late APPLIED receipt confirms current pending without rolling projection revision back', async () => {
+  const h = loadUnknownWritePlayer()
+  try {
+    const old = deferredPlayerResult()
+    h.setReceiptResult(old.promise)
+    h.page.reconcilePlayerChoice()
+    h.page.data.gameModule = Object.assign({}, h.page.data.gameModule, { revision: 12,
+      nodes: [{ nodeId: 32, status: 'COMPLETED' }], sheetShow: true })
+    old.resolve({ status: 'matched', receipt: terminalReceipt(h.command, 'APPLIED') })
+    await settle()
+    assert.equal(h.page.data.gameModule.revision, 12)
+    assert.equal(h.page.data.gameModule.nodes[0].nodeId, 32)
+    assert.equal(h.page.data.gameModule.sheetShow, true)
+    assert.equal(h.page.data.gameModule.write.status, 'confirmed')
+  } finally { h.cleanup() }
+})
+
+for (const change of ['pending', 'activity', 'session']) test('receipt ignores changed ' + change + ' context', async () => {
+  const h = loadUnknownWritePlayer()
+  try {
+    h.page.data.gameModule.sessionId = 91
+    const old = deferredPlayerResult()
+    h.setReceiptResult(old.promise)
+    h.page.reconcilePlayerChoice()
+    if (change === 'pending') {
+      h.page._playerPendingWrite = { ...h.page._playerPendingWrite, requestId: 'new-pending-request' }
+      h.page.data.gameModule.write = { status: 'unknown', requestId: 'new-pending-request' }
+    } else if (change === 'activity') h.page.data.activityId = 702
+    else h.page.data.gameModule.sessionId = 92
+    const pending = h.page._playerPendingWrite
+    const before = JSON.parse(JSON.stringify(h.page.data.gameModule))
+    old.resolve({ status: 'matched', receipt: terminalReceipt(h.command, 'APPLIED') })
+    await settle()
+    assert.deepEqual(h.page.data.gameModule, before)
+    assert.equal(h.page._playerPendingWrite, pending)
+    assert.equal(h.page._reloads, 0)
+  } finally { h.cleanup() }
+})
+
+for (const outcome of ['ready', 'error', 'rejected']) test('older projection ' + outcome + ' cannot override newer projection', async () => {
+  const h = loadUnknownWritePlayer()
+  try {
+    h.page._playerPendingWrite = null
+    h.page._loadPlayerGameModule = h.definition._loadPlayerGameModule
+    h.page.rebuild = () => {}
+    const old = deferredPlayerResult()
+    h.setProjectionResult(old.promise); h.page._loadPlayerGameModule()
+    h.setProjectionResult(readyPlayerProjection(12)); h.page._loadPlayerGameModule()
+    await settle()
+    if (outcome === 'rejected') old.reject(new Error('old error'))
+    else old.resolve(outcome === 'ready' ? readyPlayerProjection(10) : { status: 'network-error' })
+    await settle()
+    assert.equal(h.page.data.gameModule.revision, 12)
+    assert.equal(h.page.data.gameModule.stale, false)
+    assert.equal(h.page.data.gameModule.error, '')
+  } finally { h.cleanup() }
+})
+
+for (const change of ['activity', 'session', 'mismatched response']) test('projection ignores ' + change + ' context', async () => {
+  const h = loadUnknownWritePlayer()
+  try {
+    h.page._playerPendingWrite = null
+    h.page.data.gameModule.sessionId = 91
+    h.page._loadPlayerGameModule = h.definition._loadPlayerGameModule
+    const old = deferredPlayerResult()
+    h.setProjectionResult(old.promise); h.page._loadPlayerGameModule()
+    if (change === 'activity') h.page.data.activityId = 702
+    if (change === 'session') h.page.data.gameModule.sessionId = 92
+    const before = JSON.parse(JSON.stringify(h.page.data.gameModule))
+    const response = readyPlayerProjection(12)
+    if (change === 'mismatched response') response.data.activityId = 702
+    old.resolve(response); await settle()
+    assert.deepEqual(h.page.data.gameModule, before)
+  } finally { h.cleanup() }
+})
+
+test('same-session lower projection cannot replace current revision', async () => {
+  const h = loadUnknownWritePlayer()
+  try {
+    h.page._playerPendingWrite = null
+    h.page.data.gameModule.sessionId = 91
+    h.page.data.gameModule.revision = 12
+    h.page._loadPlayerGameModule = h.definition._loadPlayerGameModule
+    h.setProjectionResult(readyPlayerProjection(10)); h.page._loadPlayerGameModule()
+    await settle()
+    assert.equal(h.page.data.gameModule.revision, 12)
+    assert.equal(h.page.data.gameModule.loading, false)
+  } finally { h.cleanup() }
+})
+
+test('projection refresh preserves same pending in-memory command and original-key retry', async () => {
+  const storage = new Map()
+  const h = loadUnknownWritePlayer({ storage })
+  try {
+    assert.equal(h.page._savePlayerPending(h.command), true)
+    const memory = h.page._playerPendingWrite
+    h.page._loadPlayerGameModule = h.definition._loadPlayerGameModule
+    h.page.rebuild = () => {}
+    h.setProjectionResult(readyPlayerProjection(12)); h.page._loadPlayerGameModule()
+    await settle()
+    assert.equal(h.page._playerPendingWrite, memory)
+    assert.equal(h.page.data.gameModule.write.canRetry, true)
+    assert.equal(h.page.retryPlayerUnknownWrite(), true)
+    assert.deepEqual(h.submitCalls[0].input, h.command)
+    assert.equal(storage.get('game_player_pending_m9_a701').command, undefined)
+    await settle()
+  } finally { h.cleanup() }
+})
+
+for (const outcome of ['unknown', 'applied', 'rejected']) test('old write ' + outcome + ' cannot affect replacement pending', async () => {
+  const h = loadUnknownWritePlayer()
+  try {
+    h.page.data.gameModule.write = { status: 'idle', requestId: '' }
+    const old = deferredPlayerResult()
+    h.setSubmitResult(old.promise)
+    h.page.submitPlayerChoice({ currentTarget: { dataset: { node: 31, choice: 'A' } } })
+    const original = h.submitCalls[0].input
+    const replacement = { ...original, requestId: 'replacement-pending-701' }
+    h.page._savePlayerPending(replacement)
+    h.page.data.gameModule.write = { status: 'unknown', requestId: replacement.requestId }
+    const current = h.page._playerPendingWrite
+    const before = JSON.parse(JSON.stringify(h.page.data.gameModule.write))
+    if (outcome === 'rejected') old.reject(new Error('late rejection'))
+    else old.resolve(outcome === 'applied'
+      ? { status: 'success', receipt: terminalReceipt(original, 'APPLIED') } : { status: 'unknown' })
+    await settle()
+    assert.equal(h.page._playerPendingWrite, current)
+    assert.deepEqual(h.page.data.gameModule.write, before)
+    assert.equal(h.page._reloads, 0)
+  } finally { h.cleanup() }
+})
+
+test('projection refresh does not turn an in-flight write into retryable unknown', async () => {
+  const h = loadUnknownWritePlayer()
+  try {
+    h.page.data.gameModule.sessionId = 91
+    h.page.data.gameModule.write = { status: 'idle', requestId: '' }
+    const write = deferredPlayerResult()
+    h.setSubmitResult(write.promise)
+    h.page.submitPlayerChoice({ currentTarget: { dataset: { node: 31, choice: 'A' } } })
+    const input = h.submitCalls[0].input
+    h.page._loadPlayerGameModule = h.definition._loadPlayerGameModule
+    h.page.rebuild = () => {}
+    h.setProjectionResult(readyPlayerProjection(9)); h.page._loadPlayerGameModule()
+    await settle()
+    assert.equal(h.page.data.gameModule.write.status, 'submitting')
+    assert.equal(h.page.retryPlayerUnknownWrite(), false)
+    assert.equal(h.submitCalls.length, 1)
+    assert.equal(h.receiptCalls.length, 0)
+    write.resolve({ status: 'unknown', requestId: input.requestId }); await settle()
+    assert.equal(h.page.data.gameModule.write.status, 'unknown')
+  } finally { h.cleanup() }
+})
+
+test('deferred receipt after real projection refresh keeps revision12 and current projected nodes', async () => {
+  const h = loadUnknownWritePlayer()
+  try {
+    h.page.data.gameModule.sessionId = 91
+    h.page._savePlayerPending(h.command)
+    const receipt = deferredPlayerResult()
+    h.setReceiptResult(receipt.promise)
+    h.page.reconcilePlayerChoice()
+    h.page._loadPlayerGameModule = h.definition._loadPlayerGameModule
+    h.page.rebuild = () => {}
+    const projection = readyPlayerProjection(12)
+    projection.data.player.nodes = [{ nodeId: 32, personalState: 'AVAILABLE' }]
+    h.setProjectionResult(projection)
+    h.page._loadPlayerGameModule(); await settle()
+    assert.equal(h.page.data.gameModule.revision, 12)
+    receipt.resolve({ status: 'matched', receipt: terminalReceipt(h.command, 'APPLIED') })
+    await settle(); await settle()
+    assert.equal(h.page.data.gameModule.revision, 12)
+    assert.equal(h.page.data.gameModule.nodes[0].nodeId, 32)
+    assert.equal(h.page._playerPendingWrite, null)
+    assert.equal(h.submitCalls.length, 0)
+  } finally { h.cleanup() }
+})

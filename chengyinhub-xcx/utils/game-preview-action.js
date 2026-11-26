@@ -1,0 +1,80 @@
+// 作者本地试玩：模板和主题预览共用，不上传资料、不创建玩家会话。
+function previewD20Result(kit) {
+  const values = kit.rollMode === 'normal' ? [12] : [12, 7];
+  const kept = kit.rollMode === 'disadvantage' ? Math.min(...values) : Math.max(...values);
+  const total = kept + kit.modifier;
+  const success = total >= kit.dc;
+  // 沙盒：作者本地预览，不是正式判定；加值来自作者在模板中设定的固定值。
+  return { values, kept, total, success, text: success ? kit.successText : kit.failText, sandbox: true, modifierSource: 'TEMPLATE_FIXED' };
+}
+
+function applyPreviewAction(source, event, startedAt, now = Date.now()) {
+  const kit = Object.assign({}, source);
+  const { action, detail = {} } = event || {};
+  const result = { kit, startedAt: startedAt || 0, ready: false, message: '' };
+  if (kit.mode === 'd20' && action === 'roll') {
+    kit.result = previewD20Result(kit);
+    result.ready = true;
+  } else if (kit.type === 'profile' && action === 'avatar') {
+    kit.avatarUrl = detail.tempFilePath || '';
+  } else if (kit.type === 'profile' && action === 'submit') {
+    const answers = Object.assign({}, detail.answers);
+    const complete = (kit.questions || []).every(question => {
+      const value = String(answers[question.key] == null ? '' : answers[question.key]).trim();
+      if (!value) return false;
+      if (question.kind === 'pick') return (question.options || []).some(option => option.key === value);
+      return value.length <= (Number(question.maxLength) || 12);
+    });
+    if (!complete || (kit.avatar && kit.avatar.enabled && kit.avatar.required && !kit.avatarUrl)) return null;
+    kit.answers = answers;
+    // 咔哒:试玩没有本局状态可问,一律按「条件已满足」演给作者看
+    const labelOf = (q, key) => ((q.options || []).find(o => o.key === key) || {}).label || key;
+    kit.overrides = (kit.questions || []).filter(q => q.kaccha && kit.answers[q.key] && kit.answers[q.key] !== q.kaccha.option)
+      .map(q => {
+        const hit = { key: q.key, picked: labelOf(q, kit.answers[q.key]), assigned: labelOf(q, q.kaccha.option), voice: q.kaccha.voice };
+        kit.answers[q.key] = q.kaccha.option;
+        return hit;
+      });
+    if (kit.overrides.length) result.message = '预览：假定触发条件已满足';
+    kit.done = true;
+    result.ready = true;
+  } else if (kit.type === 'note' && action === 'submit') {
+    kit.mine = String(detail.text || '');
+    kit.done = true;
+    result.ready = true;
+    result.message = '预览留言，仅自己可见';
+  } else if (kit.type === 'photocheck' && action === 'shoot') {
+    kit.lastUrl = detail.tempFilePath || '';
+    result.message = '照片仅供预览，未上传或识别';
+  } else if (kit.type === 'dailysign' && action === 'accept') {
+    // 试玩:按作者写的第一条签文揭开,留言与照片只在本机
+    kit.myText = String(detail.text || ''); kit.myPhotoUrl = detail.photoUrl || '';
+    kit.claimed = true; kit.revealed = true;
+  } else if (kit.type === 'journeycheck' && action === 'roll' && !kit.receipt) {
+    // D20 三档试玩:本机掷一个 d20,按默认难度线判(简单 10 / 标准 13 / 困难 16,与服务端 JourneyRulesValidator 默认值同;
+    // 主题里改过难度线的,以正式游玩为准)
+    const dc = { easy: 10, medium: 13, hard: 16 }[kit.tier] || 13, roll = 1 + Math.floor(Math.random() * 20);
+    kit.receipt = { rolled: true, tier: kit.tier, dc, dice: [roll], kept: roll, total: roll, success: roll >= dc,
+      nat: roll === 20 ? 'CRIT' : (roll === 1 ? 'FUMBLE' : ''), rerolled: false, settled: false, text: '', failCostLabel: '',
+      hp: null, luck: null, exhausted: false, mods: [] };
+  } else if (kit.type === 'journeycheck' && action === 'settle' && kit.receipt && !kit.receipt.settled) {
+    kit.receipt = Object.assign({}, kit.receipt, { settled: true, text: kit.receipt.success ? kit.successText : kit.failText });
+    result.ready = true;
+  } else if (kit.type === 'typein' && action === 'start') {
+    if (kit.passed || (kit.tries > 0 && kit.attempts >= kit.tries)) return null;
+    result.startedAt = now;
+    kit.startConfirmed = true;
+  } else if (kit.type === 'typein' && action === 'submit') {
+    if (!startedAt || kit.passed || (kit.tries > 0 && kit.attempts >= kit.tries)) return null;
+    const normalize = value => kit.caseSensitive ? String(value).trim() : String(value).trim().toLowerCase();
+    kit.passed = normalize(detail.text || '') === normalize(kit.target) && now - startedAt <= kit.seconds * 1000;
+    kit.attempts += 1;
+    kit.startConfirmed = false;
+    result.startedAt = 0;
+    result.ready = kit.passed || (kit.tries > 0 && kit.attempts >= kit.tries);
+    result.message = kit.passed ? '预览：挑战完成' : '预览：未通过';
+  } else return null;
+  return result;
+}
+
+module.exports = { applyPreviewAction, previewD20Result };

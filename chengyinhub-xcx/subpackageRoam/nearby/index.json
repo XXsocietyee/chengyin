@@ -1,0 +1,27 @@
+{
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "附近的队伍",
+  "navigationBarTextStyle": "white",
+  "backgroundColor": "#000000",
+  "usingComponents": {
+    "cy-empty": "/components/cy/empty/index",
+    "cy-nav-bar": "/components/cy/nav-bar/index",
+    "cy-inline-error": "/components/cy/inline-error/index",
+    "cy-avatar": "/components/cy/avatar/index",
+    "free-map": "/components/cy/free-map/index",
+    "cy-toast": "/components/cy/toast/index",
+    "cy-modal-host": "/components/cy/modal-host/index",
+    "cy-error": "/components/cy/error/index",
+    "cy-option-sheet": "/components/cy/option-sheet/index",
+    "cy-result-sheet": "/components/cy/result-sheet/index",
+    "cy-icon": "/components/cy/icon/index",
+    "cy-proto-cam": "/subpackageRoam/components/cy/proto-cam/index",
+    "cy-privacy-gate": "/components/cy/privacy-gate/index",
+    "cy-loading-mask": "/components/cy/loading-mask/index",
+    "cy-back-guard": "/components/cy/back-guard/index",
+    "team-report-sheet": "/subpackageMember/components/cy/team-report-sheet/index"
+  },
+  "componentPlaceholder": {
+    "team-report-sheet": "view"
+  }
+}

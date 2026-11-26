@@ -1,0 +1,59 @@
+// cy-tabs:统一水平 Tab 栏(封装 style/components.wxss §5.2 的 .cy-tabs 类系统为组件)。
+// properties:tabs=[{key,label,badge?,icon?}] · active=当前选中 key · variant=''|fill|wide|segmented|chip|icon · sticky=Boolean
+// chip(R2 新增):Airbnb Messages 式独立药丸,item 各自成丸、横向可滑,与 segmented(单胶囊内分段)不同。
+// sharedSlab:chip 的等分共享选中块,仅由需要连续位移动效的固定短筛选显式开启。
+// 事件:切换时 triggerEvent('change', { key });强调色可由页面用 --cy-tabs-accent 覆盖。
+const reducedMotionBehavior = require('../../../behaviors/reduced-motion.js');
+
+Component({
+  behaviors: [reducedMotionBehavior],
+  properties: {
+    tabs: { type: Array, value: [] },
+    active: { type: String, value: '' },
+    // variant 管**布局形态**(chip 横滑药丸 / fill 横滑等宽 / segmented / icon / 默认;attached 档与 size 紧凑档无调用方,L10-171 删)
+    variant: { type: String, value: '' },
+    // wide 管**选中指示条的宽度**：默认锚在文案上，wide 锚在整个 item 上撑满。
+    // 2026-08-05 从 variant 里拆出来 —— 这两件事本来正交，塞进一个字符串就没法
+    // 同时表达「横滑等宽布局 + 全宽选中条」，topic 页正是这个组合，迁移时因此卡住。
+    wide: { type: Boolean, value: false },
+    // plain:去掉整条 border-bottom、字号加大、下划线与文案等宽(漫游起始页这类"标题下挂 tab"的版式用)。
+    // 默认 false,其余使用方零影响。
+    plain: { type: Boolean, value: false },
+    // hairline(2026-08-20):只管整条 border-bottom 画不画,其余(字号/指示条)不动。
+    // member 主页那排 tab 用户定「不要那条白线」,但仍要选中指示条 ⇒ plain 管不了这个组合。
+    // 2026-10-23 起默认 false(页面不再画整条底线),需要底线的使用方显式传 hairline="{{true}}"。
+    hairline: { type: Boolean, value: false }, // 2026-10-23 业主:页面横线去掉 —— 整条底线默认不画,要画的页面显式传 hairline
+    sticky: { type: Boolean, value: false },
+    sharedSlab: { type: Boolean, value: false },
+  },
+  data: {
+    _slabCount: 0,
+    _slabWidth: '0',
+    _slabOffset: 0,
+    _slabOpacity: 0,
+  },
+  observers: {
+    // L10-171:共享选中块只在 sharedSlab 时渲染;其余 40+ 个 tab 实例不再为它每次切换都发一次 setData。
+    'tabs, active, sharedSlab': function (tabs, active, sharedSlab) {
+      if (!sharedSlab) return;
+      const items = Array.isArray(tabs) ? tabs : [];
+      const activeIndex = items.findIndex((item) => item && item.key === active);
+      const slabPercent = items.length ? 100 / items.length : 0;
+      const slabInset = items.length ? 12 / items.length : 0;
+      this.setData({
+        _slabCount: items.length,
+        // CSS calc 的除法在旧基础库并不稳定，先在 JS 展开成标准的百分比减法。
+        _slabWidth: items.length ? `calc(${slabPercent}% - ${slabInset}rpx)` : '0',
+        _slabOffset: Math.max(activeIndex, 0) * 100,
+        _slabOpacity: activeIndex >= 0 ? 1 : 0,
+      });
+    },
+  },
+  methods: {
+    onTab(e) {
+      const key = e.currentTarget.dataset.key;
+      if (key === this.data.active) return;
+      this.triggerEvent('change', { key });
+    },
+  },
+});

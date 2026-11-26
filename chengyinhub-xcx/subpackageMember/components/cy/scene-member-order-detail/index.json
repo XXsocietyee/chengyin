@@ -1,0 +1,14 @@
+{
+  "component": true,
+  "usingComponents": {
+    "cy-card": "/components/cy/card/index",
+    "cy-consent-check": "/components/cy/consent-check/index",
+    "cy-empty": "/components/cy/empty/index",
+    "cy-icon": "/components/cy/icon/index",
+    "cy-option-sheet": "/components/cy/option-sheet/index",
+    "cy-result-sheet": "/components/cy/result-sheet/index",
+    "cy-inline-error": "/components/cy/inline-error/index",
+    "cy-switch": "/components/cy/switch/index"
+  },
+  "styleIsolation": "apply-shared"
+}

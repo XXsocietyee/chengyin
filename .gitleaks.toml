@@ -1,0 +1,90 @@
+# gitleaks 配置 —— CI 密钥扫描门禁用
+#
+# 用法(云效 CI 门禁 job_8):
+#   gitleaks detect --source . --no-git --no-banner --redact -c .gitleaks.toml
+#
+# 为什么用 --no-git:GitHub 侧的 gitleaks-action 在 push 事件下只扫本次增量 commits。
+# 这里必须对齐同一语义,否则全量扫 1852 条历史每次都红(2026-08-27 实测 18 处),
+# 门禁变噪音之后就没人看了 —— 那比不扫更坏。
+# ⚠️ 历史里那 18 处是【真的】,只是不属于本门禁的职责范围,已单独立项处理。
+#
+# 与 ci/secret-file-gate.py 互补:
+#   那个管「有没有密钥/证书【文件】」,这个管「文件【内容】里有没有密钥串」。
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+description = "Generic API Key"
+regex = '''(?i)(?:key|api|token|secret|client|passwd|password|auth|access)(?:[0-9a-z\-_\t .]{0,20})(?:[\s|']|[\s|"]){0,3}(?:=|>|:{1,3}=|\|\||:|<=|=>|:=)(?:'|\"|\s|=|\x60){0,5}([0-9a-z\-_.=]{10,150})(?:['|\"|\n|\r|\s|\x60|;]|$)'''
+
+[[rules.allowlists]]
+# ── 为什么需要豁免(2026-08-27 实测)────────────────────────────────────────
+# 干净 checkout 扫出 5 处,全部是误报,分两类:
+#
+# ① PUB_KEY_ID_ 前缀:微信支付的【公钥 ID】,是公开标识符不是密钥。
+#    ⚠️ 只用 stopwords 豁免这一个值前缀,【不把 application.yml 加进 paths】——
+#    那样整个文件从此对真密钥永久失明,而它里面还有 4 个环境变量注入的敏感项
+#    (JWT_SECRET / WITHDRAWAL_PII_KEY / WXMINI_SECRET / WXPAY_APIV3_KEY)。
+stopwords = ["PUB_KEY_ID_"]
+#
+# ② 两个测试类里的固定测试常量(TEST_KEY / API_V3_KEY,序列号写着 TEST-SERIAL-0001)。
+#    ⚠️ 锚死到【具体文件】,不放通配 —— 放宽一次就等于对那类路径永久失明。
+#    新增测试文件不会被自动豁免,这是有意的。
+paths = [
+  '''chengyinhub-admin/src/test/java/com/chengyinhub/business/security/WithdrawalPiiProtectorTest\.java''',
+  '''chengyinhub-admin/src/test/java/com/chengyinhub/business/service/impl/WechatPayCallbackForgedSignatureTest\.java''',
+  # ③ 旅程第七码头样例的状态键注册夹具:"key": "clue.receipt_071" 是具名状态键(clue./relation./tag./counter.),
+  #    命中 generic-api-key 的 key:值 形状,不是密钥。同样锚死到这一个文件。
+  '''chengyinhub-admin/src/test/resources/journey/seventh-pier/state-keys\.json''',
+  # ④ 弹窗审计证据只记录源码/截图/报告 SHA-256，不承载凭据；generic-api-key 会把哈希误报成 API key。
+  '''docs/evidence/popup-style-1003/complete/source-inventory\.json''',
+  '''docs/evidence/popup-style-1003/after/source-inventory\.json''',
+  '''docs/evidence/popup-style-1003/verification\.json''',
+]
+
+# Only these nine historical inventory entries; path and exact line must both match.
+[[rules.allowlists]]
+condition = "AND"
+paths = ['''(^|/)docs/evidence/popup-style-1003/before/source-inventory\.json$''']
+regexTarget = "line"
+regexes = [
+  '''^\s*"pages/play/utils/play\-action\-key\.js": "ecbdd88fa18de8d63d57e620086338385c53be7a40178733777db2de2d1a0014",?\s*$''',
+  '''^\s*"style/tokens\.wxss": "2f6521a039056c52605699bba0a926184c60d1b30041b0cccf2209e09fbac9a9",?\s*$''',
+  '''^\s*"utils/access\-gate\.js": "1554ea1b334fdf39c10064e8b7a30d99f1ae2a4c0c6e971248e6ad05c56bae1f",?\s*$''',
+  '''^\s*"utils/compliance/consent\-client\.js": "80c6afc9cef322338885332e7ce9a15aa4cb62c58a4429bbdb83c379f2d6e250",?\s*$''',
+  '''^\s*"utils/game\-session\-client\.js": "ee120d19734e4d6d87003ce6831eff39e05fc75f80591a098e8258439c784d02",?\s*$''',
+  '''^\s*"utils/merchant\-access\-policy\.js": "b447b641105a6078625c81f891642db9405a6e3d72a3d67972a65610d135db59",?\s*$''',
+  '''^\s*"utils/play\-visual\-tokens\.js": "ee4f81a826bc03f12b4c70cce4b2ce39d2809740e4d120f280cc47b5f0499146",?\s*$''',
+  '''^\s*"utils/transport/request\-client\.js": "fc6edd47c1589af79a334d2206c37082fd3cfe70ffecf9c83a4b38092e040057",?\s*$''',
+  '''^\s*"utils/transport/upload\-client\.js": "942d548462b4f5db5ce9f365dac7b1b178ee3cc22cf44cc94c70a5481d8f0165",?\s*$''',
+]
+
+[[rules.allowlists]]
+# 预设键是公开目录里的 Txx-slug 标识；仅允许该字段的固定形状。
+condition = "AND"
+paths = ['''(^|/)chengyinhub-system/src/main/resources/gameplay-presets/catalog\.json$''']
+regexTarget = "line"
+regexes = ['''^\s*"presetKey": "T[0-9]{2}-[a-z0-9-]+",?\s*$''']
+
+[[rules.allowlists]]
+# 仅为单测里的公开测试活动标识消除变量名误报，不匹配真实凭据格式。
+condition = "AND"
+paths = ['''(^|/)chengyinhub-admin/src/test/java/com/chengyinhub/business/service/VideoBountyServiceTest\.java$''']
+regexTarget = "line"
+regexes = ['''^\s*private static final String CAMPAIGN_KEY = "launch-[0-9]{4}q[0-9]";\s*$''']
+
+# One historical rig request ID, not an API credential; retain exact path and full-line matching.
+[[rules.allowlists]]
+condition = "AND"
+paths = ['''(^|/)docs/delivery/walk-fix-20261102/integ/fix-shots/i1-walk-readbacks\.txt$''']
+regexTarget = "line"
+regexes = ['''^\s*NET\ POST\ /api/play/advanced/action\ 200\ 200\ 操作成功\ \{"sessionId":2,"version":0,"idempotencyKey":"adv\-2\-v0\-0968ec51","action":"REPORT_SENSOR_FAILURE","payload":\{"game":"quietHold","denied":true\}\}$''']
+
+# A second historical rig request ID; exact path and full request only.
+[[rules.allowlists]]
+condition = "AND"
+paths = ['''(^|/)docs/delivery/walk-fix-20261102/l1-play/RIG-NOTES\.md$''']
+regexTarget = "line"
+regexes = ['''^\s*request:\ \{"sessionId":5,"version":0,"idempotencyKey":"adv\-5\-v0\-ecaf236b","action":"SUBMIT_QA","payload":\{"input":"吴淞江"\}\}$''']

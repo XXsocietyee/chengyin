@@ -1,0 +1,66 @@
+// 全局配置文件
+const API_BASE_URL = 'https://www.chengyinhub.com/prod-api';
+const TRUSTED_ASSET_HOSTS = ['www.chengyinhub.com', 'chengyin-oss.oss-cn-shanghai.aliyuncs.com', 'xianghuioss.oss-cn-shanghai.aliyuncs.com'];
+
+function normalizeApiBaseUrl(value) {
+  var url = String(value || '').trim().replace(/\/+$/, '');
+  if (!/^https:\/\/[^/?#]+(?:[/?#]|$)/i.test(url)) return '';
+  return url;
+}
+
+function resolveRuntimeConfig(envVersion, externalConfig) {
+  envVersion = String(envVersion || '').toLowerCase();
+  if (envVersion === 'release') {
+    // L10-084:只返回有人读的字段(envVersion 供 B3 请求头标记构建类型)。
+    return {
+      envVersion: 'release',
+      apiBaseUrl: API_BASE_URL,
+      assetBaseUrl: API_BASE_URL + '/profile/',
+    };
+  }
+
+  var environment = envVersion === 'trial' ? 'staging' : 'develop';
+  var configuredUrl = externalConfig && externalConfig.apiEnvironments
+    ? normalizeApiBaseUrl(externalConfig.apiEnvironments[environment])
+    : '';
+  // 2026-08-25 用户裁决:撤掉 develop / trial 的 fail-closed。原来没配测试服就把 apiBaseUrl 置空,
+  // 结果开发者工具与体验版一条数据都拉不出来(每个页面都停在「加载失败」)。
+  // 现在没配就回落生产。⚠️ 代价是明确的:开发版/体验版的写请求(下单、核销、退款)会真落生产库。
+  // 2026-09-15 用户拍板删除运行时生产写闸(X01),不再有「非 release 拦写请求」这一层。
+  // ext.json 里显式配了测试服就仍然优先用测试服。
+  var apiBaseUrl = configuredUrl || API_BASE_URL;
+  return {
+    envVersion: envVersion === 'trial' || envVersion === 'develop' ? envVersion : 'unknown',
+    apiBaseUrl: apiBaseUrl,
+    assetBaseUrl: apiBaseUrl + '/profile/',
+  };
+}
+
+function resolveFromWx(wxApi) {
+  var envVersion = 'unknown';
+  var externalConfig = {};
+  try { envVersion = wxApi.getAccountInfoSync().miniProgram.envVersion; } catch (e) {}
+  try { externalConfig = wxApi.getExtConfigSync() || {}; } catch (e) {}
+  return resolveRuntimeConfig(envVersion, externalConfig);
+}
+
+function trustedHttpsUrl(value) {
+  var match = String(value || '').match(/^https:\/\/([^/?#]+)(?:[/?#]|$)/i);
+  return !!match && TRUSTED_ASSET_HOSTS.indexOf(match[1].toLowerCase()) >= 0;
+}
+
+const config = {
+  apiBaseUrl: API_BASE_URL,
+  // 静态资源基础URL
+  baseImgUrl: API_BASE_URL + '/profile/',
+  trustedAssetHosts: TRUSTED_ASSET_HOSTS.slice(),
+  isTrustedAssetUrl: trustedHttpsUrl,
+  resolveRuntimeConfig: resolveRuntimeConfig,
+  resolveFromWx: resolveFromWx,
+  // 第九轮 m1 第 8 项:首次进漫游的大气层转场视频(m3 制作)。空 = 不播。上传与填写步骤见 docs/发版checklist.md「漫游大气层转场视频」。
+  roamAtmosVideoUrl: '',
+  // 第十一轮 g4(j3 F19):故事手写体(龙藏体 Long Cang,SIL OFL 1.1)放自己的 OSS,不走 fonts.gstatic.com。空 = 系统字体。上传与 CORS 见 docs/发版checklist.md「故事手写体」。
+  storyFontUrl: 'https://chengyin-oss.oss-cn-shanghai.aliyuncs.com/static/fonts/longcang-v21.ttf',
+};
+
+module.exports = config;

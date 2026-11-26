@@ -1,0 +1,30 @@
+# 审计 D3：/etc/logrotate.d/chengyin（模板）。按天轮转，保留 30 天，压缩。
+# 占位符：<NGINX_LOG_DIR>、<NGINX_PID_FILE>。复制到服务器后替换；真实路径以外的值不要提交到仓库。
+
+<NGINX_LOG_DIR>/*.log {
+    daily
+    rotate 30
+    maxage 30
+    missingok
+    notifempty
+    compress
+    delaycompress
+    dateext
+    sharedscripts
+    postrotate
+        [ -s <NGINX_PID_FILE> ] && kill -USR1 "$(cat <NGINX_PID_FILE>)"
+    endscript
+}
+
+# 应用 stdout 由 systemd 重定向，进程一直持有文件句柄，只能 copytruncate（截断瞬间可能丢极少量行）。
+/www/wwwlogs/java/springboot/chengyinhub-admin.log {
+    daily
+    rotate 30
+    maxage 30
+    missingok
+    notifempty
+    compress
+    delaycompress
+    dateext
+    copytruncate
+}

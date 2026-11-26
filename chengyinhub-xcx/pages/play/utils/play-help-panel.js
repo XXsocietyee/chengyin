@@ -1,0 +1,300 @@
+'use strict';
+// UG-05/06/07/08/09 提示阶梯面板(G-PACK /api/play/help*)。
+//
+// ★ 服务端事实驱动控件:GET /api/play/help 返回 enabled=false(没有 hintLadder)时本面板不出现,
+//   旧「看提示 / 揭示答案」入口一字不动;enabled=true 时只用这里,新旧入口互斥,不会双扣。
+// ★ 每层三态:免费 / 消耗 N 积分 / 不可用;已解锁的层是「重看」,不弹扣费确认。
+// ★ 本局剩余免费次数只显示服务端 remainingFreeUses;没下发就不显示计数器(未知不是 0)。
+// ★ 使用与跳过都带 requestId,发出前先落盘;结果未知时「继续核对」用同一个号(服务端只回放原结果),永不换号。
+// ★ 跳过只在服务端给出可用的 SKIP 层时出现,单独放在面板最底下一行;确认写明「这一关记 0 分」,成功不放庆祝动画。
+// ★ F01 逐级:服务端也拒越级(LEVEL_OUT_OF_ORDER),这里置灰只是提前告诉玩家;跳过不受顺序限制。
+// ★ 分数明细只搬服务端 helpReceipt;NOT_SCORED 显示「本题不计分」,绝不写 0 分;积分与解谜分分开列。
+const { id } = require('./orient-score-view.js');
+const modal = require('../../../utils/modal.js');
+const morph = require('../../../utils/morph-success.js');
+
+const BASE = '/api/play/help';
+const PENDING_KEY = 'play-help-pending:v1';
+// POOL_TRIM(F03 字母池):去掉 N 个干扰字;回包 content 是一句文字(如「已去掉 3 个干扰字」),候选字要重读会话视图才少。
+const TYPE_LABEL = { TEXT: '文字提示', IMAGE: '图片提示', LETTER: '首字', DIGIT: '一个数字', ANSWER: '答案', SKIP: '跳过，继续剧情', POOL_TRIM: '去掉干扰字' };
+const RENDERABLE = ['TEXT', 'IMAGE', 'LETTER', 'DIGIT', 'ANSWER', 'POOL_TRIM'];
+
+const data = { helpPanel: { show: false, enabled: false, nodeId: '',
+  freeLeft: null, rows: [], skip: null, notice: '', receipt: null, receiptOpen: false, receiptError: '', busy: false,
+  // qx-u3 morph:busyLevel = 正在解锁的那一层(行尾收成转圈),doneLevel = 刚解锁、正在亮勾的那一层
+  busyLevel: null, doneLevel: null } };
+
+const ok = body => body && Number(body.code) === 200;
+const definitive = body => body && !body.httpFail && !body.netFail && /^4\d\d$/.test(String(body.code));
+const nonNegInt = value => Number.isSafeInteger(value) && value >= 0;
+
+function newRequestId() {
+  let rand = '';
+  while (rand.length < 16) rand += Math.random().toString(36).slice(2);
+  return ('h' + Date.now().toString(36) + rand).slice(0, 40);
+}
+
+/** 服务端层列表 → 行。顺序就是作者顺序;前一层(非跳过)没解锁的层置灰,标「需先看上一层」。 */
+function project(view) {
+  if (!view || view.enabled !== true || !Array.isArray(view.layers)) return { enabled: false, rows: [], skip: null, freeLeft: null };
+  const rows = [];
+  let skip = null;
+  let previousUnlocked = true;
+  view.layers.forEach(layer => {
+    if (!layer || !Number.isSafeInteger(layer.level) || layer.level <= 0) return;
+    const type = String(layer.type || '');
+    if (type === 'SKIP') {
+      if (layer.usable === true) skip = { level: layer.level };
+      return;
+    }
+    const known = RENDERABLE.includes(type);
+    const usable = known && layer.usable === true;
+    const unlocked = layer.unlocked === true;
+    const gated = usable && !unlocked && !previousUnlocked;
+    const cost = nonNegInt(layer.costPoints) ? layer.costPoints : null;
+    let state = 'unavailable';
+    if (usable && unlocked) state = 'review';
+    else if (usable && gated) state = 'gated';
+    else if (usable && layer.free === true) state = 'free';
+    else if (usable && cost != null && cost > 0) state = 'cost';
+    else if (usable && cost === 0) state = 'free';   // 作者明确标 0 = 免费,不消耗共享次数
+    rows.push({ level: layer.level, type, label: TYPE_LABEL[type] || '提示', state, cost: state === 'cost' ? cost : 0,
+      action: { review: '重看', gated: '需先看上一层', free: '免费', cost: cost + ' 积分', unavailable: '暂不可用' }[state],
+      content: null, contentType: '', charge: '', pending: false, error: '' });
+    previousUnlocked = unlocked;
+  });
+  const freeLeft = nonNegInt(view.remainingFreeUses) ? view.remainingFreeUses : null;
+  return { enabled: rows.length > 0 || !!skip, rows, skip, freeLeft };
+}
+
+/** helpReceipt → 明细行。只搬服务端数;缺明细只给净分与「明细待补」,不补 0 行。 */
+function receiptView(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const lines = [];
+  const notScored = raw.scoreState === 'NOT_SCORED';
+  const num = value => Number.isFinite(value) ? value : null;
+  if (raw.skipped === true) lines.push({ k: '本题', v: '跳过 · 记 0 分 · 辅助完成' });
+  else if (raw.assisted === true) lines.push({ k: '本题', v: '揭示答案，未自行解出' });
+  if (notScored) lines.push({ k: '解谜分', v: '本题不计分' });
+  else {
+    if (num(raw.baseScore) != null) lines.push({ k: '本题解谜分', v: String(raw.baseScore) });
+    if (num(raw.bonus) != null && raw.bonus !== 0) lines.push({ k: '加成', v: '+' + raw.bonus });
+    if (num(raw.helpDeduction) != null && raw.helpDeduction !== 0) lines.push({ k: '提示扣分', v: '-' + raw.helpDeduction });
+    if (num(raw.skipDeduction) != null && raw.skipDeduction !== 0) lines.push({ k: '跳过扣分', v: '-' + raw.skipDeduction });
+    if (num(raw.netScore) != null) lines.push({ k: '本题得分', v: String(raw.netScore) });
+  }
+  if (num(raw.pointsCharged) != null && raw.pointsCharged > 0) lines.push({ k: '提示消耗积分', v: String(raw.pointsCharged) });
+  const levels = Array.isArray(raw.levels) ? raw.levels : null;
+  if (levels) levels.forEach(row => {
+    if (!row || !Number.isSafeInteger(row.level)) return;
+    lines.push({ k: '第 ' + row.level + ' 层 · ' + (TYPE_LABEL[row.type] || '提示'),
+      v: row.free === true ? '免费' : (Number.isFinite(row.pointsCharged) ? row.pointsCharged + ' 积分' : '') });
+  });
+  if (!levels && !notScored) lines.push({ k: '明细', v: '明细待补' });
+  return { lines };
+}
+
+function chargeLine(use) {
+  if (!use || !Number.isFinite(use.chargedPoints) || use.chargedPoints <= 0) return '';
+  return '消耗 ' + use.chargedPoints + ' 积分' + (Number.isFinite(use.balanceAfter) ? ' · 余 ' + use.balanceAfter : '');
+}
+
+/** 提示阶梯挂在哪一站:故事里正开着玩法(advancedPlay + kit)时是那一站,否则是任务页的 game。 */
+function helpNodeId(state) {
+  const advanced = state && state.advancedPlay;
+  if (advanced && advanced.show && advanced.node && state.playKit && state.playKit.kit) return id(advanced.node.nodeId);
+  return id(state && state.game && state.game.nodeId);
+}
+
+function methods(send) {
+  const panel = {
+    _helpCapture() {
+      const app = typeof getApp === 'function' ? getApp() : null;
+      return { owner: String(app && app.getUserID ? app.getUserID() || '' : ''), runId: id((this._routeState || {}).sessionId),
+        nodeId: helpNodeId(this.data), epoch: this._helpEpoch || 0 };
+    },
+    _helpCurrent(c) {
+      const now = this._helpCapture();
+      return !this._playDisposed && c.owner && c.owner === now.owner && c.runId === now.runId && c.nodeId === now.nodeId
+        && c.epoch === now.epoch;
+    },
+    _helpSet(patch) { this.setData({ helpPanel: Object.assign({}, this.data.helpPanel, patch) }); },
+    _helpPendingAll() {
+      try { const all = wx.getStorageSync(PENDING_KEY); return all && typeof all === 'object' ? all : {}; } catch (e) { return null; }
+    },
+    // L02-079: 本人别的局留下的待核对号不再有用(那一局的面板打不开了),打开面板时清掉
+    _helpPrune(c) {
+      const all = this._helpPendingAll();
+      if (!all || !c.owner || !c.runId) return;
+      let changed = false;
+      Object.keys(all).forEach(key => {
+        const parts = key.split('|');
+        if (parts[0] === c.owner && parts[1] !== String(c.runId)) { delete all[key]; changed = true; }
+      });
+      if (!changed) return;
+      try { wx.setStorageSync(PENDING_KEY, all); } catch (e) { /* 清不掉下次再清 */ }
+    },
+    _helpPendingKey(c, action, level) { return [c.owner, c.runId, c.nodeId, action, level || 0].join('|'); },
+    _helpRemember(c, action, level, requestId) {
+      const all = this._helpPendingAll();
+      if (!all) return false;
+      all[this._helpPendingKey(c, action, level)] = requestId;
+      try {
+        wx.setStorageSync(PENDING_KEY, all);
+        return (this._helpPendingAll() || {})[this._helpPendingKey(c, action, level)] === requestId;
+      } catch (e) { return false; }
+    },
+    _helpForget(c, action, level) {
+      const all = this._helpPendingAll();
+      if (!all) return;
+      delete all[this._helpPendingKey(c, action, level)];
+      try { wx.setStorageSync(PENDING_KEY, all); } catch (e) { /* 留着只会让下次沿用同号,仍安全 */ }
+    },
+    /** 进入任务页时读一次;没有阶梯就什么都不改,旧提示入口照旧。 */
+    loadHelpLadder() {
+      this._helpEpoch = (this._helpEpoch || 0) + 1;
+      const c = this._helpCapture();
+      this._helpSet({ show: false, enabled: false, rows: [], skip: null, freeLeft: null, receipt: null, receiptOpen: false,
+        notice: '', receiptError: '', busy: false, nodeId: c.nodeId });
+      if (this.data.isPreview || this.data.isMock || !c.runId || !c.nodeId) return Promise.resolve(false);
+      return send(BASE, 'GET', { runId: c.runId, nodeId: c.nodeId }).then(body => {
+        if (!this._helpCurrent(c)) return false;
+        if (!ok(body)) { this._helpSet({ enabled: false }); return false; }   // 读不到 = 不出新面板,旧入口照旧
+        const view = project(body.data);
+        if (body.data && (id(body.data.runId) !== c.runId || id(body.data.nodeId) !== c.nodeId)) return false;
+        this._helpSet(Object.assign({ enabled: view.enabled }, view));
+        if (view.enabled) this.setData({ canHint: false, canReveal: false });   // 新旧入口互斥
+        return view.enabled;
+      }).catch(() => false);
+    },
+    openHelpPanel() {
+      if (!this.data.helpPanel.enabled) return;
+      this._helpSet({ show: true, notice: '' });
+      const c = this._helpCapture();
+      this._helpPrune(c);
+      const pending = this._helpPendingAll() || {};
+      if (typeof this._stageEvent === 'function') this._stageEvent('hint_open', c.nodeId);   // CG-01-P2-9
+      // 重进后仍有未核对的原请求:行上直接标「结果待确认」,只给「继续核对」。
+      const rows = this.data.helpPanel.rows.map(row => Object.assign({}, row,
+        { pending: !!pending[this._helpPendingKey(c, 'use', row.level)] }));
+      this._helpSet({ rows, skipPending: !!pending[this._helpPendingKey(c, 'skip', 0)] });
+    },
+    closeHelpPanel() { this._helpSet({ show: false }); },
+    tapHelpRow(e) {
+      const level = Number(e && e.currentTarget && e.currentTarget.dataset.level);
+      const row = this.data.helpPanel.rows.find(item => item.level === level);
+      if (!row || this.data.helpPanel.busy) return;
+      if (row.pending) return this._helpUse(row, true);
+      // L02-078: 已经显示着内容的「重看」不再发一次 /use 和计数回读
+      if (row.state === 'review' && row.content) return;
+      if (row.state === 'review') return this._helpUse(row, false);
+      if (row.state !== 'free' && row.state !== 'cost') return;
+      const c = this._helpCapture();
+      modal.show({ title: row.label, content: row.state === 'free' ? '本次免费查看' : '查看将消耗 ' + row.cost + ' 积分',
+        confirmText: '查看', success: res => { if (res.confirm && this._helpCurrent(c)) this._helpUse(row, false); } });
+    },
+    _helpUse(row, recovering) {
+      const c = this._helpCapture();
+      const all = this._helpPendingAll();
+      if (!all) { this._helpSet({ notice: '本机存储不可用，暂不提交' }); return; }
+      const requestId = all[this._helpPendingKey(c, 'use', row.level)] || newRequestId();
+      if (!this._helpRemember(c, 'use', row.level, requestId)) { this._helpSet({ notice: '无法保存原请求，暂不提交' }); return; }
+      const patchRow = (patch, extra) => this._helpSet(Object.assign({ busy: false, busyLevel: null, rows: this.data.helpPanel.rows.map(item =>
+        item.level === row.level ? Object.assign({}, item, patch) : item) }, extra));
+      this._helpSet({ busy: true, busyLevel: row.level, notice: '' });
+      return send(BASE + '/use', 'POST', { runId: c.runId, nodeId: c.nodeId, level: row.level, action: 'HELP', requestId }).then(body => {
+        if (!this._helpCurrent(c)) return;
+        if (ok(body) && body.data && body.data.level === row.level && typeof body.data.content === 'string') {
+          this._helpForget(c, 'use', row.level);
+          // qx-u3 morph:内容随回包立即写入,行尾先亮勾停一拍(doneLevel),之后内容才浮出来(fresh → cy-rise-in)。
+          // 重看(已解锁)不再亮勾;减动效 hold=0 直接出内容。
+          const hold = row.state === 'review' ? 0 : morph.holdFor();
+          patchRow({ pending: false, error: '', state: 'review', action: '重看', content: body.data.content,
+            contentType: body.data.type, charge: chargeLine(body.data), fresh: hold > 0 }, { doneLevel: hold ? row.level : null });
+          if (hold) {
+            morph.cancel(this);
+            this._morphTimer = setTimeout(() => {
+              this._morphTimer = null;
+              if (this._helpCurrent(c) && this.data.helpPanel.doneLevel === row.level) this._helpSet({ doneLevel: null });
+            }, hold);
+          }
+          // F03:去掉干扰字记在服务端本局状态里,重读一次会话视图(与交卷后同一个读口),候选字才少下来
+          if (body.data.type === 'POOL_TRIM') this._helpRefreshSession();
+          return this.loadHelpCounter(c);
+        }
+        if (definitive(body)) {
+          this._helpForget(c, 'use', row.level);
+          patchRow({ pending: false, content: null,
+            error: body.reasonCode === 'POINTS_INSUFFICIENT' ? '积分不足，本层未解锁' : (body.msg || '本层暂不可用') });
+          return;
+        }
+        patchRow({ pending: true, error: '结果待确认' });
+      }).catch(() => { if (this._helpCurrent(c)) patchRow({ pending: true, error: '结果待确认' }); });
+    },
+    /** 重读正开着的高级玩法会话视图(advanced-game 的 refreshState);没有玩法组件时什么都不做。 */
+    _helpRefreshSession() {
+      const game = typeof this._advancedGameComponent === 'function' ? this._advancedGameComponent() : null;
+      if (game && typeof game.refreshState === 'function') game.refreshState();
+    },
+    /** 用完一层后重读剩余免费次数与各层状态;不本地减次数。 */
+    loadHelpCounter(c) {
+      return send(BASE, 'GET', { runId: c.runId, nodeId: c.nodeId }).then(body => {
+        if (!this._helpCurrent(c) || !ok(body)) return;
+        const view = project(body.data);
+        const byLevel = {};
+        this.data.helpPanel.rows.forEach(row => { byLevel[row.level] = row; });
+        const rows = view.rows.map(row => {
+          const old = byLevel[row.level] || {};
+          return Object.assign(row, { content: old.content || null, contentType: old.contentType || '', charge: old.charge || '', fresh: !!old.fresh });
+        });
+        this._helpSet({ rows, skip: view.skip, freeLeft: view.freeLeft });
+      }).catch(() => {});
+    },
+    tapHelpSkip() {
+      const panelState = this.data.helpPanel;
+      if (!panelState.skip || panelState.busy) return;
+      if (panelState.skipPending) return this._helpSkip();
+      const c = this._helpCapture();
+      modal.show({ title: '跳过这一关', content: '这一关记 0 分', confirmText: '跳过', confirmColor: '#E5484D', /* ds-ok: 上线波次原型逐值(装饰 / 品牌色块) */
+        success: res => { if (res.confirm && this._helpCurrent(c)) this._helpSkip(); } });
+    },
+    _helpSkip() {
+      const c = this._helpCapture();
+      const all = this._helpPendingAll();
+      if (!all) { this._helpSet({ notice: '本机存储不可用，暂不提交' }); return; }
+      const requestId = all[this._helpPendingKey(c, 'skip', 0)] || newRequestId();
+      if (!this._helpRemember(c, 'skip', 0, requestId)) { this._helpSet({ notice: '无法保存原请求，暂不提交' }); return; }
+      this._helpSet({ busy: true, notice: '' });
+      return send(BASE + '/skip', 'POST', { runId: c.runId, nodeId: c.nodeId, requestId }).then(body => {
+        if (!this._helpCurrent(c)) return;
+        if (ok(body) && body.data && body.data.skipped === true) {
+          this._helpForget(c, 'skip', 0);
+          this._helpSet({ busy: false, skipPending: false, skip: null,
+            receipt: receiptView(body.data.helpReceipt), receiptOpen: true });
+          if (typeof this.onHelpSkipped === 'function') this.onHelpSkipped(c.nodeId, body.data);
+          return;
+        }
+        if (definitive(body)) {
+          this._helpForget(c, 'skip', 0);
+          this._helpSet({ busy: false, skipPending: false, notice: body.msg || '本题暂不能跳过' });
+          return;
+        }
+        this._helpSet({ busy: false, skipPending: true, notice: '结果待确认' });
+      }).catch(() => { if (this._helpCurrent(c)) this._helpSet({ busy: false, skipPending: true, notice: '结果待确认' }); });
+    },
+    toggleHelpReceipt() {
+      const state = this.data.helpPanel;
+      if (state.receiptOpen) { this._helpSet({ receiptOpen: false }); return; }
+      const c = this._helpCapture();
+      this._helpSet({ receiptOpen: true, receiptError: '' });
+      return send(BASE + '/receipt', 'GET', { runId: c.runId, nodeId: c.nodeId }).then(body => {
+        if (!this._helpCurrent(c)) return;
+        if (ok(body)) this._helpSet({ receipt: receiptView(body.data) });
+        else this._helpSet({ receipt: null, receiptError: '结算明细暂不可用' });
+      }).catch(() => { if (this._helpCurrent(c)) this._helpSet({ receipt: null, receiptError: '结算明细暂不可用' }); });
+    },
+  };
+  return panel;
+}
+
+module.exports = { data, methods, helpNodeId, project, receiptView, chargeLine, TYPE_LABEL };

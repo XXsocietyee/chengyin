@@ -1,0 +1,1456 @@
+@charset "UTF-8";
+@import "../styles/photo-grid.wxss";
+
+/* ===========================================================
+ * 创建节点玩法 · 关卡编辑器(玻璃拟态)
+ * 视觉照设计稿 城市解谜玩法创建.dc.html;单位 rpx(设计 px ≈ ×2)
+ * 主蓝 var(--cy-brand) / 主橙 var(--cy-color-status-warning) / 成功绿 var(--cy-success) / 危险 var(--cy-danger)
+ *   ⚠️ 「主蓝」「主橙」两种语义曾一起写成 --cy-brand。2026-08-01 去紫后两者都渲染成
+ *   中性色,重合不可见;2026-08-09 创建域改回稿配色后 brand 变回主蓝,橙的那几处
+ *   (核心徽章 / 奖励模块图标)会跟着变蓝 —— 已按稿分回 status-warning。
+ * =========================================================== */
+
+/* 暗色底 + 白微光(去紫色化:原紫/蓝双色光改中性白光,呼应黑白基调) */
+page {
+  height: 100%;
+  background:
+    radial-gradient(circle at 14% 6%, rgba(255,255,255,.05) 0, rgba(255,255,255,0) 52%), /* ds-ok: 装饰性微光,非语义色 */
+    radial-gradient(circle at 96% 92%, rgba(255,255,255,.04) 0, rgba(255,255,255,0) 52%), /* ds-ok: 装饰性微光,非语义色 */
+    var(--cy-bg-page);
+}
+
+.cg {
+  position: relative;
+  height: 100%; /* PG-055:随 page 100% 撑满,不写 100vh */
+  display: flex;
+  flex-direction: column;
+  font-family: -apple-system, "PingFang SC", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+/* ============ 滚动容器 ============ */
+.cg-scroll {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  box-sizing: border-box;
+  /* fill 用 backwards 不用 both：both 会常驻 100% 帧的 transform，给 fixed 后代（cy-sheet）建 containing block 把弹层裁进本页容器 */
+  animation: cg-rise var(--cy-motion-slow) var(--cy-ease-out) var(--cy-motion-fast) backwards;
+}
+.cg-scroll-pad { height: calc(260rpx + env(safe-area-inset-bottom)); } /* 固定底栏 + 失败说明条之上要能把最后一行滚出来 */
+/* 失败说明条浮在底栏上方(bottom 160rpx)期间,尾部再让出说明条的高度,最后一行不被它盖住 */
+.cg-scroll-pad--err { height: calc(260rpx + var(--cy-space-8) + env(safe-area-inset-bottom)); } /* ds-ok: 260rpx 同上一行 */
+
+@keyframes cg-rise {
+  0% { opacity: 0; transform: translateY(16rpx); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* 通用 */
+.cg-ph { color: var(--cy-text-secondary); }
+.req { color: var(--cy-color-status-danger); }
+.cg-title-row { display: flex; align-items: center; }
+.cg-title-row .cg-title-input { flex: 1; min-width: 0; }
+.cg-caret { color: var(--cy-text-secondary); font-size: var(--cy-font-label); transform: rotate(-90deg); } /* back(‹)转成向下 ∨:图标集没有 chevron-down,同 club/event-ops 先例 */
+.cg-inline-error { display: block; margin-top: var(--cy-space-1-5); }
+.cg-inline-error--banner { margin-right: var(--cy-space-4); margin-left: var(--cy-space-4); }
+
+.cg-title-input {
+  width: 100%; box-sizing: border-box;
+  height: 96rpx;
+  line-height: 96rpx;
+  /* 去掉下划线:这是玩法名称输入框,原来那条 4rpx 底边让它看着像个被划线的标题 */
+  border: none;
+  background: transparent;
+  padding: 0 var(--cy-space-1);
+  text-align: left;
+  font-size: var(--cy-font-title); font-weight: 700; color: var(--cy-text-title);
+}
+/* 校验失败与行内提示同语义：输入区深红底，不能只靠一条细下划线。 */
+.cg-title-input.err {
+  border: 2rpx solid var(--cy-color-status-danger);
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-color-status-danger-soft);
+}
+
+/* ============ 玻璃卡片 ============ */
+.cg-card {
+  margin: var(--cy-space-3-5) var(--cy-space-4) 0;
+  --cy-comp-card-radius: var(--cy-radius-sm);
+  --cy-comp-card-pad: var(--cy-space-1-5) var(--cy-space-4) var(--cy-space-3-5);
+}
+
+.cg-field { padding: var(--cy-space-2-5) 0; }
+.cg-divider { border-top: 1rpx solid var(--cy-border-card); }
+.cg-label { font-size: var(--cy-font-body); font-weight: 600; color: var(--cy-text-title); margin-bottom: 16rpx; }
+.cg-row-between { display: flex; align-items: center; justify-content: space-between; }
+.cg-count { font-size: var(--cy-font-label); color: var(--cy-text-secondary); }
+
+.cg-two { display: flex; gap: var(--cy-space-3-5); }
+.cg-col { flex: 1; min-width: 0; }
+
+/* 输入 / 文本域 */
+.cg-textarea,
+.cg-cfg-input,
+.cg-cfg-textarea {
+  width: 100%; box-sizing: border-box;
+  border: 1rpx solid var(--cy-border-card);
+  background: var(--cy-bg-card-2);
+  border-radius: var(--cy-radius-md);
+  padding: var(--cy-legacy-22) var(--cy-legacy-26);
+  font-size: var(--cy-font-body); color: var(--cy-text-title);
+  line-height: var(--cy-leading-normal);
+}
+/* 单行输入固定 88rpx,与相邻的 .cg-pick 下拉等高(高度只给 input,textarea 走 .sm/.lg) */
+.cg-cfg-input { height: var(--cy-btn-h); line-height: var(--cy-btn-h); padding: 0 var(--cy-legacy-26); }
+.cg-textarea.sm,
+.cg-cfg-textarea { height: 128rpx; min-height: 128rpx; }
+.cg-textarea.lg { height: 168rpx; }
+.cg-textarea.err {
+  border: 2rpx solid var(--cy-color-status-danger);
+  background: var(--cy-color-status-danger-soft);
+}
+
+/* 下拉伪选择(底部 sheet) */
+.cg-pick {
+  width: 100%; box-sizing: border-box;
+  border: 1rpx solid var(--cy-border-card);
+  background: var(--cy-bg-card-2);
+  border-radius: var(--cy-radius-md);
+  height: 88rpx;
+  padding: 0 var(--cy-space-3-5);
+  font-size: var(--cy-font-body); color: var(--cy-text-title);
+  display: flex; align-items: center; justify-content: space-between;
+}
+/* P-41:多选的商铺类型(「茶饮店/咖啡馆/酒吧」)单行省略,不折行 */
+.cg-pick-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cg-pick.empty { color: var(--cy-text-secondary); }
+.cg-pick.err { border-color: var(--cy-danger); background: var(--cy-danger-soft); }
+
+.cg-cover-del {
+  position: absolute; top: var(--cy-legacy-18); right: var(--cy-legacy-18);
+  width: var(--cy-btn-h); height: var(--cy-btn-h);
+}
+
+/* 类别 chips:布局与配色在下方 .cg-chip 定稿处(L04-047 合并,这里只留定稿没写的三项) */
+.cg-chip { box-sizing: border-box; gap: var(--cy-space-1-5); border: 1rpx solid var(--cy-border-line); }
+.cg-chip-ico { display: flex; flex: none; }
+.cg-chip-x {
+  width: var(--cy-btn-h); height: var(--cy-btn-h); margin: calc(var(--cy-legacy-14) * -1) calc(var(--cy-space-2-5) * -1) calc(var(--cy-legacy-14) * -1) 0;
+  color: var(--cy-text-secondary); font-size: var(--cy-font-body); line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.cg-chip-add {
+  min-height: var(--cy-btn-h); box-sizing: border-box;
+  display: flex; align-items: center; gap: var(--cy-space-1);
+  border: 3rpx dashed var(--cy-border-line); color: var(--cy-text-secondary);
+  font-size: var(--cy-font-label); font-weight: 600;
+  padding: var(--cy-legacy-14) var(--cy-space-3); border-radius: 22rpx; /* ds-ok */
+}
+
+/* 可叠加玩法与主玩法共用配置面板。 */
+.cg-advanced { margin-top: var(--cy-space-4); }
+.cg-adv-section { margin-top: var(--cy-space-3); }
+/* 开关打开后长出来的那一格(幸运档位 / 放宽方式),与开关行拉开一点 */
+.cg-adv-reveal { display: block; margin-top: var(--cy-space-2-5); }
+/* 「＋ 添加」后面紧跟下一组的标题时,标题会贴在虚线框上 —— 拉开一段 */
+.cg-adv-add + .cg-cfg-label, .cg-adv-add + .cg-adv-section { margin-top: var(--cy-space-4); }
+.cg-adv-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--cy-space-2); margin-top: var(--cy-space-2); }
+.cg-adv-repeat { margin-top: var(--cy-space-2); padding: var(--cy-space-2-5); border-radius: var(--cy-radius-md); background: var(--cy-bg-card-2); display: flex; flex-direction: column; gap: var(--cy-space-2); }
+.cg-adv-repeat-head { display: flex; align-items: center; justify-content: space-between; color: var(--cy-text-title); font-size: var(--cy-font-label); font-weight: 700; }
+/* 删除 = 图标,与类别 ✕、封面 ✕ 同一个 close-sm;负外边距把 44px 命中区收进行高,行不被撑高 */
+.cg-adv-del { width: var(--cy-btn-h); height: var(--cy-btn-h); margin: calc(var(--cy-space-2) * -1) calc(var(--cy-space-2) * -1) calc(var(--cy-space-2) * -1) 0; display: flex; align-items: center; justify-content: center; color: var(--cy-text-secondary); }
+.cg-adv-add { margin-top: var(--cy-space-2); min-height: var(--cy-btn-h); border: 2rpx dashed var(--cy-border-line); border-radius: var(--cy-radius-md); display: flex; align-items: center; justify-content: center; color: var(--cy-color-brand-strong); font-size: var(--cy-font-label); font-weight: 700; }
+
+.cg-tool-actions { display: flex; gap: var(--cy-space-3); color: var(--cy-color-brand-strong); font-size: var(--cy-font-label); }
+.cg-tool-actions > view { min-height: var(--cy-btn-h); display: flex; align-items: center; }
+.cg-tool-sheet { display: flex; flex-direction: column; }
+.cg-tool-scroll { flex: 1; min-height: 0; }
+
+.cg-adv-options { margin-top: var(--cy-space-2); }
+/* 显形档 3D 模型上传:整行,上下多留一档间距(用户 9-23:间距大一点、左右对齐) */
+.cg-model { margin: var(--cy-space-3) 0; }
+.cg-model--done { position: relative; border-style: solid; }
+.cg-model-x {
+  position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  width: var(--cy-btn-h); height: var(--cy-btn-h);
+  display: flex; align-items: center; justify-content: center;
+}
+.cg-outcome-fields { margin-top: var(--cy-space-2); padding: var(--cy-space-2); border-radius: var(--cy-radius-md); background: var(--cy-bg-card); }
+.cg-outcome-contract { display:flex; flex-direction:column; gap:var(--cy-space-2); }
+.cg-outcome-row { display:flex; align-items:center; justify-content:space-between; gap:var(--cy-space-2); padding:var(--cy-space-2); border:1rpx solid var(--cy-border-line); border-radius:var(--cy-radius-md); }
+
+.cg-outcome-label { color:var(--cy-text-secondary); font-size:var(--cy-font-label); }
+.cg-rw-line.compact { padding-top: var(--cy-space-2); }
+
+/* ============ 模块卡片 ============ */
+.cg-mod {
+  margin: var(--cy-space-3) var(--cy-space-4) 0;
+  --cy-comp-card-radius: var(--cy-radius-sm);
+  --cy-comp-card-pad: 0;
+  border-radius: var(--cy-radius-sm);
+  overflow: hidden;
+}
+
+.cg-mod-head {
+  display: flex; align-items: center; gap: var(--cy-space-2-5);
+  padding: var(--cy-space-3-5) var(--cy-space-4);
+/* 2026-08-20 用户点名删掉板块头下的分隔线(--cy-border-line 在本页快照里是浅灰) */
+}
+
+.cg-mod-ico {
+  width: 68rpx; height: 68rpx; border-radius: 20rpx; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--cy-font-body); font-weight: 800; color: #fff;
+}
+
+.cg-mod-ico--purple { background: var(--cy-brand-soft); color: var(--cy-accent-strong); }
+
+.cg-mod-meta { flex: 1; min-width: 0; }
+.cg-mod-name {
+  font-size: var(--cy-font-subtitle); font-weight: 700; color: var(--cy-text-title);
+  display: flex; align-items: center; gap: var(--cy-space-1-5);
+}
+
+.cg-mod-del {
+  width: var(--cy-btn-h); height: var(--cy-btn-h); flex: none;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.cg-mod-body { padding: var(--cy-space-3-5) var(--cy-space-4) var(--cy-space-4); }
+.cg-mod-body.pad { padding: var(--cy-space-1-5) var(--cy-space-4) var(--cy-space-3-5); }
+
+
+/* —— 配置面板 —— */
+.cg-cfg {
+  margin-top: var(--cy-space-3-5);
+  --cy-comp-card-radius: var(--cy-radius-lg);
+  --cy-comp-card-pad: var(--cy-space-3-5);
+}
+.cg-cfg-label { font-size: var(--cy-font-label); font-weight: 600; color: var(--cy-text-body); margin-bottom: var(--cy-legacy-14); }
+.cg-cfg-input { margin-bottom: 24rpx; }
+/* 输入框永远比它所在的面低一档:白卡上是灰底,灰色子卡(.cg-adv-repeat)上回到白底 */
+.cg-adv-repeat .cg-cfg-input,
+.cg-adv-repeat .cg-textarea,
+.cg-adv-repeat .cg-pick { background: var(--cy-bg-card); }
+.cg-cfg-input.flat { margin-bottom: 0; flex: 1; min-width: 0; }
+.cg-cfg-hint {
+  font-size: var(--cy-font-label); color: var(--cy-text-secondary); margin-top: var(--cy-legacy-14);
+  line-height: 1.6;                      /* ds-ok 照原型 模板编辑页v2 的 .hint */
+}
+
+.cg-cfg-add {
+  min-height: var(--cy-btn-h); display: flex; align-items: center;
+  margin-top: var(--cy-space-2-5); font-size: var(--cy-font-label); font-weight: 600; color: var(--cy-info);
+}
+/* 选项问答 */
+.cg-choice-list { display: flex; flex-direction: column; gap: var(--cy-space-2); }
+.cg-choice-li { display: flex; align-items: center; gap: var(--cy-legacy-18); }
+.cg-choice-radio {
+  width: var(--cy-btn-h); height: var(--cy-btn-h); flex: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.cg-choice-radio__glyph {
+  width: 60rpx; height: 60rpx; border-radius: 18rpx; /* ds-ok: 保留原 30px 视觉圆钮，仅外层 owner 扩到 44px */
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--cy-font-label); font-weight: 700;
+  background: var(--cy-bg-card-2); color: var(--cy-text-secondary);
+}
+.cg-choice-radio.on .cg-choice-radio__glyph { background: var(--cy-success); color: var(--cy-color-text-inverse); }
+.cg-choice-del {
+  width: var(--cy-btn-h); height: var(--cy-btn-h); flex: none;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* 选项媒体:挂在选项行下面一条,与选项文本框左对齐(缩进 = 圆圈宽 + gap) */
+.cg-choice-item { display: flex; flex-direction: column; gap: var(--cy-space-1); }
+.cg-opt-media {
+  display: flex; align-items: center; gap: var(--cy-space-2);
+  padding-left: calc(60rpx + var(--cy-legacy-18));
+}
+.cg-opt-thumb-hit {
+  width: var(--cy-btn-h); height: var(--cy-btn-h); flex: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.cg-opt-thumb { width: 72rpx; height: 72rpx; border-radius: var(--cy-radius-sm); }
+.cg-opt-chip {
+  min-height: var(--cy-btn-h); display: flex; align-items: center; justify-content: center;
+}
+.cg-opt-chip__visual {
+  padding: var(--cy-space-1) var(--cy-space-2);
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-bg-card-2); color: var(--cy-text-secondary);
+  font-size: var(--cy-font-caption);
+}
+.cg-opt-chip.on .cg-opt-chip__visual { color: var(--cy-success); }
+.cg-opt-chip--clear { color: var(--cy-color-text-tertiary); }
+
+/* 题干附件:两个等宽格子,配了显示内容,没配是一个加号占位 */
+.cg-qmedia { display: flex; gap: var(--cy-space-2); }
+/* 只放一个槽时别撑满整行:下面的 flex:1 是给「配图 + 音频」两个槽并排设计的,
+ * 单槽套上去就是一整行 160rpx 高的灰块,压过它上下所有单行输入。 */
+.cg-qmedia--one .cg-qmedia-slot, .cg-qmedia--one .cg-qmedia-add { flex: 0 0 240rpx; }
+.cg-qmedia-slot, .cg-qmedia-add {
+  position: relative; flex: 1; min-width: 0; height: 160rpx;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--cy-space-1);
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-bg-card-2); color: var(--cy-text-secondary);
+}
+.cg-qmedia-img { width: 100%; height: 100%; border-radius: var(--cy-radius-md); }
+.cg-qmedia-t { font-size: var(--cy-font-caption); }
+.cg-qmedia-x {
+  position: absolute; right: var(--cy-space-1); top: var(--cy-space-1);
+  width: var(--cy-btn-h); height: var(--cy-btn-h);
+}
+.cg-qmedia-x__glyph {
+  position: absolute; top: 0; right: 0;
+  width: 44rpx; height: 44rpx; border-radius: var(--cy-radius-pill);
+  display: flex; align-items: center; justify-content: center;
+  background: var(--cy-bg-card); color: var(--cy-text-secondary); font-size: var(--cy-font-caption);
+}
+
+/* 拍照审核开关行 / hint 开关行 */
+.cg-sw-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 24rpx;
+}
+.cg-sw-label { font-size: var(--cy-font-label); font-weight: 600; color: var(--cy-text-body); }
+
+/* hint 区块 */
+.cg-hint-wrap {
+  margin-top: var(--cy-space-3-5);
+  border-top: 2rpx dashed var(--cy-border-line);
+  padding-top: var(--cy-space-3-5);
+}
+.cg-hint-head { display: flex; align-items: center; gap: var(--cy-space-2); }
+.cg-hint-emoji {
+  width: 40rpx; height: 40rpx; border-radius: 14rpx;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--cy-brand-soft); color: var(--cy-color-brand-strong); /* 同上:软底上改用 -strong 档 */
+  font-size: var(--cy-font-caption); font-weight: 800;
+}
+.cg-hint-fields { margin-top: 24rpx; display: flex; flex-direction: column; }
+.cg-hint-fields .cg-cfg-input:last-child { margin-bottom: 0; }
+
+/* —— 奖励行 —— */
+.cg-rw-row { padding: var(--cy-space-3) 0; border-bottom: 1rpx solid var(--cy-border-card); }
+.cg-rw-row.last { border-bottom: none; }
+.cg-rw-line { display: flex; align-items: center; gap: var(--cy-legacy-22); }
+
+.cg-rw-meta { flex: 1; min-width: 0; }
+.cg-rw-name { font-size: var(--cy-font-body); font-weight: 600; color: var(--cy-text-title); }
+ /* ds-ok: 2rpx 像素级微调 */
+.cg-rw-cfg {
+  margin-top: 24rpx;
+  --cy-comp-card-radius: var(--cy-radius-md);
+  --cy-comp-card-pad: var(--cy-space-3);
+  /* fill=backwards 同 .cg-scroll：both 常驻 transform 会裁掉卡片内 cy-reward-selector 的 fixed 弹层 */
+  animation: cg-reveal var(--cy-motion-standard) var(--cy-ease-out) backwards;
+}
+
+/* 勋章 */
+.cg-medal { display: flex; gap: var(--cy-legacy-22); align-items: center; }
+.cg-medal-up {
+  width: 108rpx; height: 108rpx; border-radius: var(--cy-radius-md); flex: none;
+  background: var(--cy-bg-card-2); border: 3rpx dashed var(--cy-border-line); color: var(--cy-text-secondary);
+  display: flex; align-items: center; justify-content: center; font-size: var(--cy-font-display);
+  overflow: hidden;
+}
+.cg-medal-img { width: 100%; height: 100%; }
+.cg-medal-clear {
+  min-width: var(--cy-btn-h); min-height: var(--cy-btn-h); flex: none;
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--cy-font-label); color: var(--cy-text-secondary);
+}
+
+/* —— 剧情节点 —— */
+.cg-beat {
+  --cy-comp-card-radius: var(--cy-radius-lg);
+  --cy-comp-card-pad: var(--cy-space-3);
+  margin-bottom: var(--cy-space-3);
+}
+.cg-beat-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--cy-legacy-18); }
+.cg-beat-tag { display: flex; align-items: center; gap: var(--cy-legacy-14); font-size: var(--cy-font-label); font-weight: 600; color: var(--cy-text-secondary); }
+.cg-beat-no {
+  width: var(--cy-legacy-36); height: var(--cy-legacy-36); border-radius: 50%;
+  background: var(--cy-brand-soft); color: var(--cy-text-secondary); font-size: var(--cy-font-caption); font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.cg-beat-del {
+  min-width: var(--cy-btn-h); min-height: var(--cy-btn-h);
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--cy-font-label); color: var(--cy-text-secondary);
+}
+.cg-beat-text {
+  width: 100%; box-sizing: border-box;
+  border: 3rpx solid var(--cy-border-line); background: var(--cy-bg-card); border-radius: 22rpx;
+  padding: var(--cy-legacy-22) var(--cy-legacy-26); font-size: var(--cy-font-body); color: var(--cy-text-title);
+  min-height: 152rpx; margin-bottom: var(--cy-legacy-18); /* V-14:随正文撑高(auto-height),不再裁字 */
+}
+.cg-beat-row { display: flex; gap: var(--cy-legacy-18); align-items: stretch; }
+.cg-beat-tagin {
+  flex: 1; min-width: 0; box-sizing: border-box;
+  border: 3rpx solid var(--cy-border-line); background: var(--cy-bg-card); border-radius: 22rpx;
+  height: var(--cy-btn-h); line-height: var(--cy-btn-h); /* V-14:原生 input 默认矮,上下内距把字压扁 */
+  padding: 0 var(--cy-space-3); font-size: var(--cy-font-body); color: var(--cy-text-title);
+}
+
+.cg-beat-add {
+  text-align: center;
+  border: 3rpx dashed var(--cy-border-line); border-radius: var(--cy-radius-md);
+  padding: var(--cy-space-3); color: var(--cy-text-secondary); font-size: var(--cy-font-body); font-weight: 600;
+}
+
+/* —— 语音 —— */
+.cg-audio {
+  --cy-comp-card-radius: var(--cy-radius-md);
+  --cy-comp-card-pad: var(--cy-space-3) var(--cy-space-3-5);
+}
+.cg-audio__inner { display: flex; align-items: center; gap: var(--cy-space-3); }
+.cg-audio-play {
+  width: var(--cy-btn-h); height: var(--cy-btn-h); border-radius: 50%; flex: none;
+  background: var(--cy-success); color: #fff; font-size: var(--cy-font-body);
+  display: flex; align-items: center; justify-content: center;
+}
+.cg-audio-meta { flex: 1; min-width: 0; }
+.cg-audio-name { font-size: var(--cy-font-body); font-weight: 600; color: var(--cy-text-title); }
+.cg-audio-del {
+  min-width: var(--cy-btn-h); min-height: var(--cy-btn-h); flex: none;
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--cy-font-label); color: var(--cy-text-secondary);
+}
+.cg-audio-empty {
+  width: 100%; height: 128rpx; box-sizing: border-box;
+  border-radius: var(--cy-radius-md); border: 3rpx dashed var(--cy-success); background: var(--cy-bg-card-2);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--cy-success); font-size: var(--cy-font-body); font-weight: 600;
+}
+
+/* 空态 */
+.cg-empty {
+  margin: var(--cy-space-3) var(--cy-space-4) 0;
+  --cy-comp-card-radius: var(--cy-radius-lg);
+  --cy-comp-card-pad: var(--cy-space-5) var(--cy-space-3-5);
+  text-align: center;
+}
+/* 添加模块行 */
+.cg-addmod {
+  background: var(--cy-bg-card); border: 3rpx dashed var(--cy-border-line);
+  border-radius: var(--cy-radius-lg); padding: var(--cy-space-3-5);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--cy-info); font-size: var(--cy-font-body); font-weight: 700;
+  transition: transform var(--cy-motion-press) var(--cy-ease-out), background var(--cy-motion-fast) var(--cy-ease-out);
+}
+.cg-addmod--pressed { transform: scale(.985); background: var(--cy-bg-card-2); }
+
+/* ============ 编辑态底部栏 ============ */
+/* 底栏定位与底色合在下方 .cg-bottombar 一条里(L04-047:原先两条同名选择器互相覆盖) */
+
+.cg-bottombar > cy-btn { flex: 1; min-width: 0; }
+/* P-40:保存 / 发布失败说明浮在底部按钮上方(预览里的提交栏已删) */
+.cg-submit-error {
+  position: fixed; left: 0; right: 0; z-index: 61;
+  bottom: calc(160rpx + env(safe-area-inset-bottom)); /* ds-ok 底部按钮栏高度 */
+  padding: 0 var(--cy-page-x);
+}
+
+.cg-load-state {
+  box-sizing: border-box;
+  min-height: 520rpx;
+  padding: var(--cy-space-5) var(--cy-page-x);
+}
+
+.cg-preview .cg-scroll-pad { height: var(--cy-space-6); }
+/* ============ 预览态(深色底) ============ */
+.cg-preview {
+  position: fixed; inset: 0; z-index: 80;
+  display: flex; flex-direction: column;
+  background: linear-gradient(180deg, #000000, #162959);
+}
+/* 翻页条 + 步骤标签:滚动区之上的固定头,188rpx 是顶部安全区 + 返回键的预留高度 */
+.cg-pv-head { flex: none; padding-top: calc(env(safe-area-inset-top) + 188rpx); } /* ds-ok: 188rpx 是预览态顶部安全区+返回键预留高度 */
+.cg-pv-scroll { flex: 1; min-height: 0; box-sizing: border-box; }
+/* L04-050:试玩里「继续 / 提交 / 完成」三颗按钮同一段上间距,原先各写一遍内联 style */
+.cg-pv-btn { margin-top: var(--cy-space-4); }
+.cg-pv-pager {
+  position: relative; z-index: 3;
+  display: flex; align-items: center; gap: var(--cy-space-2);
+  padding: var(--cy-space-2) var(--cy-legacy-36) 0;
+}
+.cg-pv-seg { flex: 1; height: 8rpx; border-radius: 4rpx; background: rgba(127,127,127,.28); transition: background var(--cy-motion-fast) var(--cy-ease-out); } /* ds-ok: 2026-10-28 分段进度条 */
+.cg-pv-seg.on { background: var(--cy-color-text-primary); }
+
+.cg-pv-body { padding: var(--cy-space-2) var(--cy-legacy-36) 0; }
+.cg-pv-step { font-size: var(--cy-font-label); color: var(--cy-color-text-tertiary); padding: var(--cy-space-3) var(--cy-legacy-36) var(--cy-space-4); }
+.cg-pv-panel { animation: cg-pv-panel-in var(--cy-motion-slow) var(--cy-ease-out) both; }
+
+/* 到达 */
+.cg-pv-cover {
+  width: 100%; height: 440rpx; border-radius: var(--cy-radius-2xl); overflow: hidden;
+  position: relative; background: #141414; /* ds-ok */
+  box-shadow: 0 16rpx 60rpx rgba(0,0,0,.18); /* ds-ok: 到达封面浮起投影,深浅两色页同值 */
+}
+.cg-pv-cover-img { width: 100%; height: 100%; }
+ /* ds-ok: 无图封面的最小高 */
+.cg-pv-badge {
+  display: inline-block;
+  background: #111; color: #fff; /* ds-ok: 紫底白字徽章,#fff 是恒定前景色不随主题翻转 */
+  font-size: var(--cy-font-caption); font-weight: 600; padding: var(--cy-space-1) var(--cy-legacy-18); border-radius: var(--cy-radius-sm); margin-bottom: 16rpx;
+}
+.cg-pv-cover-tit { margin-top: var(--cy-space-3); font-size: var(--cy-font-page-title); font-weight: 800; color: var(--cy-color-text-primary); }
+.cg-pv-intro { padding: var(--cy-space-6) var(--cy-space-2) 0; }
+.cg-pv-intro .cg-pv-meta-v { margin-top: var(--cy-space-2); font-weight: 400; color: var(--cy-color-text-tertiary); }
+.cg-pv-intro .cg-pv-desc { margin-top: var(--cy-space-5); line-height: 1.75; color: var(--cy-color-text-secondary); }
+.cg-pv-nav { flex: none; display: flex; align-items: center; justify-content: space-between; padding: var(--cy-space-3) var(--cy-legacy-36) calc(var(--cy-space-4) + env(safe-area-inset-bottom)); }
+.cg-pv-navbtn { width: 112rpx; height: 112rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--cy-color-bg-surface); color: var(--cy-color-text-primary); box-shadow: 0 4rpx 20rpx rgba(0,0,0,.08); } /* ds-ok */
+.cg-pv-navbtn.is-off { opacity: .35; }
+.cg-pv-navn { font-size: var(--cy-font-label); color: var(--cy-color-text-tertiary); }
+.cg-pv-card {
+  margin-top: var(--cy-space-4);
+  --cy-comp-card-bg: rgba(255,255,255,.58); /* ds-ok: 深色玩法预览舞台上的既有玻璃卡,非页面主题卡 */
+  --cy-comp-card-radius: var(--cy-radius-lg);
+  --cy-comp-card-pad: var(--cy-space-4);
+}
+.cg-pv-desc { font-size: var(--cy-font-body); color: var(--cy-color-text-secondary); line-height: 1.6; }
+.cg-pv-meta-v { font-size: var(--cy-font-body); font-weight: 600; color: var(--cy-color-text-primary); margin-top: var(--cy-legacy-4); }
+
+/* 剧情时间流 */
+.cg-pv-beat { padding: var(--cy-space-6) var(--cy-space-1-5); }
+.cg-pv-beat-tag { display: flex; align-items: center; gap: var(--cy-space-2-5); font-size: var(--cy-font-caption); letter-spacing: 4rpx; color: #6b86c2; font-weight: 600; margin-bottom: var(--cy-space-3-5); } /* ds-ok */
+.cg-pv-beat-line { width: var(--cy-legacy-36); height: 2rpx; background: #3a4a73; } /* ds-ok */
+.cg-pv-beat-img { width: 100%; height: 340rpx; border-radius: 28rpx; margin-bottom: var(--cy-legacy-36); overflow: hidden; background: #222c47; } /* ds-ok */
+.cg-pv-beat-img-pic { width: 100%; height: 100%; }
+.cg-pv-beat-text { font-size: var(--cy-font-title); line-height: 1.95; color: #e8eefb; }
+
+/* 点位任务 */
+.cg-pv-ch-head { display: flex; align-items: center; gap: var(--cy-space-2); margin-bottom: var(--cy-space-3-5); }
+.cg-pv-ch-ico {
+  width: 60rpx; height: 60rpx; border-radius: 18rpx;
+  background: #eaf1ff; display: flex; align-items: center; justify-content: center; font-size: var(--cy-font-body);
+}
+.cg-pv-ch-label { font-size: var(--cy-font-label); font-weight: 700; color: var(--cy-brand); }
+.cg-pv-ch-tit { font-size: var(--cy-font-subtitle); font-weight: 700; color: var(--cy-color-text-primary); line-height: 1.5; }
+.cg-pv-ch-body { margin-top: var(--cy-space-4); }
+.cg-pv-answer {
+  width: 100%; box-sizing: border-box;
+  border: 3rpx solid #e6eaf0; background: rgba(255,255,255,.45);
+  border-radius: var(--cy-radius-md); padding: var(--cy-legacy-26) var(--cy-space-3-5); font-size: var(--cy-font-body);
+}
+.cg-pv-answer.err { border-color: #f5455c; }
+.cg-pv-choices { display: flex; flex-direction: column; gap: var(--cy-space-2-5); }
+.cg-pv-choice {
+  border: 3rpx solid #e6eaf0; background: #fff; border-radius: var(--cy-radius-md);
+  padding: var(--cy-legacy-26) var(--cy-space-3-5); font-size: var(--cy-font-body); color: #2a3346; /* ds-ok */
+}
+.cg-pv-choice.on { border-color: var(--cy-brand); background: var(--cy-brand-soft); }
+.cg-pv-choice-l { font-weight: 700; color: var(--cy-brand); margin-right: 16rpx; }
+.cg-pv-photo {
+  height: 240rpx; border-radius: 28rpx; border: 3rpx dashed #cdd5e0;
+  background: rgba(255,255,255,.45);
+  display: flex; align-items: center; justify-content: center;
+  color: #9aa4b2; font-size: var(--cy-font-body); font-weight: 600;
+}
+.cg-pv-scan {
+  height: 240rpx; border-radius: 28rpx; background: rgba(255,255,255,.45);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--cy-color-text-secondary); font-size: var(--cy-font-body); font-weight: 600;
+}
+.cg-pv-gps {
+  height: 240rpx; border-radius: 28rpx;
+  background: linear-gradient(135deg, rgba(234,241,255,.55), rgba(243,247,255,.3));
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--cy-space-1-5);
+  color: var(--cy-brand); font-size: var(--cy-font-body); font-weight: 600;
+}
+.cg-pv-gps-ico { font-size: var(--cy-font-display-xl); }
+.cg-pv-none { color: #9aa4b2; font-size: var(--cy-font-body); }
+.cg-pv-wrong {
+  margin-top: 24rpx; background: #fff4f5; border: 1rpx solid #ffd4da; border-radius: 20rpx;
+  padding: var(--cy-space-2-5) var(--cy-legacy-26); font-size: var(--cy-font-label); color: #f5455c; /* ds-ok */
+}
+.cg-pv-usehint {
+  min-height: var(--cy-btn-h); margin-top: 24rpx;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center; font-size: var(--cy-font-body); color: #ffd089; /* ds-ok: 深色沉浸预览舞台的既有提示色 */
+}
+.cg-pv-hint {
+  margin-top: var(--cy-space-2-5);
+  background: rgba(253,243,223,.16); border: 1rpx solid rgba(255,208,137,.4);
+  border-radius: var(--cy-radius-md); padding: var(--cy-space-3) var(--cy-space-3-5); font-size: var(--cy-font-body); color: #ffe1b0; /* ds-ok */
+}
+
+/* 完成 */
+.cg-pv-complete { text-align: center; padding-top: var(--cy-space-6); }
+.cg-pv-check {
+  width: 192rpx; height: 192rpx; border-radius: 50%;
+  background: #16a36a; color: #fff; font-size: 96rpx; /* ds-ok: 完成态大对勾装饰图标,远超字号量表是刻意的视觉焦点,非文字 */
+  display: flex; align-items: center; justify-content: center; margin: 0 auto;
+  box-shadow: 0 20rpx 60rpx rgba(22,163,106,.45);
+}
+.cg-pv-complete-t1 { font-size: var(--cy-font-page-title); font-weight: 800; color: #fff; margin-top: var(--cy-space-5); } /* ds-ok: 预览态深色完成页恒白字 */
+.cg-pv-complete-t2 { font-size: var(--cy-font-body); color: #9fb3dd; margin-top: 16rpx; }
+
+/* 奖励 */
+.cg-pv-reward-tit { text-align: center; font-size: var(--cy-font-display); font-weight: 800; color: #fff; margin: var(--cy-space-1-5) 0 var(--cy-legacy-36); } /* ds-ok */
+.cg-pv-coupon { --cy-comp-card-bg: var(--cy-color-bg-surface); --cy-comp-card-radius: var(--cy-radius-lg); --cy-comp-card-pad: 0; overflow: hidden; margin-bottom: var(--cy-space-3); }
+.cg-pv-coupon__inner { display: flex; }
+.cg-pv-coupon-l { width: 180rpx; background: linear-gradient(135deg, var(--cy-brand), var(--cy-accent-strong)); display: flex; align-items: center; justify-content: center; font-size: var(--cy-type-data-xl); }
+.cg-pv-coupon-r { flex: 1; padding: var(--cy-space-3-5) var(--cy-space-4); }
+.cg-pv-coupon-name { font-size: var(--cy-font-subtitle); font-weight: 800; color: var(--cy-color-text-primary); }
+.cg-pv-medal { --cy-comp-card-bg: var(--cy-color-bg-surface); --cy-comp-card-radius: var(--cy-radius-lg); --cy-comp-card-pad: var(--cy-space-4); text-align: center; margin-bottom: var(--cy-space-3); }
+.cg-pv-medal-ico {
+  width: 144rpx; height: 144rpx; border-radius: 50%; overflow: hidden;
+  background: linear-gradient(135deg, #ffd86b, #ffb74d);
+  display: flex; align-items: center; justify-content: center; font-size: var(--cy-type-data-xl); margin: 0 auto;
+  box-shadow: 0 8rpx 28rpx rgba(255,183,77,.4);
+}
+.cg-pv-medal-img { width: 100%; height: 100%; }
+.cg-pv-medal-name { font-size: var(--cy-font-subtitle); font-weight: 800; color: var(--cy-color-text-primary); margin-top: 24rpx; }
+.cg-pv-rwtext {
+  --cy-comp-card-bg: var(--cy-color-state-pressed);
+  --cy-comp-card-radius: var(--cy-radius-lg);
+  --cy-comp-card-pad: var(--cy-space-4);
+  text-align: center;
+  font-size: var(--cy-font-body); color: #e8eefb; line-height: 1.6;
+}
+.cg-pv-norw {
+  --cy-comp-card-bg: rgba(255,255,255,.08); /* ds-ok: 深色玩法预览舞台的低强调空态,无对应 8% overlay token */
+  --cy-comp-card-radius: var(--cy-radius-lg);
+  --cy-comp-card-pad: var(--cy-space-5);
+  text-align: center; color: #9fb3dd; font-size: var(--cy-font-body); /* ds-ok: 预览态深色场景既有次要文字色 */
+}
+
+@keyframes cg-pv-panel-in {
+  0% { opacity: 0; transform: translateY(20rpx); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes cg-reveal {
+  0% { opacity: 0; transform: translateY(-12rpx); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* ============ 通用遮罩 / sheet ============ */
+.cg-mask { position: fixed; inset: 0; z-index: 95; background: rgba(15,25,45,.26); }
+/* 2026-10-23 弹层动效:原来一帧出现。进场用全局 cy-fade-in / cy-rise(app.wxss 已有,不新增关键帧),
+   时长 / 曲线同弹层规范 half 档;退场见下方 .is-out(r5-editor.js 的 cgDismiss) */
+.cg-mask { animation: cy-fade-in var(--cy-motion-sheet-in) var(--cy-ease-standard); }
+.cg-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 96;
+  animation: cy-rise var(--cy-motion-sheet-in) var(--cy-ease-standard);
+  background: var(--cy-bg-card);
+  backdrop-filter: blur(80rpx) saturate(200%);
+  border-radius: var(--cy-comp-sheet-radius) var(--cy-comp-sheet-radius) 0 0; border-top: 1rpx solid var(--cy-border-card);
+  padding: var(--cy-space-4) var(--cy-space-4) calc(var(--cy-space-4) + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  max-height: min(var(--cy-comp-sheet-full), var(--cy-comp-sheet-max-h, var(--cy-comp-sheet-max-height))); overflow-y: auto;
+}
+.cg-sheet.picker { padding-left: 0; padding-right: 0; }
+.cg-mask.is-out { animation: none; opacity: 0; transition: opacity var(--cy-motion-sheet-out) var(--cy-ease-standard); pointer-events: none; }
+.cg-sheet.is-out { animation: none; transform: translateY(100%); transition: transform var(--cy-motion-sheet-out) var(--cy-ease-standard); pointer-events: none; }
+.cg--reduced-motion .cg-mask, .cg--reduced-motion .cg-sheet { animation: none; }
+.cg-sheet-bar { width: 76rpx; height: 8rpx; border-radius: 4rpx; background: var(--cy-border-line); margin: 0 auto var(--cy-space-3-5); } /* ds-ok */
+.cg-sheet-tit { font-size: var(--cy-comp-sheet-title-size); font-weight: 700; line-height: var(--cy-comp-sheet-title-leading); color: var(--cy-text-title); margin-bottom: var(--cy-legacy-6); }
+.cg-sheet-tit.center { text-align: left; font-size: var(--cy-comp-sheet-title-size); font-weight: 700; margin-bottom: 16rpx; }
+.cg-sheet-head { display: flex; align-items: center; margin-right: calc(-1 * var(--cy-space-4)); }
+.cg-sheet-head .cg-sheet-tit { flex: 1; min-width: 0; margin-bottom: 0; }
+.cg-sheet-close { flex: none; width: var(--cy-btn-h); height: var(--cy-btn-h); display: flex; align-items: center; justify-content: center; color: var(--cy-text-secondary); }
+.cg-sheet.picker .cg-sheet-head { padding-left: var(--cy-page-x); margin-right: 0; }
+
+.cg-sheet-list { display: flex; flex-direction: column; gap: var(--cy-space-2-5); }
+.cg-sheet-card {
+  display: flex; align-items: center; gap: var(--cy-legacy-26);
+  padding: var(--cy-space-3-5);
+  border-radius: var(--cy-radius-lg); background: var(--cy-bg-card); border: 1rpx solid var(--cy-border-card);
+  transition: transform var(--cy-motion-press) var(--cy-ease-out);
+}
+.cg-sheet-card--pressed { transform: scale(.985); }
+
+.cg--reduced-motion .cg-scroll,
+.cg--reduced-motion .cg-rw-cfg,
+.cg--reduced-motion .cg-pv-panel { animation: none !important; }
+.cg--reduced-motion .cg-addmod,
+.cg--reduced-motion .cg-sheet-card { transition: none !important; }
+
+.cg-sheet-meta { flex: 1; min-width: 0; }
+.cg-sheet-name { font-size: var(--cy-font-body); font-weight: 700; color: var(--cy-text-title); display: flex; align-items: center; gap: var(--cy-space-1-5); }
+.cg-sheet-desc { font-size: var(--cy-font-label); color: var(--cy-text-secondary); margin-top: var(--cy-legacy-6); }
+.cg-sheet-plus { flex: none; display: flex; align-items: center; justify-content: center; color: var(--cy-text-secondary); }
+.cg-sheet-allin { text-align: center; color: var(--cy-text-secondary); font-size: var(--cy-font-body); padding: var(--cy-space-5) 0; }
+
+/* picker 列表 */
+
+.cg-picker-li {
+  padding: var(--cy-space-3) var(--cy-page-x); min-height: var(--cy-btn-h); box-sizing: border-box; font-size: var(--cy-type-body); line-height: var(--cy-leading-normal); color: var(--cy-text-title);
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1rpx solid var(--cy-border-card);
+}
+.cg-picker-li.on { color: var(--cy-brand); font-weight: 600; }
+.cg-picker-label { flex: 1; min-width: 0; margin-right: var(--cy-space-2); }
+.cg-picker-tick {
+  flex: none; width: 40rpx; height: 40rpx; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center;
+  border: 2rpx solid var(--cy-color-border-strong); border-radius: var(--cy-radius-pill);
+}
+.cg-picker-li.on .cg-picker-tick { background: var(--cy-color-text-primary); border-color: var(--cy-color-text-primary); }
+.cg-picker-li.on .cg-picker-tick::after {
+  content: ''; width: var(--cy-space-1-5); height: var(--cy-space-1-5);
+  border-radius: var(--cy-radius-pill); background: var(--cy-color-text-inverse);
+}
+
+/* 主题创建域（含玩家视角预览）：浅底白卡 + 稿的彩色强调，见 style/tokens.wxss 同名块。 */
+.theme-topic-editor {
+  /* 这页仍有历史 alias 用法；显式桥接到本页语义主题，避免从 page{} 继承暗色值。
+   * ★实测发现桥接到 --cy-color-* 的间接引用未生效(卡片/输入框仍渲染成 page{} 暗色默认值),
+   * 这里对表面/文本/描边 token 补一层本页字面值兜底,不再依赖跨文件 var() 链条。
+   * ⚠️ 这是快照,值必须与 style/tokens.wxss 的 .theme-topic-editor 逐字同步,
+   *    否则本页会停在旧配色而全站其它创建页已换 —— 契约测试逐条比对两边。 */
+  --cy-color-bg-page: #F3F4F4; /* ds-ok: 真值层兜底,与 style/tokens.wxss 的 .theme-topic-editor 同值,非装饰硬编码 */
+  --cy-color-bg-surface: #FFFFFF; /* ds-ok: 同上 */
+  --cy-color-bg-surface-subtle: #EEEEEE; /* ds-ok: 同上 */
+  --cy-color-text-primary: #000000; /* ds-ok: 同上 */
+  --cy-color-text-secondary: #404040; /* ds-ok: 同上 */
+  --cy-color-text-tertiary: #6B6B6B; /* ds-ok: 同上 */
+  --cy-color-border-subtle:     #E8E8E8; /* ds-ok: 同上 */
+  --cy-color-border-strong:     #DBDBDB; /* ds-ok: 同上 */
+  /* PR #539 迁移后的 isolated cy-card 不能沿用暗色 page{} 中已求值的组件钩子。 */
+  --cy-comp-card-bg: var(--cy-color-bg-surface);
+  --cy-color-brand: #33363C; /* ds-ok: 同上 */
+  --cy-color-brand-strong: #000000; /* ds-ok: 同上 */
+  --cy-color-brand-soft: #EAEBEE; /* ds-ok: 同上 */
+  --cy-color-status-danger: #D2263C; /* ds-ok: 同上 */
+  --cy-color-status-danger-soft: #FFF4F5; /* ds-ok: 同上 */
+  --cy-color-status-info: #2F6DF0; /* ds-ok: 同上 */
+  --cy-color-status-success: #0C7A50; /* ds-ok: 同上 */
+  --cy-color-status-warning: #B85C10; /* ds-ok: 同上 */
+  --cy-bg-page: var(--cy-color-bg-page);
+  --cy-bg-card: var(--cy-color-bg-surface);
+  --cy-bg-card-2: var(--cy-color-bg-surface-subtle);
+  --cy-border-card: var(--cy-color-border-subtle);
+  --cy-border-line: var(--cy-color-border-strong);
+  --cy-brand: var(--cy-color-brand);
+  --cy-brand-soft: var(--cy-color-brand-soft);
+  --cy-accent-strong: var(--cy-color-brand-strong);
+  --cy-danger: var(--cy-color-status-danger);
+  --cy-danger-soft: var(--cy-color-status-danger-soft);
+  --cy-info: var(--cy-color-status-info);
+  --cy-success: var(--cy-color-status-success);
+  --cy-text-title: var(--cy-color-text-primary);
+  --cy-text-body: var(--cy-color-text-secondary);
+  --cy-text-secondary: var(--cy-color-text-tertiary);
+}
+
+.theme-topic-editor.cg,
+.theme-topic-editor .cg-scroll {
+  background: var(--cy-color-bg-page);
+}
+
+.theme-topic-editor .cg-bottombar,
+.theme-topic-editor .cg-sheet {
+  background: var(--cy-color-bg-surface);
+  border-color: var(--cy-color-border-subtle);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+/* ★实测发现:.cg-input/.cg-textarea/.cg-pick 只吃 --cy-bg-card 别名桥接,
+ * 在这页没有像上面 .cg-card 一样直读 --cy-color-* 真值,渲染成 page{} 暗色默认值
+ * (黑底黑字看不清)。同上面的写法,直接读真值,不吃别名桥接。 */
+.theme-topic-editor .cg-textarea,
+.theme-topic-editor .cg-pick {
+  background: var(--cy-color-bg-surface-subtle);
+  border-color: var(--cy-color-border-subtle);
+  color: var(--cy-color-text-primary);
+}
+/* 同「字段比所在的面低一档」那条:落在灰色子卡里的字段反过来用白底 */
+.theme-topic-editor .cg-adv-repeat .cg-textarea,
+.theme-topic-editor .cg-adv-repeat .cg-pick,
+.theme-topic-editor .cg-adv-repeat .cg-cfg-input {
+  background: var(--cy-color-bg-surface);
+}
+.theme-topic-editor .cg-pick.empty { color: var(--cy-color-text-tertiary); }
+
+.theme-topic-editor .cg-cfg-add,
+.theme-topic-editor .cg-addmod {
+  color: var(--cy-color-text-secondary);
+}
+.theme-topic-editor .cg-picker-li.on,
+.theme-topic-editor .cg-picker-tick {
+  color: var(--cy-color-action-primary-bg);
+}
+
+.theme-topic-editor .cg-mask { background: var(--cy-color-overlay); }
+
+.theme-topic-editor .cg-preview,
+.theme-topic-editor .cg-pv-pager {
+  background: var(--cy-color-bg-page);
+  border-color: var(--cy-color-border-subtle);
+  backdrop-filter: none;
+}
+
+.theme-topic-editor .cg-pv-choice,
+.theme-topic-editor .cg-pv-answer,
+.theme-topic-editor .cg-pv-photo,
+.theme-topic-editor .cg-pv-scan,
+.theme-topic-editor .cg-pv-gps,
+.theme-topic-editor .cg-pv-wrong,
+.theme-topic-editor .cg-pv-hint {
+  background: var(--cy-color-bg-surface);
+  border-color: var(--cy-color-border-subtle);
+  color: var(--cy-color-text-primary);
+  box-shadow: none;
+}
+
+.theme-topic-editor .cg-pv-card,
+.theme-topic-editor .cg-pv-coupon,
+.theme-topic-editor .cg-pv-medal,
+.theme-topic-editor .cg-pv-rwtext,
+.theme-topic-editor .cg-pv-norw {
+  color: var(--cy-color-text-primary);
+}
+
+.theme-topic-editor .cg-pv-choice,
+.theme-topic-editor .cg-pv-answer,
+.theme-topic-editor .cg-pv-photo,
+.theme-topic-editor .cg-pv-scan,
+.theme-topic-editor .cg-pv-gps,
+.theme-topic-editor .cg-pv-wrong,
+.theme-topic-editor .cg-pv-hint {
+  border-style: solid;
+}
+
+.theme-topic-editor .cg-pv-beat-line,
+.theme-topic-editor .cg-pv-cover {
+  background: var(--cy-color-bg-surface-subtle);
+}
+
+.theme-topic-editor .cg-pv-check,
+.theme-topic-editor .cg-pv-coupon-l,
+.theme-topic-editor .cg-pv-medal-ico,
+.theme-topic-editor .cg-pv-badge {
+  background: var(--cy-color-action-primary-bg);
+  color: var(--cy-color-action-primary-fg);
+  box-shadow: none;
+}
+
+.theme-topic-editor .cg-pv-step,
+.theme-topic-editor .cg-pv-beat-tag,
+.theme-topic-editor .cg-pv-none,
+.theme-topic-editor .cg-pv-complete-t2,
+.theme-topic-editor .cg-pv-usehint {
+  color: var(--cy-color-text-tertiary);
+}
+
+.theme-topic-editor .cg-pv-cover-tit,
+.theme-topic-editor .cg-pv-complete-t1,
+.theme-topic-editor .cg-pv-reward-tit,
+.theme-topic-editor .cg-pv-desc,
+.theme-topic-editor .cg-pv-meta-v,
+.theme-topic-editor .cg-pv-ch-tit,
+.theme-topic-editor .cg-pv-choice,
+.theme-topic-editor .cg-pv-coupon-name,
+.theme-topic-editor .cg-pv-medal-name,
+.theme-topic-editor .cg-pv-rwtext,
+.theme-topic-editor .cg-pv-norw,
+.theme-topic-editor .cg-pv-beat-text {
+  color: var(--cy-color-text-primary);
+}
+
+.theme-topic-editor .cg-pv-ch-ico,
+.theme-topic-editor .cg-pv-choice.on {
+  background: var(--cy-color-bg-surface-subtle);
+  border-color: var(--cy-color-selection);
+}
+
+.theme-topic-editor .cg-pv-ch-label,
+.theme-topic-editor .cg-pv-choice-l {
+  color: var(--cy-color-selection);
+}
+
+.cg-pref-branch{ margin-top:var(--cy-space-2); padding:var(--cy-space-3); border:1rpx solid var(--cy-border-line); border-radius:var(--cy-radius-md); background:var(--cy-color-bg-page); }
+.cg-pref-branch__code{ color:var(--cy-color-text-tertiary); font-size:var(--cy-type-micro); font-family:var(--cy-font-numeric); letter-spacing:2rpx; }
+.cg-pref-branch__title{ margin-top:var(--cy-space-1); color:var(--cy-color-text-primary); font-size:var(--cy-type-body); font-weight:700; }
+.cg-pref-branch__body,.cg-pref-branch__next{ margin-top:var(--cy-space-1); color:var(--cy-color-text-secondary); font-size:var(--cy-type-caption); line-height:1.5; }
+.cg-pv-pref{ display:flex; flex-direction:column; gap:var(--cy-space-2); }
+.cg-pv-pref__branch{ display:flex; justify-content:space-between; gap:var(--cy-space-2); padding:var(--cy-space-2-5); border:1rpx solid var(--cy-border-line); border-radius:var(--cy-radius-md); color:var(--cy-text-body); }
+
+/* 猜图的「设为正确答案」:与选项问答那一行同一套读法(圆圈 + 一句话),
+   只是它挂在每张图下面,所以要一条上间距把它和图片地址分开。 */
+.cg-adv-correct { margin-top: var(--cy-space-2); color: var(--cy-text-secondary); }
+/* 勾选态用微信原生 icon(success / circle),不自己拿 CSS 画圆和勾 */
+
+/* 每段玩法开关打开后的配置体:和开关那一行之间留一档,二十段统一,别各留各的 */
+.cg-adv-body { margin-top: var(--cy-space-3); }
+
+
+/* 选中玩法的配置面板 */
+.cg-gcfg {
+  margin-top: var(--cy-space-3); padding: 28rpx; /* ds-ok: 照原型 14px */
+  border: 1rpx solid var(--cy-color-border-subtle); border-radius: 24rpx;  /* ds-ok 照原型量的圆角(12px) */
+  background: var(--cy-color-bg-page);
+}
+.cg-gcfg .cg-textarea,
+.cg-gcfg .cg-cfg-input,
+.cg-gcfg .cg-cfg-textarea { background: var(--cy-color-bg-surface); }
+
+/* 所有玩法与高级修饰共用字段节奏；重复项用 gap，避免叠加输入框的下外边距。 */
+.cg-gcfg > .cg-adv-body { margin-top: 0; }
+.cg-gcfg .cg-pick { background: var(--cy-color-bg-surface); padding: 0 var(--cy-legacy-26); }
+.cg-gcfg cy-dropdown, .cg-advanced cy-dropdown { display: block; margin-bottom: var(--cy-space-3); }
+.cg-gcfg .cg-cfg-textarea, .cg-advanced .cg-cfg-textarea { margin-bottom: var(--cy-space-3); }
+.cg-adv-grid { margin-bottom: var(--cy-space-3); align-items: stretch; }
+.cg-adv-grid > view { display: flex; flex-direction: column; min-width: 0; }
+.cg-adv-grid > view > .cg-cfg-label { flex: 1; }
+.cg-adv-grid .cg-cfg-input, .cg-adv-grid cy-dropdown,
+.cg-adv-repeat > .cg-cfg-input, .cg-adv-repeat > .cg-cfg-textarea,
+.cg-adv-repeat cy-dropdown, .cg-adv-repeat > .cg-cfg-label { margin-bottom: 0; }
+.cg-adv-grid .cg-adv-add { margin-top: 0; box-sizing: border-box; }
+.cg-adv-repeat .cg-adv-repeat { border: 1rpx solid var(--cy-color-border-subtle); }
+.cg-gcfg .cg-cfg-hint { margin-bottom: var(--cy-space-3); }
+.cg-gcfg > .cg-cfg-hint:last-child,
+.cg-gcfg > .cg-adv-body > .cg-cfg-hint:last-child { margin-bottom: 0; }
+.cg-gcfg .cg-rw-line, .cg-gcfg .cg-sw-row {
+  min-height: var(--cy-btn-h); justify-content: space-between;
+  padding: var(--cy-space-2) 0; margin: 0 0 var(--cy-space-2);
+  gap: var(--cy-space-3); box-sizing: border-box;
+}
+.cg-gcfg .cg-rw-name, .cg-gcfg .cg-sw-label {
+  flex: 1; min-width: 0; font-size: var(--cy-font-label);
+  font-weight: 600; color: var(--cy-text-body);
+}
+.cg-gcfg cy-switch, .cg-advanced cy-switch { flex: none; }
+.cg-adv-correct { min-height: var(--cy-btn-h); font-size: var(--cy-font-label); }
+
+
+/* 玩法屏是深色的,它上面那条(安全区 + 翻页器)不能是白的 ——
+   一白一黑两截读成「游戏卡在一个白框里」。玩法在场时整屏收到玩法域的底色。 */
+.theme-topic-editor .cg-preview--kit,
+.theme-topic-editor .cg-preview--kit .cg-pv-pager {
+  background: var(--cy-color-play-surface-base);
+  border-color: transparent;
+}
+.cg-preview--kit .cg-pv-step { color: var(--cy-color-text-inverse); }
+/* 玩法屏自己有安全区,外面那 188rpx 的留白会把它整块往下推 */
+.cg-preview--kit .cg-pv-scroll { padding-top: env(safe-area-inset-top); }
+
+/* ===== 找东西:在图上点出目标 ===== */
+.cg-ho-scene {
+  position: relative; width: 100%; height: 360rpx; margin-top: var(--cy-space-1);
+  border-radius: 24rpx; overflow: hidden;  /* ds-ok 照原型量的圆角(12px) */
+  background: var(--cy-color-bg-surface-subtle);
+  border: 1rpx solid var(--cy-color-border-subtle);
+}
+.cg-ho-frame { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.cg-ho-img { width: 100%; height: 100%; }
+.cg-ho-ph {
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--cy-font-label); color: var(--cy-color-text-tertiary);
+}
+.cg-ho-pin {
+  position: absolute; width: 44rpx; height: 44rpx; margin: -22rpx 0 0 -22rpx;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: var(--cy-font-caption); font-weight: 700;
+  background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg);
+  box-shadow: 0 0 0 4rpx rgba(255, 255, 255, .85);   /* ds-ok: 深浅图上都要看得见的描边 */
+}
+.cg-ho-pin.is-arming { background: var(--cy-color-status-info); }
+.cg-ho-row { display: flex; align-items: center; gap: var(--cy-space-2); margin-top: var(--cy-space-1); }
+.cg-ho-mark {
+  min-height: 62rpx; display: flex; align-items: center; padding: 0 var(--cy-space-2-5);
+  border-radius: var(--cy-radius-pill); border: 1rpx solid var(--cy-color-border-subtle);
+  font-size: var(--cy-font-caption); color: var(--cy-color-text-secondary);
+  background: var(--cy-color-bg-surface);
+}
+.cg-ho-mark.is-on {
+  background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg);
+  border-color: transparent;
+}
+.cg-ho-state { font-size: var(--cy-font-caption); color: var(--cy-color-text-tertiary); }
+
+/* 「按这份配置试玩」:挂在玩法配置下面,没选玩法时整条不出现 */
+.cg-try {
+  margin-top: var(--cy-space-3);
+  min-height: var(--cy-btn-h);
+  display: flex; align-items: center; justify-content: center; gap: var(--cy-space-1);
+  border: 2rpx dashed var(--cy-color-border-subtle); border-radius: 24rpx;  /* ds-ok 照原型量的圆角(12px) */
+  font-size: var(--cy-font-label); font-weight: 600;
+  color: var(--cy-color-text-secondary); background: var(--cy-color-bg-surface);
+}
+
+/* 选择玩法半屏的分类快捷条(原型 .sheet-nav) */
+.cg-gsheet-nav { white-space: nowrap; padding: var(--cy-space-2) 0 var(--cy-space-1); }
+.cg-gsheet-navi {
+  display: inline-flex; align-items: center; min-height: 56rpx;
+  padding: 0 26rpx; margin-right: var(--cy-space-1-5);
+  border-radius: var(--cy-radius-pill);
+  font-size: var(--cy-font-caption); font-weight: 600;
+  color: var(--cy-color-text-secondary); background: var(--cy-color-bg-surface-subtle);
+}
+.cg-gsheet-navi.is-on {
+  background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg);
+}
+.cg-ho-scene--press { opacity: .92; }
+
+/* 同步到模板广场:一条分隔线之上的开关行(原型 .sq-row) */
+.cg-sq-row {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-3);
+  margin-top: var(--cy-space-4);
+  padding-top: var(--cy-space-3);
+  border-top: 2rpx solid var(--cy-color-border-subtle);
+}
+.cg-sq-meta { flex: 1; min-width: 0; }
+.cg-sq-name { font-size: var(--cy-type-body); font-weight: 700; }
+
+/* 玩法规则:序号画在输入框**外面**(原型 .step-no / .step-field) */
+.cg-steps { display: flex; flex-direction: column; gap: 20rpx; }  /* ds-ok 原型 10px */
+.cg-step { display: flex; gap: 20rpx; align-items: flex-start; }  /* ds-ok */
+.cg-step-no {
+  flex: none;
+  width: 44rpx; height: 44rpx;             /* ds-ok 原型 22px */
+  margin-top: 22rpx;                       /* ds-ok 原型 11px:与输入框首行对齐 */
+  border-radius: 50%;
+  background: var(--cy-color-action-primary-bg);
+  color: var(--cy-color-action-primary-fg);
+  font-size: 23rpx;                        /* ds-ok 原型 11.5px */
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.cg-step-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;                              /* ds-ok 原型 8px */
+  background: var(--cy-color-bg-surface);
+  border: 2rpx solid var(--cy-color-border-subtle);
+  border-radius: var(--cy-radius-sm);
+  padding: 20rpx 22rpx;                    /* ds-ok 原型 10px 11px */
+  box-sizing: border-box;
+}
+.cg-step-ta {
+  flex: 1;
+  min-width: 0;
+  min-height: 44rpx;                       /* ds-ok 原型 22px */
+  font-size: var(--cy-type-body);
+  line-height: 1.55;                       /* ds-ok 原型同值 */
+  color: var(--cy-color-text-primary);
+}
+.cg-step-del { flex: none; color: var(--cy-color-text-tertiary); line-height: 44rpx; }
+/* ＋ 添加一步:虚线框,左边让开序号那一列,与输入框左边缘对齐(原型 margin-left:32px) */
+.cg-step-add {
+  margin-top: 20rpx;                       /* ds-ok 原型 10px */
+  margin-left: 64rpx;                      /* ds-ok 原型 32px */
+  padding: 22rpx;                          /* ds-ok 原型 11px */
+  border: 2rpx dashed var(--cy-color-border-strong);
+  border-radius: var(--cy-radius-sm);
+  text-align: center;
+  font-size: 27rpx;                        /* ds-ok 原型 13.5px */
+  color: var(--cy-color-text-secondary);
+}
+
+/* ===== 封面 + 名字:同一张卡(原型 .hero / .hero-cover / .hero-body) ===== */
+.cg-hero {
+  margin: var(--cy-space-3) var(--cy-page-x) 0;
+  border-radius: var(--cy-radius-sm);
+  overflow: hidden;
+  /* 和同页 cy-card 同一个底 —— raised 在日间是 #E6E6E6(灰),
+     用它会让这张卡比下面「模板信息」那张暗一档,看着像两种卡 */
+  background: var(--cy-comp-card-bg);
+  box-shadow: var(--cy-shadow-card);
+}
+/* 空态是**整卡宽的 1:1 大方块**,斜纹占位 —— 原型 .hero-cover 同值 */
+.cg-hero-cover {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  background: repeating-linear-gradient(135deg,
+              #f0f0f3 0 24rpx, #ebebef 24rpx 48rpx);   /* ds-ok 逐值照原型 12px/24px 斜纹 */
+  color: var(--cy-color-text-tertiary);
+}
+.cg-hero-cover--picked { background: none; }
+.cg-hero-img { width: 100%; height: 100%; }
+.cg-hero-plus {
+  width: 84rpx; height: 84rpx;                          /* ds-ok 原型 42px */
+  border-radius: 50%;
+  background: var(--cy-color-bg-raised);
+  box-shadow: var(--cy-shadow-card);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--cy-color-text-secondary);
+}
+.cg-hero-c1 {
+  font-size: 27rpx;                                     /* ds-ok 原型 13.5px */
+  font-weight: 600;
+  color: var(--cy-color-text-secondary);
+}
+                       /* ds-ok 原型 11.5px */
+.cg-hero-body { padding: var(--cy-space-4); }           /* ds-ok 原型 16px */
+/* P-39:采用时原封面被媒体校验拒绝 —— 就地提示替换,不再整页拦截 */
+.cg-cover-unusable {
+  padding: var(--cy-space-2) var(--cy-space-4);
+  font-size: var(--cy-font-caption);
+  color: var(--cy-color-status-danger);
+  background: var(--cy-color-status-danger-soft);
+}
+
+/* 顶部让位与退出键共用真实状态栏高度,不依赖模拟器中可能为 0 的 env(safe-area-inset-top)。 */
+.cg-pv-inline-scroll { position:absolute; inset:0; height:100%; padding-top:var(--cg-pv-inline-top); box-sizing:border-box;
+  background:#000000; color:var(--cy-color-text-inverse); } /* ds-ok #000 = 玩家暗色 --cy-color-bg-page(故事流 .chfull 的底)。本分包是浅色主题,令牌在这里解析成浅灰,只能写死 */
+/* 与玩家故事流 pages/play/index.wxss 的 .chfull__kit 逐条一致(契约测试钉着)。 */
+.cg-pv-inline-kit { margin:0 var(--cy-page-x); --pe-unfold:1; --pk-card-h:auto; --pk-card-h-tall:auto; --pk-card-radius:0; --pk-card-pad:var(--cy-space-5) 0 0; --pk-card-bg:transparent; --pk-stage-pos:relative; --pk-stage-height:auto; --pk-stage-body-pos:relative; --pk-stage-bg:transparent; --pk-stage-overflow:visible; --pk-back-display:none; --pk-col-pos:relative; --pk-col-pad:0; --pk-col-align:stretch; --pk-col-text:left; --pk-btn-pos:relative; --pk-btn-x:0; --pk-btn-bottom:0; --pk-btn-mt:var(--cy-space-5); --cy-play-question-size:44rpx; --pk-q-weight:600; --pk-row-justify:flex-start; --pk-qt-radius:32rpx; --pk-embed-bg:var(--atmo-bg, transparent); --pk-embed-ink:var(--atmo-text, var(--cy-color-text-primary)); --pk-embed-sub:var(--atmo-muted, var(--cy-color-text-tertiary)); --pk-embed-soft:var(--atmo-control, rgba(255,255,255,.08)); --pk-embed-accent:var(--look-a, var(--atmo-text, var(--cy-color-text-primary))); --pk-embed-ok:var(--look-a, var(--atmo-text, var(--cy-color-text-primary))); } /* ds-ok 同 .chfull__kit */
+/* 2026-09-23 用户:题目和作答放到页面中间(与玩家故事流内嵌玩法同一口径) */
+/* PG-055:滚动区 enable-flex 成列,题面块吃掉「继续故事」以上的剩余高度,不再拿 100vh 减常量 */
+.cg-pv-inline-scroll { display:flex; flex-direction:column; }
+.cg-pv-inline-kit { flex:1 0 auto; display:flex; flex-direction:column; }
+/* 2026-10-23 复查:用上下 auto 外边距居中,不用 justify-content:center —— 内容比容器高时(D20 掷出后多一条难度线)
+   后者会往上溢出,把标题顶到退出键底下;auto 外边距只在有余量时才居中 */
+/* 2026-11-21 lead 走查:玩法 + 「继续故事」(玩完才出)作为一块居中,按钮紧跟玩法内容,不钉在屏幕下沿 */
+.cg-pv-inline-body { margin-top: auto; margin-bottom: auto; padding-bottom: var(--cy-space-6); display: flex; flex-direction: column; }
+.cg-pv-inline-end { padding-top: var(--cy-space-6); }
+
+/* ===== R5 模板编辑器（2026-10-10 主人批准原型 template-editor-v2-proto.html）=====
+   首页每项同一种行：图标 + 名称 + 一行摘要 + 右侧「配置 ›」药丸；配置都在底部面板，
+   面板页头统一「左 退出（放弃本次改动）/ 右 完成（校验后保存）」；单选一律下拉，
+   选择玩法 / 参与方式 / 形式 / 互动工具用 cy-dropdown 两列卡片档。 */
+.cg-r5-row { display: flex; align-items: center; gap: var(--cy-space-2-5); min-height: var(--cy-btn-h); padding: var(--cy-space-2) 0; }
+.cg-r5-row--hr { border-top: 1rpx solid var(--cy-color-border-subtle); }
+.cg-r5-row.is-off { opacity: .55; }
+
+.cg-r5-row__main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cg-r5-row__title { font-size: var(--cy-font-body); font-weight: 600; color: var(--cy-color-text-primary); }
+.cg-r5-row__title--plain { font-weight: 500; }
+
+.cg-r5-row__sub { margin-top: 4rpx; font-size: var(--cy-font-label); color: var(--cy-color-text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cg-r5-row__sub.is-err { color: var(--cy-color-status-danger); }
+.cg-r5-pill { flex: none; display: flex; align-items: center; gap: 4rpx; min-height: 64rpx; padding: 0 var(--cy-space-3); border-radius: var(--cy-radius-pill); background: var(--cy-color-bg-surface-subtle); font-size: var(--cy-font-label); font-weight: 600; color: var(--cy-color-text-primary); }
+.cg-r5-sec { margin: var(--cy-space-1) 0 var(--cy-space-2); font-size: var(--cy-font-label); font-weight: 600; color: var(--cy-color-text-secondary); }
+.cg-r5-gap { margin-top: var(--cy-space-3); }
+.cg-chips { display: flex; flex-wrap: wrap; gap: var(--cy-space-1-5); }
+.cg-chip { min-height: 56rpx; padding: 0 var(--cy-space-3); border-radius: var(--cy-radius-pill); background: var(--cy-color-bg-surface-subtle); display: flex; align-items: center; font-size: var(--cy-font-label); font-weight: 600; color: var(--cy-color-text-primary); }
+.cg-chip.is-on { background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg); }
+/* P-41 / G-8(2026-10-27):玩法类别标签更小、实底无描边、前面带品类图标;删除键的 44px 热区靠负边距吃回来,不撑高标签 */
+.cg-cat-chips .cg-chip { min-height: 48rpx; gap: var(--cy-space-1); padding: 0 var(--cy-space-1) 0 var(--cy-space-2-5); border: none; font-size: var(--cy-font-caption); } /* ds-ok 24px 小标签 */
+.cg-cat-chips .cg-chip-x { margin: -20rpx -16rpx -20rpx -8rpx; } /* ds-ok 44px 热区压回 24px 标签高 */
+
+/* 编辑面板：不用毛玻璃 —— backdrop-filter 会把面板变成 fixed 子层的包含块，面板内的下拉会错位。 */
+.cg-sheet.cg-edit-sheet { backdrop-filter: none; background: var(--cy-color-bg-surface); padding-top: var(--cy-space-2); }
+.cg-edit-sheet .cg-gcfg { margin-top: var(--cy-space-3); }
+.cg-mask.cg-mask--top { z-index: 97; }
+.cg-sheet.cg-edit-sheet--top { z-index: 98; }
+.cg-edit-head { position: sticky; top: calc(-1 * var(--cy-space-2)); z-index: 1; display: flex; align-items: center; gap: var(--cy-space-2); min-height: var(--cy-btn-h); padding: var(--cy-space-2) 0; background: var(--cy-color-bg-surface); }
+.cg-edit-head__exit { flex: none; min-width: var(--cy-btn-h); min-height: var(--cy-btn-h); display: flex; align-items: center; font-size: var(--cy-font-body); font-weight: 600; color: var(--cy-color-text-primary); }
+.cg-edit-head__title { flex: 1; min-width: 0; text-align: center; font-size: var(--cy-comp-sheet-title-size); font-weight: 700; color: var(--cy-color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cg-edit-head__done { flex: none; min-width: 128rpx; height: var(--cy-btn-h); padding: 0 var(--cy-space-4); box-sizing: border-box; display: flex; align-items: center; border-radius: var(--cy-radius-pill); background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg); font-size: var(--cy-font-body); font-weight: 700; }
+
+.cg-adv-add.cg-adv-add--danger { border-style: solid; border-color: transparent; color: var(--cy-color-status-danger); }
+
+/* 选项问答（2026-10-11 主人批准 HTML 原型）：分区标题、两项一行、选项内“选中后的反馈”（文字 + 最多 3 张图） */
+.cg-qa-sec { display: flex; align-items: center; gap: var(--cy-space-1-5); margin: var(--cy-space-4) 0 var(--cy-space-2); padding-top: var(--cy-space-3-5); border-top: 1rpx solid var(--cy-border-line); font-size: var(--cy-font-body); font-weight: 800; color: var(--cy-text-title); }
+.cg-qa-sec::before { content: ""; width: 6rpx; height: 28rpx; border-radius: 3rpx; background: var(--cy-brand); flex: none; } /* ds-ok: 6rpx 宽标题装饰竖条用半宽 3rpx 圆角，保留现有胶囊端部几何；无等值圆角 token */
+.cg-qa-sec--first { margin-top: 0; padding-top: 0; border-top: 0; }
+.cg-qa-pair { margin-bottom: var(--cy-space-1); }
+.cg-qa-pair .cg-cfg-input { margin-bottom: 0; }
+.cg-qa-fb { padding: var(--cy-space-2-5); border-radius: var(--cy-radius-md); background: var(--cy-bg-card); display: flex; flex-direction: column; gap: var(--cy-space-2); }
+.cg-qa-fb .cg-cfg-label { margin-bottom: 0; }
+.cg-qa-fb .cg-cfg-textarea { background: var(--cy-bg-card-2); }
+.cg-qa-imgs { flex-wrap: wrap; }
+.cg-qa-imgs .cg-qmedia-slot, .cg-qa-imgs .cg-qmedia-add { flex: 0 0 160rpx; height: 160rpx; }
+
+/* 多段题目：附加段标题右侧的移除 */
+.cg-seg-del { margin-left: auto; font-size: var(--cy-legacy-26); font-weight: 400; color: var(--cy-color-text-secondary); }
+
+/* ============ 2026-10-22 主人定稿(HTML 原型 gameplay-create-proto-20261022) ============
+   分区标题放在卡片外、标题前不画竖线;卡片只有一层(白卡 + 浅灰输入框),玩法设置不再灰套白、灰套灰;
+   浮层头左「退出」右「完成」同字号同字重;选择玩法 / 添加互动工具是 Figma 胶囊标签。 */
+.cg-sec {
+  display: flex; align-items: center; gap: var(--cy-space-2);
+}
+.cg-sec__t { font-size: var(--cy-font-subtitle); font-weight: 700; color: var(--cy-text-title); }
+.cg-sec__act { margin-left: auto; min-height: var(--cy-btn-h); display: flex; align-items: center; font-size: var(--cy-font-body); color: var(--cy-color-text-secondary); }
+.cg-sec + .cg-card, .cg-sec + .cg-gcfg, .cg-sec + .cg-inline-error + .cg-gcfg { margin-top: var(--cy-space-2); }
+.cg-line { border-top: 1rpx solid var(--cy-color-border-subtle); justify-content: space-between; }
+.cg-line .cg-rw-name { flex: 1; }
+
+.cg-scan-reply cy-dropdown { display: block; margin-bottom: var(--cy-space-1); }
+.cg-game-ico { flex: none; width: 76rpx; height: 76rpx; border-radius: var(--cy-radius-md); display: flex; align-items: center; justify-content: center; background: var(--cy-color-bg-surface-subtle); color: var(--cy-color-text-primary); }
+
+
+/* 玩法设置:每块都是与 .cg-card 同一层的白卡,里面只有浅灰输入框 */
+.cg-inline-cfg { margin: 0; }
+.cg-inline-cfg > .cg-gcfg, .cg-inline-cfg > .cg-cfg {
+  margin: var(--cy-space-3) var(--cy-space-4) 0;
+  border: 0;
+  background: var(--cy-color-bg-surface);
+}
+.cg-inline-cfg > .cg-sec + .cg-gcfg, .cg-inline-cfg > .cg-sec + .cg-inline-error + .cg-gcfg { margin-top: var(--cy-space-2); }
+.cg-inline-cfg .cg-gcfg .cg-textarea,
+.cg-inline-cfg .cg-gcfg .cg-cfg-input,
+.cg-inline-cfg .cg-gcfg .cg-cfg-textarea,
+.cg-inline-cfg .cg-gcfg .cg-pick { background: var(--cy-bg-card-2); border-color: transparent; }
+/* 重复项(选项、步骤)不再是灰底小卡:同一张白卡里用细线分开 */
+.cg-inline-cfg .cg-adv-repeat { background: transparent; padding: var(--cy-space-3) 0; border-radius: 0; border-top: 1rpx solid var(--cy-color-border-subtle); }
+.cg-inline-cfg .cg-adv-repeat .cg-cfg-input,
+.cg-inline-cfg .cg-adv-repeat .cg-textarea,
+.cg-inline-cfg .cg-adv-repeat .cg-pick { background: var(--cy-bg-card-2); }
+.cg-adv-add.cg-adv-add--first { margin-top: 0; }
+
+/* 结果反馈:三步说明 + 成功/失败开关 */
+.cg-fb-steps { display: flex; flex-direction: column; gap: var(--cy-space-2); }
+.cg-fb-step { display: flex; gap: var(--cy-space-2); font-size: var(--cy-font-body); line-height: var(--cy-leading-normal); color: var(--cy-text-title); }
+.cg-fb-step__no { flex: none; width: 32rpx; font-weight: 600; color: var(--cy-color-text-secondary); }
+.cg-fb-body { padding-top: var(--cy-space-2); }
+.cg-fb-body .pgrid { margin: var(--cy-space-1) 0 var(--cy-space-2); }
+
+/* 浮层头:左退出、右完成,同字号同字重,标题居中 */
+.cg-edit-head__exit, .cg-edit-head__done {
+  flex: none; min-width: 128rpx; height: var(--cy-btn-h); padding: 0; background: transparent; border-radius: 0;
+  display: flex; align-items: center; font-size: var(--cy-font-body); font-weight: 600; color: var(--cy-color-text-primary);
+}
+.cg-edit-head__done { justify-content: flex-end; }
+
+/* 选择玩法:半屏弹层;所有分类排成一条,只能左右滑 */
+.cg-tsheet { display: flex; flex-direction: column; height: 70vh; padding-bottom: 0; }
+.cg-tsheet.cg-tsheet--auto { height: auto; }
+.cg-tpad { display: flex; flex-wrap: wrap; gap: 20rpx 24rpx; padding: var(--cy-space-3) var(--cy-space-1) var(--cy-space-2); }
+/* Figma「Edit Interests」胶囊(节点 1:18929):高 47、全圆角、1px #EBEBEB 描边;
+   未选白底灰字 #777,选中 #D9D9D9 底深字 #131313 + 右侧对勾。宽度随字数。 */
+.cg-tag-pill {
+  position: relative; flex: none; box-sizing: border-box;
+  display: inline-flex; align-items: center; gap: 16rpx;
+  height: 94rpx; padding: 0 52rpx 0 40rpx;
+  border: 2rpx solid #EBEBEB; border-radius: 60rpx; /* ds-ok: Figma 1:18929 实测 */
+  background: #FFFFFF; color: #777777; /* ds-ok: Figma 1:18929 实测 */
+  font-size: var(--cy-font-body); white-space: nowrap;
+}
+.cg-tag-pill.is-on { background: #D9D9D9; color: #131313; padding-right: 84rpx; } /* ds-ok: Figma 1:18929 实测 */
+.cg-tag-pill.is-off { opacity: .45; }
+.cg-tag-pill__ic { flex: none; display: flex; }
+.cg-tag-pill__t { white-space: nowrap; }
+.cg-tag-pill__ck { position: absolute; right: 32rpx; top: 50%; width: 20rpx; height: 16rpx; margin-top: -8rpx; }
+.cg-tsheet__foot { flex: none; display: flex; align-items: center; gap: var(--cy-space-3); padding: var(--cy-space-3) var(--cy-space-1) calc(var(--cy-space-4) + env(safe-area-inset-bottom)); }
+.cg-tsheet__sub { flex: 1; min-width: 0; font-size: var(--cy-font-label); line-height: var(--cy-leading-normal); color: var(--cy-color-text-secondary); white-space: normal; }
+.cg-tsheet__name { margin-right: var(--cy-space-2); font-weight: 600; color: var(--cy-color-text-primary); }
+
+/* 2026-10-22 开发者工具实拍后补:玩法设置里的分区小标题去掉竖条;扫完回复、三步说明下留出间距;
+   编辑浮层里不再灰框套白输入框(和页面一样:白底 + 浅灰输入框);标签条首列让开渐隐区 */
+.cg-inline-cfg .cg-qa-sec::before { display: none; }
+
+.cg-fb-steps + .cg-line { margin-top: var(--cy-space-4); }
+.cg-edit-sheet .cg-gcfg { background: transparent; border: 0; padding: 0; }
+.cg-edit-sheet .cg-gcfg .cg-cfg-input,
+.cg-edit-sheet .cg-gcfg .cg-textarea,
+.cg-edit-sheet .cg-gcfg .cg-cfg-textarea,
+.cg-edit-sheet .cg-gcfg .cg-pick { background: var(--cy-bg-card-2); border-color: transparent; }
+
+/* 玩法图标按分类上一层浅色:浅底 + 同色图标,不用渐变 */
+.cg-game-ico--qa { background: rgba(252,63,63,.10); color: #E5484D; } /* ds-ok: 原型定稿的玩法分类色 */
+.cg-game-ico--logic { background: rgba(91,140,255,.12); color: #3E6FE0; } /* ds-ok: 原型定稿的玩法分类色 */
+.cg-game-ico--play { background: rgba(18,184,134,.12); color: #0E9E73; } /* ds-ok: 原型定稿的玩法分类色 */
+.cg-game-ico--challenge { background: rgba(124,92,255,.12); color: #6A4CE8; } /* ds-ok: 原型定稿的玩法分类色 */
+
+/* 浮层上下两端按透明度渐隐(2026-10-22 主人定稿):固定头下方、底部各一段,内容滚过去时淡出,不是换颜色 */
+.cg-edit-head::after { content: ""; position: absolute; left: 0; right: 0; bottom: -32rpx; height: 32rpx; pointer-events: none;
+  background: linear-gradient(var(--cy-color-bg-surface), transparent); }
+.cg-sheet::after { content: ""; display: block; position: sticky; bottom: calc(-1 * (var(--cy-space-4) + env(safe-area-inset-bottom))); height: 64rpx; margin-top: -64rpx; pointer-events: none;
+  background: linear-gradient(transparent, var(--cy-bg-card)); }
+
+/* 试玩的退出键(2026-10-23):照玩法台面 .st__back 的位置与大小;全屏玩法自己那颗在预览里藏掉,只留这一颗 */
+.cg-preview--kit { --pk-back-display: none; }
+.cg-pv-exit {
+  position: fixed; left: var(--cy-page-x); z-index: var(--cy-z-popover);
+  width: 88rpx; height: 88rpx; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(127, 127, 127, .24); color: var(--cy-color-text-inverse);  /* ds-ok 叠在深浅两种玩法皮肤上都看得清的中性半透明 */
+}
+/* 「试玩 · 不计成绩」小标(2026-11-21 lead 走查):原来钉在右上,压在微信胶囊(⋯ ◎)底下被裁。
+   现在是玩法内容最上面一枚左对齐的小标;整屏玩法时浮在退出键与胶囊下沿之下(top 由 pvSimTop 给)。 */
+.cg-pv-sim {
+  align-self: flex-start; margin-bottom: var(--cy-space-3);
+  padding: var(--cy-space-1) var(--cy-space-3); border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-overlay); color: #FFFFFF;  /* ds-ok 深浅两种玩法皮肤上都读得清:深色遮罩 + 白字(原 text-inverse 在浅色编辑页 = 黑字,压在深色玩法上看不见) */
+  font-size: var(--cy-type-micro); font-weight: 600;
+}
+.cg-pv-sim--float { position: fixed; left: var(--cy-page-x); z-index: var(--cy-z-popover); margin-bottom: 0; }
+
+/* ============ 2026-10-23 主人走查:间距照原型 gameplay-create-proto-20261022(1px = 2rpx) ============
+   分区标题 22/4/10、卡片内边距 16、圆角 14、页边 13;开关行上分隔线 + 16 间距;字段之间 16。 */
+.cg-sec { margin: 44rpx 26rpx 0; padding: 0 8rpx; }                                 /* ds-ok 原型 .sh 22px 4px 10px */
+.cg-sec + .cg-card, .cg-sec + .cg-gcfg, .cg-sec + .cg-inline-error + .cg-gcfg,
+.cg-inline-cfg > .cg-sec + .cg-gcfg, .cg-inline-cfg > .cg-sec + .cg-inline-error + .cg-gcfg { margin-top: var(--cy-space-2-5); }
+.cg-card { margin-left: var(--cy-page-x); margin-right: var(--cy-page-x); --cy-comp-card-pad: var(--cy-space-4); --cy-comp-card-radius: var(--cy-radius-lg); } /* 打磨第 3 轮:页边与圆角对齐全站(原 13px / 14px) */
+.cg-inline-cfg > .cg-gcfg, .cg-inline-cfg > .cg-cfg { margin-left: var(--cy-page-x); margin-right: var(--cy-page-x); padding: var(--cy-space-4); border-radius: var(--cy-radius-lg); } /* 同上 */
+.cg-inline-cfg > .cg-outcome-contract, .cg-inline-cfg > .cg-try, .cg-inline-cfg > .cg-adv-add, .cg-inline-cfg > cy-dropdown { display: block; margin-left: var(--cy-page-x); margin-right: var(--cy-page-x); } /* 卡片之外的整行块(再加一段题目 / 试玩 / 可触发的结果)与卡片同页边,不贴屏幕边 */
+.cg-inline-cfg > .cg-outcome-contract { display: flex; }
+.cg-line { display: flex; align-items: center; min-height: 88rpx; margin-top: var(--cy-space-4); padding-top: var(--cy-space-1-5); } /* ds-ok 原型 .frow.line 44px */
+.cg-scan-reply { padding-top: var(--cy-space-1); }
+.cg-game-opts { margin-top: var(--cy-space-4); }
+.cg-addmod { margin: 44rpx var(--cy-page-x) 0; }                                       /* ds-ok 原型 .addmod margin-top 22px;左右与卡片同页边 */
+
+/* 底部两颗按钮直接浮在页面上(2026-10-23 主人:不要白底栏)。
+   栏本身只留一层页面底色的透明度渐隐,滚到下面的字不会和按钮叠在一起;
+   查看预览是黑色主键,不能点时是半透明黑而不是一行灰字;保存草稿是白色胶囊带投影。 */
+.cg-bottombar {
+  display: flex; gap: var(--cy-space-2);
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+  padding: var(--cy-space-3) var(--cy-space-4) calc(24rpx + env(safe-area-inset-bottom));
+  background: linear-gradient(to bottom, rgba(243, 244, 244, 0), var(--cy-color-bg-page) 58%); /* ds-ok 页面底色的透明度渐隐 */
+  backdrop-filter: none; border-top: 0; box-shadow: none;
+  padding-top: var(--cy-space-6);
+  --cy-bg-subtle: rgba(17, 18, 20, .28);              /* ds-ok 不能点的主键:半透明黑 */
+  --cy-text-placeholder: #FFFFFF;                     /* ds-ok 同上,字仍是白 */
+  --cy-comp-btn-secondary-bg: #FFFFFF;                /* ds-ok 保存草稿:白胶囊浮在灰页面上 */
+}
+.cg-bottombar > cy-btn { border-radius: var(--cy-comp-btn-radius); box-shadow: 0 12rpx 32rpx rgba(17, 18, 20, .12); } /* ds-ok 浮起来的投影 */
+
+/* P-60:编辑器玩家视角预览里的故事正文同玩家端,用手写体(加载失败回落系统字体) */
+.cy-story-hand { font-family: 'CyStoryHand', -apple-system, "PingFang SC", "Noto Sans SC", sans-serif; } /* ds-ok 字族名同 story-font.js STORY_FONT_FAMILY */
+.cy-story-note { font-family: 'CyStoryHand', -apple-system, "PingFang SC", "Noto Sans SC", sans-serif; } /* ds-ok 段首「[手写]」的信件 / 便条,同玩家端 */
+/* ===== 10-28 原型 A e-temp / e-after:分组列表 + 就地展开(检定段、添加加值半屏、消耗与效果半屏) =====
+   L1 的半屏基础样式(feature/cy27-l1-editor-d20)落地后并过去,这里不再单留一份。 */
+/* 检定段沿用 cg-gcfg > cg-adv-body 外壳(段形状契约),里面这一层盖住白卡,分组列表直接落在页面底色上 */
+.cg-ios-flat { margin: calc(-1 * var(--cy-space-4)); padding-bottom: var(--cy-space-1); background: var(--cy-color-bg-page); }
+.cg-ios-grp { background: var(--cy-color-bg-surface); border-radius: var(--cy-radius-lg); overflow: hidden; }
+.cg-ios-grp + .cg-ios-grp, .cg-ios-gap { margin-top: var(--cy-space-3); }
+.cg-ios-hd { display: flex; align-items: flex-end; justify-content: space-between; padding: 44rpx var(--cy-space-4) 14rpx; font-size: var(--cy-font-label); color: var(--cy-color-text-tertiary); } 
+.cg-ios-ft { padding: 14rpx var(--cy-space-4) 0; font-size: var(--cy-font-label); color: var(--cy-color-text-tertiary); } /* ds-ok 原型 .ios-ft 7px */
+.cg-ios-ft.is-err { color: var(--cy-color-status-danger); }
+.cg-ios-row { position: relative; display: flex; align-items: center; gap: 20rpx; min-height: 100rpx; padding: var(--cy-space-2) var(--cy-space-4); box-sizing: border-box; background: var(--cy-color-bg-surface); } /* ds-ok 原型 .ios-row 50px */
+.cg-ios-row + .cg-ios-row::before { content: ""; position: absolute; left: var(--cy-space-4); right: 0; top: 0; height: 1rpx; background: var(--cy-color-border-subtle); }
+.cg-ios-row.is-sub { padding-left: 56rpx; }
+.cg-ios-row.is-add .cg-ios-t { font-weight: 600; }
+.cg-ios-row.is-off { pointer-events: none; }
+.cg-ios-row.is-off .cg-ios-t { color: var(--cy-color-text-disabled); }
+.cg-ios-row.is-off .cg-ios-add { background: var(--cy-color-text-disabled); }
+.cg-ios-row.is-danger { justify-content: center; }
+.cg-ios-row.is-danger .cg-ios-t { color: var(--cy-color-status-danger); }
+.cg-ios-m { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.cg-ios-t { font-size: var(--cy-font-body); color: var(--cy-color-text-primary); }
+.cg-ios-t.is-l { flex: none; min-width: 128rpx; }
+.cg-ios-v { flex: none; max-width: 60%; font-size: var(--cy-font-body); color: var(--cy-color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cg-ios-in { flex: 1 1 auto; min-width: 0; text-align: right; font-size: var(--cy-font-body); color: var(--cy-color-text-primary); }
+.cg-ios-in.is-l { text-align: left; }
+.cg-ios-fold { flex: none; display: flex; color: var(--cy-color-text-tertiary); transition: transform var(--cy-motion-expand) var(--cy-ease-standard); }
+.cg-ios-fold.is-open { transform: rotate(90deg); }
+.cg-ios-chk { flex: none; display: flex; color: var(--cy-color-text-primary); visibility: hidden; }
+.cg-ios-chk.is-on { visibility: visible; }
+.cg-ios-add { flex: none; width: 44rpx; height: 44rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg); } /* ds-ok 原型 .ios-ic--add 22px,行本身是命中区 */
+.cg-ios-seg { flex: 1 1 auto; display: flex; padding: 4rpx; border-radius: var(--cy-radius-sm); background: var(--cy-color-bg-surface-subtle); }
+.cg-ios-seg > view { flex: 1; min-height: 64rpx; padding: 0 var(--cy-space-1); display: flex; align-items: center; justify-content: center; border-radius: var(--cy-radius-sm); font-size: var(--cy-font-label); color: var(--cy-color-text-primary); white-space: nowrap; }
+.cg-ios-seg > view.is-on { background: var(--cy-color-bg-surface); font-weight: 600; box-shadow: var(--cy-shadow-card); }
+.cg-ios-stp { margin-left: auto; display: flex; align-items: center; gap: var(--cy-space-2); font-size: var(--cy-font-body); color: var(--cy-color-text-primary); }
+.cg-ios-stp > view { min-width: 88rpx; min-height: 64rpx; padding: 0 var(--cy-space-2); box-sizing: border-box; display: flex; align-items: center; justify-content: center; border-radius: var(--cy-radius-sm); background: var(--cy-color-bg-surface-subtle); font-size: var(--cy-font-body); }
+.cg-ios-stp > view.is-dis { pointer-events: none; color: var(--cy-color-text-disabled); }
+.cg-ios-minus { width: 24rpx; height: 4rpx; border-radius: var(--cy-radius-pill); background: currentColor; }
+.cg-ios-pills { display: flex; flex-wrap: wrap; gap: var(--cy-space-2); padding: var(--cy-space-2) var(--cy-space-4) var(--cy-space-3); background: var(--cy-color-bg-surface); }
+.cg-ios-pill { min-height: 64rpx; padding: 0 var(--cy-space-3); display: flex; align-items: center; border-radius: var(--cy-radius-pill); background: var(--cy-color-bg-surface-subtle); font-size: var(--cy-font-label); color: var(--cy-color-text-primary); }
+.cg-ios-pill-in { flex: 1 1 240rpx; min-height: 64rpx; padding: 0 var(--cy-space-3); border-radius: var(--cy-radius-pill); background: var(--cy-color-bg-surface-subtle); font-size: var(--cy-font-label); }
+.cg-ios-sheet { background: var(--cy-color-bg-page); }
+.cg-ios-sheet .cg-edit-head { background: var(--cy-color-bg-page); }
+.cg-edit-head__done.is-ghost { background: transparent; }
+
+/* Questo 新玩法作者配置(questo-author.js):沿用 cg-cfg / cg-adv 行,只补格子与红字错误 */
+.cg-qz-line { display: flex; align-items: center; gap: var(--cy-space-2); }
+.cg-qz-line .cg-cfg-input { flex: 1; min-width: 0; }
+.cg-qz-err { margin-top: 8rpx; font-size: var(--cy-type-label); color: var(--cy-color-status-danger); }
+.cg-qz-cells { display: flex; flex-wrap: wrap; align-items: center; gap: 20rpx 28rpx; margin: var(--cy-space-2) 0 var(--cy-space-4); }
+/* r2 b2-ug-01:格子缩小;一个词里不换行,词与词之间才换行 */
+.cg-qz-word { display: flex; flex-wrap: nowrap; gap: 8rpx; }
+.cg-qz-cell { width: 56rpx; height: 72rpx; line-height: 72rpx; text-align: center; border-radius: 12rpx;   /* ds-ok 小格圆角按格宽收小 */
+  background: var(--cy-color-bg-surface-subtle); font-weight: 700; color: var(--cy-color-text-tertiary);
+  box-shadow: inset 0 -4rpx 0 var(--cy-color-border-strong); }
+.cg-qz-cell.is-given { background: var(--cy-color-text-primary); color: var(--cy-color-bg-surface); box-shadow: none; }
+.cg-qz-cell.is-sep { width: auto; background: transparent; box-shadow: none; color: var(--cy-color-text-secondary); }
+/* r2 b2-ug-02/03:选项图 / 人物头像与文案同一行 */
+.cg-qz-optrow { display: flex; align-items: center; gap: var(--cy-space-3); }
+.cg-qz-optrow .cg-cfg-input { flex: 1; min-width: 0; }
+.cg-qz-thumb { position: relative; flex: none; width: 112rpx; height: 112rpx; border-radius: var(--cy-radius-md); overflow: hidden;
+  background: var(--cy-color-bg-surface-subtle); }
+.cg-qz-thumb--add { display: flex; align-items: center; justify-content: center; color: var(--cy-color-text-secondary); }
+.cg-qz-thumb__img { width: 100%; height: 100%; }
+.cg-qz-thumb__x { position: absolute; top: 0; right: 0; width: 48rpx; height: 48rpx; display: flex; align-items: center; justify-content: center;
+  border-bottom-left-radius: var(--cy-radius-md); background: rgba(0, 0, 0, .45); color: #fff; }   /* ds-ok 图上删除角标,压暗底保证可见 */
+/* 命中区 44px:透明 ::after 从右上角向内撑到 88rpx 见方,角标视觉尺寸不变 */
+.cg-qz-thumb__x::after { content: ''; position: absolute; top: 0; right: 0; width: 88rpx; height: 88rpx; }
+.cg-qz-person { padding: var(--cy-space-4) 0; border-top: 1rpx solid var(--cy-color-border-strong); display: flex; flex-direction: column; gap: var(--cy-space-2); }
+.cg-qz-person__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8rpx; }
+.cg-qz-person__name { font-size: var(--cy-type-body); font-weight: 700; color: var(--cy-color-text-primary); }
+.cg-qz-tm { display: flex; flex-direction: column; gap: 8rpx; }
+
+/* l-misc:选择玩法回到列表(分类标签横滑,玩法竖排);弹层高度固定在半屏档,列表在里面滚 */
+.cg-glist { flex: 1; min-height: 0; max-height: 46vh; }
+.cg-glist__in { padding: var(--cy-space-2) var(--cy-space-1) 0; }
+.cg-grow { min-height: 112rpx; gap: var(--cy-space-3); border-bottom: 1rpx solid var(--cy-color-border-subtle); }
+.cg-grow.is-off { opacity: .45; }
+.cg-grow__sub { display: block; margin-top: 4rpx; font-size: var(--cy-font-caption); color: var(--cy-color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cg-grow__ck { flex: none; width: 44rpx; height: 44rpx; border-radius: 50%; box-sizing: border-box; border: 3rpx solid var(--cy-color-border-strong); display: flex; align-items: center; justify-content: center; }
+.cg-grow.is-on .cg-grow__ck { border-color: var(--cy-color-action-primary-bg); background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg); }
+
+/* 细节打磨二期 L1/L5/L7 */
+.cg-hero-cover,
+.cg-hero-cover--picked,
+.cg-cover-del,
+.cg-cover-unusable,
+.cg-pick,
+.cg-chip-x,
+.cg-chip-add,
+.cg-step-add,
+.cg-r5-row,
+.cg-sec__act,
+.cg-r5-pill,
+.cg-adv-del,
+.cg-adv-add,
+.cg-choice-li,
+.cg-adv-correct,
+.cg-ho-mark,
+.cg-seg-del,
+.cg-qz-thumb__x,
+.cg-qz-thumb,
+.cg-qz-thumb--add,
+.cg-qmedia-x,
+.cg-qz-cell,
+.cg-ios-row,
+.cg-try,
+.cg-choice-radio,
+.cg-opt-thumb-hit,
+.cg-opt-chip,
+.cg-opt-chip--clear,
+.cg-cfg-add,
+.cg-medal-up,
+.cg-medal-clear,
+.cg-mod-del,
+.cg-beat-add,
+.cg-pv-choice,
+.cg-pv-usehint,
+.cg-pv-navbtn,
+.cg-edit-head__exit,
+.cg-edit-head__done,
+.cg-gsheet-navi,
+.cg-grow,
+.cg-tag-pill,
+.cg-audio-play,
+.cg-audio-del,
+.cg-audio-empty,
+.cg-model-x,
+.cg-model,
+.cg-ios-pill,
+.cg-sheet-close,
+.cg-picker-li {
+  transition: var(--cy-tr-press);
+}
+.cg-count { font-variant-numeric: tabular-nums; }
+
+/* 2026-11-19 主人定稿:「高级设置」一个折叠组(标题行可点,右侧箭头展开时朝下) */
+.cg-sec--fold { min-height: var(--cy-btn-h); }
+.cg-fold-caret { color: var(--cy-color-text-secondary); transition: transform var(--cy-motion-fast) var(--cy-ease-out); }
+.cg-fold-caret.is-open { transform: rotate(90deg); }
+.cg--reduced-motion .cg-fold-caret { transition: none; }
+
+/* 选项的信任(cast-game-trust-1119):与剧情分支选项同一组 ±stepper,0 收起成名字药丸 */
+.cg-trust { display: flex; align-items: center; flex-wrap: wrap; gap: var(--cy-space-1-5); margin-top: var(--cy-space-2); }
+.cg-trust__k { color: var(--cy-color-text-tertiary); font-size: var(--cy-font-caption); }
+.cg-trust__on { display: inline-flex; align-items: center; gap: var(--cy-space-1); }
+.cg-trust__n { color: var(--cy-color-text-primary); font-size: var(--cy-font-caption); }

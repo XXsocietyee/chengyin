@@ -1,0 +1,34 @@
+<view class="oi-page {{isMerchantViewer ? 'theme-merchant' : 'theme-dark'}}">
+  <cy-toast id="cy-toast" />
+  <cy-access-gate kind="login" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+  <cy-nav-bar />
+  <cy-page-title title="官方活动邀约" flush="{{true}}" />
+
+  <cy-skeleton wx:if="{{loading}}" type="list" count="3" />
+  <cy-error load-failure class="cy-fade-in" wx:elif="{{error}}" fill size="lg" title="邀约加载失败" sub="{{error}}" bind:retry="fetch" auto-back />
+  <cy-empty wx:elif="{{!invites.length}}" fill size="lg" kind="empty" title="暂无待处理的活动职责" class="cy-fade-in" />
+  <view wx:else class="oi-list cy-fade-in">
+    <view wx:if="{{refreshing}}" class="oi-refreshing" aria-role="status" aria-live="polite">正在同步最新邀约…</view>
+    <view wx:for="{{invites}}" wx:key="partyId" class="oi-card">
+      <view class="oi-head"><view><text class="oi-event">{{item._display.eventTitle}}</text><text class="oi-meta">{{item._display.cityRole}}</text></view><text class="oi-status {{item.status}}">{{item._status}}</text></view>
+      <text wx:if="{{item._roleNote}}" class="oi-role-note">{{item._role}}：{{item._roleNote}}</text>
+      <view class="oi-scope"><text>{{item._display.scope}}</text><text>{{item._window}}</text><text wx:if="{{item._capacity}}">{{item._capacity}}</text></view>
+      <text wx:if="{{item._paused}}" class="oi-paused" aria-role="status">{{item._paused}}</text>
+      <text wx:if="{{item.responsibilitySummary}}" class="oi-summary">{{item.responsibilitySummary}}</text>
+      <block wx:if="{{actionError && actionErrorPartyKey === item._partyKey}}">
+        <cy-inline-error class="oi-action-error" kind="{{actionErrorKind}}" title="这次操作没有完成" sub="{{actionError}}" action="重试" bind:action="retryAction" />
+      </block>
+      <view wx:if="{{item.status==='INVITED'}}" class="oi-actions">
+        <view class="oi-btn decline {{actionBusyPartyKey || refreshing ? 'is-busy' : ''}}" catchtap="act" data-id="{{item.partyId}}" data-action="decline" aria-role="button" aria-label="拒绝本场邀约" aria-disabled="{{actionBusyPartyKey || refreshing ? true : false}}" hover-class="{{actionBusyPartyKey || refreshing ? 'none' : 'cy-pressed'}}" hover-stay-time="80">{{actionBusyPartyKey === item._partyKey && actionBusyAction === 'decline' ? '正在拒绝…' : '拒绝'}}</view>
+        <view class="oi-btn accept {{actionBusyPartyKey || refreshing ? 'is-busy' : ''}}" catchtap="act" data-id="{{item.partyId}}" data-action="accept" aria-role="button" aria-label="接受本场职责" aria-disabled="{{actionBusyPartyKey || refreshing ? true : false}}" hover-class="{{actionBusyPartyKey || refreshing ? 'none' : 'cy-pressed'}}" hover-stay-time="80">{{actionBusyPartyKey === item._partyKey && actionBusyAction === 'accept' ? '正在接受…' : '接受职责'}}</view>
+      </view>
+      <view wx:elif="{{item.status==='ACCEPTED'||item.status==='ACTIVE'}}" class="oi-actions">
+        <view wx:if="{{item.partyType==='OFFICIAL'&&item.role==='ORGANIZER'}}" class="oi-summary">要换主办，先邀请对方接受，再由你转交</view>
+        <view wx:else class="oi-btn secondary {{actionBusyPartyKey || refreshing ? 'is-busy' : ''}}" catchtap="act" data-id="{{item.partyId}}" data-action="withdraw" aria-role="button" aria-label="退出本场职责" aria-disabled="{{actionBusyPartyKey || refreshing ? true : false}}" hover-class="{{actionBusyPartyKey || refreshing ? 'none' : 'cy-pressed'}}" hover-stay-time="80">{{actionBusyPartyKey === item._partyKey && actionBusyAction === 'withdraw' ? '正在退出…' : '退出本场职责'}}</view>
+      </view>
+      <text wx:if="{{actionBusyPartyKey === item._partyKey}}" class="oi-action-status" aria-role="status" aria-live="polite">正在提交，请稍候</text>
+    </view>
+  </view>
+</view>

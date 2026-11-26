@@ -1,0 +1,893 @@
+const toast = require('../../../utils/toast.js'); const pageMotion = require('../../../utils/page-motion.js');
+const app = getApp();
+const { memberIdOf, isAccessDenied } = require('../utils/merchant-scope.js');
+const currentMemberId = () => memberIdOf(app);
+// 整页加载失败带后端原话;没有原话时才用兜底句。
+function loadErrorText(res) {
+  if (app.getRequestErrorMessage) return app.getRequestErrorMessage(res, '请稍后重试');
+  return (res && res.msg) || '请稍后重试';
+}
+const merchantTheme = require('../../../utils/merchant-theme.js');
+const subscribe = require('../../../utils/subscribe.js');
+const { normalizeMerchantFinanceRoute, isFinancePagePayload, isFinanceObjectPayload, isMerchantEventsPayload, money, yuan } = require('../utils/merchant-finance.js');
+const { normalizeMerchantAccess } = require('../../../utils/merchant-access-policy.js');
+// UI-06(2026-09-18 用户走查):退款售后不再单独一张卡,并进核销记录的 全部/待处理/已处理 三个 tab。
+// 复用售后列表页的同一份行解析,不在台账里再写一套字段兜底。
+const { shapeAftercareListPage } = require('../aftercare/detail/view-model.js');
+
+const PAGE_SIZE = 20;
+// 售后三个 bucket 都要拉:待处理 = 待回应 + 处理中,已处理 = 已完成。
+const REFUND_BUCKETS = ['PENDING', 'PROCESSING', 'COMPLETED'];
+const LEDGER_FRESH_MS = 60 * 1000;
+
+// 请求通道的 fail 是 (body, status):把 status 带进去,否则 HTTP 403 + 业务体会被当成可重试的加载失败
+function withStatus(error, status) {
+  if (!status) return error || null;
+  return Object.assign({}, error && typeof error === 'object' ? error : {}, { statusCode: status });
+}
+
+Page({
+  data: {
+    statusBarHeight: 20,
+    navBarHeight: 44,
+    view: 'redemptions',
+    loadingMore: false,
+    source: '',
+    isProjectMessages: false,
+    projectEvents: [],
+    // CU-M-184:UI-06 把退款并进这本列表后,标题只写「核销记录」会让人以为 3 笔含退款。
+    pageTitle: '核销与退款',
+    routeError: false,
+    loading: true,
+    error: false,
+    errorText: '',
+    hasLoaded: false,
+    accessDenied: false,
+    merchantAccess: { canReadAftercare: false },
+    // L07-036:平铺行只在实例上(this._redemptions),页面只渲染按天分组的 redemptionGroups,不再同一批行下发两遍
+    redemptionGroups: [],
+    summary: null,
+    redemptionFilter: 'all',
+    redemptionTabs: [
+      { key: 'all', label: '全部' },
+      { key: 'pending', label: '待处理' },
+      { key: 'handled', label: '已处理' },
+      { key: 'no_cash', label: '不结现金' }
+    ],
+    overview: null,
+    entries: [],
+    batches: [],
+    settlementErrors: { overview: '', entries: '', batches: '' },
+    settlementLoading: { overview: false, entries: false, batches: false },
+    settleAlertsEnabled: false,
+    settleAlertsLoading: false,
+    settleAlertsState: 'unknown',
+    settleAlertsHint: '—',
+  },
+
+  onLoad(options) {
+    this._unloaded = false;
+    this._skipNextShowReload = true;
+    this._scopeMemberId = currentMemberId();
+    const sys = wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync();
+    this.setData({ statusBarHeight: sys.statusBarHeight || 20, navBarHeight: app.globalData.navBarHeight || 44 });
+    const route = normalizeMerchantFinanceRoute(options);
+    if (!route) {
+      this.setData({ routeError: true, loading: false, error: false, pageTitle: '结算' });
+      return;
+    }
+    this._projectEventScope = route.ownerType ? { ownerType: route.ownerType, ownerId: route.ownerId } : null;
+    this._topicId = route.topicId || 0;
+    this.setData({ view: route.view, source: route.source, isProjectMessages: Boolean(this._projectEventScope),
+      pageTitle: this._projectEventScope ? '本项目近期动态' : (route.topicId ? '台账' : route.view === 'redemptions' ? '核销与退款' : (route.view === 'settlement' ? '结算' : '消息与动态')) });
+    this.revalidateCurrentView();
+  },
+
+  onShow() {
+    merchantTheme.merchantPageShow();
+    const memberId = currentMemberId();
+    if (this._scopeMemberId === undefined) {
+      this._scopeMemberId = memberId;
+      if (this.data.view === 'settlement') this.syncCoopSettleAlertSetting();
+      return;
+    }
+    if (memberId !== this._scopeMemberId) {
+      this._skipNextShowReload = false;
+      this._resetMemberScope(memberId);
+      if (this.data.view === 'settlement') this.syncCoopSettleAlertSetting();
+      if (!this.data.routeError) this.revalidateCurrentView();
+      return;
+    }
+    if (this.data.view === 'settlement') this.syncCoopSettleAlertSetting();
+    if (this._skipNextShowReload) {
+      this._skipNextShowReload = false;
+      return;
+    }
+    if (this.data.routeError) return;
+    // L07-033:同账号 60s 内从只读详情返回:仍向服务端重验商家资格,但保留已翻的页与滚动位置,不重拉列表
+    if (this.data.hasLoaded && Date.now() - (this._viewLoadedAt || 0) < LEDGER_FRESH_MS) {
+      this._identityEpoch = (this._identityEpoch || 0) + 1;
+      const accessKey = JSON.stringify(this.data.merchantAccess || {});
+      this._verifyMerchantAccess(() => {
+        // 重验到的资格与已上屏数据所依据的不同(如售后/资金读权被收回):按新资格整页重读
+        if (this.data.hasLoaded && JSON.stringify(this.data.merchantAccess || {}) === accessKey) this.setData({ loading: false });
+        else this.loadCurrentView();
+      });
+      return;
+    }
+    this.revalidateCurrentView();
+  },
+  onHide() { merchantTheme.merchantPageRestore(); },
+
+  // 非商家成员看账本:原地无权限态的唯一动作(UI 走查 1119 U3 同款)
+  onDenyCta() { require('../../../utils/merchant-no-permission.js').followDenyCta(this, false, '/pages/merchant/index/index'); },
+  // MC-019:核销记录 / 收入明细 / 对公结算按 pageNum 递增触底加载,不再只看第 1 页。
+  onReachBottom() {
+    if (this.data.loading || this._loadingMore) return;
+    if (this.data.view === 'redemptions' && !this.data.isProjectMessages) { this._loadMore('redemptions'); return; }
+    if (this.data.view === 'settlement') {
+      if (this._hasMorePage('entries')) this._loadMore('entries');
+      else this._loadMore('batches');
+    }
+  },
+  onUnload() {
+    this._unloaded = true;
+    merchantTheme.merchantPageRestore();
+    this._invalidateScopedRequests();
+  },
+  _invalidateScopedRequests() {
+    this._settleAlertsEpoch = (this._settleAlertsEpoch || 0) + 1;
+    this._settleAlertsOperation = null;
+    this._identityEpoch = (this._identityEpoch || 0) + 1;
+    this._projectEventEpoch = (this._projectEventEpoch || 0) + 1;
+    this._redemptionEpoch = (this._redemptionEpoch || 0) + 1;
+    const epochs = this._settlementSectionEpoch || {};
+    ['overview', 'entries', 'batches'].forEach((section) => { epochs[section] = (epochs[section] || 0) + 1; });
+    this._settlementSectionEpoch = epochs;
+  },
+  onNavBack() { if (getCurrentPages().length > 1) wx.navigateBack(); else wx.reLaunch({ url: '/pages/merchant/index/index' }); },
+  retry() { this.revalidateCurrentView(); },
+
+  _resetMemberScope(memberId) {
+    this._scopeMemberId = memberId;
+    this._invalidateScopedRequests();
+    this._clearScopedData(true, false);
+  },
+
+  _clearScopedData(loading, error) {
+    this._redemptionRows = [];
+    this._refundRows = [];
+    this._pageState = {};
+    this._loadingMore = false;
+    this._redemptions = [];
+    this.setData({
+      loading,
+      error,
+      hasLoaded: false,
+      accessDenied: false,
+      projectEvents: [],
+      redemptionGroups: [],
+      summary: null,
+      overview: null,
+      entries: [],
+      batches: [],
+      settlementErrors: { overview: '', entries: '', batches: '' },
+      settlementLoading: { overview: false, entries: false, batches: false },
+      settleAlertsEnabled: false,
+      settleAlertsLoading: false,
+      settleAlertsState: 'unknown',
+      settleAlertsHint: '—',
+    });
+  },
+
+  _denyMerchantAccess() {
+    this._invalidateScopedRequests();
+    this._clearScopedData(false, true);
+    this.setData({ accessDenied: true });
+  },
+
+  _isCurrentMemberScope(memberId) {
+    return !this._unloaded
+      && memberId === this._scopeMemberId
+      && memberId === currentMemberId();
+  },
+
+  request(url, data, done) {
+    app.sendRequest({
+      hideLoading: true, url, method: 'POST', data: JSON.stringify(data || {}), header: { 'Content-Type': 'application/json' },
+      success: done,
+      fail: (error, status) => done(withStatus(error, status)),
+    });
+  },
+
+  _verifyMerchantAccess(onAllowed) {
+    const memberId = this._scopeMemberId === undefined
+      ? currentMemberId()
+      : this._scopeMemberId;
+    this._scopeMemberId = memberId;
+    // 同页不同区块允许并行重试；generation 只在换主体、拒权或卸载时递增。
+    this._identityEpoch = this._identityEpoch || 0;
+    const identityEpoch = this._identityEpoch;
+    const isCurrent = () => identityEpoch === this._identityEpoch
+      && this._isCurrentMemberScope(memberId);
+    this.setData({ loading: true, error: false, errorText: '', accessDenied: false });
+    app.sendRequest({
+      hideLoading: true,
+      silentError: true,
+      url: '/api/merchant/access/me',
+      method: 'POST',
+      success: (res) => {
+        if (!isCurrent()) return;
+        const validAccess = res && (res.code === '200' || res.code === 200) && res.data
+          && typeof res.data === 'object' && !Array.isArray(res.data) && typeof res.data.active === 'boolean';
+        if (!validAccess) {
+          this._invalidateScopedRequests();
+          this._clearScopedData(false, true);
+          return;
+        }
+        const access = (res && (res.code === '200' || res.code === 200))
+          ? normalizeMerchantAccess(res.data) : { active: false };
+        const allowed = access.active && (this.data.view === 'settlement'
+          ? access.canReadFinance
+          : (this.data.view === 'redemptions' ? access.canReadVerifyRecords : access.canReadBasic));
+        if (!allowed) {
+          this._denyMerchantAccess();
+          return;
+        }
+        const previousAccess = this.data.merchantAccess || {};
+        if (this.data.isProjectMessages
+            && (Boolean(previousAccess.canReadFinance) !== access.canReadFinance
+              || Boolean(previousAccess.canReadVerifyRecords) !== access.canReadVerifyRecords)) {
+          this.setData({ projectEvents: [], hasLoaded: false });
+        }
+        if (this.data.view === 'redemptions' && !access.canReadFinance) {
+          this._redemptions = [];
+          this.setData({
+            merchantAccess: access,
+            redemptionFilter: 'all',
+            redemptionGroups: [],
+            summary: null,
+            hasLoaded: false,
+          });
+        } else {
+          this.setData({ merchantAccess: access });
+        }
+        onAllowed();
+      },
+      fail: (failure, status) => {
+        if (!isCurrent()) return;
+        const error = withStatus(failure, status);
+        if (isAccessDenied(error)) this._denyMerchantAccess();
+        else this.setData({ loading: false, error: true, errorText: loadErrorText(error) });
+      },
+    });
+  },
+
+  revalidateCurrentView() {
+    // 整页重验（含筛选切换）每次推进代次：旧身份探针即使迟到拒绝，也不能清掉
+    // 新筛选已经确认的资金态。三个 settlement 局部重试仍直接走 _verifyMerchantAccess，
+    // 不推进这里的代次，因此不同区块可以并行完成。
+    this._identityEpoch = (this._identityEpoch || 0) + 1;
+    this._verifyMerchantAccess(() => this.loadCurrentView());
+  },
+
+  loadCurrentView() {
+    this._viewLoadedAt = Date.now();
+    if (this.data.view === 'messages') {
+      if (this.data.isProjectMessages) return this.loadProjectEvents();
+      this.setData({ loading: false, error: false }); return;
+    }
+    if (this.data.view === 'settlement') return this.loadSettlement();
+    this.loadRedemptions();
+  },
+
+  loadProjectEvents() {
+    const scope = this._projectEventScope;
+    if (!scope) { this._denyMerchantAccess(); return; }
+    const memberId = this._scopeMemberId;
+    const identityEpoch = this._identityEpoch;
+    const epoch = (this._projectEventEpoch || 0) + 1;
+    this._projectEventEpoch = epoch;
+    this.setData({ loading: true, error: false, errorText: '' });
+    this.request('/api/merchant/events', {}, (res) => {
+      if (!this._isCurrentMemberScope(memberId) || identityEpoch !== this._identityEpoch
+          || epoch !== this._projectEventEpoch || scope !== this._projectEventScope) return;
+      if (isAccessDenied(res)) { this._denyMerchantAccess(); return; }
+      if (!isMerchantEventsPayload(res)) {
+        this.setData({ loading: false, error: true, errorText: loadErrorText(res) }); return;
+      }
+      // 与工作台铃铛相同的二元键；接口只返回全店最近最多10条，不能当项目全历史。
+      const projectEvents = res.data.filter(row => String(row.ownerType) === String(scope.ownerType)
+        && String(row.ownerId) === String(scope.ownerId));
+      this.setData({ projectEvents, loading: false, error: false, hasLoaded: true });
+    });
+  },
+
+  loadRedemptions() {
+    const scopeMemberId = this._scopeMemberId === undefined
+      ? currentMemberId()
+      : this._scopeMemberId;
+    this._scopeMemberId = scopeMemberId;
+    const epoch = (this._redemptionEpoch || 0) + 1;
+    this._redemptionEpoch = epoch;
+    const canReadFinance = Boolean(this.data.merchantAccess.canReadFinance);
+    const filter = canReadFinance ? this.data.redemptionFilter : 'all';
+    // L07-032:退款行与核销筛选无关 ⇒ 切筛选时沿用本次进页已读到的退款行,不再重拉 3 个售后 bucket
+    const cache = this._refundCache;
+    const reuseRefunds = this._reuseRefundsOnce === true && !!cache
+      && cache.member === scopeMemberId && cache.canReadFinance === canReadFinance;
+    this._reuseRefundsOnce = false;
+    this._redemptionRows = [];
+    this._refundRows = [];
+    this.setData({ loading: true, error: false, errorText: '' });
+    const query = this._topicId ? { pageNum: 1, pageSize: PAGE_SIZE, filter, topicId: this._topicId } : { pageNum: 1, pageSize: PAGE_SIZE, filter };
+    this.request('/api/merchant/finance/redemptions', query, (res) => {
+      if (!this._isCurrentMemberScope(scopeMemberId)
+        || epoch !== this._redemptionEpoch
+        || filter !== (this.data.merchantAccess.canReadFinance ? this.data.redemptionFilter : 'all')) return;
+      if (isAccessDenied(res)) { this._denyMerchantAccess(); return; }
+      if (!isFinancePagePayload(res)) { this.setData({ loading: false, error: true, errorText: loadErrorText(res) }); return; }
+      this._redemptionRows = res.data.rows.map((row) => this.redemptionRow(row, canReadFinance));
+      if (reuseRefunds) this._refundRows = cache.rows;
+      this._setPageState('redemptions', 1, res.data);
+      // 汇总条只认服务端聚合:前端拿到的 rows 只是当前页,自己求和分页后必错且错得静默。
+      this._applyRedemptionView({
+        summary: summaryView(res.data.summary, canReadFinance),
+        loading: false, error: false, hasLoaded: true,
+      });
+      // 售后退款列表是全店的、不带主题,主题台账不掺进来
+      if (this.data.merchantAccess.canReadAftercare && !this._topicId && !reuseRefunds && filter !== 'no_cash') {
+        this._loadRefundRows(scopeMemberId, epoch, canReadFinance);
+      }
+    });
+  },
+
+  // 售后退款行并进同一份列表(UI-06):待处理 = PENDING + PROCESSING,已处理 = COMPLETED。
+  // 三个 bucket 并发拉,全到齐才重排一次,避免逐 bucket 追加造成顺序闪跳。
+  _loadRefundRows(scopeMemberId, epoch, canReadFinance) {
+    let pending = REFUND_BUCKETS.length;
+    let failed = false;
+    const items = [];
+    const finish = () => {
+      pending -= 1;
+      if (pending > 0) return;
+      if (!this._isCurrentMemberScope(scopeMemberId) || epoch !== this._redemptionEpoch) return;
+      this._refundRows = items.map((item) => this.refundRow(item, canReadFinance));
+      this._refundCache = failed ? null : { member: scopeMemberId, canReadFinance, rows: this._refundRows };
+      this._applyRedemptionView(failed ? { error: true } : {});
+    };
+    REFUND_BUCKETS.forEach((bucket) => {
+      this.request(`/api/merchant/aftercare/list?bucket=${bucket}&pageNum=1&pageSize=${PAGE_SIZE}`, {}, (res) => {
+        if (isAccessDenied(res)) { failed = true; finish(); return; }
+        const shaped = res && (res.code === 200 || res.code === '200')
+          ? shapeAftercareListPage(res.data, bucket) : null;
+        if (!shaped) { failed = true; finish(); return; }
+        // PG-031:人工退款工单(MANUAL_CASE)同样并入台账,点进售后详情的工单视图
+        items.push.apply(items, shaped.items.filter(item => (item.recordType === 'REFUND'
+          && Number.isSafeInteger(item.refundId) && item.refundId > 0)
+          || (item.recordType === 'MANUAL_CASE' && Number.isSafeInteger(item.manualCaseId) && item.manualCaseId > 0)));
+        finish();
+      });
+    });
+  },
+
+  // 把核销 base 行与退款行合成最终视图;退款只在 全部/待处理/已处理 出现,不结现金 tab 不掺退款。
+  // setData 逐字段静态写，便于门禁核对消费关系。
+  _applyRedemptionView(patch) {
+    const source = patch || {};
+    const filter = this.data.merchantAccess.canReadFinance ? this.data.redemptionFilter : 'all';
+    const refunds = filter === 'no_cash' ? [] : (this._refundRows || []).filter((row) => {
+      if (filter === 'pending') return row.refundBucket !== 'COMPLETED';
+      if (filter === 'handled') return row.refundBucket === 'COMPLETED';
+      return true;
+    });
+    const rows = (this._redemptionRows || []).concat(refunds);
+    // L07-035:核销键可能带 'T'、退款键是空格 ⇒ 统一成空格后按字符串比较(不用 localeCompare)
+    const sortKey = (row) => String(row.sortKey || '').replace('T', ' ');
+    rows.sort((a, b) => { const x = sortKey(a), y = sortKey(b); return x < y ? 1 : x > y ? -1 : 0; });
+    const has = (key) => Object.prototype.hasOwnProperty.call(source, key);
+    this._redemptions = rows;
+    this.setData({
+      redemptionGroups: groupByDay(rows),
+      summary: has('summary') ? source.summary : this.data.summary,
+      loading: has('loading') ? source.loading : this.data.loading,
+      error: has('error') ? source.error : this.data.error,
+      hasLoaded: has('hasLoaded') ? source.hasLoaded : this.data.hasLoaded,
+    });
+  },
+
+  loadSettlement() {
+    this._loadSettlementSections(['overview', 'entries', 'batches']);
+  },
+
+  retrySettlementOverview() { this._verifyMerchantAccess(() => this._loadSettlementSections(['overview'])); },
+  retrySettlementEntries() { this._verifyMerchantAccess(() => this._loadSettlementSections(['entries'])); },
+  retrySettlementBatches() { this._verifyMerchantAccess(() => this._loadSettlementSections(['batches'])); },
+
+  _loadSettlementSections(sections) {
+    const scopeMemberId = this._scopeMemberId === undefined
+      ? currentMemberId()
+      : this._scopeMemberId;
+    this._scopeMemberId = scopeMemberId;
+    const sectionEpochs = this._settlementSectionEpoch || {};
+    const requestEpochs = {};
+    sections.forEach((section) => {
+      requestEpochs[section] = (sectionEpochs[section] || 0) + 1;
+      sectionEpochs[section] = requestEpochs[section];
+    });
+    this._settlementSectionEpoch = sectionEpochs;
+    const loadingState = Object.assign({}, this.data.settlementLoading);
+    const errorState = Object.assign({}, this.data.settlementErrors);
+    sections.forEach((section) => {
+      loadingState[section] = true;
+      errorState[section] = '';
+    });
+    this.setData({ loading: true, error: false, settlementLoading: loadingState, settlementErrors: errorState });
+
+    const errorCopy = {
+      overview: '结算概览暂未取回',
+      entries: '收入明细暂未取回',
+      batches: '对公结算暂未取回',
+    };
+    let pending = sections.length;
+    let anySuccess = false;
+
+    const finishOne = (patch) => {
+      pending -= 1;
+      const nextLoading = patch.settlementLoading || this.data.settlementLoading;
+      const nextErrors = patch.settlementErrors || this.data.settlementErrors;
+      let loading = this.data.loading;
+      let error = this.data.error;
+      let hasLoaded = this.data.hasLoaded;
+      hasLoaded = this.data.hasLoaded || anySuccess;
+      if (pending === 0) {
+        loading = Object.keys(nextLoading).some((key) => Boolean(nextLoading[key]));
+        error = Object.keys(nextErrors).some((key) => Boolean(nextErrors[key]));
+      }
+      this.setData({
+        settlementLoading: nextLoading,
+        settlementErrors: nextErrors,
+        loading,
+        error,
+        hasLoaded,
+        overview: Object.prototype.hasOwnProperty.call(patch, 'overview') ? patch.overview : this.data.overview,
+        entries: Object.prototype.hasOwnProperty.call(patch, 'entries') ? patch.entries : this.data.entries,
+        batches: Object.prototype.hasOwnProperty.call(patch, 'batches') ? patch.batches : this.data.batches,
+      });
+    };
+
+    sections.forEach((section) => {
+      const acceptResponse = (res) => {
+        if (!this._isCurrentMemberScope(scopeMemberId)) return;
+        if (isAccessDenied(res)) { this._denyMerchantAccess(); return; }
+        if (requestEpochs[section] !== (this._settlementSectionEpoch || {})[section]) {
+          finishOne({});
+          return;
+        }
+        const valid = section === 'overview' ? isFinanceObjectPayload(res) : isFinancePagePayload(res);
+        const nextErrors = Object.assign({}, this.data.settlementErrors, {
+          [section]: valid ? '' : errorCopy[section],
+        });
+        const nextLoading = Object.assign({}, this.data.settlementLoading, { [section]: false });
+        const patch = { settlementErrors: nextErrors, settlementLoading: nextLoading };
+
+        if (valid) {
+          anySuccess = true;
+          if (section === 'overview') {
+            patch.overview = this.overviewRow(res.data); if (!this._lgCounted) { this._lgCounted = true; pageMotion.countMoney(this, 'lgK'); } // 2026-11-02 X-1:本月主数字第一次到达时慢-快-慢落地
+          } else if (section === 'entries') {
+            patch.entries = res.data.rows.map(this.entryRow);
+            this._setPageState('entries', 1, res.data);
+          } else {
+            patch.batches = res.data.rows.map(this.batchRow);
+            this._setPageState('batches', 1, res.data);
+          }
+        }
+
+        finishOne(patch);
+      };
+      if (section === 'overview') {
+        this.request('/api/merchant/finance/overview', {}, acceptResponse);
+      } else if (section === 'entries') {
+        this.request('/api/merchant/finance/settlement-entries', {
+          pageNum: 1, pageSize: PAGE_SIZE, source: this.data.source || 'all',
+        }, acceptResponse);
+      } else if (section === 'batches') {
+        this.request('/api/merchant/finance/public-transfer-batches', {
+          pageNum: 1, pageSize: PAGE_SIZE,
+        }, acceptResponse);
+      }
+    });
+  },
+
+  _setPageState(key, pageNum, data) {
+    const state = this._pageState || (this._pageState = {});
+    const prev = pageNum > 1 && state[key] ? state[key].count : 0;
+    state[key] = { pageNum, total: Number(data.total) || 0, count: prev + data.rows.length, lastSize: data.rows.length };
+  },
+
+  _hasMorePage(key) {
+    const state = (this._pageState || {})[key];
+    return !!state && state.lastSize >= PAGE_SIZE && state.count < state.total;
+  },
+
+  _loadMore(key) {
+    if (!this._hasMorePage(key)) return;
+    const scopeMemberId = this._scopeMemberId;
+    const pageNum = this._pageState[key].pageNum + 1;
+    const canReadFinance = Boolean(this.data.merchantAccess.canReadFinance);
+    const query = { pageNum, pageSize: PAGE_SIZE };
+    const epoch = key === 'redemptions' ? this._redemptionEpoch : (this._settlementSectionEpoch || {})[key];
+    const done = (res) => {
+      this._loadingMore = false;
+      if (!this._isCurrentMemberScope(scopeMemberId)) return;
+      const current = key === 'redemptions' ? this._redemptionEpoch : (this._settlementSectionEpoch || {})[key];
+      if (epoch !== current) { this.setData({ loadingMore: false }); return; }
+      if (isAccessDenied(res)) { this._denyMerchantAccess(); return; }
+      if (!isFinancePagePayload(res)) {
+        this.setData({ loadingMore: false });
+        toast.error('加载失败，请重试');
+        return;
+      }
+      this._setPageState(key, pageNum, res.data);
+      if (key === 'redemptions') {
+        this._redemptionRows = (this._redemptionRows || []).concat(res.data.rows.map((row) => this.redemptionRow(row, canReadFinance)));
+        this._applyRedemptionView({});
+        this.setData({ loadingMore: false });
+      } else if (key === 'entries') {
+        this.setData({ loadingMore: false, entries: this.data.entries.concat(res.data.rows.map(this.entryRow)) });
+      } else {
+        this.setData({ loadingMore: false, batches: this.data.batches.concat(res.data.rows.map(this.batchRow)) });
+      }
+    };
+    this._loadingMore = true;
+    this.setData({ loadingMore: true });
+    if (key === 'redemptions') {
+      const filter = canReadFinance ? this.data.redemptionFilter : 'all';
+      this.request('/api/merchant/finance/redemptions', Object.assign(query, { filter }, this._topicId ? { topicId: this._topicId } : {}), done);
+    } else if (key === 'entries') {
+      this.request('/api/merchant/finance/settlement-entries', Object.assign(query, { source: this.data.source || 'all' }), done);
+    } else {
+      this.request('/api/merchant/finance/public-transfer-batches', query, done);
+    }
+  },
+
+  overviewRow(row) {
+    const rawNet = row.personalArrivedThisMonthNet;
+    const net = rawNet === null || rawNet === undefined || rawNet === '' ? null : Number(rawNet);
+    const netLabel = net === null || !Number.isFinite(net) ? '状态待定' : (net < 0 ? '净调整' : '净入账');
+    return Object.assign({}, row, {
+      netLabel,
+      hasAdjustmentPending: Number(row.adjustmentPending) > 0,
+      hasPersonalAdjustment: Number(row.personalExecutedAdjustmentsThisMonth) !== 0,
+      personalNetDisplay: moneyDisplay(row.personalArrivedThisMonthNet),
+      publicPendingDisplay: moneyDisplay(row.publicPayablePending),
+      personalGrossDisplay: moneyDisplay(row.personalArrivedThisMonthGross),
+      personalAdjustmentDisplay: moneyDisplay(row.personalExecutedAdjustmentsThisMonth),
+      adjustmentPendingDisplay: moneyDisplay(row.adjustmentPending),
+    });
+  },
+
+  // 退款行(UI-06):复用售后列表的字段,只加台账需要的排序/分组/跳转字段。
+  // 标题与状态都带「退款」前缀 —— 混在核销记录里必须一眼看出这是退款,点进售后详情。
+  refundRow(row, canReadFinance) {
+    const item = Object.assign({}, row);
+    const refundAmount = row.amountCents == null ? null : (row.amountCents / 100).toFixed(2);
+    // 第十二轮 k6(j1 N4 / p2 N-3):右列只放商家自己的钱。玩家拿回的钱从来不是从商家扣走的,
+    // 服务端给出「这单商家还剩多少 / 少了多少」(merchantNetAmount)才画;拿不到就不画,不再画玩家退款额的负数。
+    const net = canReadFinance === false ? null : money(row.merchantNetAmount);
+    const manual = row.recordType === 'MANUAL_CASE';   // PG-031:人工退款工单行
+    const title = manual ? '人工退款工单' : (row.titleText || ''); // MC-044:账本行不露退款单号/编号,没有标题就只写「退款」
+    const status = row.statusText || '状态待确认';
+    return Object.assign(item, {
+      recordKey: manual ? 'aftercare-manual:' + row.manualCaseId : 'aftercare:' + row.refundId,
+      recordType: 'aftercare',
+      recordId: manual ? row.manualCaseId : row.refundId,
+      refundBucket: row.bucket,
+      title: title ? '退款 · ' + title : '退款',
+      customerDisplayName: row.activityTitleText || row.sourceText || '',
+      timeText: row.timeText,
+      dayKey: row.dateKey,
+      sortKey: row.createTimeText,
+      // 状态签带玩家退回的金额,和右列商家金额分开:「退款 ¥14.99 · 已退回」。
+      // j1 F21:状态本身以「退款」开头时不再叠前缀。
+      stateText: '退款' + (refundAmount == null ? '' : ' ' + yuan(refundAmount)) + ' · ' + status.replace(/^退款\s*/, ''),
+      stateVariant: row.statusTone || 'neutral',
+      amountText: net,
+      amountDisplay: net == null ? null : yuan(net, { signed: true }),
+      amountTone: net == null || Number(net) === 0 ? 'mute' : (Number(net) < 0 ? 'neg' : 'pos'),
+    });
+  },
+  redemptionRow(row, canReadFinance) {
+    const financeVisible = canReadFinance !== false;
+    const item = Object.assign({}, row);
+    item.amountText = row.settlementAmount == null || Number(row.settlementAmount) === 0 ? null : money(row.settlementAmount);
+    // 右列只放金额,一列一语义。两种未成立要分开:金额尚未成立(①②待主题结算)→ ¥0.0(MC-011=B,与 yuan(0) 同口径);
+    // 明确不产生现金 → 右列留空(M-27 第3轮:不再画破折号,状态 chip 已说「无现金结算」)。
+    item.amountDisplay = item.amountText != null ? yuan(item.amountText, { signed: true })
+      : (row.displayState === 'NO_CASH_SETTLEMENT' ? null : '¥0.0');
+    item.amountTone = item.amountText == null ? 'mute' : (Number(item.amountText) < 0 ? 'neg' : 'pos');
+    item.dayKey = row.occurredAt ? String(row.occurredAt).slice(0, 10) : '';
+    item.timeText = row.occurredAt ? String(row.occurredAt).slice(11, 16) : '';
+    item.sortKey = row.occurredAt ? String(row.occurredAt).slice(0, 16) : '';
+    item.title = [row.topicName, row.chapterName].filter(Boolean).join(' · ') || '核销记录';
+    // M-27 第4轮:顾客报名姓名(服务端按本商家核销解密下发);没有就空着,不写占位。
+    item.customerName = typeof row.customerDisplayName === 'string' ? row.customerDisplayName.trim() : '';
+    if (!financeVisible) {
+      item.amountText = null;
+      item.amountDisplay = null;
+      item.amountTone = 'mute';
+      item.stateText = row.fulfillmentState === 'REVERSED'
+        ? '核销已撤销' : (row.fulfillmentState === 'ACTIVE' ? '核销有效' : '—');
+      item.stateVariant = row.fulfillmentState === 'ACTIVE' ? 'success' : 'neutral';
+      return item;
+    }
+    // 状态从副文里拿出来变 chip:副文只留「谁 · 几点」,长句不再和金额抢右对齐位。
+    item.stateText = financeStateText(row);
+    item.stateVariant = stateVariant(row.displayState);
+    return item;
+  },
+  entryRow(row) {
+    const item = Object.assign({}, row);
+    item.amountText = money(row.signedAmount);
+    // F14a(MC-011=B):金额字段缺失写 yuan(0)(¥0.0),不写「待定」;请求失败走页面自己的错误/重试,不会到这里。
+    item.amountDisplay = item.amountText == null ? yuan(0) : yuan(item.amountText, { signed: true });
+    item.amountTone = item.amountText == null ? 'mute' : (Number(item.amountText) < 0 ? 'neg' : 'pos');
+    item.timeText = row.occurredAt ? String(row.occurredAt).slice(5, 10) : '';
+    item.sourceText = { REDEMPTION_FEE: '核销计酬', COOP_SHARE: '合作分润', ACTIVITY_SHARE: '活动分润', MERCHANT_CLAWBACK: '已执行扣划' }[row.source] || '调整';
+    if (row.source === 'COOP_SHARE' && row.topicName) item.sourceText += ' · ' + row.topicName;
+    item.stateText = financeStateText(row);
+    item.stateVariant = stateVariant(row.displayState);
+    item.coopDetailId = row.source === 'COOP_SHARE' && row.refKind === 'coop_settlement'
+      && (row.payeeType == null || row.payeeType === 'merchant' || row.payeeType === 'club')
+      && /^[1-9]\d*$/.test(String(row.refId || '')) && Number.isSafeInteger(Number(row.refId)) ? String(row.refId) : '';
+    item.coopBreakdown = row.source === 'COOP_SHARE' && row.originalAmount != null
+      ? '原始应结 ' + yuan(row.originalAmount) + ' · 已执行调整 ' + (row.executedAdjustmentAmount == null ? yuan(0) : yuan(row.executedAdjustmentAmount)) : '';
+    return item;
+  },
+  batchRow(row) {
+    const item = Object.assign({}, row);
+    item.amountText = money(row.amountTotal);
+    item.amountDisplay = item.amountText == null ? yuan(0) : yuan(item.amountText);
+    item.stateText = row.displayState === 'LEDGER_ERROR' ? '结算数据对不上，请联系客服' : (row.netDirection === 'ZERO' ? '本期无需打款' : (row.netDirection === 'MERCHANT_OWES_PLATFORM' ? '调整待处理' : batchStateText(row)));
+    item.stateVariant = row.displayState === 'LEDGER_ERROR' ? 'danger'
+      : (row.paymentState === 'PAID' ? 'success' : 'warning');
+    item.invoiceText = { NONE: '未开票', ISSUED: '已开票', RED: '已红冲' }[row.invoiceState] || '';
+    return item;
+  },
+
+  goCoopSettlements() {
+    if (!this.data.merchantAccess.canReadFinance || !this._isCurrentMemberScope(this._scopeMemberId)) return;
+    wx.navigateTo({ url: '/pages/merchant/ledger/index?view=settlement&source=coop' });
+  },
+  goSettlementDetail(event) {
+    if (!this.data.merchantAccess.canReadFinance || !this._isCurrentMemberScope(this._scopeMemberId)) return;
+    const id = event && event.currentTarget && event.currentTarget.dataset.id;
+    if (!id || !this.data.entries.some(row => row.coopDetailId === String(id))) return;
+    wx.navigateTo({ url: '/pages/coop/settlement-detail/index?source=ledger&id=' + id });
+  },
+
+  onRedemptionFilter(event) {
+    if (!this.data.merchantAccess.canReadFinance) {
+      if (this.data.redemptionFilter !== 'all') this.setData({ redemptionFilter: 'all' });
+      return;
+    }
+    // 筛选值在身份探针返回前就已变化；先推进 epoch，避免 all → pending → all
+    // 快速往返时，最早那次 all 响应因 key 再次相同而误写回新视图。
+    this._redemptions = [];
+    this._redemptionEpoch = (this._redemptionEpoch || 0) + 1;
+    this.setData({
+      loading: true,
+      error: false,
+      errorText: '',
+      redemptionFilter: event.detail.key,
+      hasLoaded: false,
+      redemptionGroups: [],
+      summary: null,
+    });
+    this._reuseRefundsOnce = true;
+    this.revalidateCurrentView();
+  },
+  goRedemptionDetail(event) {
+    const item = event.currentTarget.dataset.item;
+    if (!item) return;
+    // 退款条目仍回原来的售后详情页(UI-06),不能拿退款单号去查核销详情。
+    if (item.recordType === 'aftercare') {
+      // 售后详情里可以回应/处理:回来必须整页重读,不吃 L07-033 的新鲜窗口
+      this._viewLoadedAt = 0;
+      if (item.manualCaseId) { wx.navigateTo({ url: `/pages/merchant/aftercare/detail/index?recordType=MANUAL_CASE&manualCaseId=${item.manualCaseId}` }); return; }
+      if (!item.refundId) return;
+      wx.navigateTo({ url: `/pages/merchant/aftercare/detail/index?refundId=${item.refundId}` });
+      return;
+    }
+    if (!item.recordType || !item.recordId) return;
+    wx.navigateTo({ url: `/pages/merchant/ledger/order-detail/index?recordType=${item.recordType}&recordId=${item.recordId}` });
+  },
+  goBatchDetail(event) {
+    const id = event.currentTarget.dataset.id;
+    if (id === null || id === undefined || id === '') return;
+    wx.navigateTo({ url: `/pages/merchant/ledger/batch-detail/index?batchId=${id}` });
+  },
+  goAssets() { wx.navigateTo({ url: '/subpackageA/pages/assetcenter/earnings/index?theme=merchant' }); },
+  goInbox() { wx.navigateTo({ url: '/subpackageB/pages/im/list/index' }); },
+  _beginCoopSettleAlertOperation(loading) {
+    const memberId = this._scopeMemberId;
+    if (!memberId || !this._isCurrentMemberScope(memberId) || this.data.settleAlertsLoading) return null;
+    const operation = { memberId, epoch: (this._settleAlertsEpoch || 0) + 1 };
+    this._settleAlertsEpoch = operation.epoch;
+    this._settleAlertsOperation = operation;
+    this.setData({
+      settleAlertsEnabled: false,
+      settleAlertsState: 'unknown',
+      settleAlertsHint: loading ? '正在确认微信通知授权…' : '—',
+      settleAlertsLoading: loading,
+    });
+    return operation;
+  },
+  _isCurrentCoopSettleAlertOperation(operation) {
+    return !!operation && this._settleAlertsOperation === operation
+      && operation.epoch === this._settleAlertsEpoch
+      && this._isCurrentMemberScope(operation.memberId);
+  },
+  _finishCoopSettleAlertOperation(operation, state, hint) {
+    if (!this._isCurrentCoopSettleAlertOperation(operation)) return false;
+    this._settleAlertsOperation = null;
+    this.setData({
+      settleAlertsEnabled: state === 'allowed',
+      settleAlertsState: state,
+      settleAlertsHint: hint,
+      settleAlertsLoading: false,
+    });
+    return true;
+  },
+  syncCoopSettleAlertSetting() {
+    const operation = this._beginCoopSettleAlertOperation(false);
+    if (!operation) return;
+    const finish = (state, hint) => this._finishCoopSettleAlertOperation(operation, state, hint);
+    const templateId = subscribe.TEMPLATES && subscribe.TEMPLATES.coopSettle;
+    if (!templateId) { finish('unknown', '此通知暂不可申请'); return; }
+    if (typeof wx.getSetting !== 'function') { finish('unknown', '当前微信无法读取通知授权'); return; }
+    try {
+      wx.getSetting({
+        withSubscriptions: true,
+        success: (res) => {
+          const settings = res && res.subscriptionsSetting;
+          const item = settings && settings.itemSettings && settings.itemSettings[templateId];
+          if (settings && settings.mainSwitch === false) {
+            finish('not_allowed', '微信通知总开关未开启');
+          } else if (settings && settings.mainSwitch === true && item === 'accept') {
+            finish('allowed', '已允许微信通知');
+          } else if (settings && settings.mainSwitch === true && (item === 'reject' || item === 'ban')) {
+            finish('not_allowed', '此微信通知尚未获允许');
+          } else {
+            finish('unknown', ''); // 第十二轮 k9(j1):还没问过就不写说明,开关本身就是「可点击申请」
+          }
+        },
+        fail: () => finish('unknown', '暂未读到授权状态，可重试'),
+      });
+    } catch (e) {
+      finish('unknown', '暂未读到授权状态，可重试');
+    }
+  },
+  enableCoopSettleAlerts(event) {
+    const operation = this._beginCoopSettleAlertOperation(true);
+    if (!operation) return;
+    const finish = (state, hint) => this._finishCoopSettleAlertOperation(operation, state, hint);
+    const enabled = !!(event && event.detail && event.detail.value);
+    if (!enabled) {
+      if (typeof wx.openSetting !== 'function') {
+        finish('unknown', '当前微信无法打开通知设置');
+        return;
+      }
+      try {
+        wx.openSetting({
+          withSubscriptions: true,
+          success: () => {
+            if (!finish('unknown', '正在读取微信通知设置…')) return;
+            this.syncCoopSettleAlertSetting();
+          },
+          fail: () => finish('unknown', '未能打开微信设置，请重试'),
+          complete: () => finish('unknown', '通知设置尚未确认，可重试'),
+        });
+      } catch (e) {
+        finish('unknown', '未能打开微信设置，请重试');
+      }
+      return;
+    }
+    // 直接留在用户 tap 同步栈；只记录本机授权结果，不承诺每笔到账均有通知。
+    try {
+      return subscribe.request(['coopSettle']).then((result) => {
+        if (result && result.status === subscribe.STATUS.ACCEPTED
+            && Array.isArray(result.acceptedKeys) && result.acceptedKeys.includes('coopSettle')) {
+          if (finish('allowed', '已允许微信通知')) toast('已允许微信通知');
+        } else if (result && result.status === subscribe.STATUS.REJECTED
+            && Array.isArray(result.rejectedKeys) && result.rejectedKeys.includes('coopSettle')) {
+          finish('not_allowed', '此微信通知尚未获允许');
+        } else {
+          const hint = result && result.status === subscribe.STATUS.NOT_CONFIGURED ? '此通知暂不可申请'
+            : (result && result.status === subscribe.STATUS.UNSUPPORTED ? '当前微信不支持通知授权' : '授权结果未确认，请重试');
+          finish('unknown', hint);
+        }
+        return result;
+      }).catch(() => {
+        finish('unknown', '授权结果未确认，请重试');
+        return null;
+      });
+    } catch (e) {
+      finish('unknown', '授权结果未确认，请重试');
+    }
+  },
+});
+
+/** displayState → chip 语义色。1:1 映射,不含业务判断(零现金的具体原因仍由服务端 noCashReason 给)。 */
+function stateVariant(displayState) {
+  return {
+    PENDING_SETTLEMENT: 'warning',
+    SETTLED: 'success',
+    ADJUSTMENT_PENDING: 'danger',
+    ADJUSTED: 'neutral',
+    REVERSED_BEFORE_SETTLEMENT: 'neutral',
+    NO_CASH_SETTLEMENT: 'neutral',
+    LEDGER_ERROR: 'danger',
+  }[displayState] || 'neutral';
+}
+
+/** 按自然日分组(一组一卡),日期取服务端下发的 occurredAt 前 10 位,不在前端做时区换算。 */
+function groupByDay(rows) {
+  const groups = [];
+  let current = null;
+  rows.forEach((row) => {
+    if (!current || current.dayKey !== row.dayKey) {
+      current = { dayKey: row.dayKey, dayLabel: dayLabel(row.dayKey), rows: [] };
+      groups.push(current);
+    }
+    current.rows.push(row);
+  });
+  return groups;
+}
+function dayLabel(dayKey) {
+  if (!dayKey) return '未标注日期';
+  const parts = String(dayKey).split('-');
+  return parts.length === 3 ? `${parts[1]} 月 ${parts[2]} 日` : dayKey;
+}
+
+/** 汇总条:只渲染服务端算好的三个数,缺字段就整条不显示(不猜、不用当前页求和)。 */
+function summaryView(summary, canReadFinance) {
+  if (!summary) return null;
+  const count = Number(summary.count);
+  if (!Number.isInteger(count) || count < 0) return null;
+  if (!canReadFinance) return { countText: `${count} 笔` };
+  const pending = money(summary.pendingAmount);
+  const arrived = money(summary.arrivedAmount);
+  if (pending == null || arrived == null) return null;
+  return {
+    countText: `${count} 笔`,
+    pendingDisplay: yuan(pending),
+    arrivedDisplay: yuan(arrived),
+  };
+}
+
+// F14a(MC-011=B):缺字段写 yuan(0)(¥0.0);「状态待定」这类状态文字不是数值,照旧。
+function moneyDisplay(value) {
+  const amount = money(value);
+  return amount == null ? yuan(0) : yuan(amount);
+}
+
+function financeStateText(item) {
+  if (item.displayState === 'NO_CASH_SETTLEMENT') {
+    if (item.noCashReason) return item.noCashReason;
+    console.warn('资金域零现金记录缺少 noCashReason');
+    return '本次不产生现金结算';
+  }
+  return {
+    PENDING_SETTLEMENT: item.source === 'COOP_SHARE' ? '待入账' : (item.settlementRoute === 'COOP_ORDER' ? '待主题结算' : '待结算'),
+    SETTLED: item.destination === 'PERSONAL_ACCOUNT' ? '已入个人账户' : '平台已打款',
+    ADJUSTMENT_PENDING: '调整中', ADJUSTED: '已调整', REVERSED_BEFORE_SETTLEMENT: '核销已撤销', LEDGER_ERROR: '结算数据对不上，请联系客服',
+  }[item.displayState] || '状态待确认';
+}
+function batchStateText(batch) {
+  if (batch.holdState === 'FROZEN') return '结算处理中';
+  if (batch.paymentState === 'PAID') return batch.invoiceState === 'ISSUED' ? '平台已打款 · 已开票' : '平台已打款 · 未开票';
+  if (batch.paymentState === 'CONFIRMED') return '已确认';
+  return '待对账';
+}

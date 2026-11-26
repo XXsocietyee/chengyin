@@ -1,0 +1,48 @@
+<!-- 玩家深底(owner 定稿);商家身份进来时按「商家恒浅」挂商家主题 -->
+<view class="ti-root {{operationScope === 'MERCHANT' ? 'theme-merchant' : 'ti-root--player'}}">
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+<view class="ti {{reducedMotion ? 'ti--reduced-motion' : ''}} {{morph ? 'ti--morph' : ''}}">
+  <!-- 2026-10-22 owner 定稿:漂浮圆圈铺满整屏、在文案后面;运动与玻璃边见 orbit.js / index.js。
+       数据是真实精选玩法,拉不到就整块不画(不塞占位模板冒充现网内容) -->
+  <canvas wx:if="{{cardCount}}" type="2d" id="tiField" class="ti-field"
+          bindtouchstart="onFieldStart" bindtouchmove="onFieldMove" bindtouchend="onFieldEnd" bindtouchcancel="onFieldEnd"
+          aria-role="img" aria-label="精选玩法封面"></canvas>
+
+  <!-- custom 导航:系统返回钮被关掉,必须自带 cy-nav-bar 才退得出去。
+       2026-10-27 P-22 owner:开场动画铺满整屏(含导航栏下方)—— 顶栏用透明 overlay 档,
+       实底顶栏会把画布最上面那一截圆圈挡住。本页不滚动,overlay 不会翻成实底。 -->
+  <cy-nav-bar overlay />
+  <!-- 本页不挂返回钮下的导航级大标题(主张文案在页面中间偏左),
+       所以顶部让位用显式 spacer,而不是靠标题组件自带的 safeTop -->
+  <view style="height: {{statusBarHeight + navBarHeight}}px;"></view>
+
+  <view class="ti-stage ti-stage--state" wx:if="{{!cardCount && cardsLoading}}">
+    <cy-skeleton type="card" count="3" />
+  </view>
+  <view class="ti-stage ti-stage--state" wx:elif="{{!cardCount && cardsError}}">
+    <cy-inline-error load-failure title="精选示例暂未加载" sub="{{cardsError}}" action="重试" bind:action="loadCards" />
+  </view>
+  <!-- x-fix4 A-4:没有精选示例就什么都不画(不写「暂无」说明句、不留一块空态区),主张文案与按钮照常 -->
+
+  <view class="ti-copy" id="tiCopy">
+    <view class="ti-copy-a">把你玩过的一段路</view>
+    <view class="ti-copy-b">做成别人也能走的玩法</view>
+  </view>
+
+  <view class="ti-cta">
+    <cy-inline-error load-failure wx:if="{{navigationError}}" title="创建页面没有打开" sub="{{navigationError}}" action="重试" bind:action="goCreate" />
+    <!-- 圆圈要从按钮后面过:画布在部分环境按原生层压在最上面,所以按 #tiBtn 的位置在画布上挖掉按钮形状 -->
+    <view id="tiBtn">
+      <cy-btn variant="primary" style="width:100%" loading="{{navigating}}" disabled="{{navigating}}" bindtap="goCreate">
+        开始创建
+      </cy-btn>
+      <!-- r2-create(b4-21 业主「这些就是我们的玩法模板啊 就是直接从主题或玩法那点进去配置的」):§21「从预设开始」与预设页撤掉 -->
+    </view>
+  </view>
+</view>
+
+  <!-- 换页:整页虚化时叠一层染色 -->
+  <view class="ti-wash {{morph ? 'ti-wash--on' : ''}}"></view>
+</view>

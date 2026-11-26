@@ -1,0 +1,28 @@
+// 金额展示的空值口径(方案 §3.4 / §11.2-1):
+// 绑定值为空(undefined / null / '')时渲 0(D-119 2026-11-11 业主「金额也写 0」,取代原先的 '—'),绝不渲出一个裸的 ¥ 或空白。
+// 0 是合法金额,必须照常渲成 ¥0.0 —— 不能被当成空值吃掉。
+// 小数位(2026-11-22 业主定稿,与 utils/money-format.js 同口径):一位小数(39 → ¥39.0、29.9 → ¥29.9),
+// 第二位小数非零才两位(0.01 → ¥0.01、12.35 → ¥12.35)。非数值(如区间文案)原样透出。
+// WXS 不是 JS:Number() 不能当函数调用(编译期直接 Unexpected token),isNaN 也没有。
+// 转数用 *1,判 NaN 用 n !== n —— 这两条是 WXS 里唯一稳的写法。
+function decimal(n) {
+  var neg = n < 0;
+  var cents = Math.round((neg ? -n : n) * 100);
+  if (cents === 0) return '0.0';
+  var text = cents % 10 === 0 ? (cents / 100).toFixed(1) : (cents / 100).toFixed(2);
+  return (neg ? '-' : '') + text;
+}
+
+function amount(v) {
+  if (v === undefined || v === null || v === '') return '¥0.0';
+  var n = v * 1;
+  if (typeof v === 'boolean' || n !== n) return '¥' + v;
+  return '¥' + decimal(n);
+}
+
+// 历史入口(商家工作台收入 hero 等),口径与 amount 相同
+function amount2(v) {
+  return amount(v);
+}
+
+module.exports = { amount: amount, amount2: amount2 };

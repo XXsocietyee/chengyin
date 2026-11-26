@@ -1,0 +1,147 @@
+@import "/pages/playkit/style/play-surface.wxss";
+
+/* cy-playkit-barter · 以物换物。沿用排序那一屏的暗台面(skin-qadark)与 --ink/--sub/--soft/--ok 皮肤变量;
+   内嵌时皮肤变量由故事流那一层换成章节配色。320pt 宽屏:交换卡单列,背包换行。 */
+.bt { color: var(--ink); text-align: left; align-items: stretch; }
+.bt__title { font-size: var(--cy-type-sheet-title); font-weight: 800; line-height: 1.4; }
+
+/* 目标:✓ 绿 = 已达成;✗ 灰 = 还没达成;红只在服务端确认这份计划没过之后 */
+.bt__goals { display: flex; flex-wrap: wrap; gap: var(--cy-space-2); margin-top: var(--cy-space-4); }
+.bt__goal {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 10rpx 22rpx;
+  border-radius: var(--cy-radius-pill);
+  background: var(--soft);
+  color: var(--sub);
+  font-size: var(--cy-type-label);
+  font-weight: 700;
+  transition: color .2s ease, background-color .2s ease;
+}
+.bt__goal.is-met { color: var(--cy-color-status-success); background: var(--cy-color-status-success-soft); }
+.bt__goal.is-failed { color: var(--cy-color-status-danger); background: var(--cy-color-status-danger-soft); }
+
+/* 背包 */
+.bt__bag {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cy-space-2);
+  margin-top: var(--cy-space-4);
+  padding: var(--cy-space-3);
+  border-radius: var(--cy-radius-md);
+  background: var(--soft);
+  min-height: 112rpx;
+  box-sizing: border-box;
+}
+.bt__thing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6rpx;
+  width: 104rpx;
+}
+.bt__thing-n {
+  max-width: 104rpx;
+  font-size: var(--cy-type-caption);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bt__lost { margin-top: var(--cy-space-2); font-size: var(--cy-type-label); color: var(--sub); }
+
+/* 线条图标:mask 取形、currentColor 取色(同 cy-icon 的做法),跟着皮肤墨色走 */
+.bt-ic {
+  flex: none;
+  width: 56rpx;
+  height: 56rpx;
+  background-color: currentColor;
+  -webkit-mask-image: var(--bt-m); mask-image: var(--bt-m);
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: contain; mask-size: contain;
+}
+.bt-ic--sm { width: 36rpx; height: 36rpx; }
+/* 没配图标:名字首字落在一个描边圆里 */
+.bt-ic--glyph {
+  background-color: transparent;
+  -webkit-mask-image: none; mask-image: none;
+  box-sizing: border-box;
+  border: 3rpx solid currentColor;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--cy-type-label);
+  font-weight: 800;
+}
+.bt-ic--clip { --bt-m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 7v8.5a3 3 0 0 0 6 0V5.5a2 2 0 0 0-4 0V15a1 1 0 0 0 2 0V8'/%3E%3C/svg%3E"); }
+.bt-ic--coaster { --bt-m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8'/%3E%3Ccircle cx='12' cy='12' r='4.5'/%3E%3C/svg%3E"); }
+.bt-ic--labels { --bt-m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 5h9l7 7-8 8-8-8z'/%3E%3Ccircle cx='8.5' cy='9.5' r='1.3'/%3E%3C/svg%3E"); }
+.bt-ic--strap { --bt-m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='9' width='18' height='6' rx='3'/%3E%3Cpath d='M15 9v6M18 12h.01'/%3E%3C/svg%3E"); }
+.bt-ic--parcel { --bt-m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 8l8-4 8 4v8l-8 4-8-4z'/%3E%3Cpath d='M4 8l8 4 8-4M12 12v8'/%3E%3C/svg%3E"); }
+.bt-ic--tape { --bt-m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='10' cy='12' r='6'/%3E%3Ccircle cx='10' cy='12' r='2.2'/%3E%3Cpath d='M10 18h10'/%3E%3C/svg%3E"); }
+.bt-ic--book { --bt-m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 4h11a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2z'/%3E%3Cpath d='M5 18a2 2 0 0 1 2-2h11M9 8h5'/%3E%3C/svg%3E"); }
+.bt-ic--key { --bt-m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='12' r='4'/%3E%3Cpath d='M12 12h9M18 12v3M21 12v2'/%3E%3C/svg%3E"); }
+.bt-ic--ticket { --bt-m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 7h18v3a2 2 0 0 0 0 4v3H3v-3a2 2 0 0 0 0-4z'/%3E%3Cpath d='M14 7v10' stroke-dasharray='1.5 2'/%3E%3C/svg%3E"); }
+.bt-ic--bag { --bt-m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 8h14l-1 12H6z'/%3E%3Cpath d='M9 8V6a3 3 0 0 1 6 0v2'/%3E%3C/svg%3E"); }
+.bt-ic--cup { --bt-m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 8h11v6a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5z'/%3E%3Cpath d='M16 10h1.5a2.5 2.5 0 0 1 0 5H16M8 3v2M12 3v2'/%3E%3C/svg%3E"); }
+.bt-ic--letter { --bt-m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='6' width='18' height='12' rx='1.5'/%3E%3Cpath d='M3 7l9 6 9-6'/%3E%3C/svg%3E"); }
+
+/* 交换卡:钥字 + 「给 → 得」。用过的虚线描边、钥字换成第几步;背包里没有 give 的压暗且点不动 */
+.bt__offers { display: flex; flex-direction: column; gap: 16rpx; margin-top: var(--cy-space-5); }
+.bt__offer {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  min-height: 104rpx;
+  padding: 16rpx 24rpx;
+  box-sizing: border-box;
+  border-radius: var(--cy-radius-md);
+  background: var(--soft);
+  border: 3rpx solid transparent;
+  transition: opacity .2s ease, border-color .2s ease;
+}
+.bt__offer.is-used { background: transparent; border: 3rpx dashed var(--sub); }
+.bt__offer.is-off { opacity: .38; }
+.bt__key {
+  flex: none;
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3rpx solid var(--ink);
+  box-sizing: border-box;
+  font-family: var(--cy-font-numeric);
+  font-size: var(--cy-type-label);
+  font-weight: 800;
+}
+.bt__offer.is-used .bt__key { border-style: dashed; color: var(--sub); border-color: var(--sub); }
+.bt__swap { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 10rpx; font-size: var(--cy-type-body); font-weight: 600; }
+.bt__swap-n { white-space: nowrap; }
+.bt__arrow { display: flex; color: var(--sub); padding: 0 4rpx; }
+.bt__press { opacity: .88; }
+.g-btn--press { opacity: .88; }
+
+.bt__undo {
+  align-self: flex-start;
+  margin-top: var(--cy-space-3);
+  padding: 12rpx 0;
+  font-size: var(--cy-type-label);
+  font-weight: 700;
+  color: var(--ink);
+  text-decoration: underline;
+}
+.bt__undo.is-off { opacity: .38; }
+
+.bt__wrong {
+  margin-top: var(--cy-space-2);
+  font-size: var(--cy-type-body);
+  font-weight: 700;
+  color: var(--cy-color-status-danger);
+}
+
+.bt--reduced .bt__goal, .bt--reduced .bt__offer { transition: none; }

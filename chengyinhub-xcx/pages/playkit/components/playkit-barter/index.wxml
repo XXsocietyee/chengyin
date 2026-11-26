@@ -1,0 +1,51 @@
+<!-- 以物换物 · 交换规划。点卡只是预演,「就这样换」才交整串顺序;判定在服务端重放。 -->
+<cy-play-stage id="cy-play-stage" skin="qadark" show="{{show}}" back-label="退出"
+               tries="{{maxTries}}" used="{{attempts}}"
+               bind:back="onClose">
+  <view class="g-col bt {{reducedMotion ? 'bt--reduced' : ''}}">
+    <view class="bt__title pe pe--blur" wx:if="{{title}}">{{title}}</view>
+
+    <view class="bt__goals pe pe--up">
+      <view class="bt__goal is-{{item.state}}" wx:for="{{v.goals}}" wx:key="id"
+            aria-label="{{item.label}}：{{item.met ? '已达成' : '未达成'}}">
+        <cy-icon name="{{item.met ? 'check' : 'close-sm'}}" size="28" />{{item.label}}
+      </view>
+    </view>
+
+    <view class="bt__bag pe pe--up" aria-label="背包">
+      <view class="bt__thing" wx:for="{{v.bag}}" wx:key="key" aria-label="{{item.name}}">
+        <view wx:if="{{item.icon}}" class="bt-ic bt-ic--{{item.icon}}" aria-hidden="true"></view>
+        <view wx:else class="bt-ic bt-ic--glyph" aria-hidden="true">{{item.glyph}}</view>
+        <text class="bt__thing-n">{{item.name}}</text>
+      </view>
+    </view>
+    <view class="bt__lost" wx:if="{{v.lostKeep}}">{{v.lostKeep}}就不在背包里了</view>
+
+    <view class="bt__offers">
+      <view class="bt__offer is-{{item.state}} pe pe--up" wx:for="{{v.offers}}" wx:key="id"
+            data-id="{{item.id}}" bindtap="onPick"
+            aria-role="button" aria-disabled="{{item.state !== 'ready'}}"
+            aria-label="{{item.key}}：用{{item.giveName}}换{{item.getName}}{{item.used ? '，第' + item.step + '步' : ''}}"
+            hover-class="{{item.state === 'ready' ? 'bt__press' : 'none'}}" hover-stay-time="80">
+        <view class="bt__key">{{item.used ? item.step : item.key}}</view>
+        <view class="bt__swap">
+          <view wx:if="{{item.giveIcon}}" class="bt-ic bt-ic--sm bt-ic--{{item.giveIcon}}" aria-hidden="true"></view>
+          <text class="bt__swap-n">{{item.giveName}}</text>
+          <view class="bt__arrow" aria-hidden="true"><cy-icon name="arrow-right" size="28" /></view>
+          <view wx:if="{{item.getIcon}}" class="bt-ic bt-ic--sm bt-ic--{{item.getIcon}}" aria-hidden="true"></view>
+          <text class="bt__swap-n">{{item.getName}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="bt__undo {{v.canUndo && !passed ? '' : 'is-off'}}" bindtap="onUndo"
+          aria-role="button" aria-label="撤回上一步" aria-disabled="{{!v.canUndo || passed}}"
+          hover-class="bt__press" hover-stay-time="80">撤回上一步</view>
+
+    <view class="bt__wrong" wx:if="{{v.wrongLine}}" aria-role="alert">{{v.wrongLine}}</view>
+  </view>
+
+  <view wx:if="{{!passed}}" class="g-btn {{v.canSubmit ? '' : 'g-btn--disabled'}} pe pe--up" bindtap="onSubmit"
+        aria-role="button" aria-label="就这样换" aria-disabled="{{!v.canSubmit}}"
+        hover-class="g-btn--press" hover-stay-time="80">就这样换</view>
+</cy-play-stage>

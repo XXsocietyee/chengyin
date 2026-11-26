@@ -1,0 +1,86 @@
+// cy-swipe-row 手势 · 渲染层(WXS)(AUDIT-1122 L04-020)。
+// 左滑和拖动排序的 touchmove 只在渲染层跑:setStyle 跟手,不逐帧 setData;
+// 松手才 callMethod 一次,由逻辑层决定开 / 关、挪几格。行开着时的偏移用逻辑层按屏宽换好的 px(data-openpx),
+// 不再按 2 倍屏粗算 156rpx。
+var TRIGGER = 40; // px,滑过这么多算「要开 / 要关」
+var AXIS_SLOP = 6; // px,先动这么多再判横竖
+
+function rowOf(owner) { return owner.selectComponent('.sw__row'); }
+function rootOf(owner) { return owner.selectComponent('.sw'); }
+
+// 逻辑层按屏宽换好的开口 px 经 openpx 属性变化传进来,存在渲染层状态里
+function setOpenPx(value, old, owner) {
+  var px = value * 1;
+  if (px === px && px > 0) owner.getState().openPx = px;
+}
+
+function start(e, owner) {
+  var ds = e.currentTarget.dataset;
+  var st = owner.getState();
+  st.sw = null;
+  if (ds.disabled || ds.editing) return;
+  var t = e.touches[0];
+  st.sw = { x0: t.clientX, y0: t.clientY, axis: '', dx: 0, open: !!ds.open, openPx: st.openPx || 78 };
+}
+
+function move(e, owner) {
+  var s = owner.getState().sw;
+  if (!s) return;
+  var t = e.touches[0];
+  var dx = t.clientX - s.x0, dy = t.clientY - s.y0;
+  if (!s.axis) {
+    if (Math.abs(dx) < AXIS_SLOP && Math.abs(dy) < AXIS_SLOP) return;
+    s.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+  }
+  if (s.axis !== 'x') return;
+  s.dx = dx;
+  var base = s.open ? -s.openPx : 0;
+  var x = Math.max(-s.openPx - 20, Math.min(0, base + dx));
+  var row = rowOf(owner);
+  if (row) row.setStyle({ transform: 'translateX(' + x + 'px)', transition: 'none' });
+}
+
+function end(e, owner) {
+  var st = owner.getState();
+  var s = st.sw;
+  st.sw = null;
+  if (!s || s.axis !== 'x') return;
+  var row = rowOf(owner);
+  if (row) row.setStyle({ transform: '', transition: '' });
+  var open = s.open ? s.dx < TRIGGER : s.dx < -TRIGGER;
+  if (open !== s.open) owner.callMethod('onSwipeEnd', { open: open });
+}
+
+function gripStart(e, owner) {
+  var ds = e.currentTarget.dataset;
+  var st = owner.getState();
+  st.drag = null;
+  if (ds.disabled) return;
+  st.drag = { y0: e.touches[0].clientY, dy: 0 };
+  owner.callMethod('onGripStart', {});
+}
+
+function gripMove(e, owner) {
+  var d = owner.getState().drag;
+  if (!d) return;
+  d.dy = e.touches[0].clientY - d.y0;
+  var root = rootOf(owner);
+  if (root) root.setStyle({ transform: 'translateY(' + d.dy + 'px)' });
+}
+
+function gripEnd(e, owner) {
+  var st = owner.getState();
+  var d = st.drag;
+  st.drag = null;
+  if (!d) return;
+  var root = rootOf(owner);
+  if (root) root.setStyle({ transform: '' });
+  owner.callMethod('onGripEnd', { dy: d.dy });
+}
+
+module.exports = {
+  TRIGGER: TRIGGER,
+  setOpenPx: setOpenPx,
+  start: start, move: move, end: end,
+  gripStart: gripStart, gripMove: gripMove, gripEnd: gripEnd,
+};

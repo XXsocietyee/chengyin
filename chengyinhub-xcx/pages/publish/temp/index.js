@@ -1,0 +1,3942 @@
+const templateAdoption = require('../utils/publish/template-adoption.js');
+// R11 g1 F2:服务端只在带 outcomeRules 时才把这两段当作一站玩法(AdvancedGameConfigValidator.hasEnabledMechanic)
+const OUTCOME_REQUIRED_SECTIONS = ['check', 'album'];
+const authorWrites = require('../../../utils/author-write-recovery.js');
+const { applyTheme } = require('../../../utils/theme.js');
+const { memberId, failureStatus, retryLogin, waitForInitialSession, recoverReadSession } = require('../../../utils/session/login-reload.js');
+const modal = require('../../../utils/modal.js');
+const { resolveMenuChrome } = require('../../../utils/nav-safe-area.js');
+const { decodeDisplayFields } = require('../../../utils/display-text.js');
+// 回填进输入框的作者文字:服务端过滤会把 x<y 存成 x&lt;y,解码后再回填,保存时提交的就是原文。
+const DECODED_FORM_TEXT = ['title', 'description', 'usageLocation', 'requiredMaterials', 'ruleInstructions',
+  'questionName', 'questionAnswer', 'feedbackText', 'medalName', 'questionA', 'questionB', 'questionC', 'questionD',
+  'hint1', 'hint2', 'answerReveal', 'photoRequireDesc', 'storyText', 'merchantGuide'];
+const toast = require('../../../utils/toast.js');
+const QA_ANSWER_MODES = [{ key: 'single', label: '单选' }, { key: 'multi', label: '多选' }];
+const QA_TRIES = [{ key: 0, label: '不限次数' }, { key: 1, label: '1 次' }, { key: 2, label: '2 次' }, { key: 3, label: '3 次' }, { key: 5, label: '5 次' }, { key: 10, label: '10 次' }];
+const QA_REVEAL = [{ key: false, label: '不亮出答案' }, { key: true, label: '亮出正确答案' }];
+const QA_FB_IMG_MAX = 3;
+let app = getApp();
+/* 结果面板终态停留时长;跳转挂在面板 close 上,时长只此一处 */
+const RESULT_SHEET_MS = 2000;
+const roleGuard = require('../../../utils/roleGuard.js');
+const optionMedia = require('../utils/publish/option-media.js');
+const { readReducedMotion } = require('../../../utils/motion-preference.js');
+const { safeUserMessage } = require('../../../utils/transport/safe-user-message.js');
+const { isRecordList } = require('../../../utils/response-shape.js');
+const advancedGameConfig = require('../utils/publish/advanced-game-config.js');
+const advancedGamePreview = require('../utils/publish/advanced-game-preview.js');
+const { applyPreviewAction } = require('../../../utils/game-preview-action.js');
+const nodeGameCatalog = require('../utils/publish/node-game-catalog.js');
+const nodeOutcomeContract = require('../utils/publish/node-outcome-contract.js');
+const supportMatrix = require('../utils/publish/gameplay-support-matrix.js');
+const templateTools = require('../utils/publish/template-tools.js');
+const r5Editor = require('./r5-editor.js'); const questoAuthor = require('./questo-author.js'); const barterMixerAuthor = require('./barter-mixer-author.js'); const checkSection = require('./check-section.js'); const afterSection = require('./after-section.js');
+const publishIssueTarget = require('../utils/publish/publish-issue-target.js');
+const templateAuthorFields = require('../utils/publish/template-author-fields.js');
+const merchantAccessPolicy = require('../../../utils/merchant-access-policy.js');
+const { formatDurationMinutes, gameTemplateCover } = require('../../../utils/template-display.js');
+const { resolveCategoryIcon } = require('../../../utils/category-icon.js');
+const { loadStoryFont, handParas } = require('../utils/publish/story-font.js'); const { storyFontUrl: STORY_FONT_URL } = require('../../../utils/config.js');
+const { splitRuleSteps } = require('../../../utils/rule-steps.js');
+const editorLayout = require('./editor-layout.js');
+const { rejectionNamesCover } = require('../utils/publish/cover-rejection.js');
+const { safeDecode } = require('../../../utils/safe-decode.js');
+const storyCast = require('../utils/publish/story-cast.js'); // 选择类选项的角色信任(cast-game-trust-1119)
+
+/* 发布全量校验的报错顺序 —— validateForm 与「查看预览」置灰点击必须读同一份。
+   2026-09-19 审查 F-PU-1:这里曾各自维护一份,发布那份漏了 interactionType,
+   于是「据点玩法形态必选」的红字写出来了、按钮却放行,商家以为配好了。 */
+// 2026-11-19 主人定稿的页面顺序(玩法 → 玩法设置 → 封面名字 / 模板信息 → 高级设置):置灰按钮点了停在**页面上第一处**缺项
+const PUBLISH_ERROR_ORDER = ['finish', 'advanced', 'title', 'description', 'players', 'duration', 'categoryIds',
+  'interactionType', 'voice', 'reward'];
+
+function durationWithUnit(value) {
+  const raw = String(value == null ? '' : value).trim();
+  if (!raw) return '';
+  if (/小时|hour/i.test(raw)) return raw;
+  return formatDurationMinutes(raw);
+}
+
+
+function editorMemberId() {
+  return String((typeof app.getUserID === 'function' ? app.getUserID() : (app.globalData || {}).user_id) || '');
+}
+
+function currentEditor(page) {
+  const memberId = page._editorMemberId === undefined ? editorMemberId() : page._editorMemberId;
+  return () => !page._disposed && editorMemberId() === memberId;
+}
+
+function positiveId(value) {
+  const text = templateAdoption.id(value);
+  return !text ? null : Number.isSafeInteger(Number(text)) ? Number(text) : text;
+}
+
+// 采用被媒体校验明确拒绝(422 或「媒体来源未经审核/请重新上传」类回包),不是结果未知。
+function isMediaRejection(res) {
+  if (!res || res.code == '200') return false;
+  if (res.code == 422) return true;
+  return /媒体|图片|封面|对象存储|重新上传/.test(String(res.msg || res.message || ''));
+}
+
+// P-41(2026-10-27):类别标签前面带图标(同 utils/category-icon 的品类映射)
+function withCategoryIcons(list) {
+  return (list || []).map(item => Object.assign({}, item, { icon: resolveCategoryIcon(item && item.categoryName) }));
+}
+
+function isTemplateDetailPayload(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (value.sysCategoryList != null && !isRecordList(value.sysCategoryList)) return false;
+  const scalarFields = [
+    'id', 'title', 'description', 'imgUrl', 'players', 'usageLocation',
+    'requiredMaterials', 'duration', 'difficulty', 'ruleInstructions',
+    'validationMethod', 'feedbackMethod', 'feedbackMethodStr', 'questionName',
+    'questionAnswer', 'feedbackText', 'couponId', 'couponName', 'medalImg',
+    'medalName', 'medalStyle', 'questionA', 'questionB', 'questionC',
+    'questionD', 'correctAnswer', 'activityCategoryids', 'hint1', 'hint2',
+    'answerReveal', 'photoRequireDesc', 'photoReview', 'audioUrl',
+    'audioDuration', 'questionImg', 'questionAudio', 'questionOptionMediaJson',
+    'storyText', 'storyJson', 'preferenceJson', 'advancedConfigJson', 'status',
+    'rewardRulesJson', 'merchantGuide', 'sensorType', 'sensorConfig', 'storyImg'
+  ];
+  return scalarFields.every((key) => value[key] == null
+    || ['string', 'number', 'boolean'].includes(typeof value[key]));
+}
+
+// 模块定义(常量,顺序即展示顺序)
+// 提示(hint)已并入「完成方式」,不再是独立模块
+const MODULE_DEFS = [
+  { key: 'finish', name: '玩法', desc: '', iconName: 'check' },
+  { key: 'reward', name: '完成奖励', desc: '优惠券 / 勋章', iconName: 'gift' },
+  { key: 'story', name: '剧情故事', desc: '到达后的剧情', iconName: 'edit' },
+  { key: 'voice', name: '语音讲解', desc: '上传一段音频导览', iconName: 'play' },
+]; const ADDABLE_MODULES = ['finish', 'reward']; // 2026-10-22:添加模块只出玩法与完成奖励(剧情不再新增,语音讲解在互动工具里)
+
+// 完成方式 tile(value 对应 validationMethod 映射)
+// 2026-11-22 业主拍板 F:偏好题组只在官方模板里提供,不再出现在普通作者可选的完成方式里;
+// 已有的偏好题配置照常运行,编辑页只读展示它的结果分支(见 _methodTile 的旧码回读)。
+const PREFERENCE_TILE = { value: 6, iconName: 'filter-lines', label: '偏好题组', sub: '多步选择，结果固定' };
+const METHOD_TILES = [
+  { value: 1, iconName: 'edit', label: '文字作答', sub: '写下现场看到或确认到的内容' },
+  { value: 3, iconName: 'check', label: '选项问答', sub: '从选项中选出正确答案' },
+  { value: 2, iconName: 'camera', label: '拍照打卡', sub: '上传现场照片' },
+  { value: 4, iconName: 'qr-scan', label: '扫码打卡', sub: '扫描现场二维码' },
+  { value: 5, iconName: 'gps', label: 'GPS 到达', sub: '走进坐标范围即通过' },
+  { value: 0, iconName: 'check', label: '无需验证', sub: '点击即完成' },
+  // 自由探索三玩法。它们的题面与答案都在「玩法配置」里配,tile 只负责选中完成方式;
+  // 光选 tile 不开对应段的话,节点会退化成到达即通关(completesOnArrive 收了 8/9/10),
+  // 玩法静默不存在 —— 所以 _collectValidationErrors 里有一条配套的必填校验。
+  { value: 8, iconName: 'edit', label: '猜数字', sub: '猜一个数，按接近程度分档给分' },
+  { value: 9, iconName: 'filter-lines', label: '猜图', sub: '几张图里挑出正确的那一张' },
+  { value: 10, iconName: 'gps', label: '找东西', sub: '在图上点中藏起来的目标' },
+];
+
+// 完成方式 ↔ 玩法配置段:选了这个 tile,就必须把这一段打开填完
+const PLAY_METHOD_SECTIONS = { 8: 'estimate', 9: 'pricePair', 10: 'hiddenObject' };
+const PLAY_METHOD_LABELS = { 8: '猜数字', 9: '猜图', 10: '找东西' };
+
+/** 行 id 生成:同毫秒连点两次不能撞 —— 撞了服务端会判「id 不能重复」 */
+function rowId(prefix) {
+  return `${prefix}_${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
+}
+
+const ADVANCED_ROW_TEMPLATES = {
+  // 猜图 2026-09-10 改模型:图片说明 + 是不是正确答案,不再有价格
+  'pricePair.items': () => ({ id: rowId('pic'), name: '', imageUrl: '', correct: false }),
+  'hiddenObject.hotspots': () => ({ id: rowId('spot'), label: '', x: 0.5, y: 0.5, r: 0.08 }),
+  'predict.options': () => ({ key: rowId('opt'), label: '' }),
+  'qa.options': () => ({ id: rowId('opt'), label: '', fb: '', correct: false })
+};
+
+// 竞猜截止小时:0–23 的整点
+const PREDICT_HOURS = Array.from({ length: 24 }, (_, hour) => hour);
+/* 第几天揭晓:0 当天 / 1 明天 / …… 存相对天数不存日期,模板复制出去照样成立 */
+const PREDICT_DAYS = Array.from({ length: 31 }, (_, day) => day);
+const PREDICT_DAY_LABEL = (day) => (day === 0 ? '当天' : day === 1 ? '明天' : day === 2 ? '后天' : '第 ' + day + ' 天');
+
+// 面板内即时报错的段(推理类三玩法)。见 data.gameConfigError
+const PANEL_LIVE_ERROR_SECTIONS = ['sort', 'match', 'classify'];
+
+// 适用场所预设
+const VENUE_OPTIONS = ['景区', '公园绿地', '商圈街区', '古镇老街', '博物馆', '校园', '室内场馆'];
+
+// 支持提示的完成方式(文字/选项/GPS)
+const HINT_METHODS = [1, 3, 5];
+
+/* 单选一律是 cy-dropdown(2026-09-22 用户定):bind:change 的 detail.value 是下标,存的是那一项的 key */
+function pickedItem(list, e) {
+  return list[Number(e.detail.value)];
+}
+
+// 据点玩法语义(cms_member_template.interaction_type),正交于 validationMethod。
+// 普通模板发布 DTO 没有这个字段,所以只在据点入口出现。
+const INTERACTION_TYPES = [
+  { key: 'city_story_card', label: '城市故事卡' },
+  { key: 'hidden_menu', label: '隐藏菜单' },
+  { key: 'photo_spot', label: '拍照点' },
+  { key: 'qr_checkin', label: '到店扫码' }
+];
+
+// 角色建档的选项 key 必须**跨题**唯一:服务端 AdvancedGameConfigValidator 按 key 定位加成,
+// 重名会写错变量且不报错,所以它直接拒(「建档选项的 key 不能重复」)。作者看不到 key,
+// 这里扫全部题目已占用的 key 统一取号 —— 只在题内去重的话,两道选择题都会是 A/B,
+// 保存必挂(2026-09-22 走查实跑配「新生儿登记」时撞上)。
+function nextProfileOptionKeys(questions, count) {
+  const used = new Set();
+  (questions || []).forEach((question) => (question.options || []).forEach((option) => used.add(String(option.key || ''))));
+  const keys = [];
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  for (let i = 0; keys.length < count; i += 1) {
+    const key = i < letters.length ? letters[i] : 'opt' + (i - letters.length + 1);
+    if (!used.has(key)) { used.add(key); keys.push(key); }
+  }
+  return keys;
+}
+
+/* 试玩出不来时说实话:检定是旅程里的一次掷骰,不是一屏玩法(C-04);其余才是真没填完。 */
+function noPreviewTip(section) {
+  if (section === 'album') return '请先为相册添加照片';
+  return section === 'check' ? 'D20 在旅程里掷骰，编辑页演不了' : '这个玩法还要再填一点才能试玩';
+}
+
+/* 存盘的 validationMethod 一处说清(L04-040,原先是 prepareFormData 里一行 400 字的嵌套判断):
+   ① 开了扫码参与 → 4(读回只靠 scan.enabled 显示「扫码」,存旧值 2 会被服务端拒,第十三轮 m3 / m7);
+   ② 拍照问答没开扫码:选了定位到达(5)或扫码(4)保留,否则 2(第十三轮 m3:有进行方式的主题里站点要先「到达」);
+   ③ 旧编辑器把高级问答存成空旧题(1/3 且旧题字段全空)→ 0,重存时交回高级判题;
+   ④ 其余原样。 */
+function resolveValidationMethod(formData, gameKey, advanced) {
+  const vm = formData.validationMethod;
+  const a = advanced || {};
+  if (a.scan && a.scan.enabled) return 4;
+  if (gameKey === 'qaShot') return [4, 5].includes(Number(vm)) ? vm : 2;
+  const legacyEmpty = !['questionName', 'questionAnswer', 'questionA', 'questionB', 'questionC', 'questionD']
+    .some(key => formData[key] && String(formData[key]).trim());
+  if (['qaText', 'qaPick'].includes(gameKey) && a.qa && a.qa.enabled && [1, 3].includes(vm) && legacyEmpty) return 0;
+  return vm;
+}
+
+Page({
+  ...r5Editor.methods, ...checkSection.methods, ...afterSection.methods, ...questoAuthor.methods, ...barterMixerAuthor.methods,
+  MODULE_DEFS: MODULE_DEFS,
+
+  _supportMatrix: null,
+  _toolSelected: templateTools.selected({}),
+  _toolSummaries: templateTools.summaries({}),
+  data: {
+    creatorLoginRequired: false,
+    // 封面素材来源声明(r2-create):assetId 只来自本次上传回包;label = 已声明的来源中文名
+    qaAnswerModes: QA_ANSWER_MODES, qaTriesOptions: QA_TRIES, qaRevealOptions: QA_REVEAL, qaFbImgMax: QA_FB_IMG_MAX,
+    ...r5Editor.data, ...checkSection.data, ...afterSection.data,
+    operationScope: '',
+    isMyScope: false, // R9-04:回填走个人草稿接口(/api/template/myinfo)
+    merchantAccess: merchantAccessPolicy.inactiveAccess(),
+    // 据点玩法语义(interaction_type,正交于 validationMethod)。只有 from=citynode 时显示。
+    interactionTypes: INTERACTION_TYPES,
+    // 「这个玩法怎么出现」的两档;被锁成只能整屏时整个下拉置灰,原因写在下面
+    presentOptions: [{ key: 'inline', label: '内嵌故事流' }, { key: 'fullscreen', label: '整屏' }],
+    diceCountOptions: [{ key: 1, label: '一颗' }, { key: 2, label: '两颗' }],
+    // 勋章双样式(用户 8-07 拍板):二维发光 / 3D 珐琅;珐琅建议透明角方图
+    medalStyleOptions: [{ key: 'glow', label: '二维发光' }, { key: 'enamel', label: '3D 珐琅' }],
+    interactionType: '',
+
+    statusBarHeight: getApp().globalData.statusBarHeight,
+    navBarHeight: getApp().globalData.navBarHeight,
+    reducedMotion: false,
+    sheetTop: 0,
+
+    // 2026-10-10 主人裁定：独立模板不再配置玩家人数 / 玩法时长（旧值后端原样保留）。
+
+    // 选中项 label 文本(wxml 直接读)
+    difficultyLabel: '',
+
+
+    // 玩法类别 - 多选
+    selectedCategoryIds: [],
+    descriptionMaxLength: 30,
+    defaultCover: '',
+    selectedCategoryNames: [],
+    categorySheetVisible: false,
+    categorySheetIds: '',
+    categoryList: [],
+
+    // 完成方式 tile
+    methodSupportsHint: false,
+    hintEnabled: false,
+    preferencePreview: [],
+    preferenceConfigError: '',
+    advanced: advancedGameConfig.defaultConfig(),
+    /* 玩法模块:一个节点只选一个玩法(真源=原型「模板编辑页 v2」)。
+       gameKey 是选中的那个,gameCurrent 是它在目录里的那一条,用来画已选卡。 */
+    gameGroups: nodeGameCatalog.PICKER_GROUPS.map(group => ({ title: group.title, items: group.items.map(item => Object.assign({}, item, { key: item.gameKey || item.forms?.[0].gameKey || item.key })) })).concat({ title: '互动工具', items: templateTools.TOOLS.map(item => Object.assign({ tool: true }, item)) }),
+    supportMatrixLoading: false, supportMatrixLoadError: '', supportError: '', supportReasons: {}, supportConditions: {},
+    slotKinds: templateTools.SLOT_KINDS,
+    toolScopes: templateTools.SCOPES,
+    votePolicies: templateTools.POLICIES,
+    toolSheetOpen: false,
+    toolKey: '',
+    toolDraft: {},
+    toolError: null,
+    gameKey: '',
+    gameCurrent: null,
+    gameSection: '',
+    /* 呈现方式(契约 §1.5):presentChoice = 当前生效档(显式配的,或默认表推的),
+       presentInlineLocked = 这个段是不是「只能全屏」那批 —— 那批的内嵌开关置灰并写明原因。 */
+    presentChoice: 'fullscreen',
+    /* 2026-10-30 所有玩法都能内嵌:撤掉 presentInlineLocked(不再置灰) */
+    /* 同上撤掉 presentLockReason */
+    // 这个玩法会不会真的执行限时(施工文档 §1.4)
+    timerAvailable: true,
+    gameSheetOpen: false,
+    // 找东西:当前要在图上标位置的那个目标(-1 = 没在标)
+    hotspotArming: -1,
+    hotspotFrame: '',
+    // 选择玩法半屏:分类快捷条当前在哪一组、要滚到哪个锚点
+    sheetGroup: 0,
+    // 签文池的换行草稿(编辑期事实源),与 advanced.dailySign.poems 一一对应
+    dailySignDrafts: [],
+    advancedConfigError: '',
+    /* 选中玩法面板内的即时报错。只给推理类三段算 —— 其余玩法的错已经有各自的必填提示,
+       全量在这里再报一遍会变成同一句话出现两处。 */
+    gameConfigError: '',
+    outcomePreview: [],
+    outcomeContractErrors: [],
+    timerTimeoutOptions: ['FAILED', 'EXPIRED'],
+    leaderboardMetricOptions: ['ELAPSED_TIME', 'SCORE', 'COMPLETED_UNITS'],
+    leaderboardScopeOptions: ['ACTIVITY', 'TOPIC'],
+    predictHourOptions: PREDICT_HOURS,
+    predictDayOptions: PREDICT_DAYS,
+    predictDayLabel: PREDICT_DAY_LABEL(1),
+    // 问答三种模式与扫码三种回复:key 是存进配置的稳定值,label 只给人看
+    // 与「完成方式」同一套 tile 读法:三选一都是图标 + 名字 + 一句说明 + 右侧单选点
+    scanKinds: [
+      { key: 'TEXT', iconName: 'edit', label: '文字', sub: '扫完弹一段话' },
+      { key: 'VOICE', iconName: 'play', label: '语音', sub: '扫完放一段录音' },
+      { key: 'IMAGE', iconName: 'image', label: '图片', sub: '扫完出一张图' },
+      { key: 'OVERLAY', iconName: 'camera', label: '显形', sub: '扫完东西出现在镜头里' },
+    ],
+    // 显形档的真 AR:东西钉在现实里,手机怎么转它都在原地(手机跑不动时自动回落成镜头上叠一张图)
+    scanArModes: [
+      { key: 'NONE', label: '不开', sub: '镜头上叠一张图' },
+      { key: 'PLANE', label: '放在地上', sub: '识别地面或桌面，点一下放在那儿' },
+      { key: 'MARKER', label: '认一张图', sub: '认出你拍的实物照片，贴着它长出来' },
+    ],
+    // 《预制人生》新段的可选值:key 是存进配置的稳定值(契约 §2),label 只给人看
+    profileKinds: [
+      { key: 'text', label: '打字答' },
+      { key: 'pick', label: '选项答' },
+    ],
+    // 状态写入的三个 op(真源 = AdvancedGameConfigValidator 的 EFFECT_OPS)
+    effectValueSlots: [], effectRows: {}, effectErrors: [], effectResourceDraft: null, effectResourceError: null,
+    effectResourceDisabledReason: '',
+    resourceEffectOps: [{ key: 'INC', label: '增加' }, { key: 'FLOOR', label: '恢复到至少' }],
+    effectOps: [
+      { key: 'INC', label: '加' },
+      { key: 'SET', label: '设为' },
+      { key: 'ADD_TAG', label: '挂标记' },
+    ],
+    // 条件修正预设(真源 = advanced-game-config.js 的 MOD_PRESETS,两处由对拍测试钉住)
+    hpLadderOn: false,        // 派生:advanced.check.mods 里阶梯全在
+    luckOptions: advancedGameConfig.LUCK_OPTIONS,
+    luckIndex: -1,            // 派生:-1 = 幸运开关关着
+    relaxOptions: [],         // 派生:按当前启用的玩法段生成的放宽
+    relaxIndex: -1,           // 派生:-1 = 放宽开关关着
+    // R14 检定三档(真源 = validateCheck 的 CHECK_TIERS,是唯一的难度表达)
+    checkTiers: [
+      { key: 'easy', label: '简单' },
+      { key: 'medium', label: '中等' },
+      { key: 'hard', label: '困难' },
+    ],
+    d20RollModes: [
+      { key: 'normal', label: '普通 · 掷一颗' },
+      { key: 'advantage', label: '优势 · 两颗取高' },
+      { key: 'disadvantage', label: '劣势 · 两颗取低' },
+    ],
+    photoCheckFallbacks: [
+      { key: 'retake', label: '让他重拍' },
+      { key: 'pass', label: '放过他' },
+    ],
+
+    // 完成奖励三 toggle
+    rwCoupon: false,
+    rwText: false,
+    rwMedal: false,
+    rwAny: false,
+
+    // 剧情多节点
+    storyBeats: [{ id: 1, text: '', tag: '', imgs: [] }],
+
+    // 优惠券
+    selectedCouponName: '',
+
+    // 通用底部选择器
+    pickerSheet: { open: false, key: '', title: '', options: [] },
+    qaAnswerError: '', qzHintTypes: questoAuthor.HINT_TYPES, ...questoAuthor.view(advancedGameConfig.defaultConfig()), // Questo 新玩法作者配置(questo-author.js)
+    segmentOn: {}, segmentAddOptions: [], clueContent: {},
+    // 以物换物 / 调音台的两张静态选项表(barter-mixer-author.js):物品图标、目标两档
+    bxIcons: barterMixerAuthor.ICON_OPTIONS, bxGoalKinds: barterMixerAuthor.GOAL_KINDS,
+
+    // 校验滚动(scroll-view 内)
+    scrollIntoView: '',
+
+    errors: {},
+    editorLoading: false,
+    loadError: '',
+    loadErrorIsAccess: false,
+    loadErrorIsOperation: false,
+    coverMediaUnusable: false,
+    submitting: false,
+    submittingAction: '',
+    lastSubmitAction: '',
+    submitError: '',
+    dirty: false,
+    formData: {
+      originalTemplateId: 0,
+      categoryId: 1,
+      title: "",
+      description: "",
+      imgUrl: "",
+
+      players: "",
+      usageLocation: "",
+      requiredMaterials: "",
+
+      duration: "",
+      difficulty: "",
+      isSync: 0,
+      ruleInstructions: "",
+      validationMethod: 0,
+      feedbackMethod: 0,
+      questionName: "",
+      questionAnswer: "",
+      feedbackText: "",
+      couponId: 0,
+      medalImg: "",
+      medalName: "",
+      medalStyle: "glow",
+      questionA: "",
+      questionB: "",
+      questionC: "",
+      questionD: "",
+      correctAnswer: "A",
+      activityCategoryids: "",
+
+      // 题干附件(看图答题 / 听音答题)。与「语音讲解」模块的 audioUrl 不是一回事:
+      // 那是整节点的导览音,这是这道题的题面。
+      questionImg: "",
+      questionAudio: "",
+      // 选项媒体,序列化自 optionItems 的 img/audio(见 utils/publish/option-media.js)
+      questionOptionMediaJson: "",
+      preferenceJson: "",
+      advancedConfigJson: "",
+      rewardRulesJson: "",
+      merchantGuide: "",
+      sensorType: "",
+      sensorConfig: "",
+      storyImg: "",
+
+      // 提示(并入完成方式)
+      hint1: "",
+      hint2: "",
+      answerReveal: "",
+
+      // 拍照
+      photoRequireDesc: "",
+      photoReview: 0,
+
+      // 语音
+      audioUrl: "",
+      audioDuration: "",
+      audioFileName: "",
+      audioFormat: "",
+
+      // 剧情:storyText 供玩家节点直接读取,storyJson 保存富剧情分节
+      storyText: "",
+      storyJson: "",
+
+      status: 1, // 0=草稿 1=发布
+    },
+
+    optionItems: [],
+    optionQuestion: "",
+
+    // 模块状态
+    moduleList: [],
+    availableModules: [],
+    showAddSheet: false,
+    canOpenPreview: false,
+    previewVisible: false,
+    /* 玩法规则的展示形态:一行一步。真值仍在 formData.ruleInstructions(换行分隔),
+       这里只是把它拆开给界面用,存盘前再拼回去 —— 不新建后端字段。 */
+    ruleSteps: [''],
+    // 2026-11-19 主人:选填项收进一个「高级设置」折叠组,记住展开状态(见 editor-layout.js 顶部定稿)
+    advancedOpen: false,
+    answerRuleRows: [],
+    qaPh: editorLayout.QA_PLACEHOLDERS,
+    advancedErrorField: '',
+    // 预览要演的那一屏玩法。null = 这个节点没开玩法配置,回落到基础验证那套
+    pvKit: null,
+    pvSimulated: false,
+    // 试玩玩完了没有:玩完才出「继续故事」(2026-11-21 lead 走查:玩的过程中不挂灰按钮)
+    pvDone: false,
+    // 整屏玩法时「试玩 · 不计成绩」小标的 top(px):退出键与微信胶囊两者下沿之下
+    pvSimTop: 0,
+    canPublishGame: false,
+    audioPreviewPlaying: false,
+
+    // 预览态状态机
+    pvSteps: [],
+    // 当前身份用不了的玩法:key → 原因。选玩法面板里标成锁住、点了不选中(服务端那道闸照旧)
+    lockedGames: {},
+    pvStep: 0,
+    pvStepKey: '',
+    pvStepLabel: '',
+    pvBeats: [],
+    pvMethodIconName: 'check',
+    pvMethodLabel: '无需验证',
+    pvChallengeTitle: '',
+    pvSubmitLabel: '完成',
+    pvAnswer: '',
+    pvSelected: null,
+    pvWrong: false,
+    pvHasHint: false,
+    pvHintShown: false,
+    pvHintText: '',
+    creationSuccess: { show: false, eyebrow: '', title: '', detail: '', metaPrimary: '', metaSecondary: '', primaryText: '', secondaryText: '', showSecondary: false, primaryAction: '', secondaryAction: '', closeAction: '' },
+    /* 本页两支成功态并存:「节点玩法已保存」留 creation-success(有 dismiss 分叉),
+       「模板草稿已保存 / 已发布」走结果面板(纯导航,收敛成直接跳)。 */
+    resultSheet: { show: false, kind: 'success', title: '', sub: '', meta: '', pill: '',
+      why: '', duration: 2000 },
+  },
+
+  goBack() {
+    if (this.data.previewVisible) {
+      this.destroyPreviewAudio();
+      this.closePreview();
+      return;
+    }
+    if (this.data.submitting) return;
+    if (!this.data.dirty) {
+      this.exitPage();
+      return;
+    }
+    modal.show({
+      title: '放弃未保存的玩法？',
+      content: '本次修改尚未保存为草稿。',
+      confirmText: '放弃',
+      cancelText: '继续编辑',
+      success: (res) => {
+        if (res.confirm) this.exitPage();
+      }
+    });
+  },
+
+  exitPage() {
+    if (this._disposed) return;
+    this.destroyPreviewAudio();
+    if (this._exitAfterPreview) return;
+    // 原生返回拦截关闭完成后再退页，setData 回调时它可能仍在退场。
+    if (this.data.previewVisible) {
+      this._exitAfterPreview = true;
+      this.setData({ previewVisible: false });
+      return;
+    }
+    wx.navigateBack({
+      delta: 1,
+      fail: () => wx.switchTab({ url: '/pages/template/index' })
+    });
+  },
+
+  onHide: function () { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1; this._hidden = true; },
+
+  onUnload: function () { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1;
+    this._unloaded = true;
+    this._disposed = true;
+    this._templateLoadToken = (this._templateLoadToken || 0) + 1;
+    this._albumEditRevision = (this._albumEditRevision || 0) + 1;
+    this.destroyPreviewAudio();
+    // L04-043 / L04-052:罗盘采样、浮层退场动画的定时器别在已卸载的页面上再 setData
+    if (this._compassDone) this._compassDone(true);
+    if (this._cgOutTimer) { clearTimeout(this._cgOutTimer); this._cgOutTimer = null; }
+  },
+
+  onShow: function () {
+    this._hidden = false;
+    if (this._readSessionChanged) { this._readSessionChanged = false; if (!this._creatorOwnerChanged()) this.getData(); return; }
+    if (this._creatorOwnerChanged() || this.data.creatorLoginRequired) return;
+    if (this._editorMemberId !== undefined && this._editorMemberId !== editorMemberId()) {
+      wx.switchTab({ url: '/pages/template/index' });
+      return;
+    }
+    this.syncNativeTheme();
+    const reducedMotion = readReducedMotion();
+    if (this.data.reducedMotion !== reducedMotion) this.setData({ reducedMotion });
+  },
+
+  syncNativeTheme() {
+    applyTheme(this.data.previewVisible && this.data.pvKit && this.data.pvStepKey === 'challenge' ? 'dark' : 'light');
+  },
+
+  // ===== 玩法配置（模板级，配置快照由服务端在开局时冻结） =====
+  chooseAlbumImage(e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const current = this.data.advanced.album.images;
+    const revision = this._albumEditRevision;
+    const replacing = Number.isInteger(index) && index >= 0 && index < current.length;
+    if (!replacing && current.length >= 6) return;
+    const target = replacing ? current[index] : null;
+    app.chooseImage((res) => {
+      const url = res && res[0];
+      if (!url || this.data.gameKey !== 'album' || revision !== this._albumEditRevision) return;
+      // 上传期间可能改了配文或删了照片:合进最新的列表,不拿开始时的快照覆盖
+      const images = this.data.advanced.album.images.slice();
+      if (replacing) {
+        if (!images[index] || images[index].url !== target.url) { toast('照片顺序变了，请重新替换'); return; }
+        images[index] = Object.assign({}, images[index], { url });
+      } else {
+        if (images.length >= 6) { toast('最多 6 张照片'); return; }
+        images.push({ url, line: '' });
+      }
+      this._setFormState({ 'advanced.album.images': images, advancedConfigError: '' });
+    }, 1);
+  },
+  onAlbumLine(e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const images = this.data.advanced.album.images.map((image, i) => i === index
+      ? Object.assign({}, image, { line: e.detail.value }) : image);
+    this._setFormState({ 'advanced.album.images': images, advancedConfigError: '' });
+  },
+  removeAlbumImage(e) {
+    const index = Number(e.currentTarget.dataset.index);
+    this._setFormState({ 'advanced.album.images': this.data.advanced.album.images.filter((_, i) => i !== index), advancedConfigError: '' });
+  },
+
+  onAdvancedToggle: function (e) {
+    const key = e.currentTarget.dataset.key;
+    this._setFormState({ [`advanced.${key}.enabled`]: !!e.detail.value, advancedConfigError: '' });
+  },
+  onAdvancedField: function (e) {
+    const section = e.currentTarget.dataset.section;
+    const field = e.currentTarget.dataset.field;
+    const numeric = e.currentTarget.dataset.numeric === '1';
+    const value = numeric ? Number(e.detail.value) : e.detail.value;
+    this._setFormState({ [`advanced.${section}.${field}`]: value, advancedConfigError: '' });
+  },
+  /* 段里的子开关(目前只有弹球的「限时」)。
+     不复用 onAdvancedToggle:那个的 data-key 拼的是 `advanced.<key>.enabled`,
+     而这里要改的是 `advanced.ballShake.timed` —— 硬塞进去会写出
+     `advanced.ballShake.timed.enabled` 这种没人读的字段,而且不报错。 */
+  onAdvancedSubToggle: function (e) {
+    const path = e.currentTarget.dataset.key;
+    this._setFormState({ [`advanced.${path}`]: !!e.detail.value, advancedConfigError: '' });
+  },
+  /* 罗盘取值:商家站在目标方向上点一下,量 1.5 秒取中位数填进 bearing。
+     取中位数不取最后一帧 —— 单帧读数会被手机壳里的磁铁、金属桌面瞬间带偏几十度。
+     模拟器不报罗盘:等不到一帧就明说,别让商家以为「转半天没反应是我站得不对」。 */
+  onCompassCapture: function () {
+    if (this._compassCapturing) return;
+    this._compassCapturing = true;
+    const samples = [];
+    const cb = (res) => {
+      const d = res && Number(res.direction);
+      if (Number.isFinite(d)) samples.push(d);
+    };
+    let fired = false;
+    const done = (silent) => {
+      if (fired) return;
+      fired = true;
+      clearTimeout(this._compassTimer); this._compassTimer = null; this._compassDone = null;
+      this._compassCapturing = false;
+      try { if (wx.offCompassChange) wx.offCompassChange(cb); } catch (err) { /* 没注册成功过 */ }
+      try { wx.stopCompass(); } catch (err) { /* 已经停了 */ }
+      if (silent === true) return;   // 页面卸载:只收监听,不再写表单、不弹提示(L04-043)
+      if (!samples.length) { toast('这台设备没报出方向，请在真机上试'); return; }
+      const sorted = samples.slice().sort((a, b) => a - b);
+      const mid = sorted[Math.floor(sorted.length / 2)];
+      this._setFormState({ 'advanced.compass.bearing': Math.round(((mid % 360) + 360) % 360), advancedConfigError: '' });
+      toast('已记下当前方向');
+    };
+    wx.onCompassChange(cb);
+    this._compassDone = done;
+    this._compassTimer = setTimeout(done, 1500);
+  },
+  // 一颗还是两颗。两颗只报点数和,不对应任务 —— 拿和去索引六个面会越界
+  onDiceCount: function (e) {
+    const count = (pickedItem(this.data.diceCountOptions, e) || { key: 1 }).key;
+    this._setFormState({ 'advanced.diceRoll.diceCount': count, advancedConfigError: '' });
+  },
+  onD20RollMode: function (e) {
+    const mode = pickedItem(this.data.d20RollModes, e);
+    if (mode) this._setFormState({ 'advanced.diceRoll.rollMode': mode.key, advancedConfigError: '' });
+  },
+  // 六个面各一个输入框。走下标路径,不能复用 onAdvancedField 的 `段.字段` 形状
+  onDiceFace: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    if (!(index >= 0 && index < 6)) return;
+    const face = this.data.advanced.diceRoll.faces[index];
+    const value = face && typeof face === 'object' ? Object.assign({}, face, { action: e.detail.value }) : e.detail.value;
+    this._setFormState({ [`advanced.diceRoll.faces[${index}]`]: value, advancedConfigError: '' });
+  },
+  onAdvancedPicker: function (e) {
+    const section = e.currentTarget.dataset.section;
+    const field = e.currentTarget.dataset.field;
+    const options = this.data[e.currentTarget.dataset.options] || [];
+    const value = options[Number(e.detail.value)];
+    const patch = { [`advanced.${section}.${field}`]: value };
+    // 第几天揭晓要同时更新那颗下拉自己显示的字:数字存 0/1/2,人看的是「当天/明天/后天」
+    if (section === 'predict' && field === 'revealDays') patch.predictDayLabel = PREDICT_DAY_LABEL(value);
+    this._setFormState(patch);
+  },
+  // 三个新玩法各有一组可增删的行(比价商品 / 找东西目标 / 竞猜选项)。
+  // 用一组通用增删改代替三套复制粘贴;行的默认形状按「段.字段」查表。
+  // id / key 一律自动生成,不让商家手填 —— 手填必然出现重复和空值,而那两种错都要到
+  // 提交时才被服务端拦下,商家看到的是一句读不懂的报错。
+  addAdvancedRow: function (e) {
+    const path = e.currentTarget.dataset.path;
+    const make = ADVANCED_ROW_TEMPLATES[path];
+    if (!make) return;
+    const list = this._advancedList(path).concat(make());
+    this._setFormState({ [`advanced.${path}`]: list, advancedConfigError: '' });
+  },
+  updateAdvancedRow: function (e) {
+    const path = e.currentTarget.dataset.path;
+    const index = Number(e.currentTarget.dataset.index);
+    const field = e.currentTarget.dataset.field;
+    // scale=100:商家按元输入,存回去是分(服务端只认分)
+    const scale = Number(e.currentTarget.dataset.scale) || 0;
+    const numeric = e.currentTarget.dataset.numeric === '1' || scale > 0;
+    let value = e.detail.value;
+    if (numeric) {
+      const parsed = Number(value);
+      // 输入框允许暂时为空/半截小数,存 NaN 会被 normalize 删键,不会顶个 0 上去
+      value = scale > 0 ? Math.round(parsed * scale) : parsed;
+    }
+    const list = this._advancedList(path)
+      .map((row, i) => (i === index ? Object.assign({}, row, { [field]: value }) : row));
+    this._setFormState({ [`advanced.${path}`]: list, advancedConfigError: '' });
+  },
+  removeAdvancedRow: function (e) {
+    const path = e.currentTarget.dataset.path;
+    const index = Number(e.currentTarget.dataset.index);
+    const list = this._advancedList(path).filter((_, i) => i !== index);
+    this._setFormState({ [`advanced.${path}`]: list, advancedConfigError: '' });
+  },
+  _advancedList: function (path) {
+    const parts = path.split('.');
+    const section = this.data.advanced[parts[0]] || {};
+    return Array.isArray(section[parts[1]]) ? section[parts[1]] : [];
+  },
+  addRandomItem: function () {
+    const items = (this.data.advanced.random.items || []).concat({
+      id: rowId('item'), label: '', weight: 1, content: ''
+    });
+    this._setFormState({ 'advanced.random.items': items });
+  },
+  updateRandomItem: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const field = e.currentTarget.dataset.field;
+    const numeric = e.currentTarget.dataset.numeric === '1';
+    const items = this.data.advanced.random.items.map((item, i) => i === index
+      ? Object.assign({}, item, { [field]: numeric ? Number(e.detail.value) : e.detail.value }) : item);
+    this._setFormState({ 'advanced.random.items': items });
+  },
+  removeRandomItem: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    this._setFormState({ 'advanced.random.items': this.data.advanced.random.items.filter((_, i) => i !== index) });
+  },
+  _setBranchSteps: function (steps) {
+    // Round5 #11:步骤 / 选项 ID 与结局 outcomeCode 由系统生成且不给创作者看;旧数据缺的在这里补齐,
+    // 起点步骤失效时落到第一段(旧设置分支同样适用)。
+    steps = (steps || []).map((step) => (step && step.terminal && !step.outcomeCode && step.id
+      ? Object.assign({}, step, { outcomeCode: step.id }) : step));
+    const patch = { 'advanced.branch.steps': steps };
+    if (this.data.advanced.branch.enabled && this.data.advanced.outcomeRules?.version !== 1
+        && !steps.some(step => step.id === this.data.advanced.branch.startStepId)) {
+      patch['advanced.branch.startStepId'] = steps[0]?.id || '';
+    }
+    if (this.data.gameKey && !this.data.r5Editor.nextDisabledReason && this.data.gameSection !== 'branch' && (this.data.advanced.outcomeRules?.version === 1 || !this.data.advanced.branch.enabled)) {
+      patch['advanced.branch.enabled'] = steps.length > 0;
+      patch['advanced.branch.startStepId'] = steps.some(step => step.id === this.data.advanced.branch.startStepId) ? this.data.advanced.branch.startStepId : steps[0]?.id || '';
+      if (!this.data.advanced.outcomeRules) patch['advanced.outcomeRules'] = Object.assign({ version: 1, pass: {} }, require('../utils/publish/outcome-after.js').once(this.data.advanced) ? {} : { fail: {} });
+    }
+    this._setFormState(patch);
+  },
+  pickBranchNextStep: function (e) {
+    const option = this.data.r5Editor.feedbackStepOptions[Number(e.detail.value)];
+    if (option) this.updateBranchOption({ currentTarget: { dataset: Object.assign({}, e.currentTarget.dataset, { field: 'nextStepId' }) }, detail: { value: option.key } });
+  },
+  addBranchStep: function () {
+    if ((this.data.advanced.branch.steps || []).length >= 50) return this.setData({ r5PanelError: '最多配置 50 段反馈' });
+    const id = rowId('step');
+    const steps = (this.data.advanced.branch.steps || []).concat({
+      id, title: '', body: '', terminal: true,
+      outcomeCode: id, outcomeLabel: '结束本站反馈', options: []
+    });
+    this._setBranchSteps(steps);
+  },
+  updateBranchStep: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const field = e.currentTarget.dataset.field;
+    const steps = this.data.advanced.branch.steps.map((step, i) => i === index
+      ? Object.assign({}, step, { [field]: e.detail.value }) : step);
+    this._setBranchSteps(steps);
+  },
+  toggleBranchTerminal: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const terminal = !!e.detail.value;
+    const steps = this.data.advanced.branch.steps.map((step, i) => i === index
+      ? Object.assign({}, step, {
+        terminal,
+        outcomeCode: terminal ? (step.outcomeCode || step.id) : step.outcomeCode,
+        outcomeLabel: terminal ? (step.outcomeLabel || step.title || '完成节点') : step.outcomeLabel,
+        options: terminal ? [] : step.options
+      }) : step);
+    this._setBranchSteps(steps);
+  },
+  removeBranchStep: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    this._setBranchSteps(this.data.advanced.branch.steps.filter((_, i) => i !== index));
+  },
+  addBranchOption: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    if ((this.data.advanced.branch.steps[index]?.options || []).length >= 12) return this.setData({ r5PanelError: '每段最多配置 12 个选项' });
+    const steps = this.data.advanced.branch.steps.map((step, i) => i === index
+      ? Object.assign({}, step, { terminal: false, options: (step.options || []).concat({
+        id: rowId('option'), label: '', nextStepId: '', score: 0
+      }) }) : step);
+    this._setBranchSteps(steps);
+  },
+  updateBranchOption: function (e) {
+    const stepIndex = Number(e.currentTarget.dataset.stepindex);
+    const optionIndex = Number(e.currentTarget.dataset.optionindex);
+    const field = e.currentTarget.dataset.field;
+    const numeric = e.currentTarget.dataset.numeric === '1';
+    const steps = this.data.advanced.branch.steps.map((step, si) => si !== stepIndex ? step : Object.assign({}, step, {
+      options: step.options.map((option, oi) => oi === optionIndex
+        ? Object.assign({}, option, { [field]: numeric ? Number(e.detail.value) : e.detail.value }) : option)
+    }));
+    this._setBranchSteps(steps);
+  },
+  removeBranchOption: function (e) {
+    const stepIndex = Number(e.currentTarget.dataset.stepindex);
+    const optionIndex = Number(e.currentTarget.dataset.optionindex);
+    const steps = this.data.advanced.branch.steps.map((step, si) => si !== stepIndex ? step : Object.assign({}, step, {
+      options: step.options.filter((_, oi) => oi !== optionIndex)
+    }));
+    this._setBranchSteps(steps);
+  },
+
+  // ===== v5.1 新玩法的重复项编辑器 =====
+  // 标量字段(标题/时段/目标步数…)走上面的通用 onAdvancedField / onAdvancedPicker,
+  // 只有数组形状需要各自的增删改 —— 它们的元素形状彼此不同,套不进一个通用函数。
+
+  /** 签文池是二维数组(条 → 行),textarea 用换行编辑更顺手,所以维持一份字符串草稿。
+      草稿是编辑期的事实源,poems 每次输入都从草稿整体重算 —— 两份不会漂移。 */
+  _dailySignDraftsOf: function (model) {
+    const poems = (model && model.dailySign && model.dailySign.poems) || [];
+    return (Array.isArray(poems) ? poems : []).map(poem => (Array.isArray(poem) ? poem : [poem]).join('\n'));
+  },
+  _poemsOfDrafts: function (drafts) {
+    return drafts.map(draft => String(draft || '').split('\n').map(line => line.trim()).filter(Boolean));
+  },
+  addDailyPoem: function () {
+    const drafts = (this.data.dailySignDrafts || []).concat('');
+    this._setFormState({ dailySignDrafts: drafts, 'advanced.dailySign.poems': this._poemsOfDrafts(drafts), advancedConfigError: '' });
+  },
+  updateDailyPoem: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const drafts = (this.data.dailySignDrafts || []).map((draft, i) => i === index ? e.detail.value : draft);
+    this._setFormState({ dailySignDrafts: drafts, 'advanced.dailySign.poems': this._poemsOfDrafts(drafts), advancedConfigError: '' });
+  },
+  removeDailyPoem: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const drafts = (this.data.dailySignDrafts || []).filter((_, i) => i !== index);
+    this._setFormState({ dailySignDrafts: drafts, 'advanced.dailySign.poems': this._poemsOfDrafts(drafts), advancedConfigError: '' });
+  },
+
+  addBlindOption: function () {
+    const options = this.data.advanced.blindTaste.options || [];
+    if (options.length >= 6) return toast('盲品选项最多 6 项');
+    // key 用 A/B/C… 顺位补第一个没被占用的字母,避免和已有选项撞 key
+    const used = options.map(option => String(option.key || ''));
+    const key = 'ABCDEFGHIJ'.split('').find(letter => used.indexOf(letter) < 0) || `opt_${options.length + 1}`;
+    this._setFormState({ 'advanced.blindTaste.options': options.concat({ key, label: '' }), advancedConfigError: '' });
+  },
+  updateBlindOption: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const field = e.currentTarget.dataset.field;
+    const options = this.data.advanced.blindTaste.options.map((option, i) => i === index
+      ? Object.assign({}, option, { [field]: e.detail.value }) : option);
+    const patch = { 'advanced.blindTaste.options': options, advancedConfigError: '' };
+    // 改的就是当前答案那一项的 key ⇒ answerKey 跟着走,否则答案会指向一个不存在的选项
+    if (field === 'key' && this.data.advanced.blindTaste.answerKey === this.data.advanced.blindTaste.options[index].key) {
+      patch['advanced.blindTaste.answerKey'] = e.detail.value;
+    }
+    this._setFormState(patch);
+  },
+  removeBlindOption: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const removed = this.data.advanced.blindTaste.options[index];
+    const options = this.data.advanced.blindTaste.options.filter((_, i) => i !== index);
+    const patch = { 'advanced.blindTaste.options': options, advancedConfigError: '' };
+    // 删掉的正好是答案 ⇒ 落到剩下的第一项,而不是留一个悬空 answerKey
+    if (removed && this.data.advanced.blindTaste.answerKey === removed.key) {
+      patch['advanced.blindTaste.answerKey'] = options.length ? options[0].key : '';
+    }
+    this._setFormState(patch);
+  },
+  setBlindAnswer: function (e) {
+    this._setFormState({ 'advanced.blindTaste.answerKey': e.currentTarget.dataset.key, advancedConfigError: '' });
+  },
+
+  // ===== 《预制人生》五段:建档 / 拍照审核 / 检定 / 留言 / 限时打字 =====
+  // 标量字段照样走 onAdvancedField / onAdvancedSubToggle,只有建档的问题与选项、
+  // 留言的预设短句是列表形状,需要各自的增删改(与签文池、盲品选项同一套做法)。
+  addProfileQuestion: function () {
+    const questions = (this.data.advanced.profile || {}).questions || [];
+    if (questions.length >= 8) return toast('建档最多 8 个问题');
+    // 变量名自动给一个没被占用的 —— 留空会直接吃校验红,而商家以为自己只是还没填
+    const used = questions.map((question) => String(question.key || ''));
+    let seq = questions.length + 1;
+    while (used.indexOf('q' + seq) >= 0) seq += 1;
+    this._setFormState({
+      'advanced.profile.questions': questions.concat({
+        key: 'q' + seq, label: '', kind: 'text', maxLength: 12, required: true
+      }),
+      advancedConfigError: ''
+    });
+  },
+  updateProfileQuestion: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const field = e.currentTarget.dataset.field;
+    const numeric = e.currentTarget.dataset.numeric === '1';
+    const questions = (this.data.advanced.profile.questions || []).map((question, i) => i === index
+      ? Object.assign({}, question, { [field]: numeric ? Number(e.detail.value) : e.detail.value, required: true })
+      : question);
+    this._setFormState({ 'advanced.profile.questions': questions, advancedConfigError: '' });
+  },
+  /** 保存成功页按玩法类型给图标(2026-09-23 用户:拍照类要是相机)。与游玩页入口卡同一套判法。 */
+  _gameIcon: function () {
+    const a = this.data.advanced || {};
+    const on = (k) => !!(a[k] && a[k].enabled);
+    if (Number(this.data.formData && this.data.formData.validationMethod) === 2 || on('photoCheck') || (on('qa') && String(a.qa.mode || '').toUpperCase() === 'SHOT')) return 'camera';
+    if (on('note')) return 'edit';
+    if (on('steps')) return 'walk';
+    return 'play';
+  },
+  toggleProfileKaccha: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const questions = (this.data.advanced.profile.questions || []).map((question, i) => {
+      if (i !== index) return question;
+      const kaccha = Object.assign({ var: 'counter.instability', gte: 4, voice: '' }, question.kaccha, { enabled: !!e.detail.value });
+      if (!kaccha.option) kaccha.option = ((question.options || [])[0] || {}).key || '';
+      return Object.assign({}, question, { kaccha });
+    });
+    this._setFormState({ 'advanced.profile.questions': questions, advancedConfigError: '' });
+  },
+  pickProfileKaccha: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const question = (this.data.advanced.profile.questions || [])[index] || {};
+    const picked = pickedItem(question.options || [], e);
+    if (picked) this.updateProfileKaccha({ currentTarget: { dataset: { index, field: 'option' } }, detail: { value: picked.key } });
+  },
+  updateProfileKaccha: function (e) {
+    const d = e.currentTarget.dataset;
+    const index = Number(d.index);
+    const raw = e.detail.value;
+    const questions = (this.data.advanced.profile.questions || []).map((question, i) => i === index
+      ? Object.assign({}, question, { kaccha: Object.assign({}, question.kaccha, { [d.field]: d.numeric === '1' ? Number(raw) : raw }) })
+      : question);
+    this._setFormState({ 'advanced.profile.questions': questions, advancedConfigError: '' });
+  },
+  removeProfileQuestion: function (e) {
+    const questions = (this.data.advanced.profile.questions || []);
+    // 契约 §2.1:questions 至少 1 条。删到空 = 这一屏什么都不问,不如关掉这段
+    if (questions.length <= 1) return toast('建档至少留一个问题');
+    const index = Number(e.currentTarget.dataset.index);
+    this._setFormState({
+      'advanced.profile.questions': questions.filter((_, i) => i !== index),
+      advancedConfigError: ''
+    });
+  },
+  /** 打字题 ↔ 选项题。切到选项题时补两个空选项 —— 一个 options 都没有的 pick
+      在契约里必红(2–6 个),而商家会以为自己只是刚切过来。 */
+  pickProfileKind: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const picked = pickedItem(this.data.profileKinds, e);
+    const kind = picked && picked.key === 'pick' ? 'pick' : 'text';
+    const questions = (this.data.advanced.profile.questions || []).map((question, i) => {
+      if (i !== index) return question;
+      if (kind === 'text') return Object.assign({}, question, { kind: 'text', required: true });
+      const seed = nextProfileOptionKeys(this.data.advanced.profile.questions, 2);
+      const options = (question.options || []).length >= 2
+        ? question.options
+        : seed.map((key) => ({ key, label: '', effects: [] }));
+      return Object.assign({}, question, { kind: 'pick', options, required: true });
+    });
+    this._setFormState({ 'advanced.profile.questions': questions, advancedConfigError: '' });
+  },
+  addProfileOption: function (e) {
+    const qIndex = Number(e.currentTarget.dataset.qindex);
+    const questions = (this.data.advanced.profile.questions || []).map((question, i) => {
+      if (i !== qIndex) return question;
+      const options = question.options || [];
+      if (options.length >= 6) return question;
+      const key = nextProfileOptionKeys(this.data.advanced.profile.questions, 1)[0];
+      return Object.assign({}, question, { options: options.concat({ key, label: '', effects: [] }) });
+    });
+    this._setFormState({ 'advanced.profile.questions': questions, advancedConfigError: '' });
+  },
+  updateProfileOption: function (e) {
+    const qIndex = Number(e.currentTarget.dataset.qindex);
+    const oIndex = Number(e.currentTarget.dataset.index);
+    const field = e.currentTarget.dataset.field;
+    const questions = (this.data.advanced.profile.questions || []).map((question, i) => i !== qIndex
+      ? question
+      : Object.assign({}, question, {
+        options: (question.options || []).map((option, j) => j === oIndex
+          ? Object.assign({}, option, { [field]: e.detail.value }) : option)
+      }));
+    this._setFormState({ 'advanced.profile.questions': questions, advancedConfigError: '' });
+  },
+  // 原有效果来源共用编辑器；资源行 var 引用 VALUE 槽，旧变量行不自动迁移。
+  _refreshEffectResources: function () {
+    const advanced = this.data.advanced;
+    const slots = templateTools.slotsOf(advanced);
+    const rows = {};
+    templateTools.effectPaths(advanced).forEach(path => {
+      rows[path] = templateTools.effectsAt(advanced, path).map(row => {
+        if (!row || typeof row !== 'object') return { key: '', label: '', legacy: false, missing: true };
+        const slot = slots.find(slot => slot.key === row.var && slot.kind === 'VALUE');
+        const legacy = !slot && row.op !== 'FLOOR' && /^(counter\.|clue\.|relation\.|sys\.)/.test(row.var || '') || row.op === 'ADD_TAG';
+        return { key: slot ? slot.key : '', label: slot ? slot.label : '', legacy,
+          missing: !legacy && !!row.var && !slot };
+      });
+    });
+    this.setData({ effectValueSlots: templateTools.slotChoices(slots, 'VALUE'), effectRows: rows,
+      effectErrors: templateTools.effectSlotErrors(advanced) });
+  },
+  openEffectResource: function (e, declareNew) {
+    const reason = supportMatrix.effectSlotPolicy(this._supportMatrix, this.data.advanced);
+    if (reason) { this.setData({ effectResourceError: { field: 'key', error: reason } }); return; }
+    const { path, index } = e.currentTarget.dataset;
+    if (!templateTools.effectPaths(this.data.advanced).includes(path)) return;
+    const row = templateTools.effectsAt(this.data.advanced, path)[Number(index)];
+    if (!row) return;
+    const slot = templateTools.slotsOf(this.data.advanced).find(slot => slot.key === row.var && slot.kind === 'VALUE');
+    this.setData({ effectResourceDraft: { path, index: Number(index), key: !declareNew && slot ? slot.key : '', label: '' }, effectResourceError: null });
+  },
+  updateEffectResourceField: function (e) {
+    const field = e.currentTarget.dataset.field;
+    if (!this.data.effectResourceDraft || !['key', 'label'].includes(field)) return;
+    const value = field === 'key' ? this.data.effectValueSlots[Number(e.detail.value)]?.key : e.detail.value;
+    if (value == null) return;
+    this.setData({ effectResourceDraft: Object.assign({}, this.data.effectResourceDraft, { [field]: value }), effectResourceError: null });
+  },
+  closeEffectResource: function () { this.setData({ effectResourceDraft: null, effectResourceError: null }); },
+  saveEffectResource: function () {
+    const draft = this.data.effectResourceDraft;
+    if (!draft) return;
+    const result = templateTools.bindEffect(this.data.advanced, draft.path, draft.index, draft.key, draft.label);
+    if (result.error) { this.setData({ effectResourceError: result }); return; }
+    this._setFormState({ advanced: result.value, effectResourceDraft: null, effectResourceError: null, advancedConfigError: '' });
+  },
+  pickEffectResource: function (e) {
+    const reason = supportMatrix.effectSlotPolicy(this._supportMatrix, this.data.advanced);
+    if (reason) { this.setData({ effectResourceError: { field: 'key', error: reason } }); return; }
+    const choice = this.data.effectValueSlots[Number(e.detail.value)];
+    if (!choice) return;
+    if (!choice.key) return this.openEffectResource(e, true);
+    const { path, index } = e.currentTarget.dataset;
+    const result = templateTools.bindEffect(this.data.advanced, path, Number(index), choice.key);
+    if (result.error) { this.setData({ effectResourceError: result }); return; }
+    this._setFormState({ advanced: result.value, effectResourceError: null, advancedConfigError: '' });
+  },
+  _effectsList: function (path) {
+    const list = String(path || '').split('.').reduce((node, key) => {
+      if (node == null) return undefined;
+      return /^\d+$/.test(key) ? node[Number(key)] : node[key];
+    }, this.data.advanced);
+    return Array.isArray(list) ? list : [];
+  },
+  _setEffects: function (path, list) {
+    if (!templateTools.effectPaths(this.data.advanced).includes(path)
+      && path !== 'qa.options' && !/^profile\.questions\.\d+\.options$/.test(path)) return;
+    // 数字段要写成 [0] 下标 —— setData 的路径认数组下标,不认 `.0`
+    const dataPath = 'advanced' + String(path || '').split('.')
+      .map((key) => (/^\d+$/.test(key) ? `[${key}]` : `.${key}`)).join('');
+    this._setFormState({ [dataPath]: list, effectResourceError: null, advancedConfigError: '' });
+  },
+  /** 「记住这个选择」:给选项挂 / 摘一条贴标签效果。标签名自动生成(tag.m_ + 6 位),作者不用起名 ——
+      结局、伏笔、后文里挑的是选项本身的文字(optionTagsOf 按选项文案列出来)。 */
+  toggleOptionMemo: function (e) {
+    const d = e.currentTarget.dataset;
+    const index = Number(d.index);
+    const rows = this._effectsList(d.path);
+    const next = rows.map((row, i) => {
+      if (i !== index) return row;
+      const kept = (row.effects || []).filter((eff) => !(eff && eff.op === 'ADD_TAG' && String(eff.value || '').indexOf('tag.m_') === 0));
+      if (e.detail.value) kept.push({ var: '', op: 'ADD_TAG', value: 'tag.m_' + Math.random().toString(36).slice(2, 8).replace(/^[0-9]/, 'a') });
+      return Object.assign({}, row, { effects: kept });
+    });
+    this._setEffects(d.path, next);
+  },
+  /** 选项的「信任」:每个角色一个 ±(-2..2),0 收起成名字药丸;与剧情分支选项同一组件、同一份 trust 形状。 */
+  onOptionTrust: function (e) {
+    const d = e.currentTarget.dataset;
+    const index = Number(d.index);
+    const rows = this._effectsList(d.path);
+    if (!rows[index]) return;
+    const value = e.detail && e.detail.value != null ? Number(e.detail.value) : Number(d.v);
+    const order = (this.data.castMembers || []).map((m) => m.id);
+    const next = rows.map((row, i) => {
+      if (i !== index) return row;
+      const trust = storyCast.setTrust(row.trust, d.cast, value, order);
+      const out = Object.assign({}, row, { trust });
+      if (!trust.length) delete out.trust;
+      return out;
+    });
+    this._setEffects(d.path, next);
+  },
+  addEffectRow: function (e) {
+    const path = e.currentTarget.dataset.path;
+    const list = this._effectsList(path);
+    if (list.length >= 16) return toast('一项最多配 16 条效果');
+    this._setEffects(path, list.concat({ var: '', op: 'INC', value: 1 }));
+  },
+  updateEffectField: function (e) {
+    const path = e.currentTarget.dataset.path;
+    const index = Number(e.currentTarget.dataset.index);
+    const field = e.currentTarget.dataset.field;
+    if (!['var', 'value'].includes(field)) return;
+    const row = this._effectsList(path)[index];
+    if (field === 'var' && templateTools.slotsOf(this.data.advanced).some(slot => slot.key === row?.var)) return toast('请从所需数值资源中选择');
+    const list = this._effectsList(path).map((row, i) => {
+      if (i !== index) return row;
+      // ADD_TAG 的值是 tag 字符串,数值 op 的值是整数 —— 混着存会让服务端判格式错
+      const next = Object.assign({}, row, { [field]: e.detail.value });
+      if (field === 'value' && row.op !== 'ADD_TAG') next.value = Number(e.detail.value);
+      return next;
+    });
+    this._setEffects(path, list);
+  },
+  pickEffectOp: function (e) {
+    const path = e.currentTarget.dataset.path;
+    const index = Number(e.currentTarget.dataset.index);
+    // 画像段是下拉(按下标取);检定段还是芯片(data-op 带值)—— 检定段改成下拉后删掉 data-op 这条路
+    const row = this._effectsList(path)[index];
+    const bound = this.data.effectRows[path]?.[index]?.legacy === false
+      || templateTools.slotsOf(this.data.advanced).some(slot => slot.kind === 'VALUE' && slot.key === row?.var);
+    const picked = pickedItem(bound ? this.data.resourceEffectOps : this.data.effectOps, e);
+    const op = e.currentTarget.dataset.op || (picked && picked.key) || 'INC';
+    if (bound && !['INC', 'FLOOR'].includes(op)) return toast('请选择增加或恢复到至少');
+    const list = this._effectsList(path).map((row, i) => {
+      if (i !== index) return row;
+      // 换 op 就把值换成那一档的形状:数字 ↔ tag,不留下一个上一档的残值
+      const value = op === 'ADD_TAG'
+        ? (typeof row.value === 'string' ? row.value : '')
+        : (Number.isFinite(Number(row.value)) && row.value !== '' ? Number(row.value) : 1);
+      return Object.assign({}, row, { op, value });
+    });
+    this._setEffects(path, list);
+  },
+  removeEffectRow: function (e) {
+    const path = e.currentTarget.dataset.path;
+    const index = Number(e.currentTarget.dataset.index);
+    this._setEffects(path, this._effectsList(path).filter((_, i) => i !== index));
+  },
+  // ===== 条件修正与放宽:都从预设里选,不让作者手敲条件 DSL(9-22 用户拍板) =====
+  /** 回显开关与放宽列表 —— advanced 变了就得重算,不然开关会停在上一次的状态。 */
+  _syncCheckDerived: function (adv) {
+    const cfg = advancedGameConfig;
+    const a = adv || this.data.advanced || {};
+    const mods = (a.check && a.check.mods) || [];
+    const choices = cfg.relaxChoices(a);
+    const own = (a.variants || []).filter(cfg.isEditorVariant)[0];
+    const next = {
+      hpLadderOn: cfg.hpLadderOn(mods),
+      luckIndex: cfg.luckIndex(mods),
+      relaxOptions: choices.map((c) => ({ key: c.key, label: c.pick })),
+      relaxIndex: own ? choices.findIndex((c) => JSON.stringify(c.relax) === JSON.stringify(own.relax)) : -1,
+    };
+    // 每次 _setFormState 都会走到这里:没变就不 setData(L04-051),放宽选项对任何玩法照常算
+    const d = this.data;
+    if (next.hpLadderOn === d.hpLadderOn && next.luckIndex === d.luckIndex && next.relaxIndex === d.relaxIndex
+      && JSON.stringify(next.relaxOptions) === JSON.stringify(d.relaxOptions)) { this._refreshCheckView(a); return; }
+    this.setData({ hpLadderOn: next.hpLadderOn, luckIndex: next.luckIndex, relaxOptions: next.relaxOptions, relaxIndex: next.relaxIndex },
+      () => this._refreshCheckView(a));
+  },
+  _writeMods: function (mods) {
+    const adv = JSON.parse(JSON.stringify(this.data.advanced));
+    adv.check = adv.check || {};
+    adv.check.mods = mods;
+    this.data.dirty = true;   // L04-008
+    this.setData({ advanced: adv, advancedConfigError: '', submitError: '' });
+    this._syncCheckDerived(adv);
+  },
+  // 开 = 默认第一档;具体哪档在下面的下拉里换
+  toggleLuck: function (e) {
+    this._writeMods(advancedGameConfig.applyLuck((this.data.advanced.check || {}).mods, e.detail.value ? 0 : -1));
+  },
+  onLuckPick: function (e) { // 10-28:幸运加分就地勾选,点一行 = data-index 那一档,选完收起
+    this._writeMods(advancedGameConfig.applyLuck((this.data.advanced.check || {}).mods, Number(e.currentTarget.dataset.index))); this.setData({ checkOpen: '' });
+  },
+  // 放宽只有一个触发条件(血量低),多配几条也只有第一条生效 —— 所以是单选,不是列表。
+  _writeRelax: function (index) {
+    const c = advancedGameConfig.relaxChoices(this.data.advanced)[index];
+    const adv = JSON.parse(JSON.stringify(this.data.advanced));
+    const rest = (adv.variants || []).filter((v) => !advancedGameConfig.isEditorVariant(v));
+    adv.variants = c ? rest.concat({ when: Object.assign({}, c.when), relax: Object.assign({}, c.relax) }) : rest;
+    this.data.dirty = true;   // L04-008
+    this.setData({ advanced: adv, advancedConfigError: '', submitError: '' });
+    this._syncCheckDerived(adv);
+  },
+  toggleRelax: function (e) {
+    this._writeRelax(e.detail.value ? 0 : -1);
+  },
+  onRelaxPick: function (e) {
+    this._writeRelax(Number(e.detail.value));
+  },
+  toggleHpLadder: function (e) {
+    this._writeMods(advancedGameConfig.toggleHpLadder((this.data.advanced.check || {}).mods, !!(e.detail && e.detail.value)));
+  },
+  pickCheckTier: function (e) {
+    this._setFormState({ 'advanced.check.tier': (pickedItem(this.data.checkTiers, e) || { key: 'medium' }).key, advancedConfigError: '' });
+  },
+  removeProfileOption: function (e) {
+    const qIndex = Number(e.currentTarget.dataset.qindex);
+    const oIndex = Number(e.currentTarget.dataset.index);
+    const question = (this.data.advanced.profile.questions || [])[qIndex];
+    // 契约 §2.1:pick 的 options 至少 2 个
+    if (!question || (question.options || []).length <= 2) return toast('选项题至少留 2 个选项');
+    const questions = this.data.advanced.profile.questions.map((item, i) => i === qIndex
+      ? Object.assign({}, item, { options: (item.options || []).filter((_, j) => j !== oIndex) })
+      : item);
+    this._setFormState({ 'advanced.profile.questions': questions, advancedConfigError: '' });
+  },
+  pickPhotoCheckFallback: function (e) {
+    this._setFormState({
+      'advanced.photoCheck.fallback': (pickedItem(this.data.photoCheckFallbacks, e) || { key: 'retake' }).key,
+      advancedConfigError: ''
+    });
+  },
+  /* 取景轮廓(S1):上传拿站内地址。清空时置空串 —— normalize 会把空串整键删掉,
+     不把 "" 存进库(服务端判它非法)。
+
+     ⚠️ 必须带 skipCrop:app.chooseImage 默认要过裁剪台,而 pages/crop/index.js 导出固定是 jpg、
+     导出前还先铺一层白底(不铺白 PNG 的透明像素会被合成成黑)。轮廓要的正是透明底线条图,
+     过一趟就变成白底 —— 铺在实时画面上就是一层白纱,恰好是「现场感」的反面。
+     裁剪页那条「没动过画布就原样透传」的旁路要求商家一根手指都不碰,靠不住。
+     ⚠️ 也别改成页面里直接调 wx.chooseMedia:privacy-gate-coverage 门禁会判红 ——
+     这一页没挂 cy-privacy-gate,直接调的话触发隐私授权时整页会被隐私页盖住(实测踩过)。 */
+  uploadPhotoFrame: function () {
+    var that = this;
+    app.chooseImage(function (res) {
+      if (!res || !res[0]) return;
+      that._setFormState({ 'advanced.photoCheck.frameUrl': res[0], advancedConfigError: '' });
+    }, 1, { skipCrop: true });
+  },
+  /* 显形档 AR 的 3D 模型:从会话里选一个 .glb,走 app 的统一上传通道(隐私闸 + 10MB 前置拒绝),
+     拿回来的是 OSS 地址。清空置空串,normalize 会在关了 AR 时一并作废。 */
+  uploadScanModel: function () {
+    var that = this;
+    app.chooseDocument(function (res) {
+      var file = res && res[0];
+      if (file && file.url) that._setFormState({ 'advanced.scan.modelUrl': file.url, advancedConfigError: '' });
+    }, 1, ['glb']);
+  },
+  clearScanModel: function () {
+    this._setFormState({ 'advanced.scan.modelUrl': '', advancedConfigError: '' });
+  },
+  clearPhotoFrame: function () {
+    this._setFormState({ 'advanced.photoCheck.frameUrl': '', advancedConfigError: '' });
+  },
+  addNotePreset: function () {
+    const presets = (this.data.advanced.note || {}).presets || [];
+    if (presets.length >= 6) return toast('预设短句最多 6 条');
+    this._setFormState({ 'advanced.note.presets': presets.concat(''), advancedConfigError: '' });
+  },
+  updateNotePreset: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    this._setFormState({
+      'advanced.note.presets': (this.data.advanced.note.presets || [])
+        .map((item, i) => (i === index ? e.detail.value : item)),
+      advancedConfigError: ''
+    });
+  },
+  removeNotePreset: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    this._setFormState({
+      'advanced.note.presets': (this.data.advanced.note.presets || []).filter((_, i) => i !== index),
+      advancedConfigError: ''
+    });
+  },
+
+  // ===== 推理类三玩法(排序 / 连线 / 分类) =====
+  // id 一律自动生成:手填必然出现重复和空值,而那两种错都要到提交时才被服务端拦下。
+  // 数量上下限在这里就拦住 —— 校验器兜底,但不该先让人填完再报错。
+  addSortItem: function () {
+    const items = this.data.advanced.sort.items || [];
+    if (items.length >= 8) { toast('排序最多 8 条'); return; }
+    this._setFormState({ 'advanced.sort.items': items.concat({ id: rowId('srt'), label: '' }), advancedConfigError: '' });
+  },
+  removeSortItem: function (e) {
+    const items = this.data.advanced.sort.items || [];
+    if (items.length <= 2) { toast('排序至少 2 条'); return; }
+    const index = Number(e.currentTarget.dataset.index);
+    this._setFormState({ 'advanced.sort.items': items.filter((_, i) => i !== index), advancedConfigError: '' });
+  },
+  /* 连线按「左 | 右」成对录入:增删都成对动 left/right,下标对齐是 pairs 的前提。 */
+  addMatchPair: function () {
+    const left = this.data.advanced.match.left || [];
+    if (left.length >= 6) { toast('连线最多 6 对'); return; }
+    const right = this.data.advanced.match.right || [];
+    this._setFormState({
+      'advanced.match.left': left.concat({ id: rowId('lft'), label: '' }),
+      'advanced.match.right': right.concat({ id: rowId('rgt'), label: '' }),
+      advancedConfigError: ''
+    });
+  },
+  removeMatchPair: function (e) {
+    const left = this.data.advanced.match.left || [];
+    if (left.length <= 2) { toast('连线至少 2 对'); return; }
+    const index = Number(e.currentTarget.dataset.index);
+    this._setFormState({
+      'advanced.match.left': left.filter((_, i) => i !== index),
+      'advanced.match.right': (this.data.advanced.match.right || []).filter((_, i) => i !== index),
+      advancedConfigError: ''
+    });
+  },
+  addClassifyBin: function () {
+    const bins = this.data.advanced.classify.bins || [];
+    if (bins.length >= 4) { toast('分类最多 4 个类别'); return; }
+    this._setFormState({ 'advanced.classify.bins': bins.concat({ id: rowId('bin'), label: '' }), advancedConfigError: '' });
+  },
+  /* 删类别时,归到它的那些条目**回到未选**而不是悄悄改到别的类 ——
+     自动改类等于替商家做了选择,而那条数据看起来是对的。 */
+  removeClassifyBin: function (e) {
+    const bins = this.data.advanced.classify.bins || [];
+    if (bins.length <= 2) { toast('分类至少 2 个类别'); return; }
+    const index = Number(e.currentTarget.dataset.index);
+    const removed = bins[index];
+    const answer = Object.assign({}, this.data.advanced.classify.answer || {});
+    if (removed) Object.keys(answer).forEach((itemId) => { if (answer[itemId] === removed.id) delete answer[itemId]; });
+    this._setFormState({
+      'advanced.classify.bins': bins.filter((_, i) => i !== index),
+      'advanced.classify.answer': answer,
+      advancedConfigError: ''
+    });
+  },
+  addClassifyItem: function () {
+    const items = this.data.advanced.classify.items || [];
+    if (items.length >= 10) { toast('分类最多 10 条'); return; }
+    this._setFormState({ 'advanced.classify.items': items.concat({ id: rowId('itm'), label: '' }), advancedConfigError: '' });
+  },
+  removeClassifyItem: function (e) {
+    const items = this.data.advanced.classify.items || [];
+    if (items.length <= 2) { toast('分类至少 2 条'); return; }
+    const index = Number(e.currentTarget.dataset.index);
+    const removed = items[index];
+    const answer = Object.assign({}, this.data.advanced.classify.answer || {});
+    if (removed) delete answer[removed.id];
+    this._setFormState({
+      'advanced.classify.items': items.filter((_, i) => i !== index),
+      'advanced.classify.answer': answer,
+      advancedConfigError: ''
+    });
+  },
+  /** 某一条归到某一类。itemId 是自动生成的稳定 id,不是下标 —— 删条目不串行。 */
+  setClassifyBin: function (e) {
+    const itemId = e.currentTarget.dataset.item;
+    const bin = pickedItem(this.data.advanced.classify.bins, e);
+    const binId = bin && bin.id;
+    if (!itemId || !binId) return;
+    const answer = Object.assign({}, this.data.advanced.classify.answer || {});
+    answer[itemId] = binId;
+    this._setFormState({ 'advanced.classify.answer': answer, advancedConfigError: '' });
+  },
+
+  onCreatorLogin() {
+    return retryLogin(this, app, this._resumeCreatorLoad);
+  },
+  _resumeCreatorLoad() { if (this._creatorOwnerChanged()) return; this.onLoad(this._creatorEntryOptions || {}); },
+  _creatorOwnerChanged() {
+    if (!this._creatorOwner || this._creatorOwner === memberId(app)) return false;
+    this.setData({ creatorLoginRequired: true });
+    wx.switchTab({ url: '/pages/template/index' });
+    return true;
+  },
+
+  onLoad: function (options) {
+    this._creatorEntryOptions = options || {};
+    if (!memberId(app)) {
+      this.setData({ creatorLoginRequired: true });
+      waitForInitialSession(this, app, this._resumeCreatorLoad);
+      return;
+    }
+    this._creatorOwner = memberId(app);
+    this.setData({ creatorLoginRequired: false });
+    this._editorMemberId = editorMemberId();
+    options = options || {};
+    this._supportContext = supportMatrix.parse(safeDecode(options.supportContext)); if (options.scope === 'MERCHANT') this._supportContext.shop = true; // 第十一轮 g4 第 5 项:商家自己的玩法就是承接商家
+    this._loadSupportMatrix();
+    this._focusTool = safeDecode(options.focusTool);
+    this._focusPlan = safeDecode(options.focusPlan);
+    this._focusMessage = safeDecode(options.focusMessage); this._initCheckCtx(options);
+    var that = this;
+    const windowInfo = wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync();
+    this.setData({ sheetTop: resolveMenuChrome(windowInfo, app.globalData.menuButtonInfo).sheetTop });
+
+    const editingId = positiveId(options.id);
+    this._templateId = editingId || 0;
+    if (options.from === 'fabu' && editingId && (options.scope === 'my' || options.templateScope === 'my'))
+      this._boundDraftId = editingId;
+    // 从发布页进来时,作者在「给这个玩法起个名字」里已经起过名,传的是 nodeName —— 不接的话要再起一遍
+    const initialTitle = options.from === 'fabu' && options.nodeName ? safeDecode(options.nodeName) : '';
+
+    this.data.dirty = !!initialTitle;
+    this.setData({
+      'formData.title': initialTitle,
+      operationScope: options.scope === 'MERCHANT' ? 'MERCHANT' : '',
+      advancedOpen: editorLayout.readAdvancedOpen(wx),
+      // R9-04:scope=my 说明 id 来自「我的模板」,回填要走 /api/template/myinfo 才能读草稿。
+      // 它不参与写链路身份 —— 写身份仍只由 operationScope(MERCHANT)决定。
+      isMyScope: options.scope === 'my' || options.templateScope === 'my',
+      from: options.from || '',
+      editorLoading: !!editingId,
+      loadError: editingId || options.id == null ? '' : '模板编号无效，请返回后重试',
+      loadErrorIsAccess: !editingId && options.id != null,
+      // FE-04:纯预览态(调用方传 mode=preview 或 preview=1)——隐藏发布/草稿控件,temp 只做预览确认。
+      // 现有编辑调用方不传该参 → previewMode=false,行为完全不变。
+      previewMode: options.mode === 'preview' || options.preview === '1',
+      // 主题开着角色时由主题编辑器带进来;没带 = 不出信任行,选项上已有的 trust 原样保留
+      castMembers: options.from === 'fabu' ? storyCast.parseCastQuery(safeDecode(options.cast)) : []
+    });
+
+    if (options.from === 'citynode') that.loadCityNodeAccess();
+
+    if (editingId) {
+      if (editingId > 0) {
+        that.getData();
+      }
+    }
+
+    // 身份能力位:先按现有快照算一次,快照刷新后重算(本页可能是第一个拉权限的页)
+    that.setData({ lockedGames: that._lockedGames() });
+    roleGuard.load(() => that.setData({ lockedGames: that._lockedGames() }));
+
+    // 模块初始态(新建态默认核心模块;id>0 由 getData 回填后再调一次)
+    if (!editingId) {
+      that.initModuleState(true);
+      if (nodeGameCatalog.findGame(options.game)) {
+        that.pickGame({ currentTarget: { dataset: { key: options.game, pristine: true } } });
+        if (options.sample === '1') that.previewGameFromSheet({ currentTarget: { dataset: { key: options.game } } });
+      } else { that.setData({ scrollIntoView: 'sec-game' }); that.openR5GameSheet(); } // 2026-10-22 主人:新建不先起名,直接停在玩法并打开选择玩法(名字默认取玩法名)
+    }
+  },
+
+  loadCityNodeAccess: function () {
+    const current = currentEditor(this);
+    if (!current()) return;
+    const that = this;
+    this.setData({
+      merchantAccess: merchantAccessPolicy.inactiveAccess(),
+    });
+    app.sendRequest({
+      url: '/api/merchant/access/me', method: 'POST', hideLoading: true, silentError: true,
+      success: function (res) {
+        if (!current()) return;
+        if (!(res && (res.code === '200' || res.code === 200))) {
+          toast('商家权限没能读取');
+          return;
+        }
+        const access = merchantAccessPolicy.normalizeMerchantAccess(res.data);
+        that.setData({ merchantAccess: access });
+      },
+      fail: function () { if (current()) toast('商家权限没能读取'); },
+      successStatusAbnormal: function () { if (current()) toast('商家权限没能读取'); },
+    });
+  },
+
+  /* 难度已不能在本页修改,只在预览里把存量模板的难度值翻成文字(L04-038):
+     模板没有难度就不请求字典;有难度才拉一次,旧回包不覆盖新请求。 */
+  _loadDifficultyLabel: function () {
+    const value = this.data.formData && this.data.formData.difficulty;
+    if (!value) return;
+    const known = (this._difficultyOptions || []).find(item => item.dictValue == value);
+    if (known) { this.setData({ difficultyLabel: known.dictLabel }); return; }
+    const current = currentEditor(this);
+    if (!current()) return;
+    const token = this._difficultyDictToken = (this._difficultyDictToken || 0) + 1;
+    app.sendRequest({
+      hideLoading: true,
+      url: '/api/common/dict',
+      method: "POST",
+      data: { dictType: 'app_template_difficulty' },
+      success: (res) => {
+        if (!current() || token !== this._difficultyDictToken) return;
+        if (!(res && res.code == "200" && isRecordList(res.data))) return;
+        // 字典只给本页翻译用,不进 data(U4:wxml 零引用)
+        this._difficultyOptions = res.data;
+        const item = res.data.find(row => row.dictValue == this.data.formData.difficulty);
+        if (item) this.setData({ difficultyLabel: item.dictLabel });
+      },
+    });
+  },
+
+  // ===== 基本信息字段 =====
+  _setFormState: function (patch, callback, options) {
+    const previousRefs = Object.keys(patch).some(key => key === 'advanced' || key.startsWith('advanced.'))
+      ? templateTools.reservedRefs(this.data.advanced) : null;
+    const next = Object.assign({}, patch);
+    if (Object.prototype.hasOwnProperty.call(next, 'formData.validationMethod')
+      && Number(next['formData.validationMethod']) !== Number(this.data.formData.validationMethod)
+      && Number(next['formData.validationMethod']) !== 7
+      && !(Number(next['formData.validationMethod']) === 2 && this.data.formData.sensorType === 'filter_shot')) {
+      next['formData.sensorType'] = '';
+      next['formData.sensorConfig'] = '';
+    }
+    if (!(options && options.pristine)) {
+      this.data.dirty = true;
+      next.submitError = '';
+    }
+    this.setData(next, () => {
+      if (!(options && options.pristine) && previousRefs && this.data.advanced.interactionRules?.resourceSlots) {
+        const advanced = JSON.parse(JSON.stringify(this.data.advanced));
+        const previous = JSON.stringify(advanced.interactionRules);
+        templateTools.cleanSlots(advanced, previousRefs);
+        if (JSON.stringify(advanced.interactionRules) !== previous) this.setData({ 'advanced.interactionRules': advanced.interactionRules || {} });
+      }
+      this._refreshEffectResources();
+      this._refreshSupportMatrix();
+      this._refreshOutcomeContract();
+      this._syncCheckDerived();   // 开关玩法段 / 改次数都会改变「能放宽什么」
+      this._syncQaAnswerError(); this._syncQuesto();
+      this._syncSegments();
+      this._syncClueContent();
+      this.refreshPreviewState();
+      if (callback) callback.call(this);
+    });
+  },
+  /* 线索内容在「剧情」里：标签与线索同名的段落。这里只回显对应段号，供线索工具行显示是否已配内容。 */
+  _syncClueContent: function () {
+    const parts = {};
+    (this.data.storyBeats || []).forEach((beat, i) => {
+      const tag = String(beat.tag || '').trim();
+      if (tag && ((beat.text && beat.text.trim()) || (beat.imgs && beat.imgs.length))) (parts[tag] = parts[tag] || []).push(i + 1);
+    });
+    const map = {};
+    Object.keys(parts).forEach(tag => { map[tag] = '内容：剧情第' + parts[tag].join('、') + '段'; });
+    if (JSON.stringify(map) !== JSON.stringify(this.data.clueContent)) this.setData({ clueContent: map });
+  },
+  /* 多段客观题：主玩法是问答/排序/连线/分类之一时，可再加其它段；玩家须全部完成才结算（服务端整组判定）。 */
+  _syncSegments: function () {
+    const SEG = [['qa', '选项问答', 'PICK'], ['qa', '文字问答', 'TYPE'], ['sort', '排序'], ['match', '连线'], ['classify', '分类']];
+    const advanced = this.data.advanced || {}, main = this.data.gameSection;
+    const objective = ['qa', 'sort', 'match', 'classify'];
+    const on = {}; objective.forEach(k => { on[k] = k !== main && !!(advanced[k] && advanced[k].enabled); });
+    const add = objective.includes(main) ? SEG.filter(row => row[0] !== main && !on[row[0]]).map(row => ({ key: row[0], mode: row[2] || '', label: row[1] })) : [];
+    if (JSON.stringify(on) !== JSON.stringify(this.data.segmentOn) || JSON.stringify(add) !== JSON.stringify(this.data.segmentAddOptions)) this.setData({ segmentOn: on, segmentAddOptions: add });
+  },
+  addSegment: function (e) {
+    const row = this.data.segmentAddOptions[Number(e.detail.value)];
+    if (!row) return;
+    const defaults = advancedGameConfig.defaultConfig()[row.key] || {};
+    const section = Object.assign({}, defaults, this.data.advanced[row.key] || {}, { enabled: true });
+    if (row.key === 'qa') section.mode = row.mode;
+    this._setFormState({ ['advanced.' + row.key]: section, advancedConfigError: '' });
+  },
+  removeSegment: function (e) {
+    const key = e.currentTarget.dataset.section;
+    if (!this.data.segmentOn[key]) return;
+    this._setFormState({ ['advanced.' + key + '.enabled']: false, advancedConfigError: '' });
+  },
+  /** 选项问答的正确答案就地提示:与保存校验同一函数,采用来源隐藏答案时不提示。 */
+  _syncQaAnswerError: function () {
+    const qa = (this.data.advanced && this.data.advanced.qa) || {};
+    const adopted = this._advancedValidateOpts().adoptedFromLibrary;
+    const error = qa.enabled && !adopted ? advancedGameConfig.qaAnswerError(qa) : '';
+    if (error !== (this.data.qaAnswerError || '')) this.setData({ qaAnswerError: error });
+  },
+  _refreshOutcomeContract: function () {
+    const outcome = nodeOutcomeContract.extract({
+      validationMethod: this.data.formData.validationMethod,
+      preferenceJson: this.data.formData.preferenceJson,
+      advancedConfigJson: this.data.advanced
+    });
+    this.setData({ outcomePreview: outcome.items, outcomeContractErrors: outcome.errors });
+    return outcome;
+  },
+  onTitleChange: function (e) {
+    this._setFormState({ 'formData.title': e.detail.value, 'errors.title': '' });
+  },
+  onDescriptionChange: function (e) {
+    this._setFormState({ 'formData.description': e.detail.value, 'errors.description': '' });
+  },
+  onRequiredMaterialsChange: function (e) {
+    this._setFormState({ 'formData.requiredMaterials': e.detail.value });
+  },
+  /* ===== 玩法规则:步骤列表(原型 B 卡「玩家按顺序照做」) =====
+     ★ 不新建后端字段:整份规则仍然存在 formData.ruleInstructions 里,**一行一步**。
+     ruleSteps 只是这一页的展示形态,存盘前拼回去 —— 存量模板里那一大段文字
+     按换行拆开就是现成的步骤,不会因为换了界面就读不出来。 */
+  // P-41:旧草稿 / 模板库里「1. … 2. … 3. …」挤在一行的,回填时按序号拆成一步一条(utils/rule-steps.js)
+  _stepsFromText: function (text) {
+    return splitRuleSteps(text);
+  },
+  _syncRuleSteps: function (steps) {
+    this._setFormState({
+      ruleSteps: steps,
+      // 空步骤不写进去:玩家那边会读成一行空规则
+      'formData.ruleInstructions': steps.map((one) => String(one || '').trim()).filter(Boolean).join('\n'),
+    });
+  },
+  onRuleStepInput: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const steps = (this.data.ruleSteps || []).slice();
+    if (!(index >= 0 && index < steps.length)) return;
+    steps[index] = e.detail.value;
+    this._syncRuleSteps(steps);
+  },
+  addRuleStep: function () {
+    const steps = (this.data.ruleSteps || []).slice();
+    if (steps.length >= 12) { app.tips('最多 12 步'); return; }
+    steps.push('');
+    this._syncRuleSteps(steps);
+  },
+  removeRuleStep: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const steps = (this.data.ruleSteps || []).slice();
+    // 留最后一步:一条都不剩的话这张卡看着像坏了
+    if (steps.length <= 1 || !(index >= 0 && index < steps.length)) return;
+    steps.splice(index, 1);
+    this._syncRuleSteps(steps);
+  },
+
+  // ===== 通用底部选择器(玩家人数 / 玩法时长 / 玩法难度 / 适用场所) =====
+  openVenueSheet: function () {
+    const cur = this.data.formData.usageLocation;
+    this.setData({
+      pickerSheet: {
+        open: true, key: 'usageLocation', title: '选择适用场所',
+        options: VENUE_OPTIONS.map(v => ({ value: v, label: v, active: v === cur }))
+      }
+    });
+  },
+  closePickerSheet: function () {
+    this.setData({ 'pickerSheet.open': false });
+  },
+  onPickerSheetSelect: function (e) {
+    const value = e.currentTarget.dataset.value;
+    const key = this.data.pickerSheet.key;
+    const patch = { 'pickerSheet.open': false };
+    if (key === 'qaFbImg') { this.setData({ 'pickerSheet.open': false }); this._onQaFbImgAction(value); return; }
+    if (key === 'usageLocation') {
+      patch['formData.usageLocation'] = value;
+    }
+    this._setFormState(patch);
+  },
+
+  // ===== 完成方式模块 =====
+
+  onQuestionNameChange: function (e) {
+    this._setFormState({ 'formData.questionName': e.detail.value });
+  },
+  onQuestionAnswerChange: function (e) {
+    this._setFormState({ 'formData.questionAnswer': e.detail.value });
+  },
+  onOptionQuestionChange: function (e) {
+    this._setFormState({ optionQuestion: e.detail.value });
+  },
+  onPhotoRequireDescChange: function (e) {
+    this._setFormState({ 'formData.photoRequireDesc': e.detail.value });
+  },
+  parsePreferencePreview: function (value) {
+    if (!value) return { rows: [], error: '请填写偏好题配置' };
+    try {
+      const config = JSON.parse(value);
+      if (!Array.isArray(config.steps) || !config.steps.length) return { rows: [], error: '至少要有一道题' };
+      if (!Array.isArray(config.dimensions) || !config.dimensions.length) return { rows: [], error: '至少要有一个维度' };
+      if (config.dimensions.length > 1 && !config.tiebreak) return { rows: [], error: '有多个维度时要写平局怎么判' };
+      const results = config && config.results;
+      if (!results || Array.isArray(results) || typeof results !== 'object') return { rows: [], error: '还没写结果' };
+      const rows = Object.keys(results).map((code) => ({ code, ...(results[code] || {}) }));
+      if (!rows.length || rows.some((row) => !row.title || !row.body || !row.nextStep || ![7, 30].includes(Number(row.nextStepDays)))) {
+        return { rows, error: '每个结果都要有标题、正文、下一步和 7 或 30 天周期' };
+      }
+      const output = config.tagOutput;
+      if (output && (!output.recipientLabel || !output.purpose || output.revocable !== true)) {
+        return { rows, error: '标签必须写明接收方、用途并声明可撤回' };
+      }
+      return { rows, error: '' };
+    } catch (e) { return { rows: [], error: '偏好题内容格式有误' }; }
+  },
+
+  // ----- 提示(并入完成方式) -----
+  onHintEnabledChange: function (e) {
+    const on = !!e.detail.value;
+    const patch = { hintEnabled: on };
+    if (!on) {
+      patch['formData.hint1'] = '';
+      patch['formData.hint2'] = '';
+      patch['formData.answerReveal'] = '';
+    }
+    this._setFormState(patch);
+  },
+  onHint1Change: function (e) {
+    this._setFormState({ 'formData.hint1': e.detail.value });
+  },
+  onHint2Change: function (e) {
+    this._setFormState({ 'formData.hint2': e.detail.value });
+  },
+  onAnswerRevealChange: function (e) {
+    this._setFormState({ 'formData.answerReveal': e.detail.value });
+  },
+
+  // ----- 题干附件(看图答题 / 听音答题) -----
+  // 走与封面图、语音讲解同一条上传通道;上传成功才写进 formData,失败不留半个字段。
+  uploadQuestionImg: function () {
+    var that = this;
+    app.chooseImage(function (res) {
+      if (res && res[0]) that._setFormState({ 'formData.questionImg': res[0] });
+    }, 1);
+  },
+
+  clearQuestionImg: function () {
+    this._setFormState({ 'formData.questionImg': '' });
+  },
+
+  uploadQuestionAudio: function () {
+    var that = this;
+    app.chooseDocument(function (res) {
+      var file = res && res[0];
+      if (file && file.url) that._setFormState({ 'formData.questionAudio': file.url });
+    }, 1, ['mp3', 'm4a', 'aac']);
+  },
+
+  clearQuestionAudio: function () {
+    this._setFormState({ 'formData.questionAudio': '' });
+  },
+
+  // ----- 选项媒体 -----
+  // 媒体挂在 optionItems 的行上,提交时由 option-media.toJson 序列化成一列 JSON。
+  _patchOption: function (index, patch) {
+    if (index < 0 || index >= this.data.optionItems.length) return;
+    var options = this.data.optionItems.map(function (item, i) {
+      return i === index ? Object.assign({}, item, patch) : item;
+    });
+    this._setFormState({ optionItems: options });
+  },
+
+  uploadOptionImg: function (e) {
+    var that = this;
+    var index = Number(e.currentTarget.dataset.index);
+    app.chooseImage(function (res) {
+      if (res && res[0]) that._patchOption(index, { img: res[0] });
+    }, 1);
+  },
+
+  uploadOptionAudio: function (e) {
+    var that = this;
+    var index = Number(e.currentTarget.dataset.index);
+    app.chooseDocument(function (res) {
+      var file = res && res[0];
+      if (file && file.url) that._patchOption(index, { audio: file.url });
+    }, 1, ['mp3', 'm4a', 'aac']);
+  },
+
+  clearOptionMedia: function (e) {
+    this._patchOption(Number(e.currentTarget.dataset.index), { img: '', audio: '' });
+  },
+
+  // ----- 选项问答(行内编辑) -----
+  _normalizeOptions: function (items) {
+    const letters = ['A', 'B', 'C', 'D'];
+    // 保证只有一个正确答案
+    let correctSeen = false;
+    return items.slice(0, 4).map((it, i) => {
+      let isCorrect = !!it.isCorrect;
+      if (isCorrect && correctSeen) isCorrect = false;
+      if (isCorrect) correctSeen = true;
+      // ⚠️ img/audio 必须原样带过去 —— 归一化被增删选项、选正确答案等每条路径复用,
+      //    这里漏一个字段,用户配好的选项图会在「点一下圆圈」时无声消失。
+      return { letter: letters[i], text: it.text || '', isCorrect: isCorrect,
+        img: it.img || '', audio: it.audio || '' };
+    });
+  },
+  pickCorrectOption: function (e) {
+    const index = parseInt(e.currentTarget.dataset.index);
+    const options = this.data.optionItems.map((item, i) => ({ ...item, isCorrect: i === index }));
+    const correct = options[index] ? options[index].letter : 'A';
+    this._setFormState({ optionItems: options, 'formData.correctAnswer': correct });
+  },
+  /* 扫码段的两组选项是 cy-dropdown:detail.value 是下标,存的是那一项的 key */
+  pickScanKind: function (e) {
+    const item = pickedItem(this.data.scanKinds, e);
+    this._setFormState({ 'advanced.scan.kind': item ? item.key : 'TEXT' });
+  },
+  pickScanArMode: function (e) {
+    const item = pickedItem(this.data.scanArModes, e);
+    this._setFormState({ 'advanced.scan.arMode': item ? item.key : 'NONE' });
+  },
+  /* 判断答案对错：只切换模式，正确答案 / 选择方式 / 可答次数 / 亮答案原样保留，切回时恢复 */
+  toggleQaJudge: function (e) {
+    this._setFormState({ 'advanced.qa.judge': !!e.detail.value, advancedConfigError: '' });
+  },
+  pickQaAnswerMode: function (e) {
+    const row = QA_ANSWER_MODES[Number(e.detail.value)];
+    if (row) this.onQaMultiToggle({ detail: { value: row.key === 'multi' } });
+  },
+  pickQaMaxTries: function (e) {
+    const row = QA_TRIES[Number(e.detail.value)];
+    if (row) this._setFormState({ 'advanced.qa.maxTries': row.key, advancedConfigError: '' });
+  },
+  pickQaReveal: function (e) {
+    const row = QA_REVEAL[Number(e.detail.value)];
+    if (row) this._setFormState({ 'advanced.qa.reveal': row.key, advancedConfigError: '' });
+  },
+  /* 选项“选中后的反馈”图片：沿用 app.chooseImage 的上传与审核，每个选项最多 3 张 */
+  _setQaFbImgs: function (index, fn) {
+    const options = (this.data.advanced.qa.options || []).slice();
+    if (!options[index]) return;
+    const imgs = fn((options[index].fbImgs || []).slice());
+    if (!imgs) return;
+    options[index] = Object.assign({}, options[index], { fbImgs: imgs });
+    this._setFormState({ 'advanced.qa.options': options, advancedConfigError: '' });
+  },
+  addQaFbImg: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const option = (this.data.advanced.qa.options || [])[index];
+    if (!option) return;
+    if ((option.fbImgs || []).length >= QA_FB_IMG_MAX) { toast('每个选项最多 ' + QA_FB_IMG_MAX + ' 张反馈图片'); return; }
+    const id = option.id;
+    app.chooseImage((res) => {
+      const url = res && res[0];
+      if (!url) return;
+      const at = (this.data.advanced.qa.options || []).findIndex(row => row.id === id);
+      if (at < 0) return;
+      this._setQaFbImgs(at, imgs => { if (imgs.length >= QA_FB_IMG_MAX) { toast('每个选项最多 ' + QA_FB_IMG_MAX + ' 张反馈图片'); return null; } imgs.push(url); return imgs; });
+    }, 1);
+  },
+  tapQaFbImg: function (e) {
+    const index = Number(e.currentTarget.dataset.index), at = Number(e.currentTarget.dataset.img);
+    const option = (this.data.advanced.qa.options || [])[index];
+    const imgs = (option && option.fbImgs) || [];
+    if (!imgs[at]) return;
+    this._qaFbImgTarget = { id: option.id, url: imgs[at] };
+    this.setData({ pickerSheet: { open: true, key: 'qaFbImg', title: '反馈图片', options: [{ value: 'preview', label: '查看大图', active: false }, { value: 'replace', label: '更换', active: false }] } });
+  },
+  _onQaFbImgAction: function (value) {
+    const target = this._qaFbImgTarget; this._qaFbImgTarget = null;
+    if (!target) return;
+    const find = () => (this.data.advanced.qa.options || []).findIndex(row => row.id === target.id);
+    const i = find(); if (i < 0) return;
+    const imgs = this.data.advanced.qa.options[i].fbImgs || [];
+    if (value === 'preview') { wx.previewImage({ current: target.url, urls: imgs }); return; }
+    app.chooseImage((r) => {
+      const url = r && r[0];
+      if (!url) return;
+      const j = find();
+      if (j >= 0) this._setQaFbImgs(j, list => { const k = list.indexOf(target.url); if (k < 0) return null; list[k] = url; return list; });
+    }, 1);
+  },
+  removeQaFbImg: function (e) {
+    const index = Number(e.currentTarget.dataset.index), at = Number(e.currentTarget.dataset.img);
+    this._setQaFbImgs(index, imgs => { if (!imgs[at]) return null; imgs.splice(at, 1); return imgs; });
+  },
+  /** 选项问答:单选时点谁谁是;开了「允许多选」就变成逐个勾/取消。 */
+  pickCorrectQaOption: function (e) {
+    const index = parseInt(e.currentTarget.dataset.index);
+    const multi = !!this.data.advanced.qa.multi;
+    const options = (this.data.advanced.qa.options || [])
+      .map((item, i) => {
+        if (!multi) return Object.assign({}, item, { correct: i === index });
+        if (i !== index) return item;
+        return Object.assign({}, item, { correct: !item.correct });
+      });
+    this._setFormState({ 'advanced.qa.options': options, advancedConfigError: '' });
+  },
+  /* 选择方式只改模式,不替作者改正确答案:与新模式不符时就地显示校验提示,由作者自己调整。 */
+  onQaMultiToggle: function (e) {
+    this._setFormState({ 'advanced.qa.multi': !!e.detail.value, advancedConfigError: '' });
+  },
+  /** 猜图:把某一张设为正确答案。单选 —— 点谁谁是,其余自动取消。
+   *  用开关做的话会出现「把答案关掉」这种无意义状态,校验器也会当场判红。 */
+  pickCorrectPicture: function (e) {
+    const index = parseInt(e.currentTarget.dataset.index);
+    const items = (this.data.advanced.pricePair.items || [])
+      .map((item, i) => Object.assign({}, item, { correct: i === index }));
+    this._setFormState({ 'advanced.pricePair.items': items });
+  },
+  onOptionTextChange: function (e) {
+    const index = parseInt(e.currentTarget.dataset.index);
+    const value = e.detail.value;
+    const options = this.data.optionItems.map((item, i) => (i === index ? { ...item, text: value } : item));
+    this._setFormState({ optionItems: options });
+  },
+  addChoiceOption: function () {
+    if (this.data.optionItems.length >= 4) {
+      toast('最多 4 个选项');
+      return;
+    }
+    const options = this._normalizeOptions([...this.data.optionItems, { text: '', isCorrect: false }]);
+    this._setFormState({ optionItems: options });
+  },
+  deleteOption: function (e) {
+    if (this.data.optionItems.length <= 2) {
+      toast('至少需要 2 个选项');
+      return;
+    }
+    const index = parseInt(e.currentTarget.dataset.index);
+    const removedWasCorrect = this.data.optionItems[index] && this.data.optionItems[index].isCorrect;
+    let options = this.data.optionItems.filter((item, i) => i !== index);
+    options = this._normalizeOptions(options);
+    if (removedWasCorrect && options.length && !options.some(o => o.isCorrect)) {
+      options[0].isCorrect = true;
+    }
+    const correctIdx = options.findIndex(o => o.isCorrect);
+    this._setFormState({
+      optionItems: options,
+      'formData.correctAnswer': options[correctIdx < 0 ? 0 : correctIdx] ? options[correctIdx < 0 ? 0 : correctIdx].letter : 'A'
+    });
+  },
+
+  // ===== 完成奖励模块 =====
+  onToggleCoupon: function (e) {
+    const on = !!e.detail.value;
+    const patch = { rwCoupon: on };
+    if (!on) {
+      patch['formData.couponId'] = 0;
+      patch.selectedCouponName = '';
+    }
+    this._setFormState(patch, this._syncRwAny);
+  },
+  onToggleText: function (e) {
+    const on = !!e.detail.value;
+    const patch = { rwText: on };
+    if (!on) patch['formData.feedbackText'] = '';
+    this._setFormState(patch, this._syncRwAny);
+  },
+  onToggleMedal: function (e) {
+    const on = !!e.detail.value;
+    const patch = { rwMedal: on };
+    if (!on) {
+      patch['formData.medalImg'] = '';
+      patch['formData.medalName'] = '';
+    }
+    this._setFormState(patch, this._syncRwAny);
+  },
+  _syncRwAny: function () {
+    this.setData({ rwAny: !!(this.data.rwCoupon || this.data.rwText || this.data.rwMedal) });
+  },
+
+  onRewardCouponChange: function (e) {
+    const detail = e.detail || {};
+    const couponId = Number(detail.couponId || 0);
+    this._setFormState({
+      selectedCouponName: detail.couponName || '',
+      'formData.couponId': couponId,
+      rwCoupon: couponId > 0
+    }, this._syncRwAny);
+  },
+
+  onFeedbackTextChange: function (e) {
+    this._setFormState({ 'formData.feedbackText': e.detail.value });
+  },
+  uploadMedal: function (e) {
+    var that = this;
+    app.chooseImage(function (res) {
+      that._setFormState({ 'formData.medalImg': res[0] });
+    }, 1, { crop: true, cropScale: '1:1' });
+  },
+  onMedalNameInput: function (e) {
+    this._setFormState({ 'formData.medalName': e.detail.value });
+  },
+  onMedalStyle(e) {
+    this._setFormState({ 'formData.medalStyle': (pickedItem(this.data.medalStyleOptions, e) || { key: 'glow' }).key });
+  },
+  clearMedal: function () {
+    this._setFormState({ 'formData.medalImg': '', 'formData.medalName': '', 'formData.medalStyle': 'glow' });
+  },
+
+  // ===== 剧情故事模块(多时间节点) =====
+  onStoryBeatText: function (e) {
+    const index = parseInt(e.currentTarget.dataset.index);
+    const beats = this.data.storyBeats.map((b, i) => (i === index ? { ...b, text: e.detail.value } : b));
+    this._setFormState({ storyBeats: beats });
+  },
+  onStoryBeatTag: function (e) {
+    const index = parseInt(e.currentTarget.dataset.index);
+    const beats = this.data.storyBeats.map((b, i) => (i === index ? { ...b, tag: e.detail.value } : b));
+    this._setFormState({ storyBeats: beats });
+  },
+  uploadStoryBeatImg: function (e) {
+    const index = parseInt(e.currentTarget.dataset.index);
+    var that = this;
+    const cur = (that.data.storyBeats[index] && that.data.storyBeats[index].imgs) || [];
+    const remain = 6 - cur.length;
+    if (remain <= 0) { toast('每个节点最多6张'); return; }
+    app.chooseImage(function (res) {
+      const beats = that.data.storyBeats.map((b, i) => (i === index ? { ...b, imgs: (b.imgs || []).concat(res).slice(0, 6) } : b));
+      that._setFormState({ storyBeats: beats });
+    }, remain);
+  },
+  removeStoryBeatImg: function (e) {
+    const index = parseInt(e.currentTarget.dataset.index);
+    const imgIndex = parseInt(e.currentTarget.dataset.imgindex);
+    const beats = this.data.storyBeats.map((b, i) => (i === index ? { ...b, imgs: (b.imgs || []).filter((_, k) => k !== imgIndex) } : b));
+    this._setFormState({ storyBeats: beats });
+  },
+  addStoryBeat: function () {
+    const beats = [...this.data.storyBeats, { id: Date.now() + Math.floor(Math.random() * 1000), text: '', tag: '', imgs: [] }];
+    this._setFormState({ storyBeats: beats });
+  },
+  removeStoryBeat: function (e) {
+    if (this.data.storyBeats.length <= 1) return;
+    const index = parseInt(e.currentTarget.dataset.index);
+    const beats = this.data.storyBeats.filter((b, i) => i !== index);
+    this._setFormState({ storyBeats: beats });
+  },
+
+  // ===== 语音讲解模块 =====
+  uploadAudio: function () {
+    var that = this;
+    // 每次选择都开一个新代:后一次选择/清空/模板回填会让前一次上传的回调失效,
+    // 避免上传返回乱序时用旧结果覆盖新状态(不靠比 URL 假隔离)。
+    var uploadSeq = (this._audioUploadSeq = (this._audioUploadSeq || 0) + 1);
+    app.chooseDocument(function (res) {
+      if (uploadSeq !== that._audioUploadSeq) return;
+      if (res && res[0] && res[0].url) {
+        var file = res[0];
+        // 换新音频:先销毁旧预听并换代,再把新地址与空时长写进去(新时长由预听 onPlay 回填)。
+        // 失败时 chooseDocument 不会回调到这里,旧音频与旧时长保持不动,可重试。
+        that._invalidateAudioSource(true);
+        that._setFormState({
+          'formData.audioUrl': file.url,
+          'formData.audioDuration': '',
+          'formData.audioFileName': file.filename || '',
+          'formData.audioFormat': file.type || ''
+        });
+      }
+    }, 1, ['mp3', 'm4a', 'aac']);
+  },
+  onAudioDurationChange: function (e) {
+    this._setFormState({ 'formData.audioDuration': e.detail.value });
+  },
+  clearAudio: function () {
+    this.destroyPreviewAudio();
+    this._setFormState({
+      'formData.audioUrl': '', 'formData.audioDuration': '',
+      'formData.audioFileName': '', 'formData.audioFormat': ''
+    });
+  },
+
+  // 预听上传的音频
+  onPreviewAudio: function () {
+    var that = this;
+    var url = this.data.formData.audioUrl;
+    if (!url) return;
+    if (this._previewAudio && this._previewAudio.src === url) {
+      // 同一段音频 → 切换播放/暂停
+      if (this.data.audioPreviewPlaying) {
+        this._previewAudio.pause();
+      } else {
+        this._previewAudio.play();
+      }
+      return;
+    }
+    // 换源:销毁旧实例并换代,旧实例的异步回调从此失效(实例+代际双校验)
+    this._invalidateAudioSource(false);
+    var generation = this._audioGeneration;
+    var audio = wx.createInnerAudioContext();
+    audio.src = url;
+    audio.obeyMuteSwitch = false;
+    var isCurrent = function () {
+      return generation === that._audioGeneration && that._previewAudio === audio;
+    };
+    audio.onPlay(function () {
+      if (!isCurrent()) return;
+      that.setData({ audioPreviewPlaying: true });
+      // 自动识别时长
+      if (!that.data.formData.audioDuration) {
+        var d = Math.round(audio.duration || 0);
+        if (d > 0) that._setFormState({ 'formData.audioDuration': d });
+      }
+    });
+    audio.onPause(function () { if (isCurrent()) that.setData({ audioPreviewPlaying: false }); });
+    audio.onStop(function () { if (isCurrent()) that.setData({ audioPreviewPlaying: false }); });
+    audio.onEnded(function () { if (isCurrent()) that.setData({ audioPreviewPlaying: false }); });
+    audio.onError(function (err) {
+      if (!isCurrent()) return;
+      that.setData({ audioPreviewPlaying: false });
+      toast(safeUserMessage(err, '预听失败'));
+    });
+    // 先登记再 play:play() 若同步触发 onPlay,isCurrent 校验的实例已经是本实例。
+    this._previewAudio = audio;
+    audio.play();
+  },
+
+  // 音频源换代:销毁当前预听实例,并让所有旧预听回调失效。
+  // 换文件、清空、模板回填、卸载都走这里;旧 audioContext 的 onPlay/onEnded 等即使晚到,
+  // 也因「实例+代际」不匹配而写不进新音频的状态 —— 不再靠只比 URL 假隔离。
+  // cancelUploads=true 时同时让在途上传回调失效(清空/换模板/卸载这类「整个音频态被替换」的动作)。
+  _invalidateAudioSource: function (cancelUploads) {
+    this._audioGeneration = (this._audioGeneration || 0) + 1;
+    if (cancelUploads) this._audioUploadSeq = (this._audioUploadSeq || 0) + 1;
+    var audio = this._previewAudio;
+    this._previewAudio = null;
+    if (audio) {
+      try { audio.destroy(); } catch (e) {}
+    }
+    if (this.data.audioPreviewPlaying) this.setData({ audioPreviewPlaying: false });
+  },
+
+  destroyPreviewAudio: function () {
+    this._invalidateAudioSource(true);
+  },
+
+  // ===== 封面 =====
+  uploadPic: function (e) {
+    var that = this;
+    app.chooseImage(function (res) {
+      var picked = res && res[0];
+      var url = picked && typeof picked === 'object' ? picked.url : picked;
+      that._setFormState({ 'formData.imgUrl': url });
+      if (that.data.coverMediaUnusable) that.setData({ coverMediaUnusable: false });
+    }, 1, { crop: true, cropScale: '16:9', mapResult: function (data) { return { url: data.url, assetId: data.assetId }; } });
+  },
+  clearCover: function () {
+    this._setFormState({ 'formData.imgUrl': '' });
+  },
+
+  // ===== 模块增删 =====
+  openAddSheet: function () {
+    this.setData({ showAddSheet: true });
+  },
+  closeAddSheet: function () {
+    this.setData({ showAddSheet: false });
+  },
+
+  addModule: function (e) {
+    const key = e.currentTarget.dataset.key;
+    const def = this.MODULE_DEFS.find(d => d.key === key);
+    if (!def) return;
+    const patch = {
+      moduleList: [...this.data.moduleList, { key: key, name: def.name }],
+      availableModules: this.data.availableModules.filter(d => d.key !== key && ADDABLE_MODULES.includes(d.key)),
+      showAddSheet: false
+    };
+    if (key === 'finish') {
+      patch['formData.validationMethod'] = 0;
+      patch.methodSupportsHint = false;
+    }
+    if (key === 'story' && this.data.storyBeats.length === 0) {
+      patch.storyBeats = [{ id: 1, text: '', tag: '', imgs: [] }];
+    }
+    this._setFormState(patch); const anchor = key === 'finish' ? 'sec-join' : (key === 'reward' && this.data.gameKey !== 'album' ? 'sec-reward' : ''); if (anchor) { this.setData({ scrollIntoView: '' }); setTimeout(() => { this.setData({ scrollIntoView: anchor }); }, 30); } // CP-13:新模块接在长表单末尾,关掉面板后滚过去,看得见加在哪
+  },
+
+  removeModule: function (e) {
+    const key = e.currentTarget.dataset.key;
+    const def = this.MODULE_DEFS.find(d => d.key === key);
+    if (!def) return;
+    if (key === 'voice') this.destroyPreviewAudio();
+    const clearMap = {
+      finish: {
+        'formData.validationMethod': 0, optionItems: [], optionQuestion: '',
+        'formData.questionImg': '', 'formData.questionAudio': '',
+        'formData.questionOptionMediaJson': '',
+        'formData.questionName': '', 'formData.questionAnswer': '',
+        'formData.photoRequireDesc': '', 'formData.photoReview': 0,
+        methodSupportsHint: false, hintEnabled: false,
+        'formData.hint1': '', 'formData.hint2': '', 'formData.answerReveal': ''
+      },
+      reward: {
+        'formData.couponId': 0, 'formData.feedbackText': '', 'formData.medalImg': '',
+        'formData.medalName': '', 'formData.medalStyle': 'glow', selectedCouponName: '',
+        'formData.rewardRulesJson': '',
+        'formData.feedbackMethod': 0,
+        rwCoupon: false, rwText: false, rwMedal: false, rwAny: false
+      },
+      story: { 'formData.storyText': '', 'formData.storyImg': '', storyBeats: [{ id: 1, text: '', tag: '', imgs: [] }] },
+      voice: { 'formData.audioUrl': '', 'formData.audioDuration': '', 'formData.audioFileName': '', 'formData.audioFormat': '' }
+    };
+    const order = this.MODULE_DEFS.map(d => d.key);
+    const newAvailable = [...this.data.availableModules, this._availItem(def)].filter(d => ADDABLE_MODULES.includes(d.key))
+      .sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+    this._setFormState({
+      moduleList: this.data.moduleList.filter(m => m.key !== key),
+      availableModules: newAvailable,
+      ...(clearMap[key] || {})
+    });
+  },
+
+  _availItem: function (def) {
+    return { key: def.key, name: def.name, desc: def.desc, iconName: def.iconName };
+  },
+
+  // 由当前 formData 反推模块状态
+  initModuleState: function (pristine) {
+    const f = this.data.formData;
+    const onKeys = [];
+    if (f.validationMethod > 0 || f.questionName || this.data.optionQuestion || this.data.optionItems.length
+        || advancedGameConfig.enabledSections(this.data.advanced).length) onKeys.push('finish');
+    if (f.couponId > 0 || f.feedbackText || f.medalImg || f.medalName) onKeys.push('reward');
+    if (this.data.storyBeats.some(b => (b.text && b.text.trim()) || (b.imgs && b.imgs.length))) onKeys.push('story');
+    if (f.audioUrl) onKeys.push('voice');
+
+    // 新建态默认核心模块;复用/草稿态用反推结果
+    const keys = (this._templateId > 0) ? onKeys : ['finish', 'reward'];
+
+    this._setFormState({
+      moduleList: this.MODULE_DEFS.filter(d => keys.includes(d.key)).map(d => ({ key: d.key, name: d.name })),
+      availableModules: this.MODULE_DEFS.filter(d => !keys.includes(d.key) && ADDABLE_MODULES.includes(d.key)).map(d => this._availItem(d)),
+      methodSupportsHint: HINT_METHODS.includes(f.validationMethod),
+      hintEnabled: !!(f.hint1 || f.hint2 || f.answerReveal),
+      rwCoupon: f.couponId > 0,
+      rwText: !!f.feedbackText,
+      rwMedal: !!(f.medalImg || f.medalName),
+      rwAny: !!(f.couponId > 0 || f.feedbackText || f.medalImg || f.medalName)
+    }, null, { pristine: !!pristine });
+  },
+
+  hasModule: function (key) {
+    return this.data.moduleList.some(m => m.key === key);
+  },
+
+  // ===== 校验滚动(scroll-view 内,用 scroll-into-view) =====
+  scrollToError: function (key) {
+    const selectorMap = {
+      title: 'sec-top',
+      description: 'fld-description',
+      players: 'sec-basic',
+      duration: 'sec-basic',
+      categoryIds: 'fld-categoryIds',
+      // 「玩法形态」那排 chip 与它的红字都在「模板信息」卡里(temp/index.wxml:132-137)
+      interactionType: 'sec-basic',
+      finish: 'sec-game',
+      // 2026-11-19:缺项红字落在字段下面,定位也停在那个字段(认不出字段时停在玩法设置顶部那条红字)
+      advanced: this.data.advancedErrorField ? 'fld-' + this.data.advancedErrorField.replace('.', '-') : 'game-cfg',
+      reward: this.hasModule('reward') && this.data.gameKey !== 'album' ? 'sec-reward' : 'sec-module', // M-20:停在「完成奖励」卡上,模块被移除才退回模块区顶
+      story: 'fieldStory'
+    };
+    const target = selectorMap[key];
+    if (!target) return;
+    // 折叠组里的项报错:先展开再滚过去(必填缺项不能藏在收起的组里)
+    if (editorLayout.ADVANCED_GROUP_ERRORS.indexOf(key) >= 0 && !this.data.advancedOpen) this.setData({ advancedOpen: true });
+    // 先清空再设置,确保同 id 重复触发也能滚动
+    this.setData({ scrollIntoView: '' });
+    setTimeout(() => { this.setData({ scrollIntoView: target }); }, 30);
+  },
+
+  // ===== 玩法类别 =====
+  removeCategory: function (e) {
+    const categoryId = parseInt(e.currentTarget.dataset.id);
+    const that = this;
+    const newSelectedIds = that.data.selectedCategoryIds.filter(id => id !== categoryId);
+    const newSelectedNames = that.data.selectedCategoryNames.filter((name, index) => {
+      return that.data.selectedCategoryIds[index] !== categoryId;
+    });
+    const newCategoryList = that.data.categoryList.filter(item => item.id !== categoryId);
+    that._setFormState({
+      selectedCategoryIds: newSelectedIds,
+      selectedCategoryNames: newSelectedNames,
+      categoryList: newCategoryList,
+      'formData.activityCategoryids': newSelectedIds.join(',')
+    });
+    toast.success('移除成功', { duration: 1000 });
+  },
+
+  // 分类选择弹窗化(2026-07-31):不再 wx.navigateTo 到独立页面 + getCurrentPages() 回填,
+  // 改成半屏 cy-category-sheet + 事件回传,直接复用既有 updateCategorySelection 不用改接收逻辑。
+  navigateToCategorySelect: function () {
+    this.setData({
+      categorySheetVisible: true,
+      categorySheetIds: this.data.selectedCategoryIds.join(','),
+    });
+  },
+
+  onCategorySelect: function (e) {
+    this.updateCategorySelection(e.detail.selectedIds, e.detail.selectedCategories);
+  },
+
+  onCategorySheetClose: function () {
+    this.setData({ categorySheetVisible: false });
+  },
+
+  updateCategorySelection: function (selectedIds, selectedCategories) {
+    const that = this;
+    const selectedCategoryIds = selectedIds || [];
+    const selectedCategoryNames = selectedCategories ? selectedCategories.map(item => item.categoryName) : [];
+    const patch = {
+      selectedCategoryIds: selectedCategoryIds,
+      selectedCategoryNames: selectedCategoryNames,
+      categoryList: withCategoryIcons(selectedCategories),
+      'formData.activityCategoryids': selectedCategoryIds.join(',')
+    };
+    // 选上类别就清掉「请选择至少一个玩法类别」,与标题/描述输入时清红字同一做法
+    if (selectedCategoryIds.length) patch['errors.categoryIds'] = '';
+    that._setFormState(patch);
+  },
+
+  getCategoryNamesByIds: function (ids, callback) {
+    const that = this;
+    const categoryList = that.data.categoryList;
+    const selectedNames = [];
+    if (categoryList && categoryList.length > 0) {
+      ids.forEach(id => {
+        const category = categoryList.find(item => item.id === id);
+        if (category) { selectedNames.push(category.categoryName); }
+      });
+    }
+    if (callback && typeof callback === 'function') {
+      callback(selectedNames);
+    }
+  },
+
+  // ===== 预览态状态机 =====
+  _buildPvSteps: function () {
+    // 故事玩法「无需到达地点」,不该先给作者看一页「你已抵达 · 人数 · 时长 · 开始任务」——
+    // 那是地点节点的到达页(2026-09-22 走查截图 56)。公共玩法库那条路照旧。
+    const steps = this.data.from === 'fabu' ? [] : ['arrival'];
+    if (this.hasModule('story') && this.data.storyBeats.some(b => (b.text && b.text.trim()) || (b.imgs && b.imgs.length))) {
+      steps.push('story');
+    }
+    steps.push('challenge');
+    steps.push('complete');
+    const f = this.data.formData;
+    const rewardFilled = (this.data.rwCoupon && this.data.selectedCouponName) ||
+      (this.data.rwText && f.feedbackText) ||
+      (this.data.rwMedal && (f.medalName || f.medalImg));
+    if (rewardFilled) steps.push('reward');
+    return steps;
+  },
+
+  /* ===== 玩法模块:选一个玩法 ===== */
+  _gameSlotPatch: function (advanced) {
+    const gameKey = nodeGameCatalog.detectGame(advanced);
+    const game = nodeGameCatalog.findGame(gameKey);
+    /* gameSection 是给 WXML 用的:十九个玩法的配置面板各自认自己的段名,
+       比写十九条 gameKey === 'xxx' 短,也不会因为三种问答共用一段而写错。 */
+    return Object.assign({
+      gameKey: gameKey,
+      gameCurrent: game,
+      gameSection: game ? game.section : '',
+      timerAvailable: nodeGameCatalog.supportsTimer(gameKey),
+    }, this._presentPatch(advanced, game ? game.section : ''));
+  },
+
+  /* 呈现方式(契约 §1.5)的编辑器视图:显式配的优先,缺省按默认表(选项类默认内嵌,
+     其余默认整屏);「只能全屏」那批把内嵌这一档锁死并给原因。 */
+  _presentPatch: function (advanced, gameSection) {
+    const explicit = advancedGameConfig.explicitPresent(advanced);
+    /* 2026-10-30 起没有「只能全屏」,不再算 locked */
+    return {
+      presentChoice: explicit || advancedGameConfig.defaultPresent(gameSection),
+      /* 2026-10-30 所有玩法都能内嵌:撤掉 presentInlineLocked(不再置灰) */
+      /* 同上撤掉 presentLockReason */
+    };
+  },
+
+  /* 点「内嵌故事流 / 整屏」。⚠️ 置灰那一道在这里也真拦:「只能全屏」的段即使被点到,
+     applyPresent 也返回 null —— 只靠 WXML 的 aria-disabled 不是防线。 */
+  onPickPresent: function (e) {
+    const item = pickedItem(this.data.presentOptions, e);
+    const value = item && item.key;
+    const advanced = advancedGameConfig.applyPresent(this.data.advanced, this.data.gameSection, value);
+    if (!advanced) return;
+    const present = this._presentPatch(advanced, this.data.gameSection);
+    this.data.dirty = true;   // L04-008
+    /* 字段逐个写真源(不用展开/拼对象):U4 门禁要能静态核对 setData 顶层字段,
+       拼出来的键它核不了,只能进动态债务 —— 这里本来就只有三个固定字段。 */
+    this.setData({
+      advanced: advanced,
+      advancedConfigError: '',
+      submitError: '',
+      presentChoice: present.presentChoice,
+      /* 2026-10-30 所有玩法都能内嵌:撤掉 presentInlineLocked(不再置灰) */
+      /* 同上撤掉 presentLockReason */
+    }, () => { this.refreshPreviewState(); });
+    this._syncCheckDerived(advanced);
+  },
+
+  /* ===== 找东西:在图上点出目标位置 =====
+     商家不填坐标、不填半径(原型:「你点哪儿就是哪儿,半径系统定」)。
+     先点某个目标的「标位置」武装它,再点图 —— 不武装就点图不动,
+     否则一张图上三个目标,点一下不知道该算给谁。 */
+  armHotspot: function (e) {
+    const index = Number(e.currentTarget.dataset.index);
+    if (!Number.isInteger(index)) return;
+    this.setData({ hotspotArming: this.data.hotspotArming === index ? -1 : index });
+  },
+
+  onHotspotImgLoad: function (e) {
+    const d = (e && e.detail) || {};
+    if (!(d.width > 0) || !(d.height > 0)) return;
+    wx.createSelectorQuery().in(this).select('.cg-ho-scene').boundingClientRect((box) => {
+      if (!box || !(box.width > 0) || !(box.height > 0)) return;
+      const s = Math.min(box.width / d.width, box.height / d.height);
+      const w = (d.width * s / box.width) * 100;
+      const h = (d.height * s / box.height) * 100;
+      const pct = (v) => Number(v.toFixed(3));
+      this.setData({ hotspotFrame: 'left:' + pct((100 - w) / 2) + '%;top:' + pct((100 - h) / 2) + '%;width:' + pct(w) + '%;height:' + pct(h) + '%;' });
+    }).exec();
+  },
+  placeHotspot: function (e) {
+    const index = this.data.hotspotArming;
+    if (index < 0) return;
+    const spots = (this.data.advanced.hiddenObject || {}).hotspots || [];
+    if (!spots[index]) return;
+    const touch = (e.touches && e.touches[0]) || e.detail || {};
+    const px = touch.x != null ? touch.x : touch.clientX;
+    const py = touch.y != null ? touch.y : touch.clientY;
+    wx.createSelectorQuery().in(this).select('.cg-ho-frame').boundingClientRect((rect) => {
+      /* 量不到图的位置(还没布局完)就什么都不改 —— 这时候写进去的是一个错坐标,
+         比不写更糟:商家看不出错,玩家点哪儿都不中。 */
+      if (!rect || !(rect.width > 0) || !(rect.height > 0)) {
+        app.tips('图还没加载好，过一下再标');
+        return;
+      }
+      const x = Math.min(1, Math.max(0, (px - rect.left) / rect.width));
+      const y = Math.min(1, Math.max(0, (py - rect.top) / rect.height));
+      const next = spots.map((spot, i) => (i === index
+        ? Object.assign({}, spot, { x: Number(x.toFixed(4)), y: Number(y.toFixed(4)) })
+        : spot));
+      this.data.dirty = true;   // L04-008
+      this.setData({ 'advanced.hiddenObject.hotspots': next, hotspotArming: -1, submitError: '' });
+    }).exec();
+  },
+
+  retrySupportMatrix: function () { return this._loadSupportMatrix(true); },
+  _loadSupportMatrix: function (retry = false) {
+    if (this.data.supportMatrixLoading || (this._supportMatrixRequested && !retry)) return;
+    this._supportMatrixRequested = true;
+    this.setData({ supportMatrixLoading: true, supportMatrixLoadError: '' });
+    return supportMatrix.load(app, retry).then(matrix => { this._supportMatrix = matrix;
+        this.setData({ supportMatrixLoading: false,
+      supportMatrixLoadError: matrix ? '' : '玩法支持信息未加载，请重试' }); this._refreshSupportMatrix(); });
+  },
+  /* 第十三轮 m1:主题后来加了互斥选项或完成要求,每一站都成了任务站。重新打开已存的玩法时,
+     能结算的玩法按选中时同一口径补上结果规则,参与方式没选定位或扫码的默认定位到达;作者点一次保存就落库。 */
+  _settleLoadedGame: function () {
+    const ctx = this._supportContext, advanced = this.data.advanced;
+    if (!this._supportMatrix || !ctx || !ctx.settled || ctx.challenge || this.data.previewMode || !this.data.gameSection || !advanced || advanced.outcomeRules) return;
+    const next = supportMatrix.settleOutcome(this._supportMatrix, ctx, JSON.parse(JSON.stringify(advanced)), this.data.gameSection);
+    if (!next.outcomeRules) return;
+    const patch = { advanced: next };
+    if (![4, 5].includes(Number(this.data.formData.validationMethod)) && !this._r5ParticipationChanged) patch['formData.validationMethod'] = 5;
+    this._setFormState(patch);
+    this._settledOnLoad = true;
+  },
+  _refreshSupportMatrix: function () {
+    this._settleLoadedGame();
+    const matrix = this._supportMatrix, advanced = this.data.advanced;
+    const reasons = {}, conditions = {};
+    templateTools.TOOLS.forEach(tool => {
+      reasons[tool.key] = supportMatrix.toolPolicy(matrix, this.data.gameKey, tool.key, advanced, this._supportContext);
+      conditions[tool.key] = tool.key === 'vote' && !this._supportContext?.runtime
+        ? '可先保存投票与投入声明；采用到主题时绑定实际资源，并检查全场共享的组队进行方式'
+        : supportMatrix.condition(matrix, this.data.gameKey, tool.key);
+    });
+    nodeGameCatalog.ALL.forEach(game => {
+      reasons[game.key] = supportMatrix.choice(matrix, game.key, supportMatrix.pickAs(advanced, this._supportContext), this._supportContext);   // 第十二轮 k7 N5:任务站按会自动落结果规则判
+    });
+    if (this._refreshR5Editor) this._refreshR5Editor();
+    this.setData({ supportReasons: reasons, supportConditions: conditions,
+      effectResourceDisabledReason: supportMatrix.effectSlotPolicy(matrix, advanced),
+      supportError: supportMatrix.validate(matrix, Object.assign({}, this.data.formData, { advancedConfigJson: advanced }), this._supportContext) });
+  },
+
+  /** 分类快捷条:点一下滚到那一组(原型 #sheetNav 的 scrollTo)。 */
+
+  closeGameSheet: function () {
+    this.setData({ gameSheetOpen: false });
+  },
+
+  openToolSheet: function (e) {
+    const key = e.currentTarget.dataset.key;
+    if (!templateTools.TOOLS.some(tool => tool.key === key)) return;
+    const reason = supportMatrix.toolPolicy(this._supportMatrix, this.data.gameKey, key, this.data.advanced, this._supportContext);
+    if (reason && !this._toolSelected[key]) return toast(reason);
+    if (!this.data.gameKey) return toast('请先选择主玩法');
+    if (this.data.gameKey === 'album') return toast('相册暂不支持叠加工具');
+    if (key === 'vote' && Object.keys(this.data.advanced.interactionRules || {}).some(field => field !== 'resourceSlots')) {
+      toast('请先移除费用或次数规则');
+      return;
+    }
+    this.setData({ gameSheetOpen: false, toolSheetOpen: true, toolKey: key,
+      toolDraft: templateTools.read(key, this.data.advanced), toolError: null });
+  },
+  closeToolSheet: function () { this.setData({ toolSheetOpen: false, toolError: null }); },
+  previewToolFromSheet: function (e) {
+    const tool = templateTools.TOOLS.find(item => item.key === e.currentTarget.dataset.key);
+    if (tool) modal.show({ title: tool.label,
+      content: tool.sub + (this._toolSelected[tool.key] ? '\n当前配置：' + this._toolSummaries[tool.key] : ''),
+      showCancel: false });
+  },
+  // 工具面板的草稿改动一律走这里(L04-042):深拷一份、改、整份回写并清错误;mutate 返回 false 表示不改
+  _editToolDraft: function (mutate) {
+    const draft = JSON.parse(JSON.stringify(this.data.toolDraft));
+    if (mutate(draft) === false) return;
+    this.setData({ toolDraft: draft, toolError: null });
+  },
+  updateToolField: function (e) {
+    const field = e.currentTarget.dataset.field;
+    const value = e.detail && e.detail.value;
+    this._editToolDraft((draft) => {
+      if (field === 'mode') {
+        draft.mode = value ? 'OPTIONS' : 'FIXED';
+        if (value && draft.groups.length < 2) draft.groups.push({ label: '', rows: [{ kind: this.data.toolKey === 'reward' ? 'ITEM' : 'VALUE', key: '', label: '', amount: '' }] });
+      } else if (['decidesEnding', 'publicOnce', 'requireArrival'].includes(field)) draft[field] = !!value;
+      else if (field === 'scope' || field === 'votePolicy') {
+        const options = field === 'scope' ? this.data.toolScopes : this.data.votePolicies;
+        draft[field] = (options[Number(value)] || options[0]).key;
+      } else draft[field] = value;
+    });
+  },
+  updateCostRow: function (e) {
+    const d = e.currentTarget.dataset;
+    this._editToolDraft((draft) => {
+      const group = draft.groups[Number(d.group)];
+      if (!group) return false;
+      if (d.field === 'label' && d.row == null) group.label = e.detail.value;
+      else {
+        const row = group.rows[Number(d.row)];
+        if (!row) return false;
+        if (d.field === 'kind') {
+          row.kind = this.data.slotKinds[Number(e.detail.value)].key;
+          row.key = ''; row.label = '';
+        } else if (d.field === 'key') row.key = (row.kind === 'VALUE' ? draft.valueSlots : draft.itemSlots)[Number(e.detail.value)].key;
+        else row[d.field] = e.detail.value;
+      }
+    });
+  },
+  addCostGroup: function () {
+    this._editToolDraft((draft) => {
+      if (draft.groups.length >= 4) return false;
+      draft.groups.push({ label: '', rows: [{ kind: this.data.toolKey === 'reward' ? 'ITEM' : 'VALUE', key: '', label: '', amount: '' }] });
+    });
+  },
+  removeCostGroup: function (e) {
+    this._editToolDraft((draft) => {
+      if (draft.groups.length <= 2) return false;
+      draft.groups.splice(Number(e.currentTarget.dataset.group), 1);
+    });
+  },
+  addCostRow: function (e) {
+    this._editToolDraft((draft) => {
+      const group = draft.groups[Number(e.currentTarget.dataset.group)];
+      if (!group || group.rows.length >= 32) return false;
+      group.rows.push({ kind: this.data.toolKey === 'reward' ? 'ITEM' : 'VALUE', key: '', label: '', amount: '' });
+    });
+  },
+  removeCostRow: function (e) {
+    const d = e.currentTarget.dataset;
+    this._editToolDraft((draft) => {
+      const group = draft.groups[Number(d.group)];
+      if (!group || group.rows.length <= 1) return false;
+      group.rows.splice(Number(d.row), 1);
+    });
+  },
+  updateVotePlan: function (e) {
+    const d = e.currentTarget.dataset;
+    this._editToolDraft((draft) => {
+      const plan = draft.plans[Number(d.plan)];
+      if (!plan) return false;
+      if (d.material != null) plan.materialCost[Number(d.material)][d.field] = d.field === 'itemId'
+        ? draft.itemSlots[Number(e.detail.value)].key : e.detail.value;
+      else plan[d.field] = e.detail.value;
+    });
+  },
+  updateClueRow: function (e) {
+    const d = e.currentTarget.dataset;
+    this._editToolDraft((draft) => {
+      const row = draft.rows[Number(d.index)];
+      if (!row) return false;
+      row[d.field] = d.field === 'public' ? !!e.detail.value : e.detail.value;
+    });
+  },
+  addClueRow: function () {
+    this._editToolDraft((draft) => {
+      if (draft.rows.length >= 10) return false;
+      draft.rows.push({ name: '', public: false });
+    });
+  },
+  removeClueRow: function (e) {
+    this._editToolDraft((draft) => {
+      if (draft.rows.length <= 1) return false;
+      draft.rows.splice(Number(e.currentTarget.dataset.index), 1);
+    });
+  },
+  addPlanClue: function (e) {
+    this._editToolDraft((draft) => {
+      const plan = draft.plans[Number(e.currentTarget.dataset.plan)];
+      if (!plan) return false;
+      plan.clueNames = (plan.clueNames || []).concat('');
+    });
+  },
+  updatePlanClue: function (e) {
+    const d = e.currentTarget.dataset;
+    this._editToolDraft((draft) => {
+      const plan = draft.plans[Number(d.plan)];
+      if (!plan || !plan.clueNames) return false;
+      plan.clueNames[Number(d.index)] = e.detail.value;
+    });
+  },
+  removePlanClue: function (e) {
+    const d = e.currentTarget.dataset;
+    this._editToolDraft((draft) => {
+      const plan = draft.plans[Number(d.plan)];
+      if (!plan || !plan.clueNames) return false;
+      plan.clueNames.splice(Number(d.index), 1);
+    });
+  },
+  addVotePlan: function () {
+    this._editToolDraft((draft) => {
+      if (draft.plans.length >= 30) return false;
+      draft.plans.push({ planKey: templateTools.newPlanKey(draft.plans), title: '', summary: '', materialCost: [], clueNames: [] });
+    });
+  },
+  removeVotePlan: function (e) {
+    this._editToolDraft((draft) => {
+      draft.plans.splice(Number(e.currentTarget.dataset.plan), 1);
+    });
+  },
+  addVoteMaterial: function (e) {
+    this._editToolDraft((draft) => {
+      const plan = draft.plans[Number(e.currentTarget.dataset.plan)];
+      if (!plan || plan.materialCost.length >= 200) return false;
+      plan.materialCost.push({ itemId: '', label: '', quantity: '' });
+    });
+  },
+  removeVoteMaterial: function (e) {
+    this._editToolDraft((draft) => {
+      const d = e.currentTarget.dataset;
+      draft.plans[Number(d.plan)].materialCost.splice(Number(d.material), 1);
+    });
+  },
+  updateSlotLabel: function (e) {
+    this._editToolDraft((draft) => {
+      draft.slots[Number(e.currentTarget.dataset.slot)].label = e.detail.value;
+      draft.valueSlots = [{ key: '', label: '新建需要的资源' }].concat(draft.slots.filter(slot => slot.kind === 'VALUE').map(slot => ({ key: slot.key, label: slot.label })));
+      draft.itemSlots = [{ key: '', label: '新建需要的资源' }].concat(draft.slots.filter(slot => slot.kind === 'ITEM').map(slot => ({ key: slot.key, label: slot.label })));
+    });
+  },
+  saveTool: function () {
+    const result = templateTools.apply(this.data.toolKey, this.data.toolDraft, this.data.advanced);
+    if (result.error) { this.setData({ toolError: result }); return false; }
+    const reason = supportMatrix.validate(this._supportMatrix, Object.assign({}, this.data.formData, { advancedConfigJson: result.value }), this._supportContext);
+    if (reason) { this.setData({ toolError: { error: reason, field: this.data.toolKey } }); return false; }
+    this._toolSelected = templateTools.selected(result.value);
+    this._toolSummaries = templateTools.summaries(result.value);
+    this._setFormState({ advanced: result.value, toolSheetOpen: false, toolError: null, advancedConfigError: '' });
+    return true;
+  },
+  removeTool: function (e) {
+    const advanced = templateTools.remove(e.currentTarget.dataset.key, this.data.advanced);
+    this._toolSelected = templateTools.selected(advanced);
+    this._toolSummaries = templateTools.summaries(advanced);
+    this._setFormState({ advanced, advancedConfigError: '' });
+  },
+
+  /* 分支要身份能力位(服务端 CapabilityGuardImpl.checkAdvancedMechanics)。前端不提前说的话,
+     作者会把一整张分支图配完,点保存才被拒(2026-09-22 走查:商家号撞上)。
+     没拿到快照时不锁 —— 宁可让服务端拦,不能因为权限没加载完就把能用的人挡在外面。 */
+  _lockedGames: function () {
+    if (!roleGuard.hasSnapshot()) return {};
+    const out = {};
+    if (!roleGuard.can('canBranch')) out.branch = '当前身份未解锁「分支 / 条件玩法」';
+    return out;
+  },
+
+  pickGame: function (e) {
+    const key = e.currentTarget.dataset.key;
+    if (key === 'scan') return this.pickParticipation({ currentTarget: { dataset: { key: 'scan' } } });
+    if (templateTools.TOOLS.some(tool => tool.key === key)) return this.openToolSheet(e);
+    const modifier = nodeGameCatalog.MODIFIERS.find(item => item.key === key);
+    if (modifier) {
+      if (modifier.disabled) return toast(modifier.reason);
+      if (!this.data.gameKey) return toast('请先选择主玩法');
+      if (this.data.gameKey === 'album') return toast('相册暂不支持叠加玩法');
+      if (key === 'timer' && !this.data.timerAvailable) return toast('当前玩法不支持限时挑战');
+      this.onAdvancedToggle({ currentTarget: { dataset: { key } }, detail: { value: true } });
+      this.closeGameSheet();
+      return;
+    }
+    const game = nodeGameCatalog.findGame(key);
+    if (!game) return;
+    const locked = (this.data.lockedGames || {})[key]
+      || supportMatrix.choice(this._supportMatrix, key, supportMatrix.pickAs(this.data.advanced, this._supportContext), this._supportContext);   // 第十二轮 k7 N5
+    if (locked) { toast(locked); return; }
+    /* 整段 advanced 一次写回,不用「advanced.xx.enabled」这种拼出来的路径 ——
+       拼路径的写法过不了零消费门禁,也让人看不出到底动了哪几段。 */
+    const advanced = nodeGameCatalog.applyToConfig(this.data.advanced, key);
+    // 换主玩法时保留已加的其它客观题段（主玩法仍是客观题时）
+    const objective = ['qa', 'sort', 'match', 'classify'];
+    if (advanced && objective.includes(game.section)) objective.forEach(k => {
+      if (k !== game.section && k !== this.data.gameSection && this.data.advanced[k] && this.data.advanced[k].enabled && advanced[k]) advanced[k].enabled = true;
+    });
+    if (key === 'typeIn' && e.currentTarget.dataset.r5 && !advanced.outcomeRules) advanced.outcomeRules = { version: 1, pass: {}, fail: {} };
+    /* R11 g1 F2:D20 三档难度(check)与相册(album)只有带 outcomeRules 时服务端才当它是玩法,
+       没有就开局报「该模板未配置高级玩法」,整条线性路线断在这一站。选中时就落一份,形状同结果反馈编辑器。
+       (主题开了检定时 check 也能走旅程检定;带上结果规则两条路都开得了局。) */
+    if (advanced && OUTCOME_REQUIRED_SECTIONS.includes(game.section) && !advanced.outcomeRules) {
+      advanced.outcomeRules = require('../utils/publish/outcome-after.js').defaultRules(advanced);
+    } supportMatrix.settleOutcome(this._supportMatrix, this._supportContext, advanced, game.section);   // 第十二轮 k7 N5:状态 / 检定主题的任务站,能结算的玩法选中就落结果规则
+    /* R14 检定的 checkId 是这一处检定的稳定标识。选中时就在本地模型里落一个 ——
+       拖到保存时才由 normalize 补,会让同一次编辑里两次存盘生成两个不同的 id。 */
+    if (advanced && advanced.check && advanced.check.enabled && !advanced.check.checkId) {
+      advanced.check.checkId = rowId('check');
+    }
+    // validationMethod 只由参与方式修改；主玩法判定由 enabled section 决定。
+    // L04-008:已存模板上换主玩法是一次修改，返回时要问。新建时选玩法、onLoad 按入口参数预选都不算(主人定:只选了玩法退出不弹)
+    const authorEdit = !e.currentTarget.dataset.pristine && this._templateId > 0;
+    if (authorEdit) this.data.dirty = true;
+    const present = this._presentPatch(advanced, game.section); if (this._supportContext && this._supportContext.settled && ![4, 5].includes(Number(this.data.formData.validationMethod)) && !this._r5ParticipationChanged) this._setFormState({ 'formData.validationMethod': 5 });   // 第十二轮 k7 N5:任务站参与方式默认定位到达
+    this.setData({
+      advanced: advanced,
+      submitError: authorEdit ? '' : this.data.submitError,
+      gameKey: key,
+      gameCurrent: game,
+      gameSection: game.section,
+      timerAvailable: nodeGameCatalog.supportsTimer(key),
+      gameSheetOpen: false,
+      pvMethodLabel: game.label,
+      pvMethodIconName: game.icon,
+      presentChoice: present.presentChoice,
+      /* 2026-10-30 所有玩法都能内嵌:撤掉 presentInlineLocked(不再置灰) */
+      /* 同上撤掉 presentLockReason */
+    }, () => {
+      this._refreshOutcomeContract();
+      this._syncSegments();
+      this._prefillRuleSteps();
+      this.refreshPreviewState();
+    });
+    this._refreshSupportMatrix();
+    this._syncCheckDerived(advanced);
+  },
+
+  /** 按商家此刻填的这份配置试玩(原型 §1.1 玩法模块底下那一条)。
+      与「先看再选」不同:那个用样例,这个用真配置 —— 商家要看的是自己填的东西。 */
+  tryCurrentGame: function () {
+    this._pvTypeStartedAt = 0; this._pvAdvanced = null;
+    const pvKit = advancedGamePreview.buildPreviewKit(this.data.advanced, {
+      title: this.data.formData.title,
+      limitSeconds: (this.data.advanced.timer && this.data.advanced.timer.enabled)
+        ? Number(this.data.advanced.timer.durationSeconds) || 0 : 0,
+    });
+    if (!pvKit) { app.tips(noPreviewTip(this.data.gameSection)); return; }
+    this.setData({
+      previewVisible: true,
+      pvSteps: ['challenge'], pvStep: 0, pvKit,
+    }, () => { this._applyPvStep(0); });
+  },
+
+  /* 先看再选:按「假如选了它」的那份配置造一屏,真配置一个字都不动。 */
+  previewGameFromSheet: function (e) {
+    this._pvTypeStartedAt = 0;
+    const key = e.currentTarget.dataset.key;
+    if (templateTools.TOOLS.some(tool => tool.key === key)) return this.previewToolFromSheet(e);
+    const draft = nodeGameCatalog.applyToConfig(this.data.advanced, key, { demo: true });
+    if (!draft) return; this._pvAdvanced = draft;   // 试玩判定按这份范例配置判,不按真配置
+    /* 没有节点级配置的玩法(九宫格:九格与两档奖励配在主题上)永远建不出 kit ——
+       给它一副范例屏,别让商家点了预览只吃到一句「要先配一点内容」、看不到这玩法长什么样。 */
+    const pvKit = advancedGamePreview.buildPreviewKit(draft, { title: this.data.formData.title, limitSeconds: 0 })
+      || advancedGamePreview.buildSampleKit(key);
+    if (!pvKit) {
+      app.tips(noPreviewTip(nodeGameCatalog.findGame(key) && nodeGameCatalog.findGame(key).section));
+      return;
+    }
+    // 从选玩法半屏里点「预览」:看完回到半屏、仍停在刚才选中的那个玩法,别把人扔回编辑页重选
+    this._pvReturnSheet = this.data.gameSheetOpen ? { gameSheetOpen: true, sheetGroup: this.data.sheetGroup,
+      sheetNavAnchor: this.data.sheetNavAnchor, sheetPick: this.data.sheetPick, sheetPickItem: this.data.sheetPickItem } : null;
+    this.setData({
+      gameSheetOpen: false, previewVisible: true,
+      pvSteps: ['challenge'], pvStep: 0, pvKit, pvSimulated: advancedGamePreview.isSimulatedKit(pvKit), pvSimTop: this._pvSimTop()
+    }, () => { this._applyPvStep(0); });
+  },
+
+  openPreview: function () { if (this.data.submitting) return; // CP-11:按钮不再转圈,保存中点击不开预览
+    this._pvTypeStartedAt = 0; this._pvAdvanced = null; this._pvReturnSheet = null;
+    loadStoryFont(STORY_FONT_URL); // P-60:预览里的故事正文同玩家端手写体
+    // 查看预览前必填校验
+    const formData = this.prepareFormData();
+    if (!this.validateForm(formData, false)) return;
+
+    const steps = this._buildPvSteps();
+    /* 按**商家刚填的那份**配置造 kit,不是按已保存的 —— 预览的全部意义就在于
+       还没保存也能看到改动。配置里的秘密字段(答案之类)只走本地这一条路,
+       不经过任何下发通道。 */
+    const pvKit = advancedGamePreview.buildPreviewKit(this.data.advanced, {
+      title: this.data.formData.title,
+      limitSeconds: (this.data.advanced.timer && this.data.advanced.timer.enabled)
+        ? Number(this.data.advanced.timer.durationSeconds) || 0 : 0,
+    });
+    this.setData({ previewVisible: true, pvSteps: steps, pvStep: 0, pvKit, pvSimulated: advancedGamePreview.isSimulatedKit(pvKit), pvSimTop: this._pvSimTop() }, () => {
+      this._applyPvStep(0);
+    });
+  },
+  /* 「试玩 · 不计成绩」整屏时的 top:退出键(状态栏 + 12px + 88rpx)与微信胶囊两者下沿取大,再空 8px。
+     只用于整屏玩法;内嵌玩法里小标排在内容流最上面,本来就在导航行之下。 */
+  _pvSimTop: function () {
+    let winW = 375;
+    try { const info = wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync(); if (info && info.windowWidth > 0) winW = info.windowWidth; } catch (err) { /* 量不到按 375 算 */ }
+    let bottom = (Number(this.data.statusBarHeight) || 0) + 12 + Math.round(88 * winW / 750);
+    try {
+      const capsule = wx.getMenuButtonBoundingClientRect && wx.getMenuButtonBoundingClientRect();
+      if (capsule && capsule.bottom > bottom) bottom = capsule.bottom;
+    } catch (err) { /* 没有胶囊信息时按退出键下沿 */ }
+    return Math.round(bottom + 8);
+  },
+  /* 作者试玩仅在本地反馈交互结果；正式游玩的判定与奖励仍由服务端负责。 */
+  onPvKitAction: function (e) {
+    const d = e.detail || {};
+    if (d.action === 'close') { this.closePreview(); return; }
+    const kit = this.data.pvKit;
+    if (!kit || !this.data.previewVisible) return;
+    // 找东西:范例图上点一下,按这份配置的热区本地判中没中(坐标只在作者本机,不进 kit)
+    if (kit.type === 'hidden' && d.action === 'submit') { this._pvHiddenTap(kit, d.detail); return; }
+    const result = applyPreviewAction(kit, d, this._pvTypeStartedAt);
+    if (result) {
+      this._pvTypeStartedAt = result.startedAt;
+      this.setData({ pvKit: result.kit, pvDone: this.data.pvDone || !!result.ready });
+      if (!(result.ready && (result.kit.type === 'typein' || result.kit.type === 'journeycheck') && this.showPvVerdict(result.kit, d))) { if (result.message) app.tips(result.message); }
+    } else if (d.action === 'verdict' || d.action === 'drawn' || d.action === 'scanned') { this.setData({ pvDone: true }); if (!this.showPvVerdict(kit, d)) this.pvNext(); }
+    // CU-C-11:问答类提交在预览里不判定,原来静默吞掉 ⇒ 点「提交」像坏了。明说,别让商家以为答错/没反应。
+    else if (d.action === 'answer' || d.action === 'submit' || d.action === 'shoot') { this.setData({ pvDone: true }); if (!this.showPvVerdict(kit, d)) app.tips('试玩只看样子，不判对错'); }
+  },
+  _pvHiddenTap: function (kit, point) {
+    const hit = require('./preview-verdict.js').hiddenHit(this._pvAdvanced || this.data.advanced, kit, point);
+    if (!hit) { app.tips('这儿没有'); return; }
+    // 命中的点写回 targets(found + 点的位置),组件据此把点留在图上、清单打勾,全找到由台面自己判赢
+    const targets = (kit.targets || []).map(t => (t.id === hit ? Object.assign({}, t, { found: true, x: point.x, y: point.y }) : t));
+    this.setData({ pvKit: Object.assign({}, kit, { targets }) });
+  },
+  /* 「继续故事」:玩完才出现;与判定屏「继续」同一去向 —— 只演玩法这一屏时回编辑页,分步预览进下一步 */
+  onPvContinue: function () {
+    if (this.data.pvStep >= this.data.pvSteps.length - 1) this.closePreview(); else this.pvNext();
+  },
+  closePreview: function () {
+    this._pvTypeStartedAt = 0;
+    const back = this._pvReturnSheet;
+    this._pvReturnSheet = null;
+    this.setData({ previewVisible: false, pvKit: null, pvDone: false, pvVerdict: { show: false, kind: 'win', text: '', images: [] } });
+    if (back) this.setData({ gameSheetOpen: true, sheetGroup: back.sheetGroup, sheetNavAnchor: back.sheetNavAnchor, sheetPick: back.sheetPick, sheetPickItem: back.sheetPickItem });
+    this.syncNativeTheme();
+  },
+
+  // 物理返回守卫(见 wxml 尾部 page-container):关最上层浮层,而不是退出编辑页
+  onNativeBackGuard: function () {
+    if (this._exitAfterPreview) {
+      this._exitAfterPreview = false;
+      this.exitPage();
+      return;
+    }
+    if (this.data.pickerSheet && this.data.pickerSheet.open) {
+      this.closePickerSheet();
+    } else if (this.data.checkSheet.show) { this.closeCheckSheet();
+    } else if (this.data.afterEditor.show) { this.closeAfterSheet();
+    } else if (this.data.toolPickerOpen) { this.closeToolPicker();
+    } else if (this.data.voiceSheetOpen) { this.closeVoiceSheet();
+    } else if (this.data.musicSheetOpen) { this.closeMusicSheet();
+    } else if (this.data.toolSheetKey) {
+      this.closeR5ToolSheet();
+    } else if (this.data.scanSheetOpen) {
+      this.closeScanSheet();
+    } else if (this.data.toolSheetOpen) {
+      this.closeToolSheet();
+    } else if (this.data.gameSheetOpen) {
+      this.closeGameSheet();
+    } else if (this.data.categorySheetVisible) {
+      this.onCategorySheetClose();
+    } else if (this.data.showAddSheet) {
+      this.closeAddSheet();
+    } else if (this.data.previewVisible) {
+      this.closePreview();
+    }
+    const stillGuarded = (this.data.pickerSheet && this.data.pickerSheet.open)
+      || this.data.checkSheet.show || this.data.afterEditor.show || this.data.toolSheetKey || this.data.scanSheetOpen
+      || this.data.toolPickerOpen || this.data.voiceSheetOpen || this.data.musicSheetOpen
+      || this.data.toolSheetOpen || this.data.gameSheetOpen || this.data.categorySheetVisible || this.data.showAddSheet || this.data.previewVisible;
+    if (stillGuarded) {
+      this.setData({ backGuardOff: true });
+      setTimeout(() => this.setData({ backGuardOff: false }), 50);
+    }
+  },
+
+  _applyPvStep: function (idx) {
+    const steps = this.data.pvSteps;
+    const i = Math.max(0, Math.min(idx, steps.length - 1));
+    const key = steps[i];
+    const labelMap = { arrival: '到达节点', story: '剧情解锁', challenge: '节点任务', complete: '任务完成', reward: '获得奖励' };
+
+    const patch = {
+      pvStep: i,
+      pvStepKey: key,
+      pvStepLabel: labelMap[key] || '',
+      // 重置点位任务临时态
+      pvAnswer: '',
+      pvSelected: null,
+      pvWrong: false,
+      pvHintShown: false,
+      pvDone: false
+    };
+
+    if (key === 'story') {
+      const beats = this.data.storyBeats.filter(b => (b.text && b.text.trim()) || (b.imgs && b.imgs.length));
+      patch.pvBeats = beats.map((b, n) => ({
+        id: n,
+        label: (b.tag && b.tag.trim()) ? b.tag : ('时刻 ' + (n + 1)),
+        paras: handParas(b.text).map((p, k) => ({ k, text: p.text, hand: p.hand })),   // 段首「[手写]」同玩家端:去标记、这一段用手写体
+        imgs: Array.isArray(b.imgs) ? b.imgs : []
+      }));
+    }
+
+    if (key === 'challenge') {
+      const vm = this.data.formData.validationMethod;
+      const tile = this._methodTile(vm);
+      /* 选了玩法就报玩法的名字。十九个玩法里有十二个的 validationMethod 都是 0,
+         照老表查名字会把「抛硬币」「倒计时」全说成「无需验证」。 */
+      const game = this.data.gameCurrent;
+      patch.pvMethodIconName = game ? game.icon : tile.iconName;
+      patch.pvMethodLabel = game ? game.label : tile.label;
+      const titleMap = {
+        1: this.data.formData.questionName || '请回答下面的问题',
+        3: this.data.optionQuestion || '请选择正确答案',
+        2: this.data.formData.photoRequireDesc || '拍下你在现场的照片',
+        4: '扫描现场的二维码',
+        5: '走到目标位置',
+        0: '点击下方按钮完成打卡'
+      };
+      patch.pvChallengeTitle = titleMap[vm] || '完成节点任务';
+      const subMap = { 1: '提交答案', 3: '提交答案', 2: '上传并完成', 4: '完成扫码', 5: '我已到达此处', 0: '完成打卡' };
+      patch.pvSubmitLabel = subMap[vm] || '完成';
+      patch.pvHasHint = HINT_METHODS.includes(vm) && this.data.hintEnabled && !!(this.data.formData.hint1 || this.data.formData.answerReveal);
+      patch.pvHintText = this.data.formData.hint1 || this.data.formData.answerReveal || '再仔细观察周围的细节';
+    }
+
+    this.setData(patch);
+    this.syncNativeTheme();
+  },
+
+  pvNext: function () {
+    if (this.data.pvStep >= this.data.pvSteps.length - 1) return;
+    this._applyPvStep(this.data.pvStep + 1);
+  },
+  pvPrev: function () {
+    if (this.data.pvStep <= 0) return;
+    this._applyPvStep(this.data.pvStep - 1);
+  },
+  // P-40:预览只靠左右滑动翻步 —— 横向位移超过 60px 且明显大于纵向位移才算翻页,避免和上下滚动抢手势
+  onPvTouchStart: function (e) {
+    const t = e.changedTouches && e.changedTouches[0];
+    this._pvTouch = t ? { x: t.clientX, y: t.clientY } : null;
+  },
+  onPvTouchEnd: function (e) {
+    const start = this._pvTouch, t = e.changedTouches && e.changedTouches[0];
+    this._pvTouch = null;
+    if (!start || !t) return;
+    const dx = t.clientX - start.x, dy = t.clientY - start.y;
+    if (Math.abs(dx) < 60 || Math.abs(dx) <= Math.abs(dy) * 1.5) return;
+    if (dx < 0) this.pvNext(); else this.pvPrev();
+  },
+  onPvAnswer: function (e) {
+    this.setData({ pvAnswer: e.detail.value, pvWrong: false });
+  },
+  onPvSelectChoice: function (e) {
+    const index = parseInt(e.currentTarget.dataset.index);
+    this.setData({ pvSelected: index, pvWrong: false });
+  },
+  pvUseHint: function () {
+    this.setData({ pvHintShown: true });
+  },
+  pvSubmitChallenge: function () {
+    const vm = this.data.formData.validationMethod;
+    if (vm === 1) {
+      const ans = (this.data.formData.questionAnswer || '')
+        .split(/[、,，;；\s]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
+      const got = (this.data.pvAnswer || '').trim().toLowerCase();
+      if (!got || (ans.length && !ans.includes(got))) {
+        this.setData({ pvWrong: true });
+        return;
+      }
+    } else if (vm === 3) {
+      const correctIdx = this.data.optionItems.findIndex(o => o.isCorrect);
+      if (this.data.pvSelected === null || this.data.pvSelected !== correctIdx) {
+        this.setData({ pvWrong: true });
+        return;
+      }
+    }
+    this.pvNext();
+  },
+
+  // ===== 数据准备 / 校验 / 提交 =====
+  prepareFormData: function () {
+    const formData = { ...this.data.formData };
+    formData.categoryIds = this.data.selectedCategoryIds.join(',');
+    formData.imgArr = formData.imgUrl;
+
+    formData.validationMethod = resolveValidationMethod(formData, this.data.gameKey, this.data.advanced);
+    // 完成方式模块:未添加则清空相关字段
+    if (this.hasModule('finish') && !this.data.gameKey && !this.data.advanced.scan?.enabled) {
+      if (formData.validationMethod === 3) {
+        formData.questionA = formData.questionB = formData.questionC = formData.questionD = '';
+        this.data.optionItems.forEach((item) => {
+          formData[`question${item.letter}`] = item.text;
+        });
+        formData.questionName = this.data.optionQuestion;
+        const correct = this.data.optionItems.find(o => o.isCorrect);
+        formData.correctAnswer = correct ? correct.letter : 'A';
+        formData.questionOptionMediaJson = optionMedia.toJson(this.data.optionItems);
+      } else {
+        // 非选择题不带选项媒体:留着会在后端 sanitize 时对不上已被清空的选项文本
+        formData.questionOptionMediaJson = '';
+      }
+      if (formData.validationMethod !== 6) formData.preferenceJson = '';
+      // 题干附件只属于问答型(1 文字 / 3 选项),换成拍照/扫码/GPS 要一并清掉
+      if (formData.validationMethod !== 1 && formData.validationMethod !== 3) {
+        formData.questionImg = '';
+        formData.questionAudio = '';
+      }
+      // 提示:开关关闭则清空
+      if (!this.data.hintEnabled || !HINT_METHODS.includes(formData.validationMethod)) {
+        formData.hint1 = '';
+        formData.hint2 = '';
+        formData.answerReveal = '';
+      }
+      // 非拍照清空拍照字段
+      if (formData.validationMethod !== 2) {
+        formData.photoRequireDesc = '';
+        formData.photoReview = 0;
+      }
+    } else if (!this.data.gameKey && !this.data.advanced.scan?.enabled && !this._loadedAuthorFields && !this._r5ParticipationChanged) {
+      formData.validationMethod = 0;
+      formData.questionName = '';
+      formData.questionAnswer = '';
+      formData.photoRequireDesc = '';
+      formData.photoReview = 0;
+      formData.questionA = formData.questionB = formData.questionC = formData.questionD = '';
+      formData.hint1 = formData.hint2 = formData.answerReveal = '';
+    }
+
+    // 完成奖励模块:推导 feedbackMethod;未添加则清空
+    if (this.hasModule('reward')) {
+      if (formData.couponId > 0) {
+        formData.feedbackMethod = 1;
+      } else if (formData.feedbackText) {
+        formData.feedbackMethod = 2;
+      } else {
+        formData.feedbackMethod = 0;
+      }
+    } else {
+      formData.feedbackMethod = 0;
+      formData.couponId = 0;
+      formData.feedbackText = '';
+      formData.medalImg = '';
+      formData.medalName = '';
+    }
+    // 没有勋章名也没有勋章图,样式就没有意义 —— 别发。服务端 assertCapabilities 把 medalStyle
+    // 单独非空也当成「要设计勋章」,而表单默认永远是 'glow':不清掉的话,没有「勋章设计」能力的
+    // 账号(商家、玩家)存任何自建玩法都会被挡(2026-09-22 走查实跑撞上)。
+    if (!formData.medalName && !formData.medalImg) formData.medalStyle = '';
+
+    // 剧情模块:序列化进 storyJson(后端 DTO CmsTemplatePublishRequest.storyJson,驼峰);未添加则空
+    // 原字段名 story_json(下划线)与后端不匹配 → 剧情永不落库,故改驼峰。
+    if (this.hasModule('story')) {
+      const beats = this.data.storyBeats
+        .filter(b => (b.text && b.text.trim()) || (b.imgs && b.imgs.length))
+        .map(b => ({ text: b.text || '', tag: b.tag || '', imgs: Array.isArray(b.imgs) ? b.imgs : [] }));
+      // 标签与本模板线索名相同的段落是线索内容：只在玩家取得线索后由服务端回读，不进入到达即读的 storyText
+      const clueNames = new Set(Object.values((this.data.advanced && this.data.advanced.clues) || {}).map(name => String(name || '').trim()).filter(Boolean));
+      formData.storyText = beats.filter(b => !clueNames.has(String(b.tag || '').trim())).map(b => b.text.trim()).filter(Boolean).join('\n').slice(0, 500);
+      formData.storyJson = beats.length ? JSON.stringify(beats) : '';
+    } else {
+      formData.storyText = '';
+      formData.storyJson = '';
+    }
+
+    // 语音模块:未添加则清空
+    if (!this.hasModule('voice')) {
+      formData.audioUrl = '';
+      formData.audioDuration = '';
+    }
+
+    const advancedOpts = this._advancedValidateOpts();
+    const advancedModel = questoAuthor.beforeSave(this.data.advanced), advancedError = advancedGameConfig.validate(advancedModel, advancedOpts); // Questo 新键存盘前收口(人物与选项对齐、空可选键不写)
+    formData.advancedConfigJson = advancedError
+      ? JSON.stringify(advancedModel)
+      : advancedGameConfig.serializeChanges(advancedModel, formData.advancedConfigJson, advancedOpts);
+
+    const clearFields = templateAuthorFields.clearFields(this._loadedAuthorFields, formData);
+    if (clearFields.length) formData.clearFields = clearFields;
+
+    return formData;
+  },
+
+  // 采用公共库模板时,blindTaste.answerKey / dailySign.poems 被服务端投影剥掉,
+  // 本地必然为空 —— 校验放行这两个空值,发布时服务端从源模板补回(backfillAdoptedSecrets)。
+  _advancedValidateOpts: function () {
+    return { adoptedFromLibrary: Number(this.data.formData.originalTemplateId) > 0 };
+  },
+
+  _collectValidationErrors: function (draft) {
+    const errors = {};
+    const f = this.data.formData;
+
+    // 标题(草稿也校验)
+    if (!f.title || !f.title.trim()) errors.title = '请填写玩法标题';
+    const advancedError = advancedGameConfig.validate(this.data.advanced, this._advancedValidateOpts());
+    // L04-115:同一轮刷新里的面板实时报错直接复用这次结果,不再把整份配置再校验一遍
+    this._lastAdvancedError = advancedError;
+    if (advancedError) errors.advanced = advancedError; else if (questoAuthor.hasErrors(this.data.advanced)) errors.advanced = questoAuthor.hasErrors(this.data.advanced);
+    const outcome = this._refreshOutcomeContract();
+    if (outcome.errors.length) errors.advanced = outcome.errors[0].message;
+    if (draft) return errors;
+
+    // 发布:全量
+    // 从发布页进来的是故事里的一个环节(新生儿登记、BIOS),以草稿绑在主题上、不进公共玩法库 ——
+    // 描述 / 人数 / 时长 / 类别都是公共玩法库给玩家挑模板用的,这里不要求(服务端 /api/template/draft
+    // 也只要求标题)。公共玩法库那条路一条不松。
+    const storyGame = this.data.from === 'fabu';
+    if (!storyGame) {
+      if (!f.description || !f.description.trim()) errors.description = '请填写玩法看点';
+      else if (f.description.length > this.data.descriptionMaxLength) errors.description = `玩法描述不超过${this.data.descriptionMaxLength}字`;
+      if (this.data.selectedCategoryIds.length === 0) errors.categoryIds = '请选择至少一个玩法类别';
+    } else if (f.description && f.description.length > this.data.descriptionMaxLength) errors.description = `玩法描述不超过${this.data.descriptionMaxLength}字`;
+
+    // 据点:玩法形态必选 —— 它决定玩家在店里看到的是什么(故事卡/隐藏菜单/拍照点/扫码)
+    if (this.data.from === 'citynode' && !this.data.interactionType) {
+      errors.interactionType = '请选择玩法形态';
+    }
+
+    // 玩法为核心:必须添加
+    if (!this.hasModule('finish')) {
+      errors.finish = '请添加「玩法」并选一个玩法，这是节点体验的核心';
+    } else if (this.data.gameKey) {
+      /* 选了玩法之后,题面/答案/选项都在它自己的配置里(advancedGameConfig.validate 把关),
+         下面那串老的 validationMethod 必填只对「还没选玩法的旧模板」有效 ——
+         两套一起跑的话,选项问答会被老链路要一遍 formData.questionName,而新模型里
+         那个字段根本不再填,预览和发布会被一条永远填不满的必填卡死。
+         主题级玩法(九宫格)在节点这一层也没有可填的东西,同样不额外要求。 */
+    } else {
+      const vm = f.validationMethod;
+      if (vm === 1 && (!f.questionName || !f.questionAnswer)) errors.finish = '请填写问题和正确答案';
+      if (vm === 3) {
+        const filled = this.data.optionItems.filter(o => o.text && o.text.trim());
+        if (!this.data.optionQuestion) errors.finish = '请填写问题';
+        else if (filled.length < 2) errors.finish = '至少需要 2 个选项';
+        else if (!this.data.optionItems.some(o => o.isCorrect)) errors.finish = '请设置正确答案';
+      }
+      if (vm === 6) {
+        const preview = this.parsePreferencePreview(f.preferenceJson);
+        if (preview.error) errors.finish = preview.error;
+      }
+      // ★ 选了估数/比价/找东西,却没把对应的玩法配置段打开 = 节点退化成到达即通关
+      //   (ValidationMethod.completesOnArrive 收了 8/9/10),玩法静默不存在、零报错。
+      //   这条不拦住,商家会以为自己配好了。
+      const playSection = PLAY_METHOD_SECTIONS[vm];
+      if (playSection && !(this.data.advanced[playSection] || {}).enabled) {
+        errors.finish = `选了「${PLAY_METHOD_LABELS[vm]}」就要在「玩法」里打开并填完它`;
+      }
+    }
+
+    // 完成奖励(若添加)
+    if (this.hasModule('reward')) {
+      const hasCoupon = f.couponId > 0, hasText = !!f.feedbackText, hasMedal = !!f.medalImg || !!f.medalName;
+      // 奖励模块默认挂着;故事玩法里没配奖励就当没开,不拦(9-17 口径:不判对错、低难度)
+      if (!hasCoupon && !hasText && !hasMedal) { if (!storyGame) errors.reward = '请至少配置一种奖励'; }
+      else if (hasMedal && (!f.medalImg || !f.medalName)) errors.reward = '勋章需同时上传图片和名称';
+    }
+
+    // 语音讲解(若添加)
+    if (this.hasModule('voice') && !f.audioUrl) {
+      errors.voice = '请上传音频文件';
+    }
+
+    return errors;
+  },
+
+  refreshPreviewState: function () {
+    this._lastAdvancedError = null;
+    const canOpenPreview = Object.keys(this._collectValidationErrors(false)).length === 0;
+    const advancedError = this._lastAdvancedError;
+    // P-40:发布 / 保存并绑定挪到编辑态底栏,不再要求先打开预览 —— 可用态与「查看预览」同一份校验
+    if (canOpenPreview !== this.data.canOpenPreview || canOpenPreview !== this.data.canPublishGame) {
+      this.setData({ canOpenPreview, canPublishGame: canOpenPreview });
+    }
+    /* 推理类三段:校验错当场显示在玩法面板里(保存本来就会被 validateForm 拦下,
+       这里解决的是「填错了要等点保存才知道」)。常量段名,不是拿 selected 的段去算。 */
+    const gameConfigError = PANEL_LIVE_ERROR_SECTIONS.indexOf(this.data.gameSection) >= 0
+      ? (advancedError != null ? advancedError : advancedGameConfig.validate(this.data.advanced, this._advancedValidateOpts())) : '';
+    if (gameConfigError !== this.data.gameConfigError) this.setData({ gameConfigError });
+    const answerRuleRows = editorLayout.answerRuleRows(this.data.advanced, this.data.gameSection, this.data.segmentOn);
+    if (JSON.stringify(answerRuleRows) !== JSON.stringify(this.data.answerRuleRows)) this.setData({ answerRuleRows });
+  },
+
+  /* 高级设置:一个折叠组,展开状态存本机(主人 2026-11-19:记住展开状态) */
+  toggleAdvancedGroup: function () {
+    const advancedOpen = !this.data.advancedOpen;
+    this.setData({ advancedOpen });
+    editorLayout.writeAdvancedOpen(wx, advancedOpen);
+  },
+
+  /* 玩法规则按所选玩法预填(可改);作者改过的不覆盖 */
+  _prefillRuleSteps: function () {
+    if (!this.data.gameSection) return;
+    if (!editorLayout.shouldPrefillRules(this.data.ruleSteps, this._autoRuleSteps)) return;
+    const steps = r5Editor.ruleSteps(this.data.advanced, this.data.gameSection);
+    if (!steps.length) return;
+    this._autoRuleSteps = steps.slice();
+    // 预填是派生内容,不算作者改动:页面还没动过就保持未改状态(退出不弹「未保存」)
+    this._setFormState({ ruleSteps: steps.slice(), 'formData.ruleInstructions': steps.join('\n') }, null, { pristine: !this.data.dirty });
+  },
+
+  /* 完成方式 ↔ 玩法名字的同一处取法(摘要与预览第 3 步共用,两处不再各算一份) */
+  _methodTile: function (vm) {
+    if (vm === PREFERENCE_TILE.value) return PREFERENCE_TILE;
+    return METHOD_TILES.find(t => t.value === vm) || METHOD_TILES[METHOD_TILES.length - 1];
+  },
+
+  validateForm: function (formData, draft) {
+    if (this.data.editorLoading || this.data.loadError) return false;
+    const errors = this._collectValidationErrors(draft); this._qzSaveError(); // 保存后就地提示连「还没填」一起报
+    this._refreshSupportMatrix();
+    if (this.data.supportError) errors.advanced = this.data.supportError;
+    if (this.data.supportMatrixLoading && (supportMatrix.generic(this.data.advanced) || supportMatrix.effectOnly(this.data.advanced)
+      || (this._supportContext || {}).settled || (this._supportContext || {}).challenge)) errors.advanced = '正在读取玩法支持范围，请稍后保存';
+    const sensorError = templateAuthorFields.sensorClearError(formData.clearFields || [], formData, this._loadedAuthorFields);
+    if (sensorError) errors.finish = sensorError;
+
+    this._refreshEffectResources();
+    if (this.data.effectErrors.length) errors.advanced = this.data.effectErrors[0].error;
+    this.setData({ errors, advancedErrorField: editorLayout.advancedErrorField(errors.advanced, this.data.gameSection) });
+    if (draft) {
+      if (errors.title) { this.scrollToError('title'); return false; }
+      if (errors.finish) { this.scrollToError('finish'); return false; }
+      if (errors.advanced) { this.scrollToError('advanced'); return false; }
+      return true;
+    }
+    const firstKey = PUBLISH_ERROR_ORDER.find(k => errors[k]);
+    if (firstKey) { this.scrollToError(firstKey); return false; }
+    return true;
+  },
+
+  // 「查看预览」置灰 = 还有必填没交。点它不空转:走一遍发布同款全量校验,
+  // 定位滚动到第一条缺项,问题写在字段下方红字(errors 落字段旁)。
+  // 2026-11-03 第四轮业主标准:输入问题只在字段下方用红色 cy-inline-error 说,
+  // 不再另弹 toast 报第一条缺项;滚动定位照旧由 validateForm 完成。
+  // (本段保持原行数,下方登记在基线里的行号不挪。)
+  onPreviewDisabledTap: function () {
+    this.validateForm(this.data.formData, false);
+  },
+
+  publishGame: function () {
+    if (app.ensureLoginFor && !app.ensureLoginFor('publish', () => this.publishGame(), { owner: this, target: () => [this._templateId, this._boundDraftId, this.data.from, this.data.operationScope, this.data.isMyScope] })) return; // 2026-10-24 游客写前登录
+    const original = this._pendingTemplateWrite();
+    if (original) return this.sendData(original.body, original.endpoint, original.action);
+    if (this.data.from === 'citynode' && !this.data.merchantAccess.canManageProjects) {
+      toast('当前身份不能管理节点');
+      return;
+    }
+    const formData = this.prepareFormData();
+    if (this.data.from !== 'citynode') formData.scope = this.data.operationScope;
+    if (!this.validateForm(formData, false)) return;
+    if (this.data.from !== 'citynode' && this.data.from !== 'fabu' && this.data.isMyScope && this._templateId) formData.id = this._templateId;
+    else delete formData.id;
+    if (this._templateId && this._templateId != 0) {
+      formData.copyFromTemplateId = this._templateId;
+    }
+    if (this.data.from === 'fabu') {
+      formData.status = 0;
+      // 后端 CmsTemplatePublishRequest.isSync 是 Integer —— 发布尔 false 会在反序列化阶段 500
+      // (2026-09-22 走查实跑,生产日志 HttpMessageNotReadableException)。
+      formData.isSync = 0;
+      if (this._boundDraftId) formData.id = this._boundDraftId;
+      return this.sendData(formData, '/api/template/draft', 'bind');
+    }
+    formData.status = 1;
+    this.data.lastSubmitAction = 'publish';
+    // 据点玩法走另一条写入路径。★ 不能图省事复用 /api/template/publish ——
+    // 据点端点额外做两件这里没有的事:validationMethodError(按验证方式校验必填,
+    // 配不全就落库的话玩家侧只表现成「怎么答都不对」)+ 微信内容安全 msgSecCheck,
+    // 并落 merchantNodeEnabled=1 / nodeSubmitStatus=2。绕过去 = 静默把闸拆了。
+    if (this.data.from === 'citynode') {
+      return this.sendData(this.toNodeTemplate(formData), '/api/merchant/city-node/template/submit', 'publish');
+    }
+    // 本人模板发布原位更新(id 已在上面按 isMyScope && _templateId 定好);库 ID 只作来源，不能当会员模板 ID。
+    this.sendData(formData, '/api/template/publish', 'publish');
+  },
+
+  /**
+   * 表单形状 → CmsMemberTemplate 形状。两边字段名绝大多数同名(同一套模板模型),
+   * 这里只处理对不上的那几个;漏一个就是静默丢配置,所以配了契约锁字段清单。
+   */
+  toNodeTemplate: function (formData) {
+    const body = Object.assign({}, formData);
+    // 表单的 feedbackMethod 是 UI 推导出来的数字,实体上叫 feedbackMethodStr(字符串)
+    if (body.feedbackMethod != null) {
+      body.feedbackMethodStr = String(body.feedbackMethod);
+      delete body.feedbackMethod;
+    }
+    // 据点提交取本页确认的互动语义；普通模板沿 formData 保留个人详情读回的原字段。
+    body.interactionType = this.data.interactionType || '';
+    // categoryIds 是本页拼给发布 DTO 的,实体侧取 categoryId / activityCategoryids
+    if (body.categoryIds) {
+      body.activityCategoryids = body.categoryIds;
+      const first = String(body.categoryIds).split(',')[0];
+      if (first) body.categoryId = Number(first) || null;
+      delete body.categoryIds;
+    }
+    // 本页独有的上传辅助字段,实体上没有,别塞
+    delete body.audioFileName;
+    delete body.audioFormat;
+    delete body.copyFromTemplateId;
+    delete body.clearFields;
+    return body;
+  },
+
+  onPickInteraction: function (e) {
+    const item = pickedItem(this.data.interactionTypes, e);
+    if (item) this._setFormState({ interactionType: item.key });
+  },
+
+  saveDraft: function () {
+    if (app.ensureLoginFor && !app.ensureLoginFor('publish', () => this.saveDraft(), { owner: this, target: () => [this._templateId, this._boundDraftId, this.data.from, this.data.operationScope, this.data.isMyScope] })) return; // 2026-10-24 游客写前登录
+    const original = this._pendingTemplateWrite();
+    if (original) return this.sendData(original.body, original.endpoint, original.action);
+    if (this.data.from === 'fabu') return this.publishGame();
+    if (this.data.from === 'citynode') {
+      toast('节点玩法请配置完成后直接保存');
+      return;
+    }
+    const formData = this.prepareFormData();
+    formData.scope = this.data.operationScope;
+    if (!this.validateForm(formData, true)) return;
+    formData.status = 0;
+    /* CU-M-68:只有「本人草稿续编」才能带 id —— 这个字段在两处含义不同:
+       scope=my 进来时 _templateId 是 cms_member_template.id(后端按它 + memberId 归属更新);
+       从货架/公开库进 来时 _templateId 是 cms_template_library.id(回填走的也是 /api/template/info)。
+       把库 id 当草稿 id 发给 /api/template/draft,后端按 cms_member_template 查归属必然抛错
+       —— 隔离环境实测:采用公开玩法后点「保存草稿」报「保存草稿失败，请稍后重试」,草稿零写入。
+       采用态只带 originalTemplateId(formData 里现成),后端据此 insert 新草稿并保留来源。 */
+    if (this.data.isMyScope === true && this._templateId > 0) {
+      formData.id = this._templateId;
+    }
+    this.data.lastSubmitAction = 'draft';
+    this.sendData(formData, '/api/template/draft', 'draft');
+  },
+
+  retrySubmit: function () {
+    if (['publish', 'bind'].includes(this.data.lastSubmitAction)) this.publishGame();
+    else this.saveDraft();
+  },
+
+  _templateWriteBucket() {
+    return 'template:' + this.data.operationScope + ':' + this.data.from + ':' + (this._templateId || 'new') + ':' + (this._boundDraftId || '');
+  },
+
+  _pendingTemplateWrite() {
+    if (this.data.from === 'citynode') return null;
+    try { return authorWrites.pending(wx, authorWrites.ownerOf(app), this._templateWriteBucket()); }
+    catch (error) { this.setData({ submitError: error.message }); return null; }
+  },
+
+  sendData: function (data, url, action) {
+    const original = this._pendingTemplateWrite();
+    if (original) { data = original.body; url = original.endpoint; action = original.action; }
+    const current = currentEditor(this);
+    if (!current() || !this._ownTemplateWritable()) return;
+    const that = this;
+    if (url === '/api/merchant/city-node/template/submit'
+        && !that.data.merchantAccess.canManageProjects) {
+      toast('当前身份不能管理节点');
+      return;
+    }
+    if (that._submitting) return;
+    that._submitting = true;
+
+    const isDraft = (data.status === 0);
+    const submittingAction = action || (isDraft ? 'draft' : 'publish');
+    that.data.lastSubmitAction = submittingAction;
+    that.setData({
+      submitting: true,
+      submittingAction: submittingAction,
+      lastSubmitAction: submittingAction,   // 失败说明要按它说「草稿 / 发布」哪一步没成,得进视图层
+      submitError: ''
+    });
+
+    const request = {
+      url: url,
+      hideLoading: true,
+      autoErrorToast: false,
+      data: JSON.stringify(data),
+      method: "POST",
+      header: {
+        'Content-Type': 'application/json',
+        'X-Author-Exact-Ids': '1',
+        'Authorization': app.getAuthorization()
+      },
+      success: function (res) {
+        if (!current()) return;
+        const createdId = positiveId(res && res.data && typeof res.data === 'object' ? res.data.id : res && res.data);
+        if (res && res.code == "200" && createdId) {
+          that._loadedAuthorFields = Object.assign({}, data);
+          /* CU-M-68:草稿存成功后,本页此后编辑的就是「本人这份草稿」—— 换成新草稿 id 并切到本人口径。
+             否则采用公开玩法后留在页里再存一次,还会拿公开库 id 走「采用」分支,再建一份重复草稿。 */
+          // 发布页(from=fabu)进来时保存走的是 bind 分支,同样切到本人草稿(再存由 _boundDraftId 更新同一份)
+          if (submittingAction === 'draft' || submittingAction === 'bind') {
+            that._switchToSavedTemplate(createdId);
+          }
+          if (that.data.from === 'citynode') {
+            // 回传给据点页:它拿 templateId 去提交投放申请。
+            // 走 eventChannel 而不是 storage —— 页面栈回去就要用,存 storage 只会多一份可能过期的副本。
+            const ch = that.getOpenerEventChannel && that.getOpenerEventChannel();
+            if (ch && ch.emit) {
+              ch.emit('templateCreated', {
+                id: createdId,
+                title: that.data.formData.title,
+                interactionType: that.data.interactionType,
+                advancedConfigJson: data.advancedConfigJson,
+                validationMethod: that.data.formData.validationMethod
+              });
+            }
+            that._submitting = false;
+            that.data.dirty = false;
+            that.setData({ submitting: false, submittingAction: '', submitError: '' });
+            toast.success('玩法已保存');
+            setTimeout(function () { if (current()) that.exitPage(); }, 600);
+            return;
+          }
+          if (that.data.from === 'fabu') {
+            that._boundDraftId = createdId;
+            const tpl = Object.assign({}, data, {
+              id: createdId,
+              title: that.data.formData.title,
+              players: that.data.formData.players,
+              duration: that.data.formData.duration,
+              advancedConfigJson: data.advancedConfigJson,
+              imgUrl: that.data.formData.imgUrl || '',
+              draftStatus: 0,
+              status: 0,
+              checkStatus: 0,
+              publishStatus: 0
+            });
+            const ch = that.getOpenerEventChannel && that.getOpenerEventChannel();
+            if (ch && ch.emit) ch.emit('templateCreated', tpl);
+            that._submitting = false;
+            that.data.dirty = false;
+            that.setData({
+              submitting: false,
+              submittingAction: '',
+              submitError: '',
+              creationSuccess: {
+                show: true, eyebrow: '节点玩法已保存', title: tpl.title || '新玩法', icon: that._gameIcon(),
+                detail: '',
+                // 故事玩法不出人数 / 时长(W-04),表单里那两个是默认值,作者从没填过 —— 不印
+                metaPrimary: '',
+                metaSecondary: '',
+                primaryText: '返回路线编辑', secondaryText: '继续编辑玩法', showSecondary: true,
+                primaryAction: 'back', secondaryAction: 'dismiss', closeAction: 'back'
+              }
+            });
+          } else if (that.data.from === 'join' && !isDraft) { that._returnToJoinForm(createdId, current); } else { // M-09
+            that._submitting = false;
+            that.data.dirty = false;
+            that.setData({
+              submitting: false,
+              submittingAction: '',
+              submitError: '',
+              /* 2026-09-06 用户裁决:这一支的两颗按钮(查看模板库 / 返回上一页)都只是
+                 选去哪一页,与其它发布链路同类 ⇒ 收敛成面板自愈后直接落模板库。
+                 ⚠️ 上面那一支(「节点玩法已保存」)**没有**一起收:它的次要动作是
+                 dismiss —— 「继续编辑玩法」是留在本页接着编,不是去别的页。
+                 那是真分叉,自动跳走等于保存一次就把人踢出编辑器。 */
+              resultSheet: {
+                show: true, kind: 'success',
+                title: isDraft ? '模板草稿已保存' : '节点玩法已发布',
+                sub: isDraft ? '可以随时回到模板库继续编辑。' : '已进入你的模板库，可以用于新的城市路线。',
+                meta: that.data.formData.duration ? ('预计 ' + that.data.formData.duration + ' 分钟') : '',
+                pill: '', why: '', duration: RESULT_SHEET_MS,
+              }
+            });
+          }
+        } else {
+          that._submitting = false;
+          const sensorError = /请先切换为非传感器验证方式再清空/.test(String(res && res.msg || ''));
+          const message = safeUserMessage(res, '保存失败，请检查网络后重试');
+          that._showBackendFieldError(message);
+          that.setData({
+            submitting: false,
+            submittingAction: '',
+            submitError: message,
+          });
+          if (sensorError) that.setData({ 'errors.finish': safeUserMessage(res, '请先切换为非传感器验证方式再清空') });
+        }
+      },
+      fail: function (res) {
+        if (!current()) return;
+        that._submitting = false;
+        that.setData({
+          submitting: false,
+          submittingAction: '',
+          submitError: safeUserMessage(res, '网络暂时不可用，内容已保留，请重试')
+        });
+      }
+    };
+    if (url !== '/api/template/draft' && url !== '/api/template/publish') {
+      app.sendRequest({ ...request, url: '/api/merchant/city-node/template/submit' }); return;
+    }
+    authorWrites.run({ app, storage: wx, bucket: this._templateWriteBucket(),
+      operation: url === '/api/template/draft' ? 'TEMPLATE_DRAFT' : 'TEMPLATE_PUBLISH', endpoint: url, body: data, action,
+      current, validResult: result => /^[1-9]\d{0,18}$/.test(String(result && result.id || result || '')),
+      send: (intent, handlers) => app.sendRequest(Object.assign({}, request, handlers, {
+        url: intent.operation === 'TEMPLATE_DRAFT' ? '/api/template/draft' : '/api/template/publish',
+        data: JSON.stringify(intent.body),
+      })),
+      onSuccess: request.success, onRejected: request.success,
+      onUnknown: message => request.fail({ msg: message }),
+    });
+  },
+
+  _showBackendFieldError: function (message, toolKey, planKey) {
+    const target = publishIssueTarget.templateField(message);
+    if (!target && !toolKey) return;
+    const key = toolKey || (target && target.tool);
+    if (key && this.data.gameKey) {
+      this.openToolSheet({ currentTarget: { dataset: { key } } });
+      if (this.data.toolSheetOpen) {
+        const plans = (this.data.toolDraft && this.data.toolDraft.plans) || [];
+        const generated = /^tpl_vote_[1-9]\d*_([1-9]|[12]\d|30)$/.exec(planKey || '');
+        const plan = generated ? Number(generated[1]) - 1 : plans.findIndex(row => row.planKey === planKey || row.endingKey === planKey);
+        this.setData({ toolError: plan >= 0 && plan < plans.length ? { error: message, plan } : { error: message } });
+      } else this.setData({ 'errors.advanced': message });
+    } else if (target) this.setData({ ['errors.' + target.field]: message });
+    this.scrollToError((target && target.field) || 'advanced');
+  },
+
+  /* 面板收掉才走。只有「模板草稿已保存 / 节点玩法已发布」那一支用面板,落点固定模板库;
+     「节点玩法已保存」那支仍走 creation-success 的两颗按钮(它有 dismiss = 留在原地)。 */
+  onResultSheetClose() {
+    if (!currentEditor(this)()) return;
+    this.setData({ 'resultSheet.show': false }); if (backToActivityDraft()) return;
+    wx.reLaunch({ url: '/subpackageA/pages/myproject/index?type=template' + (this.data.operationScope === 'MERCHANT' ? '&scope=MERCHANT' : '') });
+  },
+
+  onCreationSuccessAction(e) {
+    const key = (e.detail && e.detail.key) || 'close';
+    this._leaveCreationSuccess(key === 'close' ? 'closeAction' : (key + 'Action'));
+  },
+  _leaveCreationSuccess(key) {
+    if (!currentEditor(this)()) return;
+    const flow = this.data.creationSuccess || {};
+    this.setData({ 'creationSuccess.show': false });
+    if (flow[key] === 'dismiss') return;
+    if (flow[key] === 'back') this.exitPage();
+    else if (flow[key] === 'templates' && !backToActivityDraft()) wx.reLaunch({ url: '/subpackageA/pages/myproject/index?type=template' + (this.data.operationScope === 'MERCHANT' ? '&scope=MERCHANT' : '') });
+  },
+
+  // ===== 回填 =====
+  getData: function (preserveForm) {
+    const current = currentEditor(this);
+    if (!current()) return;
+    if (this._adoptingTemplate) return;
+    var that = this;
+    const requestToken = (this._templateLoadToken || 0) + 1;
+    this._templateLoadToken = requestToken; this._templateCanEdit = false;
+    const isMyScope = this.data.isMyScope === true, requestedTemplateId = positiveId(this._templateId);
+    if (!isMyScope && !this.data.previewMode) {
+      try {
+        if (templateAdoption.read(wx,editorMemberId(),this.data.operationScope||'',templateAdoption.id(this._templateId))) {
+          this.setData({editorLoading:true});
+          this._resumeSourceAdoption(); return; // A completed receipt must survive source removal.
+        }
+      } catch (error) {
+        this.setData({editorLoading:false,loadErrorIsOperation:true,loadError:error.message});return;
+      }
+    }
+    this.setData({ editorLoading: true, loadErrorIsOperation: false, loadErrorIsAccess: false, loadError: '' });
+    const recover = (res, status) => !that._disposed && requestToken === that._templateLoadToken && recoverReadSession(that, app, res,
+      function (anonymous) { this._templateLoadToken++; this._loadedAuthorFields = null; this._editorMemberId = editorMemberId(); this.destroyPreviewAudio();
+        this.setData({ 'formData.title': '', 'formData.description': '', 'formData.ruleInstructions': '', ruleSteps: [], advanced: {}, editorLoading: false, creatorLoginRequired: anonymous, loadErrorIsOperation: false, loadErrorIsAccess: false, loadError: '请重新读取玩法详情' }); },
+      () => { if (!that._creatorOwnerChanged()) that.getData(); }, status);
+    app.sendRequest({
+      hideLoading: true,
+      silentError: true,
+      url: isMyScope ? '/api/template/author-myinfo' : '/api/template/author-info',
+      data: { id: that._templateId, scope: isMyScope ? that.data.operationScope : '' },
+      method: "POST",
+      success: function (res) {
+        if (!current() || requestToken !== that._templateLoadToken) return;
+        const validRecord = isTemplateDetailPayload(res && res.data) && that._templateRecordMatches(res.data, preserveForm, requestedTemplateId);
+        if (res && res.code == "200" && validRecord) {
+          if (that._applyTemplateEditPermission(res.data, isMyScope, preserveForm)) return;
+          if (!isMyScope && !that.data.previewMode) {
+            that._templateLoadToken++;
+            that._resumeSourceAdoption(res.data);
+            return;
+          }
+          that._applyLoadedTemplate(res.data);
+        } else {
+          that._showTemplateLoadError(res, '玩法详情格式异常，请重试');
+        }
+      },
+      fail: function (res, status) {
+        if (recover(res, status)) return;
+        if (!current() || requestToken !== that._templateLoadToken) return;
+        that._showTemplateLoadError(res, '网络暂时不可用，玩法详情未加载');
+      },
+      successStatusAbnormal: function (res, status) {
+        if (recover(res, status)) return;
+        if (!current() || requestToken !== that._templateLoadToken) return;
+        that._showTemplateLoadError(res, '玩法详情未加载', status);
+      },
+      complete: function () {
+        if (current() && requestToken === that._templateLoadToken && that.data.editorLoading) {
+          that.setData({ editorLoading: false });
+        }
+      }
+    });
+  },
+
+  _applyLoadedTemplate: function (data) {
+    this._settledOnLoad = false;
+    this.fillFormWithTemplateData(data);
+    this.data.dirty = this._settledOnLoad === true;   // 第十三轮 m1:打开时补了结果规则,离开前要存
+    this.setData({ editorLoading: false, loadError: '' });
+  },
+
+  // P-39(2026-10-27):采用被「媒体来源未经审核」类明确拒绝时不再整页拦截 ——
+  // 采用没有发生(业务结论,不是结果未知),按库模板回填成未落库的本地稿;
+  // 保存仍走 /api/template/draft 只带 originalTemplateId(见 saveDraft),由后端新建草稿。
+  // V-13:回包点名封面才清空并就地提示重新上传;否则封面照留,后端原话提示一次。
+  _openWithUnusableMedia: function (data, res) {
+    this._applyLoadedTemplate(data);
+    if (rejectionNamesCover(res, this.data.formData.imgUrl)) {
+      this.setData({ 'formData.imgUrl': '', coverMediaUnusable: true });
+      return;
+    }
+    const msg = res && (res.msg || res.message);
+    if (msg) toast(String(msg));
+  },
+
+  inspectAdoptionTemplates() {
+    if (!currentEditor(this)()) return;
+    wx.reLaunch({ url: '/subpackageA/pages/myproject/index?type=template' + (this.data.operationScope === 'MERCHANT' ? '&scope=MERCHANT' : '') });
+  },
+  _resumeSourceAdoption(sourceData) {
+    if (this._adoptingTemplate) return;
+    const scope=this.data.operationScope||'', sourceId=this._templateId;
+    const original=JSON.stringify([editorMemberId(),scope,sourceId,this.data.formData,this.data.advanced,this.data.ruleSteps,this._albumEditRevision,
+      typeof app.getAuthorization==='function'?app.getAuthorization():'']);
+    const current=()=>!this._disposed&&!this._hidden&&original===JSON.stringify([editorMemberId(),this.data.operationScope||'',this._templateId,this.data.formData,this.data.advanced,this.data.ruleSteps,this._albumEditRevision,
+      typeof app.getAuthorization==='function'?app.getAuthorization():'']);
+    templateAdoption.resume({app,storage:wx,owner:editorMemberId(),scope,sourceId,current,
+      target:{editor:'temp',sourceId:String(sourceId)},
+      onBusy:busy=>{this._adoptingTemplate=busy;},
+      onRejected:res=>{if(!sourceData||!isMediaRejection(res))return false;this._openWithUnusableMedia(sourceData,res);return true;},
+      onError:(message,status)=>{const rejected=status==='REJECTED';this._adoptionUnconfirmed=!rejected;this.setData({editorLoading:false,loadErrorIsOperation:!rejected,loadErrorIsAccess:rejected,loadError:message});},
+      onReady:detail=>{
+        if(detail.canEdit!==true){this.setData({editorLoading:false,loadError:'采用草稿归属未确认'});return false;}
+        this._adoptionUnconfirmed=false;this._templateId=positiveId(detail.id);this.data.isMyScope=true;this._templateCanEdit=true;
+        this.fillFormWithTemplateData(detail);this.data.dirty=false;this.setData({editorLoading:false,loadError:''});return true;
+      }
+    });
+  },
+
+  _showTemplateLoadError(res, fallback, statusCode) {
+    const status = failureStatus(res, statusCode);
+    this.setData({ editorLoading: false, creatorLoginRequired: status === 401,
+      loadErrorIsAccess: [400, 403, 422].includes(status), loadError: safeUserMessage(res, fallback) });
+  },
+
+  retryGetData: function () {
+    if (this._adoptionUnconfirmed) {
+      this._resumeSourceAdoption();
+      return;
+    }
+    if (positiveId(this._templateId)) this.getData(this._confirmingNewDraft === true);
+  },
+
+  fillFormWithTemplateData: function (templateData) {
+    this._albumEditRevision = (this._albumEditRevision || 0) + 1;
+    if (!templateData) return;
+    this._loadedAuthorFields = Object.assign({}, templateData);
+    const that = this;
+    // 模板回填会整块替换音频:先换代销毁旧预听,旧回调(含在途上传)不得再写进模板 C 的状态。
+    that._invalidateAudioSource(true);
+
+    let feedbackMethod = 2;
+    if (templateData.feedbackMethodStr) {
+      if (templateData.feedbackMethodStr === '优惠券反馈') feedbackMethod = 1;
+      else if (templateData.feedbackMethodStr === '文字反馈') feedbackMethod = 2;
+    } else if (templateData.feedbackMethod) {
+      feedbackMethod = templateData.feedbackMethod;
+    }
+
+    const formData = decodeDisplayFields({
+      // 引用别人的模板 = 记下来源 id;编辑自己的模板(scope=my)= 沿用它原有的来源 ——
+      // 以前一律写成自己的 id,原地保存后这条就成了「引用了 id 同号的库模板」,
+      // 从「我的故事玩法草稿」里消失、还被当成采用来的模板走另一套校验(2026-09-24 走查实证 147/149/154)
+      originalTemplateId: this.data.isMyScope === true ? (positiveId(templateData.originalTemplateId) || 0) : (templateData.id || 0),
+      categoryId: templateData.categoryId || 1,
+      title: templateData.title ? `${templateData.title}` : "",
+      description: templateData.description || "",
+      imgUrl: templateData.imgUrl || "",
+      players: templateData.players || "",
+      usageLocation: templateData.usageLocation || "",
+      requiredMaterials: templateData.requiredMaterials || "",
+      duration: templateData.duration || "",
+      difficulty: templateData.difficulty || "",
+      isSync: 0,
+      ruleInstructions: templateData.ruleInstructions || "",
+      validationMethod: templateData.validationMethod || 0,
+      // 原据点语义与完成方式独立；采用/本人续编均沿服务器读回值，不按玩法名称推导。
+      interactionType: templateData.interactionType == null ? '' : templateData.interactionType,
+      feedbackMethod: feedbackMethod,
+      questionName: templateData.questionName || "",
+      questionAnswer: templateData.questionAnswer || "",
+      feedbackText: templateData.feedbackText || "",
+      couponId: templateData.couponId || 0,
+      medalImg: templateData.medalImg || "",
+      medalName: templateData.medalName || "",
+      medalStyle: templateData.medalStyle || "glow",
+      questionA: templateData.questionA || "",
+      questionB: templateData.questionB || "",
+      questionC: templateData.questionC || "",
+      questionD: templateData.questionD || "",
+      correctAnswer: templateData.correctAnswer || "A",
+      activityCategoryids: templateData.activityCategoryids || "",
+
+      hint1: templateData.hint1 || "",
+      hint2: templateData.hint2 || "",
+      answerReveal: templateData.answerReveal || "",
+      photoRequireDesc: templateData.photoRequireDesc || "",
+      // 拍照人工审核开关已下线(2026-09-17 用户拍板,一律机审):回显/保存恒 0,
+      // 存量 photo_review=1 由 migration_play_photo_review_off_20260917.sql 置回。
+      photoReview: 0,
+      audioUrl: templateData.audioUrl || "",
+      audioDuration: templateData.audioDuration == null ? "" : templateData.audioDuration,
+      questionImg: templateData.questionImg || "",
+      questionAudio: templateData.questionAudio || "",
+      questionOptionMediaJson: templateData.questionOptionMediaJson || "",
+      storyText: templateData.storyText || "",
+      preferenceJson: templateData.preferenceJson || "",
+      advancedConfigJson: templateData.advancedConfigJson || "",
+      rewardRulesJson: templateData.rewardRulesJson == null ? "" : templateData.rewardRulesJson,
+      merchantGuide: templateData.merchantGuide == null ? "" : templateData.merchantGuide,
+      sensorType: templateData.sensorType == null ? "" : templateData.sensorType,
+      sensorConfig: templateData.sensorConfig == null ? "" : templateData.sensorConfig,
+      storyImg: templateData.storyImg == null ? "" : templateData.storyImg,
+      storyJson: templateData.storyJson || "",
+      status: (templateData.status != null) ? templateData.status : 1
+    }, DECODED_FORM_TEXT);
+
+    // 回填优惠券名称(用于奖励模块展示)
+    const couponPatch = {};
+    if (templateData.couponId && templateData.couponName) couponPatch.selectedCouponName = templateData.couponName;
+
+    // 反序列化 storyJson -> storyBeats(后端返回驼峰 storyJson)
+    const storyBeats = that._parseStoryJson(templateData.storyJson, templateData.storyText);
+
+    // 难度 label
+    const diffData = that._difficultyOptions || [];
+    const diffItem = diffData.find(d => d.dictValue === formData.difficulty);
+
+    const preferencePreview = that.parsePreferencePreview(formData.preferenceJson);
+    const advancedResult = advancedGameConfig.parse(formData.advancedConfigJson);
+    // 存量 timer / variants 原样保留，不在打开时迁移。
+    const gameSlot = that._gameSlotPatch(advancedResult.value);
+    const outcomeResult = nodeOutcomeContract.extract({
+      validationMethod: formData.validationMethod,
+      preferenceJson: formData.preferenceJson,
+      advancedConfigJson: advancedResult.value
+    });
+    that._toolSelected = templateTools.selected(advancedResult.value);
+    that._toolSummaries = templateTools.summaries(advancedResult.value);
+    // P-41:回填时就把「1. 2. 3.」拆好,存回去也是一行一步(旧草稿随下一次保存迁移)
+    const loadedRuleSteps = that._stepsFromText(formData.ruleInstructions);
+    formData.ruleInstructions = loadedRuleSteps.filter(Boolean).join('\n');
+    that.setData({
+      formData: formData,
+      interactionType: formData.interactionType,
+      descriptionMaxLength: Math.max(30, formData.description.length),
+      defaultCover: gameTemplateCover({ title: formData.title, advancedConfigJson: formData.advancedConfigJson }),
+      // 存量模板里规则是一整段文字,按换行拆成步骤 —— 换界面不能让老数据读不出来
+      ruleSteps: loadedRuleSteps,
+      storyBeats: storyBeats,
+      preferencePreview: preferencePreview.rows,
+      preferenceConfigError: formData.preferenceJson ? preferencePreview.error : '',
+      advanced: advancedResult.value,
+      gameKey: gameSlot.gameKey,
+      gameCurrent: gameSlot.gameCurrent,
+      gameSection: gameSlot.gameSection,
+      timerAvailable: gameSlot.timerAvailable,
+      presentChoice: gameSlot.presentChoice,
+      /* 2026-10-30 所有玩法都能内嵌:撤掉 presentInlineLocked(不再置灰) */
+      /* 同上撤掉 presentLockReason */
+      dailySignDrafts: that._dailySignDraftsOf(advancedResult.value),
+      advancedConfigError: advancedResult.error,
+      outcomePreview: outcomeResult.items,
+      outcomeContractErrors: outcomeResult.errors,
+      difficultyLabel: diffItem ? diffItem.dictLabel : (formData.difficulty ? String(formData.difficulty) : ''),
+      ...couponPatch
+    });
+
+    that.setCategorySelectionFromTemplate(templateData);
+
+    if (templateData.validationMethod === 3) {
+      that.setOptionDataFromTemplate(templateData);
+    }
+
+    that._refreshR5Editor();
+    that._loadDifficultyLabel();
+    that._refreshSupportMatrix();
+
+    // 反推模块状态(含 hint/rw 开关)
+    that.initModuleState(true);
+    if (that._focusMessage) {
+      that._showBackendFieldError(that._focusMessage, that._focusTool, that._focusPlan);
+      that._focusMessage = '';
+    }
+
+    that._refreshEffectResources();
+    that._syncSegments();
+    that._syncClueContent();
+    /* CU-M-69:回填走的是整块 setData(不经过 _setFormState),摘要得在这里显式重算一次 ——
+       否则采用来的模板第一次打开预览时,摘要还是初值「待配置/未设置时长」。 */
+    that.refreshPreviewState();
+
+    if (that.data.previewMode) {
+      // FE-04 纯预览态:模板加载完直接进只读预览浮层(cg-pv-bottombar 发布控件已被 previewMode 隐藏)。
+      that.openPreview();
+    }
+  },
+
+  _parseStoryJson: function (raw, storyText) {
+    const fallback = [{ id: 1, text: String(storyText || ''), tag: '', imgs: [] }];
+    if (!raw) return fallback;
+    try {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr) && arr.length) {
+        return arr.map((b, i) => ({
+          id: i + 1,
+          text: b.text || '',
+          tag: b.tag || '',
+          // 兼容旧数据:老的单图 b.img 字符串 → 收进 imgs 数组
+          imgs: Array.isArray(b.imgs) ? b.imgs : (b.img ? [b.img] : [])
+        }));
+      }
+    } catch (err) { }
+    return fallback;
+  },
+
+  setOptionDataFromTemplate: function (templateData) {
+    const optionItems = [];
+    const letters = ['A', 'B', 'C', 'D'];
+
+    letters.forEach(letter => {
+      const text = templateData[`question${letter}`];
+      if (text) {
+        optionItems.push({
+          letter: letter,
+          text: text,
+          isCorrect: templateData.correctAnswer === letter,
+          img: '',
+          audio: ''
+        });
+      }
+    });
+
+    this.setData({
+      optionItems: optionMedia.applyToOptions(optionItems, templateData.questionOptionMediaJson),
+      optionQuestion: templateData.questionName || ""
+    });
+  },
+
+  // 两条回填路径(打开已存模板 / 采用库模板 onReady)都经 fillFormWithTemplateData 走到这里,
+  // 类别芯片只在这一处落(L04-030:原先只在 _applyLoadedTemplate 里,采用后类别是空的)
+  setCategorySelectionFromTemplate: function (templateData) {
+    const that = this;
+    if (isRecordList(templateData.sysCategoryList) && templateData.sysCategoryList.length > 0) {
+      const selectedIds = templateData.sysCategoryList.map(item => item.id);
+      const selectedNames = templateData.sysCategoryList.map(item => item.categoryName);
+      that.setData({
+        categoryList: withCategoryIcons(templateData.sysCategoryList),
+        selectedCategoryIds: selectedIds,
+        selectedCategoryNames: selectedNames,
+      });
+      return;
+    }
+    if (templateData.activityCategoryids) {
+      const idArray = String(templateData.activityCategoryids).split(',').map(id => parseInt(id.trim())).filter(Number.isSafeInteger);
+      that.getCategoryNamesByIds(idArray, function (selectedNames) {
+        that._setFormState({
+          selectedCategoryIds: idArray,
+          selectedCategoryNames: selectedNames,
+          'formData.activityCategoryids': templateData.activityCategoryids
+        }, null, { pristine: true });
+      });
+    }
+  },
+
+  // ===== 个人模板编辑权限 =====
+  // 写权限只认 /api/template/myinfo 按实际归属返回的 canEdit === true(服务端保存仍校验归属)。
+  // 以下方法集中放在文件尾,避免既有调用点迁行。
+  _ownTemplateWritable: function () {
+    if (!this.data.isMyScope || this._templateCanEdit === true) return true;
+    toast('请先确认该模板可由你编辑');
+    return false;
+  },
+
+  // 草稿 / 绑定首存成功后本页改编辑本人这份草稿;新 ID 或未确认归属时先回读 myinfo,确认前不再写。
+  _switchToSavedTemplate: function (createdId) {
+    const needsOwnerConfirmation = this._templateCanEdit !== true || positiveId(this._templateId) !== createdId;
+    this._templateId = createdId;
+    this.data.isMyScope = true;
+    if (needsOwnerConfirmation && this.data.from !== 'citynode') {
+      this._confirmingNewDraft = true;
+      this.getData(true);
+    }
+  },
+
+  // 仅确认归属的回读必须正是刚保存的那份草稿,且期间没有换成别的 ID。
+  _templateRecordMatches: function (record, preserveForm, requestedTemplateId) {
+    return preserveForm !== true || (positiveId(record.id) === requestedTemplateId
+      && positiveId(this._templateId) === requestedTemplateId);
+  },
+
+  // 返回 true 表示本次回读已处理完(非本人只读跳转,或首存后仅确认归属),调用方不再回填表单。
+  _applyTemplateEditPermission: function (record, isMyScope, preserveForm) {
+    if (isMyScope && record.canEdit !== true) {
+      this.setData({ editorLoading: false, loadError: '此个人模板仅供查看，请从模板广场选用玩法' });
+      wx.redirectTo({ url: '/pages/templatedetail/templatedetail?id=' + this._templateId + '&scope=my' +
+        (this.data.operationScope === 'MERCHANT' ? '&operationScope=MERCHANT' : '') });
+      return true;
+    }
+    this._templateCanEdit = isMyScope;
+    if (preserveForm !== true) return false;
+    // 首次保存后只确认归属，不能覆盖保存期间继续输入的内容。
+    this._confirmingNewDraft = false;
+    this.setData({ editorLoading: false, loadError: '' });
+    return true;
+  },
+  /* M-09(2026-11-02):从「申请承接章节」的报名表进来建玩法,发布后回到报名表并选上新玩法,
+     不再跳去模板库 —— 那样商家找不回刚才那一章。 */
+  _returnToJoinForm(createdId, current) {
+    const ch = this.getOpenerEventChannel && this.getOpenerEventChannel();
+    if (ch && ch.emit) ch.emit('templateCreated', { id: createdId, title: this.data.formData.title });
+    this._submitting = false;
+    this.data.dirty = false;
+    this.setData({ submitting: false, submittingAction: '', submitError: '' });
+    toast.success('玩法已发布');
+    setTimeout(() => { if (current()) this.exitPage(); }, 600);
+  },
+});
+// j1 F2:从「发活动」页去建玩法时,活动草稿页还在栈里 —— 建完回到它,不 reLaunch 冲掉草稿。
+function backToActivityDraft() {
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : [];
+  const at = pages.findIndex(page => page && page.route === 'pages/publish/activity/index');
+  if (at < 0 || at >= pages.length - 1) return false;
+  wx.navigateBack({ delta: pages.length - 1 - at });
+  return true;
+}

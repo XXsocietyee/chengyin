@@ -1,0 +1,30 @@
+{
+  "note": "AUDIT-1122 A5:分包之间不能互相 require,共享件只能逐包放副本。这里登记每个副本家族的唯一规范源;副本由 scripts/gen-shared-copies.js 生成,不再手改。改规范源后跑 node scripts/gen-shared-copies.js --write。",
+  "families": [
+    {
+      "name": "cy-illus",
+      "source": "pages/play/components/cy-illus",
+      "files": ["art.js", "art-b.js", "index.js", "index.json", "index.wxml", "index.wxss"],
+      "rebaseRelativeRequires": true,
+      "copies": [
+        "pages/playkit/components/cy-illus",
+        "subpackageMember/components/cy-illus",
+        "subpackageP3/components/cy-illus",
+        "subpackageJourney/components/cy-illus"
+      ]
+    },
+    {
+      "name": "playkit-utils",
+      "source": "pages/play/utils",
+      "files": ["keep-numerals.js", "sensor-contract.js", "playkit-steps.js", "playkit-questo.js"],
+      "replace": [["/pages/play/", "/pages/playkit/"]],
+      "copies": ["pages/playkit/utils"]
+    },
+    {
+      "name": "circle-theme",
+      "source": "pages/play/utils",
+      "files": ["circle-theme.js"],
+      "copies": ["pages/topic/utils"]
+    }
+  ]
+}

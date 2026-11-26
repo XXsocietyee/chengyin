@@ -1,0 +1,130 @@
+// cy-playkit-hidden · 找东西(原型真源:模板编辑页 v2 · playkit hidden)
+//
+// ★ 热区的 x / y / r **一个都不下发**。这是本玩法唯一的防线 —— 坐标到了客户端,
+// 抓包就知道东西藏在哪,题当场作废。所以命中判定必须在服务端:
+// 组件只报「玩家点在图上的百分比坐标」。
+//
+// 下发 label 是有意的:玩家要知道自己在找什么(底部那排待找清单)。
+//
+// 商家配置时不填坐标、不填判定半径 —— 点哪儿就是哪儿,半径由系统定。
+// 让商家调半径等于让他调难度,而他没有手感依据。
+
+const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
+const motion = require('../../../../utils/motion.js');
+
+/** 触点 → 相对底图的百分比坐标。用百分比不用像素:不同机型图的显示尺寸不一样,
+ *  报像素过去服务端还得知道客户端画多大,那是把判定条件交给客户端。 */
+function toPercent(touchX, touchY, rect) {
+  if (!rect || !(rect.width > 0) || !(rect.height > 0)) return null;
+  const x = ((touchX - rect.left) / rect.width) * 100;
+  const y = ((touchY - rect.top) / rect.height) * 100;
+  if (x < 0 || x > 100 || y < 0 || y > 100) return null;
+  return { x: Number(x.toFixed(2)), y: Number(y.toFixed(2)) };
+}
+
+/** 台面里按底图原比例收一个不裁的画框,给百分比(台面开场有缩放动画,量出来的像素会变,比例不会)。 */
+function containFrame(box, img) {
+  if (!box || !(box.width > 0) || !(box.height > 0) || !img || !(img.width > 0) || !(img.height > 0)) return '';
+  const s = Math.min(box.width / img.width, box.height / img.height);
+  const w = (img.width * s / box.width) * 100;
+  const h = (img.height * s / box.height) * 100;
+  const pct = (v) => Number(v.toFixed(3));
+  return 'left:' + pct((100 - w) / 2) + '%;top:' + pct((100 - h) / 2) + '%;width:' + pct(w) + '%;height:' + pct(h) + '%;';
+}
+
+Component({
+  behaviors: [reducedMotionBehavior],
+  properties: {
+    show: { type: Boolean, value: false },
+    title: { type: String, value: '' },
+    imageUrl: { type: String, value: '' },
+    targets: { type: Array, value: [] },      // 只有 id + label,没有坐标
+    total: { type: Number, value: 0 },
+    limitSeconds: { type: Number, value: 0 },
+    maxTries: { type: Number, value: 0 },
+    used: { type: Number, value: 0 },  // L02-005
+  },
+  data: { hits: [], foundCount: 0, frame: '' },
+  observers: {
+    'show, targets': function (show) {
+      if (!show) { this._begun = false; this._served = null; return; }
+      /* 编辑页试玩没有服务端:命中由作者本机按自己的配置判,写回 targets(found + 点的位置)。
+         带着这样的 target 就照它画点、计数,不重开一局;全找到由台面判赢。正式游玩下发的 targets 不带这些字段。 */
+      const found = (this.data.targets || []).filter(t => t && t.found && Number.isFinite(t.x) && Number.isFinite(t.y));
+      if (found.length) {
+        const hits = found.map(t => ({ id: t.id, x: t.x, y: t.y }));
+        this.setData({ hits, foundCount: hits.length });
+        motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
+        const stage = this.selectComponent('#cy-play-stage');
+        if (hits.length >= this.data.total && stage) stage.win('全找到了');
+        return;
+      }
+      // L02-005
+      const served = (this.data.targets || []).filter(t => t && t.found).length;
+      const before = this._served;
+      this._served = served;
+      const stage = this.selectComponent('#cy-play-stage');
+      if (!this._begun) {
+        this._begun = true;
+        this.setData({ hits: [], foundCount: served });
+        if (stage) stage.begin();
+        this._fitFrame();
+        return;
+      }
+      if (served === this.data.foundCount) return;
+      this.setData({ foundCount: served });
+      if (before != null && served > before) {
+        motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
+        if (served >= this.data.total && stage) stage.win('全找到了');
+      }
+    },
+    used(value) {
+      // L02-005
+      const now = Number(value) || 0;
+      const seen = this._seenUsed;
+      this._seenUsed = now;
+      if (seen == null || now <= seen || !this.data.show) return;
+      const stage = this.selectComponent('#cy-play-stage');
+      if (stage && stage.nudge) stage.nudge();
+    },
+    imageUrl() { this._imgSize = null; this.setData({ frame: '' }); },
+  },
+  methods: {
+    _toPercent: toPercent,      // 纯算法出口,供单测
+    _containFrame: containFrame,
+    onImgLoad(e) {
+      const d = (e && e.detail) || {};
+      this._imgSize = d.width > 0 && d.height > 0 ? { width: d.width, height: d.height } : null;
+      this._fitFrame();
+    },
+    _fitFrame() {
+      if (!this._imgSize) return;
+      wx.createSelectorQuery().in(this).select('.hd__scene').boundingClientRect((rect) => {
+        const frame = containFrame(rect, this._imgSize);
+        if (frame && frame !== this.data.frame) this.setData({ frame });
+      }).exec();
+    },
+
+    onTapScene(e) {
+      const q = wx.createSelectorQuery().in(this);
+      q.select('.hd__frame').boundingClientRect((rect) => {
+        const t = (e.touches && e.touches[0]) || e.detail || {};
+        const p = toPercent(t.clientX != null ? t.clientX : t.x,
+                            t.clientY != null ? t.clientY : t.y, rect);
+        /* 量不到图的位置(组件还没布局完)时,这一下点击是废的。
+           以前这里直接 return:玩家连点几下没有任何反应,会以为图是死的。
+           现在抖一下 —— 「我收到了,但这一下不算」,而不是什么都不发生。 */
+        if (!p) {
+          const stage = this.selectComponent('#cy-play-stage');
+          if (stage && stage.nudge) stage.nudge();
+          return;
+        }
+        // 命中与否由服务端判 —— 坐标就是这个玩法的答案
+        this.triggerEvent('submit', p);
+      }).exec();
+    },
+
+    onVerdict(e) { this.triggerEvent('verdict', e.detail); },
+    onClose() { this.triggerEvent('close'); },
+  },
+});

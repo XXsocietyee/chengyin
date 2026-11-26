@@ -1,0 +1,8 @@
+{
+  "component": true,
+  "usingComponents": {
+    "cy-error": "/components/cy/error/index",
+    "cy-empty": "/components/cy/empty/index",
+    "cy-dot-qr": "/pages/play/components/cy/dot-qr/index"
+  }
+}

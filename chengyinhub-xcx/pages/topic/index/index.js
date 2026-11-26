@@ -1,0 +1,2627 @@
+const modal = require('../../../utils/modal.js'); const { safeUserMessage } = require('../../../utils/transport/safe-user-message.js'); const referral = require('../../../utils/commerce/referral.js'); const parallax = require('../utils/parallax.js'); const pageMotion = require('../../../utils/page-motion.js');
+const loading = require('../../../utils/loading.js');
+const imgFade = require('../../../utils/img-fade.js'); const imageUrl = require('../../../utils/image-url.js'); /* 2026-11-21:封面/章节/站点图按槽位出缩略图(img.wxs fit) */ const castPlay = require('../../../utils/cast-config.js'); // motion-1118 v2:封面 / 头图在占位色上淡入;角色 Cast v1 · E5「人物」(配置顺手缓存给游玩页)
+const toast = require('../../../utils/toast.js');
+const app = getApp();
+const { chinaParts } = require('../../../utils/datetime.js');
+const { refundRuleText } = require('../utils/refund-tiers.js'); // L06-010/L06-112:直接取真源,不在循环里 require 转出壳
+const pad2 = (n) => String(n).padStart(2, '0');
+const mdhm = (p) => pad2(p.month) + '-' + pad2(p.day) + ' ' + pad2(p.hours) + ':' + pad2(p.minutes);
+const themeRecords = require('../../../utils/theme-records.js');
+
+function recordsRequest(url, method, data, header) {
+  return new Promise(resolve => app.sendRequest({ url, method, data, header, hideLoading: true, autoErrorToast: false,
+    success: res => resolve(res || {}), successStatusAbnormal: () => resolve({ code: 'fail' }), fail: () => resolve({ code: 'fail', netFail: true }) }));
+}
+/* 结果面板终态停留时长;跳转挂在面板 close 上,时长只此一处 */
+const RESULT_SHEET_MS = 2000;
+const { readReducedMotion } = require('../../../utils/motion-preference.js');
+const xpayPay = require('../../../utils/checkout/selfplay-xpay-pay.js');
+const { createCheckoutWorkflow, hasCompletePaymentParams, isOrderExpiredFailure, isTerminalOrderConflict,
+  ORDER_REBUILD_REQUIRED, ORDER_EXPIRED_USER_MESSAGE } = require('../../../utils/checkout/checkout-workflow.js');
+const subscribe = require('../../../utils/subscribe.js');
+const { createRegistrationPaymentVerifier } = require('../../../utils/checkout/registration-payment-verifier.js');
+const { buildTopicStatBar, sessionWindowsText, buildContentIncludes, durationText } = require('../utils/topic-detail-facts.js');
+const { isRecordList } = require('../../../utils/response-shape.js');
+const { haversine, distanceText } = require('../../../utils/geo.js');
+const { lightMapStyle, mapStyleFor, routeMapKind, routeMapLines } = require('../../../utils/map-style.js');
+const { isMerchantView } = require('../../../utils/roleGuard.js');
+const LIGHT_MAP_STYLE = lightMapStyle();
+// 2026-11-14 owner:玩家看路线用主题发布时的外观(纸本 / 2077 / black);商家视角与创作者本人预览保持 white
+function routeMapPreview(info) { return isMerchantView() || Number(info && info.isOwner) === 1; }
+function routeMapStyleOf(info) {
+  const s = mapStyleFor(routeMapKind(info && info.lookJson, isMerchantView() || Number(info && info.isOwner) === 1));
+  return { mapSubkey: s.subkey, mapLayerStyle: s.layerStyle };
+}
+const routePreview = require('../utils/topic-route-preview.js');
+const marketingConsent = require('../../../utils/marketing-consent-entry.js');
+const ticketSource = require('../../../utils/ticket-source.js');
+const { buildTopicShare, resolveTopicCover } = require('../../../utils/topic-share.js');
+const { decodeDisplayText } = require('../../../utils/display-text.js');
+const contentReport = require('../utils/content-report.js');
+const reportSheet = require('../../../utils/community-report-sheet.js');
+const mediaPreview = require('../../../utils/media-preview.js');
+const motion = require('../utils/topic-motion.js');
+const chapterCards = require('../utils/chapter-cards.js'); const departNotes = require('../utils/depart-notes.js'); const stationImage = require('../utils/station-image.js');
+const { checkoutView } = require('../utils/checkout-view.js');
+const checkoutProfile = require('../utils/checkout-profile.js'); const wxPhoneBind = require('../utils/wx-phone-bind.js'); // 1122:结算层内补姓名/手机号
+const analytics = require('../../../utils/analytics.js');
+const { giftProductId } = require('../utils/gift-entry.js');
+const money = require('../../../utils/money-format.js');
+const productOrder = require('../../../utils/commerce/product-order.js'); const passUnlock = require('../../../utils/commerce/pass-unlock-view.js'); // DEC-F12 A:双人票/小队票同一结算层
+const KB_MS = 3600;          // 封面每张停留时长
+const DOCK_MS = 620;         // 价格/收藏停靠动画时长(慢-快-慢)
+
+// 只接受真实数值/十进制数字串；先验类型，不能把布尔、数组或空值强转为坐标。
+function routeCoordinate(value, limit) { return routePreview.routeCoordinate(value, limit); }
+function routePoint(row) { return routePreview.routePoint(row); }
+// 只有站点坐标，没有道路距离和实际步行时长；nodeTime 是停留时长，不能代替交通时间。
+function walkText(prev, node) {
+  const a = routePoint(prev), b = routePoint(node);
+  if (!a || !b) return '';
+  const meters = haversine(a.latitude, a.longitude, b.latitude, b.longitude);
+  if (!Number.isFinite(meters) || meters <= 0) return '';
+  return '直线约 ' + distanceText(meters) + '';
+}
+
+/* CU-C-65:站点级字段裸插值会把 null 印成字面「null」(WXML 文本插值对 null 就是这么做的,
+   与 description 家族同一个毛病)。统一在这里归一成 '',wxml 再各加一道 wx:if。 */
+function nodeText(value) {
+  if (value === null || value === undefined) return '';
+  const out = String(value).trim();
+  return out === 'null' ? '' : out;
+}
+
+// V-23c 业主 2026-10-29「简介最多20个字 在主题配置那里配置好的」:头图下只放主题配置里的短简介(subtitle),最多 20 字一行。
+const HERO_INTRO_MAX = 20;
+function heroIntro(subtitle) {
+  const chars = Array.from(nodeText(decodeDisplayText(subtitle)));
+  // 超长时截到 20 字并补省略号,不再从词中间硬切
+  return chars.length > HERO_INTRO_MAX ? chars.slice(0, HERO_INTRO_MAX).join('').replace(/[，,、；;。\s]+$/, '') + '…' : chars.join('');
+}
+
+// 2026-10-30:站点和玩法都没图时用这个主题自己的封面,不再落到通用城市占位图
+function templateCover(template, node, topicCover) {
+  // L06-028:四路候选各取第一张可显示图(认 JSON 数组串、滤 media-asset:),与站点缩略图同一解析
+  const urls = [node && node.imgUrl, template.imgUrl, template.imgArr, topicCover].map((v) => stationImage.firstImage(v));
+  return urls.map((src) => app.getImgUrl(src)).filter(Boolean)[0] || '/images/route_city_cover.png';
+}
+
+function normalizeChaptersList(chaptersList) {
+  if (chaptersList == null) return [];
+  if (!Array.isArray(chaptersList)) return null;
+  const normalized = [];
+  for (const chapter of chaptersList) {
+    if (!chapter || typeof chapter !== 'object' || Array.isArray(chapter)) return null;
+    const nodes = chapter.nodes == null ? [] : chapter.nodes;
+    if (!isRecordList(nodes)) return null;
+    for (const node of nodes) {
+      if (node.registrationMerchantList != null && !isRecordList(node.registrationMerchantList)) return null;
+    }
+    normalized.push(Object.assign({}, chapter, { nodes: nodes.map((node) => Object.assign({}, node)) }));
+  }
+  return normalized;
+}
+
+// L06-072:合格时直接交回规范化后的章节(空章节也是数组,为真),getData 不再规范化第二遍
+function hasTopicDetail(data) {
+  const nonEmptyObject = !!data && typeof data === 'object'
+    && !Array.isArray(data) && Object.keys(data).length > 0;
+  if (!nonEmptyObject) return false;
+  if (!String(data.name || '').trim()) return false;
+  return normalizeChaptersList(data.chaptersList) || false;
+}
+
+// FOLLOWUP-A-1:只有公开可见(审核通过且上架)、且不是本人的主题才给举报;口径同后端 /api/topic/report。
+function canReportTopic(info, me) {
+  if (!info || Number(info.isOwner) === 1) return false;
+  if (me && String(info.memberId || '') === String(me)) return false;
+  return Number(info.status) === 1 && Number(info.userStatus) === 1;
+}
+
+Page({
+  ...themeRecords.methods(recordsRequest, false),
+  openThemeRecordCard(e) { return this.openThemeResultCard({ currentTarget: { dataset: e.detail } }); },
+  data: {
+    mapSubkey: LIGHT_MAP_STYLE.subkey,
+    mapLayerStyle: LIGHT_MAP_STYLE.layerStyle,
+    ...themeRecords.data,
+    // 选场次 / 选票种弹层(稿 11 240:401 · 11a 240:446)
+    sessionPicker: { show: false },
+    clubSheetShow: false,
+    clubSheetItems: [],
+    reportReasonShow: false,
+    reportReasonItems: [],
+    resultSheet: { show: false, kind: 'success', title: '', sub: '', meta: '', pill: '',
+      why: '', duration: RESULT_SHEET_MS,
+      consentName: '', consentChecked: false, consentState: 'idle', consentError: '' },
+    reducedMotion: false,
+    openChapterKey: '',
+    // 页内手写 .ttabs 标签条的数据源(cy-tabs 组件已不在本页使用,注册已删 L06-070)。
+    // 2026-10-22 业主:三个标签 = 详情 / 故事 / 路线(自由探索没有固定路线,第三个叫「地点」)
+    topicTabs: [{ key: '0', label: '详情' }, { key: '1', label: '故事' }, { key: '2', label: '路线' }],
+    // ===== 2026-10-22 动效与新增块(docs/design/动效界面落地_20261022) =====
+    imgOn: {}, imgCtx: null, coverImages: [], kbIdx: 0, coverLeaving: false, detailEnter: false, heroIdx: 0, navSolid: false, storyChars: [], castRow: [], routeNote: '', sketchPoints: [], routeReal: false, tabPre: false, tabRun: false, buyOpts: [], buySel: 0, sessionPreferName: '',
+    publisher: { name: '', avatar: '' }, heroCta: { kind: '', text: '' }, faved: false,
+    docked: false, dockCtaStyle: '', dockFavStyle: '',
+    shareCard: { show: false, card: {} },
+    // 分享页「保存图片」走相册授权:页内弹隐私确认,不整页跳隐私页
+    privacyGateShow: false,
+    merchantCards: [], storyCards: [], storyMeta: '', openChapter: -1, storyDocked: false,
+    teams: { rows: [], need: 0 },
+    prep: { show: false }, prepShow: false, prepBusy: false,
+    progress: { total: 0, done: 0, labels: [] },
+    selfPlayValidText: '可玩至购买后 90 天', selfPlayCheckoutShow: false, checkout: { cover: '', placeText: '', view: checkoutView({}), profileName: '', profilePhone: '', profile: checkoutProfile.profileView(null) },
+    reveal: { show: false, cover: '', name: '', kindText: '', untilText: '', daysText: '', line: '' },
+    seatUnlock: { show: false, steps: [], face: '' },
+    id: 0,
+    is_join: 0,
+    // 自玩通行证购买确认(P1–P6 弹层,替代 wx.showModal);报名信息单独同意必须在建单前落库
+    selfPlayConfirmShow: false,
+    selfPlayConsentChecked: false,
+    selfPlayConfirmLoading: false,
+    selfPlayConsentError: '',
+    // L06-077:下单/付款失败原文与同意错误分开,勾选同意不再冲掉
+    checkoutError: '',
+    selfPlayConsentHint: '',
+    info: {}, // 主题详情数据
+    statBar: [], statK: null,
+    loadError: false,
+    topicLoaded: false,
+    missingTopicId: false,
+    // 2026-11-14：公开主题读失败直接重试，写入仍走登录闸。
+    // 拍板 2026-09-16 #10:发布商家已打烊时,购票/报名入口直接提示「商家暂停营业」
+    // (文案与后端 IMerchantBusinessStatusService.MERCHANT_CLOSED_MESSAGE 同源)。
+    merchantClosed: false,
+    loadErrorTitle: '',
+    loadErrorSub: '',
+
+    // ===== 路线地图（橙色 polyline）相关 =====
+    routeReady: false,        // 是否有可画的路线
+    mapLatitude: 0,           // 地图中心纬度
+    mapLongitude: 0,          // 地图中心经度
+    routeMarkers: [],         // 节点标记（编号 1/2/3…）
+    routePolyline: [],        // 按章分段的道路/节点虚线
+    routeIncludePoints: [],   // 让地图自动缩放到看全整条线
+
+    statusBarHeight: getApp().globalData.statusBarHeight,
+    navBarHeight: getApp().globalData.navBarHeight,
+
+    //tab切换
+    activeTab: '0',
+
+    // 评价相关
+    voteShow: false,
+    starsBox: [1, 1, 1, 1, 1],
+    ratingStars: [],
+    answer: -1,
+    plnr: "",
+    canSubmitComment: false,
+    uploadImages: [],
+
+    // 原有的滚动相关数据
+    screen1Height: 0,
+    screen2Top: 0,
+    currentScreen: 0,
+    isScrolling: false,
+
+    // 新增：吸顶相关数据
+  },
+
+  onLoad(options) { referral.capture(options); // §18 I 落地只存来源凭据
+    this.setData({ imgCtx: imageUrl.wxsContext() });
+    const that = this;
+    const topicId = Number(options.id);
+    const validTopicId = Number.isFinite(topicId) && Number.isInteger(topicId) && topicId > 0;
+
+    that.calculateScreenHeights(); that._viaSession = options.via === 'session'; // j2 F-06:俱乐部场次卡进来,主按钮先给场次
+
+    that.setData({
+      is_join: options.is_join != undefined ? options.is_join : 0,
+      id: validTopicId ? topicId : 0,
+      topicLoaded: false,
+    });
+
+    if (!validTopicId) {
+      that.setData({
+        loadError: true,
+        missingTopicId: true,
+        loadErrorTitle: '无法打开主题',
+        loadErrorSub: '',
+        topicLoaded: false,
+      });
+      return;
+    }
+
+    that.getData()
+
+    that._initWorkflow();
+    // L06-001:不在进页时预取报名资料(游客会弹「请先登录」,不买的人也白拉通讯录);
+    // 结算层打开时自己取(见 _showSelfPlayCheckout 的 _fillCheckoutProfile)。
+
+  },
+ 
+  /**
+   * 监听页面滚动
+   * _scrollTop 是实例字段不是 data:wxml 从不读它,
+   * 逐帧 setData 等于每帧白做一次逻辑层→渲染层序列化(2026-09-19 性能批3)
+   */
+  onPageScroll: function(e) {
+    const scrollTop = e.scrollTop;
+    this._scrollTop = scrollTop; parallax.follow(this, '.bgt-swiper', scrollTop, { anchor: '#heroTop' }); /* 细节打磨 S5:头图 0.5× 视差 */
+
+    // 根据滚动位置判断当前所在屏幕
+    const screen1Height = this.data.screen1Height;
+    if (scrollTop < screen1Height * 0.7) { // 70%作为切换阈值
+      if (this.data.currentScreen !== 0) {
+        this.setData({
+          currentScreen: 0
+        });
+      }
+    } else {
+      if (this.data.currentScreen !== 1) {
+        this.setData({
+          currentScreen: 1
+        });
+      }
+    }
+
+    this._checkDock(scrollTop); this._checkNav(scrollTop);
+  },
+  /**
+   * 页面显示时
+   */
+  onShow() {
+    this._win = null; // 窗口尺寸缓存作废,下次按需重取
+    const reducedMotion = readReducedMotion();
+    if (this.data.reducedMotion !== reducedMotion) this.setData({ reducedMotion }); this._navigating = false; // 返回时兜底清跳转锁
+    this._startKenBurns();
+    if (this.data.selfPlayCheckoutShow) this._fillCheckoutProfile(); // 从参与人信息/个人资料回来(R11 j3 F8)
+    setTimeout(() => this.calculateScreenHeights(), 100);
+  },
+
+  /**
+   * 页面隐藏时
+   */
+  onHide() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1;
+    this._stopKenBurns();
+  },
+
+  /**
+   * 页面卸载时
+   */
+  onUnload() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1;
+    this._unloaded = true;
+    reportSheet.cancel(this);
+    this._themeRecordsDisposed = true;
+    this._themeRecordsEpoch = (this._themeRecordsEpoch || 0) + 1;
+    this._stopKenBurns();
+    (this._motionTimers || []).forEach(clearTimeout);
+    if (this._workflow) this._workflow.destroy();
+  },
+
+  // V-22 业主 2026-10-29:主题音频只在游戏里播放,详情页不再放「主题音频讲解」行(播放代码随之删除)
+
+  /**
+   * 切换标签页
+   */
+  switchTab(e) {
+    // cy-tabs 通过 detail.key 传当前项;保留 dataset 兼容旧调用点(若还有)
+    const index = (e.detail && e.detail.key) !== undefined ? e.detail.key : e.currentTarget.dataset.index;
+    this.setData({
+      activeTab: index, tabPre: !this.data.reducedMotion, tabRun: !this.data.reducedMotion // v13:切标签时各块从下方依次浮上来;依次延迟只在入场这 1.4s 内生效,之后按压立即响应
+    }, () => { if (this.data.tabPre) { const run = this._tabRunSeq = (this._tabRunSeq || 0) + 1; this._later(30, () => this.setData({ tabPre: false }, () => this._later(1400, () => { if (run === this._tabRunSeq) this.setData({ tabRun: false }); }))); } });
+    if (String(index) === '2') { this._loadProgress(); [400, 1200].forEach((ms) => this._later(ms, () => { if (String(this.data.activeTab) === '2') this._fitRouteMap(); })); }
+    if (String(index) === '1') { this._loadCharsOnce(); this.setData({ openChapter: -1 }); this._later(900, () => { if (String(this.data.activeTab) === '1') this.setData({ openChapter: 0 }); }); } // v13:进故事标签后第一章自己展开
+  },
+
+  /* 2026-10-22 业主:点「查看详情与报名」是点按转场,不是往下滑 ——
+     封面文字先退场,再瞬时换到第二屏,第二屏头图回落、标题与按钮逐行上浮。 */
+  scrollToSecond() {
+    if (this.data.isScrolling) return;
+    if (this.data.reducedMotion) return this._scrollToSecondPlain();
+    this.setData({ isScrolling: true, coverLeaving: true });
+    this._later(280, () => {
+      const go = () => wx.pageScrollTo({ scrollTop: this.data.screen2Top, duration: 0,
+        complete: () => {
+          this.setData({ currentScreen: 1, isScrolling: false, detailEnter: true, coverLeaving: false });
+          this._later(1100, () => this.setData({ detailEnter: false }));
+          this._measureHero();
+        } });
+      if (this.data.screen2Top <= 0) { this.calculateScreenHeights(); this._later(200, go); } else go();
+    });
+  },
+
+  _scrollToSecondPlain() {
+    if (this.data.isScrolling) return;
+
+    this.setData({
+      isScrolling: true
+    });
+
+    const scrollToTarget = () => {
+      wx.pageScrollTo({
+        scrollTop: this.data.screen2Top,
+        duration: 0, // 只在减弱动态时走这里:直接到位,不滚 500ms
+        success: () => {
+          this.setData({
+            currentScreen: 1,
+            isScrolling: false
+          });
+        },
+        fail: () => {
+          this.setData({
+            isScrolling: false
+          });
+        }
+      });
+    };
+
+    // 如果还没有获取到第二屏位置，先计算再滚动
+    if (this.data.screen2Top <= 0) {
+      this.calculateScreenHeights();
+      setTimeout(scrollToTarget, 200);
+    } else {
+      scrollToTarget();
+    }
+  },
+  
+  /* ===== 2026-10-22 动效与新增块(docs/design/动效界面落地_20261022) ===== */
+  // L06-076:到点即从清单里摘掉,清单只留未触发的定时器;onUnload 统一清
+  _later(ms, fn) {
+    const list = this._motionTimers = this._motionTimers || [];
+    const t = setTimeout(() => {
+      const i = list.indexOf(t);
+      if (i >= 0) list.splice(i, 1);
+      fn();
+    }, ms);
+    list.push(t);
+    return t;
+  },
+
+  _applyMotionData(data) {
+    const merchantCards = motion.mergeExploreCards(motion.buildMerchantCards(data.chaptersList), data.exploreMerchantCards);
+    const sketchPoints = [].concat(...(data.chaptersList || []).map((c) => (c && c.nodes) || [])).map(routePoint).filter(Boolean).map((p) => ({ lat: p.latitude, lng: p.longitude }));
+    const price = data.selfPlayPrice;
+    const priceText = money.yuan(price) || '';
+    this.setData({
+      coverImages: motion.buildCoverImages(data), kbIdx: 0,
+      publisher: motion.buildPublisher(data),
+      heroCta: motion.buildHeroCta(data, { isJoin: this.data.is_join, merchantClosed: data.merchantClosed === true, priceText, preferSession: this._viaSession }),
+      merchantCards,
+      storyCards: motion.buildStoryCards(data, merchantCards),
+      storyMeta: motion.storyMeta(data),
+      'topicTabs[2].label': Number(data.productType) === 2 ? '地点' : '路线',
+      routeNote: motion.routeNote(data, merchantCards.length), heroIdx: 0, routeReal: sketchPoints.length > 0, // 有坐标默认就是真地图,示意图只在没有任何有效坐标时兜底
+      sketchPoints,
+    });
+    this._progressLoaded = false;
+    this._startKenBurns();
+    this._loadTeams(data);
+    // L06-008:开局准备只对已报名的人有用(wxml 只在 is_join==1 时出);NPC 只在故事标签出,进故事标签再拉
+    this._loadPrep(String(this.data.is_join) === '1' ? data.id : 0);
+    if (Number(data.productType) === 2) this._loadExplorePerks(data.id);
+    this._loadFav(data.id);
+    this._charsData = data;
+    this._charsLoaded = false;
+    if (String(this.data.activeTab) === '1') this._loadCharsOnce();
+  },
+
+  _loadCharsOnce() {
+    if (this._charsLoaded || !this._charsData) return;
+    this._charsLoaded = true;
+    this._loadChars(this._charsData);
+  },
+
+  // 封面轮换:只在停留第一屏时换图,离屏/隐藏/减少动效时不跑
+  _startKenBurns() {
+    this._stopKenBurns();
+    if (this.data.reducedMotion || (this.data.coverImages || []).length < 2) return;
+    this._kbTimer = setInterval(() => {
+      if (this.data.currentScreen !== 0) return;
+      this.setData({ kbIdx: (this.data.kbIdx + 1) % this.data.coverImages.length });
+    }, KB_MS);
+  },
+  _stopKenBurns() { if (this._kbTimer) { clearInterval(this._kbTimer); this._kbTimer = null; } },
+
+  // L06-005:onPageScroll 每帧都会走到这里;窗口尺寸本页内取一次缓存,onShow 时作废(横竖屏/分屏回来重取)
+  _windowSize() {
+    if (this._win) return this._win;
+    try { const w = wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync(); this._win = { w: w.windowWidth || 375, h: w.windowHeight || 667, safeBottom: w.safeArea ? Math.max(0, (w.screenHeight || w.windowHeight) - w.safeArea.bottom) : 0 }; return this._win; }
+    catch (e) { return { w: 375, h: 667, safeBottom: 0 }; }
+  },
+
+  _measureHero() {
+    if (typeof wx === 'undefined' || typeof wx.createSelectorQuery !== 'function') return;
+    try { this._measureHeroNow(); } catch (e) { /* 量不到就不停靠,按钮留在原位 */ }
+  },
+
+  _measureHeroNow() {
+    if (!this._capsule) { try { this._capsule = wx.getMenuButtonBoundingClientRect(); } catch (e) { this._capsule = null; } }
+    // 这里只预取胶囊位置给停靠动画用;
+    // 故事扇形卡收拢后的迷你卡叠已移进顶栏(v13),
+    // 跟在返回键后面自然排布,
+    // 不再按胶囊量位置。
+    // (保留同样行数,行号基线不挪)
+    const q = wx.createSelectorQuery().in(this);
+    q.select('#heroActs').boundingClientRect();
+    q.selectViewport().scrollOffset();
+    q.exec((r) => {
+      const rect = r && r[0], vp = r && r[1];
+      if (!rect || !vp) return;
+      this._heroTop = rect.top + vp.scrollTop;
+      this._heroH = rect.height;
+    });
+  },
+
+  /* 业主:价格按钮和收藏**被滚出顶栏之后**才离开原位,一起走;回到原位才回来。 */
+  _checkDock(scrollTop) {
+    if (this._heroTop == null || this._docking) return;
+    const nav = (this.data.statusBarHeight || 0) + (this.data.navBarHeight || 44);
+    const bottomOnScreen = this._heroTop + this._heroH - scrollTop;
+    const want = this.data.docked ? bottomOnScreen < nav + 12 : bottomOnScreen < nav;
+    if (want !== this.data.docked) this._animDock(want);
+  },
+
+  /* 停靠动画:各自从原位直线飞到停靠位(价格 → 右下角,收藏 → 顶栏胶囊左侧),
+     自己的节奏(620ms,慢-快-慢),不跟滚动速度走。 */
+  _animDock(on) {
+    if (typeof wx.createSelectorQuery !== 'function') return;
+    this._docking = true;
+    const q = wx.createSelectorQuery().in(this);
+    q.select('.hero-cta').boundingClientRect();
+    q.select('.hero-fav').boundingClientRect(); q.select('.bm-main').boundingClientRect();
+    q.exec((r) => {
+      const cta = r && r[0], fav = r && r[1], bar = null; // v13 没有底栏:价格按钮一律停到右下角
+      const win = this._windowSize(), cap = this._capsule || { top: 48, left: win.w - 95, height: 32 };
+      const box = (x, y, w, h) => 'left:' + x + 'px;top:' + y + 'px;width:' + w + 'px;height:' + h + 'px;';
+      const ctaW = cta ? Math.max(cta.width, 150) : 150;
+      const ctaAt = cta ? box(cta.left, cta.top, cta.width, cta.height) : '';
+      const ctaDock = bar ? box(bar.left, bar.top, bar.width, bar.height) : box(win.w - 16 - ctaW, win.h - 16 - 50 - win.safeBottom, ctaW, 50);
+      const favAt = fav ? box(fav.left, fav.top, fav.width, fav.height) : '';
+      const favDock = box(cap.left - 8 - cap.height, cap.top, cap.height, cap.height);
+      const ease = 'transition:left ' + DOCK_MS + 'ms cubic-bezier(.65,0,.35,1),top ' + DOCK_MS + 'ms cubic-bezier(.65,0,.35,1),width ' + DOCK_MS + 'ms cubic-bezier(.65,0,.35,1),height ' + DOCK_MS + 'ms cubic-bezier(.65,0,.35,1);';
+      const still = 'transition:none;';
+      if (this.data.reducedMotion) {
+        this.setData({ docked: on, dockCtaStyle: ctaDock + still, dockFavStyle: favDock + still });
+        this._docking = false;
+        return;
+      }
+      if (on) {
+        this.setData({ docked: true, dockCtaStyle: ctaAt + still, dockFavStyle: favAt + still });
+        this._later(30, () => this.setData({ dockCtaStyle: ctaDock + ease, dockFavStyle: favDock + ease }));
+        this._later(DOCK_MS + 40, () => { this._docking = false; });
+      } else {
+        this.setData({ dockCtaStyle: ctaAt + ease, dockFavStyle: favAt + ease });
+        this._later(DOCK_MS, () => { this.setData({ docked: false }); this._docking = false; });
+      }
+    });
+  },
+
+  onHeroSwipe(e) { this.setData({ heroIdx: (e && e.detail && e.detail.current) || 0 }); },
+  noop() {},
+  /* 原生 map 还没铺出来时 include-points 会被吞掉:切到路线页、地图铺出后再按全部站点取景(不新增控件绑定) */
+  _fitRouteMap() {
+    const pts = this.data.routeIncludePoints || [];
+    if (!pts.length || !wx.createMapContext) return;
+    try {
+      const ctx = wx.createMapContext('routeMap', this);
+      if (ctx && ctx.includePoints) ctx.includePoints({ points: pts, padding: routePreview.FIT_PADDING });
+    } catch (e) { /* 取景失败不影响路线展示 */ }
+  },
+  onRouteReal() { this.setData({ routeReal: true }); },
+  onBuyPick(e) { this.setData({ buySel: Number(e.currentTarget.dataset.i) || 0 }); },
+  /* 双人票 / 小队票:只读服务端在售商品(按主题过滤);没有就什么都不加。购买层开着时按 key 保住当前选中项。 */
+  _loadSeatProducts(info) {
+    const topicId = info && info.id;
+    if (!topicId || Number(info.selfPlay) !== 1) return;
+    const seq = (this._seatSeq = (this._seatSeq || 0) + 1);
+    app.sendRequest({ url: '/api/marketing/product/list', method: 'GET', hideLoading: true, autoErrorToast: false,
+      data: { topicId: Number(topicId), limit: 20 },
+      success: (res) => {
+        if (seq !== this._seatSeq || this._unloaded || !res || String(res.code) !== '200' || !Array.isArray(res.data)) return;
+        this._seatProducts = res.data;
+        if (!this.data.selfPlayConfirmShow) return;
+        const cur = (this.data.buyOpts || [])[this.data.buySel];
+        const opts = motion.buyOptions(this.data.info || info, this._seatProducts);
+        const keep = cur ? opts.findIndex((o) => o.key === cur.key) : -1;
+        this.setData({ buyOpts: opts, buySel: keep < 0 ? 0 : keep });
+      },
+    });
+  },
+  /* 去结算:自玩通行证进确认订单;发布者的票种绑在场次上,进选场次弹层并预选同名票种 */
+  onBuyGo() {
+    const opt = (this.data.buyOpts || [])[this.data.buySel];
+    if (!opt) return; if (opt.kind === 'pass') return this.onSelfPlayGoCheckout(); // x-fix2 P-2:没有可买票种(如城市定向无场次)时不落到自玩结账
+    if (opt.kind === 'product') return this.onSelfPlayGoCheckout(opt); // DEC-F12 A:与单人同一结算层,付款走商品 报价 → 下单 → 付款(到账后可邀请同伴)
+    this.setData({ selfPlayConfirmShow: false, buyIn: false, sessionPreferName: opt.name });
+    this.bmClick({ currentTarget: { dataset: {} } });
+  },
+
+  /* v13 顶栏:详情顶部照片滚过一半后,顶栏压黑并写主题名 */
+  _checkNav(scrollTop) {
+    const top = this.data.screen2Top || 0;
+    const want = top > 0 && scrollTop > top + this._windowSize().h * 0.5;
+    if (want !== this.data.navSolid) this.setData({ navSolid: want });
+  },
+
+  /* 主要角色:商家站点的出场 NPC,最多问 4 个站点;没有就整块不出 */
+  _loadChars(data) {
+    if (!this._loggedIn()) return;
+    const asks = [];
+    for (const c of (data && data.chaptersList) || []) {
+      for (const n of (c && c.nodes) || []) {
+        if (n && n.id && (n.registrationMerchantList || []).length && asks.length < 4) asks.push({ nodeId: n.id, place: nodeText(n.name) });
+      }
+    }
+    if (!asks.length) return;
+    const rows = [];
+    let left = asks.length;
+    const done = () => { left -= 1; if (!left && !this._unloaded) this.setData({ storyChars: motion.buildChars(rows) }); };
+    asks.forEach((a) => app.sendRequest({ url: '/api/ai/npc/profile', method: 'GET', hideLoading: true, autoErrorToast: false,
+      data: { scope: 'node', nodeId: a.nodeId },
+      success: (res) => { const list = res && String(res.code) === '200' && res.data && res.data.npcs; if (Array.isArray(list)) list.forEach((npc) => rows.push({ npc, place: a.place })); done(); },
+      fail: done,
+    }));
+  },
+
+  onHeroCta() {
+    const kind = this.data.heroCta && this.data.heroCta.kind;
+    if (kind === 'locked') return this.lockedTip(); if (kind === 'closed') return toast('主题已截止'); // x-fix2 P-1
+    if (kind === 'joined') return this.goJoinedPlay();
+    if (kind === 'selfplay') return this.selfPlayBuy();
+    if (kind === 'signup') return this.bmClick({ currentTarget: { dataset: {} } });
+  },
+
+  // 收藏 = 既有的主题「喜欢」(我的-喜欢 同一个接口);进页读一次当前状态
+  _loggedIn() { return typeof app.getUserID === 'function' && !!app.getUserID(); },
+
+  _loadFav(topicId) {
+    if (!topicId || !this._loggedIn()) return;
+    // L06-007:读回来之前用户点过收藏,以用户的点击为准,迟到的读结果不覆盖
+    const toggles = this._favToggles || 0;
+    app.sendRequest({ url: '/api/topic/like_list', method: 'POST', hideLoading: true, autoErrorToast: false,
+      data: { pageNum: 1, pageSize: 200 },
+      success: (res) => {
+        if (this._unloaded || (this._favToggles || 0) !== toggles || this._favBusy) return;
+        if (!res || String(res.code) !== '200' || !res.data) return;
+        const rows = Array.isArray(res.data.rows) ? res.data.rows : [];
+        this.setData({ faved: rows.some((t) => t && String(t.id) === String(topicId)) });
+      },
+      fail: () => {},
+    });
+  },
+
+  // 2026-10-31 P-8:主题卡(封面 / 主题名 / 一站接一站的路线),右下主题码;微信好友走本页 onShareAppMessage
+  openShareCard() {
+    const info = this.data.info || {};
+    const id = info.id || this.data.id;
+    if (!id) return;
+    this.setData({ shareCard: { show: true, card: { kind: 'theme', id: String(id), title: info.name || '城瘾主题',
+      cover: (this.data.coverImages || [])[0] || info.imgUrl || '', meta: this.data.storyMeta || '',
+      stops: (this.data.storyCards || []).map((c) => c.title) }, gift: this._giftId || '' } });
+    // R4 送礼:分享层渠道排里的「送礼」只在服务端列出覆盖本主题的可赠送商品时出现
+    if (this._giftAsked) return;
+    this._giftAsked = true;
+    app.sendRequest({ url: '/api/marketing/product/list', method: 'GET', hideLoading: true, autoErrorToast: false, data: { limit: 50 },
+      success: (res) => {
+        const gift = res && String(res.code) === '200' ? giftProductId(res.data, String(id)) : '';
+        if (!gift || this._unloaded) return;
+        this._giftId = gift;
+        this.setData({ 'shareCard.gift': gift });
+      },
+      fail: () => { this._giftAsked = false; } });
+  },
+  onShareCardClose() { this.setData({ 'shareCard.show': false }); },
+  showPrivacyGate() { this.setData({ privacyGateShow: true }); },
+  onPrivacyGateSettled() { this.setData({ privacyGateShow: false }); },
+
+  toggleFav() {
+    if (app.ensureLoginFor && !app.ensureLoginFor('like', () => this.toggleFav(), { owner: this, target: () => [this.data.id, this.data.info && this.data.info.id] })) return; // 2026-10-24 游客写前登录
+    const id = (this.data.info && this.data.info.id) || this.data.id;
+    if (!id || this._favBusy) return;
+    const next = !this.data.faved;
+    this._favToggles = (this._favToggles || 0) + 1;
+    this._favBusy = true;
+    this.setData({ faved: next });
+    app.sendRequest({ url: '/api/topic/like', method: 'POST', hideLoading: true, autoErrorToast: false,
+      data: { id: id, type: next ? 1 : 0 },
+      success: (res) => {
+        this._favBusy = false;
+        if (!res || String(res.code) !== '200') { this.setData({ faved: !next }); toast((res && res.msg) || '收藏没有保存，请重试'); return; }
+        toast(next ? '已收藏' : '已取消收藏');
+      },
+      fail: () => { this._favBusy = false; this.setData({ faved: !next }); toast('网络异常，收藏没有保存'); },
+    });
+  },
+
+  // 组队块:以第一个有坐标的站点为圆心读附近队伍,只留本主题的;读不到整块不出
+  _loadTeams(data) {
+    let lat = null, lng = null;
+    for (const c of (data && data.chaptersList) || []) {
+      for (const n of (c && c.nodes) || []) {
+        const p = routePoint(n);
+        if (p) { lat = p.latitude; lng = p.longitude; break; }
+      }
+      if (lat !== null) break;
+    }
+    if (lat === null || !this._loggedIn()) return;
+    app.sendRequest({ url: '/api/team/nearby', method: 'GET', hideLoading: true, autoErrorToast: false,
+      data: { lat: lat, lng: lng, radius: 20000 },
+      success: (res) => {
+        if (this._unloaded || !res || String(res.code) !== '200') return;
+        this.setData({ teams: motion.buildTeams(res.data, data.id) });
+      },
+      fail: () => {},
+    });
+  },
+
+  // 开局前准备(原型 B T-36,契约 §1.3):GET /api/play/setup 给可玩时段(非俱乐部且不是「不限」才有)、openNow 与作者准备项;
+  // 两样都没配就整行不出(B1)。未成年夜间等平台规则只在服务端执行(/api/orient/safety/check),被拒时只写一句中性说明。
+  /** FE-G4:自由探索的参与商家卡补上逐店权益(读套票目录);读不到就保持原卡,不报错。 */
+  _loadExplorePerks(topicId) {
+    if (!topicId || !this._loggedIn()) return;   // 目录要登录;游客照旧看报名商家卡
+    const seq = this._perkSeq = (this._perkSeq || 0) + 1;
+    app.sendRequest({ url: '/api/free-explore/bundle/catalog', method: 'GET', hideLoading: true, autoErrorToast: false, data: { topicId },
+      success: (res) => {
+        if (this._unloaded || seq !== this._perkSeq || !res || String(res.code) !== '200' || !res.data) return;
+        const merchantCards = motion.mergeExploreCatalog(this.data.merchantCards, res.data);
+        this.setData({ merchantCards });
+      },
+      fail: () => {},
+    });
+  },
+  _loadPrep(topicId) {
+    if (!topicId || !this._loggedIn()) { this._prepSetup = null; this.setData({ prep: { show: false } }); return; }
+    const seq = this._prepSeq = (this._prepSeq || 0) + 1;
+    this.setData({ prep: { show: true, loading: true, rowText: '正在加载…', icon: 'clock' } });
+    const failed = () => { if (!this._unloaded && seq === this._prepSeq) this.setData({ prep: { show: true, error: true, rowText: '开局前准备加载失败 · 轻点重试', icon: 'warning' } }); };
+    app.sendRequest({ url: '/api/play/setup', method: 'GET', hideLoading: true, autoErrorToast: false, data: { topicId },
+      success: (res) => {
+        if (this._unloaded || seq !== this._prepSeq) return;
+        if (!res || String(res.code) !== '200' || !res.data) { failed(); return; }
+        this._prepSetup = res.data; this._buildPrep(res.data);
+      },
+      fail: failed,
+    });
+  },
+  _buildPrep(setup, ticks) {
+    const d = setup || {};
+    const items = (Array.isArray(d.prepItems) ? d.prepItems : []).map((t) => String(t || '').trim()).filter(Boolean).slice(0, 6)
+      .map((text, k) => ({ k, text, on: !!(ticks && ticks[k]) }));
+    const w = d.playWindow && d.playWindow.mode && d.playWindow.mode !== 'any' ? d.playWindow : null;
+    if (!items.length && !w) { this.setData({ prep: { show: false } }); return; }
+    const windowText = !w ? '' : w.mode === 'night' ? '夜间 20:00–06:00' : w.mode === 'day' ? '白天 06:00–20:00' : (w.start || '') + '–' + (w.end || '');
+    const closed = !!w && d.openNow === false;
+    const left = items.filter((x) => !x.on).length;
+    const refused = !!(this.data.prep && this.data.prep.refused);
+    const rowText = closed ? '开局前准备 · ' + windowText + ' 开放' : left ? '开局前准备 · 还有 ' + left + ' 项未勾选' : '开局前准备 · 已全部勾选';
+    this.setData({ prep: { show: true, items, windowText, closed, ready: !closed && !left, refused, rowText, icon: closed ? 'clock' : left ? 'info' : 'check' } });
+  },
+  _prepTicks() { const t = {}; ((this.data.prep && this.data.prep.items) || []).forEach((x) => { if (x.on) t[x.k] = true; }); return t; },
+  openPrep() {
+    const prep = this.data.prep || {};
+    if (prep.loading) return;
+    if (prep.error) { this._loadPrep((this.data.info && this.data.info.id) || this.data.id); return; }
+    this._buildPrep(this._prepSetup, this._prepTicks()); this.setData({ prepShow: true });
+  },
+  closePrep() { this.setData({ prepShow: false }); },
+  onPrepTick(e) {
+    const k = Number(e.currentTarget.dataset.index); const t = this._prepTicks();
+    if (e.detail && e.detail.checked) t[k] = true; else delete t[k];
+    this._buildPrep(this._prepSetup, t);
+  },
+  startPrepPlay() {
+    const info = this.data.info || {}; const prep = this.data.prep || {};
+    if (!prep.ready || prep.refused || this.data.prepBusy || !info.id) return;
+    this.setData({ prepBusy: true });
+    const done = () => { if (!this._unloaded) this.setData({ prepBusy: false }); };
+    const go = () => {
+      this.setData({ prepShow: false });
+      const name = info.name ? '&topicName=' + encodeURIComponent(info.name) : '';
+      wx.navigateTo({ url: '/pages/play/index?topicId=' + info.id + name });
+    };
+    // 预检开关关闭 / 非定向主题时不拦,开局时服务端仍会再判一次
+    const skip = (res) => !!(res && ['ORIENT_DISABLED', 'ORIENT_NOT_ORIENTEERING'].includes(res.errorCode));
+    app.sendRequest({ url: '/api/orient/safety/check', method: 'POST', hideLoading: true, autoErrorToast: false,
+      data: JSON.stringify({ topicId: info.id }), header: { 'Content-Type': 'application/json' },
+      success: (res) => {
+        done();
+        if (this._unloaded) return;
+        if (skip(res)) { go(); return; }
+        if (!res || String(res.code) !== '200' || !res.data) { toast('网络异常，请重试'); return; }
+        if (res.data.allowed !== true) { this.setData({ 'prep.refused': true }); return; }
+        go();
+      },
+      fail: (res) => { done(); if (this._unloaded) return; if (skip(res)) go(); else toast('网络异常，请重试'); },
+    });
+  },
+
+  // 组队卡 → 我的队伍「本场招募」(/api/orient/team/lobby):有场次的队伍按场次读,否则按主题读
+  openTeamLobby() {
+    const info = this.data.info || {};
+    if (Number(this.data.is_join) !== 1 || Number(info.productType) !== 1 || !info.id) return;
+    const row = (this.data.teams.rows || []).find((r) => r && r.activityId) || null;
+    const scope = [info.name, row && row.when ? row.when + ' 场' : ''].filter(Boolean).join(' · ');
+    wx.navigateTo({ url: '/subpackageRoam/my-teams/index?tab=open&ownerType=' + (row ? 2 : 1)
+      + '&ownerId=' + encodeURIComponent(row ? row.activityId : info.id) + '&scope=' + encodeURIComponent(scope) });
+  },
+
+  onMerchantOpen(e) {
+    const id = e && e.detail && e.detail.id;
+    this.onLineupTap({ currentTarget: { dataset: { kind: 'merchant', id: id } } });
+  },
+
+  onStoryDock(e) { this.setData({ storyDocked: !!(e && e.detail && e.detail.docked) }); },
+
+  onChapterCard(e) {
+    const i = Number(e.currentTarget.dataset.i);
+    // 未解锁章节只是预告:点击走购票入口,绝不展开成可玩内容
+    const card = (this.data.storyCards || [])[i];
+    if (card && card.locked) return this.selfPlayBuy();
+    this.setData({ openChapter: this.data.openChapter === i ? -1 : i });
+  },
+
+  // 路线进度:已购才读本人进度(/api/play/nodes 的 total/doneCount);未购就是 0,不演示假进度
+  _loadProgress() {
+    if (this._progressLoaded) return;
+    this._progressLoaded = true;
+    const info = this.data.info || {};
+    const labels = (n) => motion.progressFallback({ productType: info.productType, locationCount: n }).labels;
+    const fallback = () => { if (!this._unloaded) this.setData({ progress: motion.progressFallback(info) }); };
+    if (Number(this.data.is_join) !== 1 || !this._loggedIn()) return fallback();
+    app.sendRequest({ url: '/api/play/nodes', method: 'GET', hideLoading: true, autoErrorToast: false,
+      data: { topicId: info.id || this.data.id },
+      success: (res) => {
+        const d = res && String(res.code) === '200' && res.data;
+        const total = d ? Number(d.total) : 0;
+        if (this._unloaded) return;
+        if (!(total > 0)) return fallback();
+        this.setData({ progress: { total: total, done: Math.min(total, Math.max(0, Number(d.doneCount) || 0)), labels: labels(total) } });
+      },
+      fail: fallback,
+    });
+  },
+
+  /* 自玩:弹层只说清买的是什么,按钮「去结算」进确认订单页(业主:随时开玩不直接付款) */
+  onSelfPlayGoCheckout(opt) {
+    if (app.ensureLoginFor && !app.ensureLoginFor('checkout', () => this.onSelfPlayGoCheckout(opt), { owner: this, target: () => [this.data.id, this.data.info && this.data.info.id] })) return; // 2026-10-24 游客写前登录
+    const option = opt && opt.kind === 'product' && Number(opt.productId) > 0 ? opt : null; // DEC-F12 A:多人票选项;bindtap 事件对象不是选项
+    if (this.lockedTip()) return;
+    const info = this.data.info || {};
+    const win = motion.passWindow({ topicEnd: info.endDate });
+    const p = this._signupParts || this._signupProfile || {};
+    const phone = String(p.phone || '');
+    this._seatReqId = null;
+    this._checkoutFacts = { info, win, quoteState: 'loading', quote: null, refusal: '', products: null, option };
+    this._profileUi = {}; this._profileFilledInSheet = false; this._payAfterName = null;
+    this.setData({
+      selfPlayConfirmShow: false,
+      selfPlayCheckoutShow: true,
+      selfPlayConsentHint: '',
+      selfPlayConsentError: '',
+      checkoutError: '',
+      checkout: {
+        cover: (this.data.coverImages && this.data.coverImages[0]) || info.imgUrl || '',
+        placeText: (info.venue && info.venue.name) || '',
+        view: checkoutView(this._checkoutFacts),
+        profileName: p.realName || '',
+        profilePhone: phone.length >= 7 ? phone.slice(0, 3) + '****' + phone.slice(-4) : phone,
+        profile: checkoutProfile.profileView(this._signupParts || this._signupProfile || null, this._profileUi),
+      },
+    });
+    this._trackBuy('checkout_open');
+    this._loadCheckoutFacts(info.id || this.data.id);
+    if (!this._signupParts) this._fillCheckoutProfile(); // 进页预取还没回来/失败:结算层自己再取一次
+  },
+
+  /* r2-store:结账层只读两样服务端事实 —— 报价(价格/减免/退款)与覆盖本主题的在售通票。
+     只读,不建单、不改支付;建单仍由 onSelfPlayConfirm 原链路完成。 */
+  _loadCheckoutFacts(topicId) {
+    const seq = (this._checkoutSeq = (this._checkoutSeq || 0) + 1);
+    const facts = this._checkoutFacts;
+    const render = () => { if (seq === this._checkoutSeq && !this._unloaded) this.setData({ 'checkout.view': checkoutView(facts) }); };
+    if (facts.option) this._quoteSeatProduct(facts, render);
+    else app.sendRequest({ url: '/api/registration/quote', method: 'POST', hideLoading: true, autoErrorToast: false,
+      header: { 'content-type': 'application/json' },
+      data: { ownerType: 1, ownerId: Number(topicId) },
+      success: (res) => {
+        if (res && String(res.code) === '200' && res.data) { facts.quoteState = 'ready'; facts.quote = res.data; }
+        else { facts.quoteState = 'refused'; facts.refusal = res && res.msg; }
+        render();
+      },
+      successStatusAbnormal: (res) => { facts.quoteState = 'refused'; facts.refusal = res && res.msg; render(); },
+      fail: () => { facts.quoteState = 'failed'; render(); },
+    });
+    app.sendRequest({ url: '/api/marketing/product/list', method: 'GET', hideLoading: true, autoErrorToast: false,
+      data: { limit: 50 },
+      success: (res) => { if (res && String(res.code) === '200' && Array.isArray(res.data)) { facts.products = res.data; render(); } },
+    });
+  },
+
+  /* DEC-F12 A:多人票报价只问服务端(商品 id + 1 份 + 自己用),价格不在端上算 */
+  _quoteSeatProduct(facts, render) {
+    app.sendRequest({ url: '/api/marketing/product/quote', method: 'POST', hideLoading: true, autoErrorToast: false,
+      header: { 'content-type': 'application/json' },
+      data: JSON.stringify(productOrder.quoteRequest(facts.option.productId)),
+      success: (res) => {
+        if (res && String(res.code) === '200' && res.data) {
+          if (!facts.quote || facts.quote.quoteSign !== res.data.quoteSign) this._seatReqId = null;
+          facts.quoteState = 'ready'; facts.quote = res.data;
+        } else { facts.quoteState = 'refused'; facts.refusal = productOrder.reasonText(res && res.reasonCode); }
+        render();
+      },
+      fail: () => { facts.quoteState = 'failed'; render(); },
+    });
+  },
+
+  /* DEC-F12 A:多人票下单 → 付款 → 只认服务端订单状态。同一次购买意图复用 requestId(结果未知可原样重发)。 */
+  _createSeatProductOrder() {
+    const facts = this._checkoutFacts;
+    const cash = facts && facts.quoteState === 'ready' ? productOrder.cashQuote(facts.quote) : null;
+    if (!cash || !cash.buyable || this._selfPlaySubmitting) return;
+    this._selfPlaySubmitting = true;
+    if (!this._seatReqId) this._seatReqId = productOrder.newRequestId();
+    const productId = Number(facts.option.productId);
+    const body = productOrder.orderRequest(productId, facts.quote, productOrder.PAY_MODE.CASH, productOrder.FULFILLMENT.SELF, this._seatReqId);
+    this.setData({ selfPlayConfirmLoading: true, checkoutError: '' });
+    app.sendRequest({ url: '/api/marketing/product/order', method: 'POST', hideLoading: true, autoErrorToast: false,
+      header: { 'content-type': 'application/json' }, data: JSON.stringify(body),
+      success: (res) => {
+        if (res && String(res.code) === '200' && res.data) { this._afterSeatOrder(res.data); return; }
+        const code = res && res.reasonCode;
+        this._seatOrderFail(productOrder.reasonText(code));
+        if (code === 'QUOTE_EXPIRED' || code === 'QUOTE_STALE') this._refreshCheckoutQuote();
+      },
+      fail: () => this._seatOrderFail('结果待确认，请再点一次查询原订单'),
+    });
+  },
+  _seatOrderFail(msg) {
+    this._selfPlaySubmitting = false;
+    this.setData({ selfPlayConfirmLoading: false });
+    this._showCheckoutFailure(msg);
+  },
+  _afterSeatOrder(order) {
+    if (order.statusLabel === 'PAID') {
+      this._seatReqId = null; this._selfPlaySubmitting = false;
+      const facts = this._checkoutFacts || {};
+      const pid = Number(facts.option && facts.option.productId);
+      const product = (this._seatProducts || []).find((p) => Number(p && p.productId) === pid) || null;
+      const steps = passUnlock.unlockSteps(product, order);
+      this.setData({ selfPlayConfirmLoading: false, selfPlayCheckoutShow: false, seatUnlock: { show: steps.length > 0, steps, face: passUnlock.faceText(product) } });
+      if (!steps.length) this.onSeatUnlockDone();
+      return;
+    }
+    if (order.statusLabel === 'PENDING_CASH') { this._paySeatOrder(order); return; }
+    this._seatOrderFail(order.statusLabel === 'CANCELLED' ? '订单已取消' : '订单当前不可支付');
+  },
+  // 现金:预下单拿支付参数 → 微信支付 → 按单号回查(SDK 成功 ≠ 已付)
+  _paySeatOrder(order) {
+    const blocked = order.payment && order.payment.blockedReason;
+    if (blocked) { this._seatOrderFail(productOrder.reasonText(blocked)); return; }
+    app.sendRequest({ url: '/api/marketing/product/orders/' + encodeURIComponent(order.orderNo) + '/pay', method: 'POST', hideLoading: true, autoErrorToast: false,
+      success: (res) => {
+        const p = res && String(res.code) === '200' && res.data && res.data.payParams;
+        if (!p) { this._seatOrderFail(productOrder.reasonText(res && res.reasonCode)); return; }
+        wx.requestPayment(Object.assign({}, p, {
+          success: () => this._verifySeatOrder(order.orderNo, 0),
+          fail: (e) => {
+            if (/cancel/.test(String((e && e.errMsg) || ''))) { this._seatOrderFail('已取消本次付款'); return; }
+            this._verifySeatOrder(order.orderNo, 2);
+          },
+        }));
+      },
+      fail: () => this._seatOrderFail('结果待确认，请到我的订单查看'),
+    });
+  },
+  _verifySeatOrder(orderNo, attempt) {
+    app.sendRequest({ url: '/api/marketing/product/orders/' + encodeURIComponent(orderNo), method: 'GET', hideLoading: true, autoErrorToast: false,
+      success: (res) => {
+        const row = res && String(res.code) === '200' && res.data && res.data.orderNo === orderNo ? res.data : null;
+        if (row && row.statusLabel === 'PAID') { this._afterSeatOrder(row); return; }
+        if (attempt < 2) { setTimeout(() => this._verifySeatOrder(orderNo, attempt + 1), 1500); return; }
+        this._seatOrderFail('支付确认中，请到我的订单查看');
+      },
+      fail: () => this._seatOrderFail('支付确认中，请到我的订单查看'),
+    });
+  },
+  // 到账分步里点「邀请同伴」:去票内席位页(只带服务端已付原单 id)
+  onSeatUnlockInvite(e) {
+    const id = Number(e && e.detail && e.detail.registrationId);
+    if (!Number.isInteger(id) || id <= 0) return;
+    this.setData({ 'seatUnlock.show': false });
+    wx.navigateTo({ url: '/subpackageJourney/pages/seats/index?registrationId=' + id });
+  },
+  onSeatUnlockDone() {
+    this.setData({ 'seatUnlock.show': false });
+    toast('已购买');
+    wx.navigateTo({ url: '/subpackageMember/market/passes/index?tab=orders' });
+  },
+
+  onCheckoutPass(e) {
+    const id = e && e.detail && e.detail.id;
+    if (!id || this._navigating) return;
+    this._navigating = true;
+    wx.navigateTo({ url: '/subpackageMember/market/pass/index?id=' + id, complete: () => { this._navigating = false; } });
+  },
+
+  /* OR-003:建单撞价变后重新报价(结算层还开着才重取)。 */
+  _refreshCheckoutQuote() {
+    const facts = this._checkoutFacts;
+    if (!facts || !this.data.selfPlayCheckoutShow) return;
+    facts.quoteState = 'loading';
+    facts.quote = null;
+    this.setData({ 'checkout.view': checkoutView(facts) });
+    const info = facts.info || this.data.info || {};
+    this._loadCheckoutFacts(info.id || this.data.id);
+  },
+
+  /* OR-028/OR-046:「购买须知与退款规则」—— 有服务端须知就按原文列,没有就列平台退款三档 */
+  onCheckoutNotice() {
+    const view = (this.data.checkout && this.data.checkout.view) || {};
+    const lines = (view.notice && view.notice.lines) || [];
+    if (!lines.length) return;
+    modal.show({ title: '购买须知与退款规则', content: lines.join('\n'), showCancel: false, confirmText: '知道了' });
+  },
+
+  /* E-B9:报价请求失败后的「重新获取价格」。只重取事实,不建单。 */
+  onCheckoutRequote() {
+    const facts = this._checkoutFacts;
+    if (!facts || facts.quoteState !== 'failed') return;
+    facts.quoteState = 'loading';
+    this.setData({ 'checkout.view': checkoutView(facts) });
+    const info = facts.info || this.data.info || {};
+    this._loadCheckoutFacts(info.id || this.data.id);
+  },
+
+  /* OR-046:已购买本主题时结算层主按钮是「继续游玩」—— 收起结算层,走已购的开玩入口 */
+  onCheckoutPlay() {
+    this.setData({ selfPlayCheckoutShow: false });
+    this.openPrep();
+  },
+
+  onCheckoutBack() {
+    if (this.data.selfPlayConfirmLoading || this._selfPlaySubmitting) return;
+    this._payAfterName = null; // 关层 = 放弃这次购买意图:在途的姓名保存回来后不再接着建单
+    this.setData({ selfPlayCheckoutShow: false });
+  },
+
+  onCheckoutProfile() {
+    this._goFixSignupProfile();
+  },
+
+  /* 付款成功 → 通行证到账动效。可选的商家营销同意行(拍板第 40 条 A)照旧要给:
+     动效收尾时有同意可选才弹原结果面板,否则直接去票夹/开局。 */
+  _showPassReveal(topicId, registrationId, expiresAt) {
+    const info = this.data.info || {};
+    const win = motion.passWindow({ topicEnd: info.endDate, expiresAt });
+    this._revealTopicId = topicId;
+    this._revealRegId = registrationId || 0;
+    const price = info.selfPlayPrice;
+    const priceText = money.yuan(price) || '';
+    // L06-008:刚买完才算已报名,开局准备这时再拉
+    if (String(this.data.is_join) !== '1' && info.id) this._later(0, () => this._loadPrep(info.id));
+    this.setData({
+      is_join: 1,
+      heroCta: motion.buildHeroCta(info, { isJoin: 1, merchantClosed: false, priceText }),
+      reveal: {
+        show: true,
+        cover: (this.data.coverImages && this.data.coverImages[0]) || info.imgUrl || '',
+        name: info.name || '',
+        kindText: '城瘾 · ' + (Number(info.productType) === 2 ? '自由探索' : '城市定向') + '通行证',
+        untilText: win.untilText, daysText: win.daysText, line: win.line,
+      },
+    });
+    // 期限口径同后端建单(CmsRegistrationServiceImpl:购买后 90 天,主题先结束则以主题为准),本地即可算准
+    this._pendingOffer = null;
+    // 只有商家发布的主题才问「接收该商家活动消息」:平台/俱乐部号名下若恰好也挂着商家档案,
+    // 会把一家无关的店(实走 A6:海上方舟下面问「滨江骑行装备专卖」)塞给玩家。
+    if (String(info.contentPublisherType || '').toUpperCase() === 'MERCHANT') {
+      marketingConsent.loadOffer(app, info.memberId || 0, (offer) => { if (offer) this._pendingOffer = offer; });
+    }
+  },
+
+  onRevealWallet() { this._finishReveal('wallet'); },
+  onRevealPlay() { this._finishReveal('play'); },
+
+  _finishReveal(kind) {
+    if (this._navigating || !this.data.reveal.show) return; // 连点「开始游戏」/「放进票夹」只走一次
+    const offer = this._pendingOffer;
+    this._pendingOffer = null;
+    if (offer) {
+      // 商家营销同意(拍板第 40 条 A)仍走原结果面板那一行;面板收起后再去票夹/开局。
+      // 揭晓时已取到的邀请直接沿用,不再重复请求。
+      this.setData({ 'reveal.show': false, selfPlayCheckoutShow: false }); this._revealNext = kind;
+      this._goSelfPlay(this._revealTopicId, offer);
+      return;
+    }
+    this._goAfterReveal(kind, () => this.setData({ 'reveal.show': false, selfPlayCheckoutShow: false })); // 揭晓层等下一页推上来再收,中间不露出主题页
+  },
+
+  _goAfterReveal(kind, onGone) {
+    const topicId = this._revealTopicId || (this.data.info && this.data.info.id) || this.data.id;
+    const regId = this._revealRegId; if (this._navigating) return; this._navigating = true;
+    if (kind === 'play' && regId && topicId) {
+      const name = this.data.info && this.data.info.name ? '&topicName=' + encodeURIComponent(this.data.info.name) : '';
+      wx.navigateTo({ url: '/pages/play/index?topicId=' + topicId + '&registrationId=' + regId + '&entry=ticket' + name, success: onGone, complete: () => { this._navigating = false; } });
+      return;
+    }
+    wx.navigateTo({ url: '/subpackageMember/signup/index?stype=0&arrive=1' + walletTopicQuery(topicId, '&'), success: onGone, complete: () => { this._navigating = false; } });
+  },
+
+  goLocation(e) {
+    let latitude = e.currentTarget.dataset.latitude;
+    let longitude = e.currentTarget.dataset.longitude;
+    let name = e.currentTarget.dataset.name;
+    let address = e.currentTarget.dataset.address;
+
+    // 场地卡在节点无坐标时也会渲染,此时不带经纬度;openLocation 传 NaN 会静默失败
+    if (!latitude || !longitude) return;
+
+    // 打开微信内置地图查看位置
+    wx.openLocation({
+      latitude: parseFloat(latitude), // 纬度，范围为-90~90，负数表示南纬
+      longitude: parseFloat(longitude), // 经度，范围为-180~180，负数表示西经
+      name: name, // 位置名
+      address: address, // 地址的详细说明
+      scale: 18, // 地图缩放级别，整形值，范围从1~28
+      success: function (res) {
+      },
+      fail: function (err) {
+      }
+    })
+  },
+  
+  /**
+   * 触摸开始事件
+   */
+  touchStart(e) {
+    if (this.data.isScrolling) return;
+    // L06-006:手势起点只给 touchEnd 用,存实例上,不每次触摸都过桥
+    this._touchY = e.touches[0].clientY;
+    this._touchT = Date.now();
+  },
+  
+  /**
+   * 稿 214:384「阵容/商家」。阵容说的是**参与品牌**(商家与俱乐部),不是买了票的玩家 ——
+   * 页上原来两块:「阵容」列 omsTicketList[].cmsRegistrationList(报名玩家),
+   * 「参与品牌」才是商家。2026-09-04 判定表定:两块是一回事,合并;俱乐部那一半原先没有。
+   *
+   * 同一家商家会挂在多个章节/节点上,按商家 id 去重 —— 不去重横滑条里会连着出现同一家。
+   * 俱乐部没有头像字段(TopicInfoVO 只有 clubId / clubName),头像交给 cy-avatar 的兜底,
+   * 不去别处凑一张。名字都没有的行直接跳过,不摆占位卡。
+   */
+  /* 稿 181:644 / 214:499 的「活动内容」——主题介绍下面那串「这趟里都有什么」。
+     ⚠️ 稿上那六条(5 articles / 12 downloadable resources / 10 coding exercises /
+        Full lifetime access / Access on mobile and TV / Certificate of completion)
+        是 Udemy 的占位内容,按「那些不是我们的不做」一条都不抄。
+        但**这个位置本身是真的**:买家在这一屏看不到「有几章、有没有语音导览、
+        通关给不给勋章和券」—— 这四件事全在 /api/topic/info-to-user 的返回里,
+        只是从来没渲染过(全仓 grep 过:finishMedalName / completeRewardCouponId /
+        totalChapterCount 在两个详情页里一次都没出现)。
+     只写后端真给了的事实,拿不到就少一条;一条都没有整块不出 —— 不摆空标题。
+     ⚠️ 不重复顶部数据条已经说过的(评价 / 预计游玩 / 开放时间 / 总里程)。 */
+  buildContentIncludes(data) { return buildContentIncludes(data); },
+
+  buildLineup(data) {
+    const rows = [];
+    if (data && String(data.clubName || '').trim()) {
+      rows.push({
+        key: 'club-' + (data.clubId || 0),
+        kind: 'club',
+        targetId: data.clubId || 0,
+        name: String(data.clubName).trim(),
+        role: '俱乐部',
+        avatar: '',
+      });
+    }
+    const seen = {};
+    const chapters = (data && data.chaptersList) || [];
+    for (let i = 0; i < chapters.length; i++) {
+      const nodes = (chapters[i] && chapters[i].nodes) || [];
+      for (let j = 0; j < nodes.length; j++) {
+        const list = nodes[j].registrationMerchantList || [];
+        for (let k = 0; k < list.length; k++) {
+          const row = list[k];
+          const shop = row && row.mmsMerchant;
+          const name = String((shop && shop.name) || '').trim();
+          if (!name) continue;
+          const dedupeKey = String((shop && shop.id) || name);
+          if (seen[dedupeKey]) continue;
+          seen[dedupeKey] = 1;
+          rows.push({
+            key: 'merchant-' + dedupeKey,
+            kind: 'merchant',
+            targetId: row.memberId || 0,
+            name,
+            avatar: String(row.picUrl || '').split(',')[0].trim(),
+            role: '商家',
+          });
+        }
+      }
+    }
+    return rows;
+  },
+
+  /* 俱乐部去俱乐部页,商家去他的个人主页。没有落点(俱乐部没 id / 商家没 memberId)就不跳,
+     不静默跳到一个错的地方。 */
+  onLineupTap(e) {
+    const { kind, id } = e.currentTarget.dataset;
+    const targetId = Number(id) || 0;
+    if (!targetId) return;
+    if (this._navigating) return; this._navigating = true; wx.navigateTo({ complete: () => { this._navigating = false; },
+      url: kind === 'club'
+        ? '/pages/club/detail/index?id=' + targetId
+        : '/pages/userinfo/userinfo?userId=' + targetId,
+    });
+  },
+
+
+  /**
+   * 触摸结束事件
+   */
+  touchEnd(e) {
+    if (this.data.isScrolling) return;
+
+    const endY = e.changedTouches[0].clientY;
+    const distance = endY - (this._touchY || 0);
+    const duration = Date.now() - (this._touchT || 0);
+    const minSwipeDistance = 50;
+
+    // 只有快速滑动或距离足够时才触发
+    if (Math.abs(distance) > minSwipeDistance || duration < 300) {
+      // 下滑操作（手指向上滑动）
+      if (distance < -minSwipeDistance && this.data.currentScreen === 0) {
+        this.scrollToSecond();
+      }
+      // 上滑操作（手指向下滑动）- 只有在接近顶部时才返回第一屏
+      else if (distance > minSwipeDistance && (this._scrollTop || 0) <= this.data.screen2Top + 100) {
+        this.scrollToFirst();
+      }
+    }
+  },
+
+  /**
+   * 滚动到第一屏
+   */
+  scrollToFirst() {
+    if (this.data.isScrolling) return;
+
+    this.setData({
+      isScrolling: true
+    });
+
+    wx.pageScrollTo({
+      scrollTop: 0,
+      duration: this.data.reducedMotion ? 0 : 350, // 减弱动态直接到位;常规档 350ms(打磨第 3 轮 §4-11,原 v13 500ms 偏慢)
+      success: () => {
+        this.setData({
+          currentScreen: 0,
+          isScrolling: false
+        });
+      },
+      fail: () => {
+        this.setData({
+          isScrolling: false
+        });
+      }
+    });
+  },
+
+  /**
+   * 返回上一页
+   */
+  goBack() {
+    wx.navigateBack({
+      delta: 1,
+      fail: () => this.goTopicList()
+    });
+  },
+
+  goTopicList() {
+    wx.reLaunch({ url: '/pages/template/index' });
+  },
+  
+  // 提交评价
+  submitComment() {
+    if (app.ensureLoginFor && !app.ensureLoginFor('post', () => this.submitComment(), { owner: this, target: () => [this.data.id] })) return; // 2026-10-24 游客写前登录
+    const that = this;
+    if (!that.data.canSubmitComment) return;
+    const {
+      answer,
+      plnr,
+      id
+    } = that.data;
+
+    if (answer === -1) {
+      toast('请选择评分');
+      return;
+    }
+
+    if (!plnr.trim()) {
+      toast('请输入评价内容');
+      return;
+    }
+    // BL-198:单飞,请求在途时忽略重复点击,避免同一条评价发两次。
+    if (that._commentSubmitting) return;
+    that._commentSubmitting = true;
+    app.sendRequest({
+      url: '/api/comment/add',
+      data: {
+        owner_type: 1,
+        owner_id: id,
+        rating: answer + 1,
+        contents: plnr,
+        reply_id: 0,
+        img_arr: that.data.uploadImages.join(';')
+      },
+      method: "POST",
+      success: function (res) {
+        if (res.code == "200") {
+          toast.success('评价成功');
+          that.voteClose();
+          // 重新加载数据更新评价列表
+          that.getData();
+        } else {
+          app.tips(res.msg);
+        }
+      },
+      complete: function () {
+        that._commentSubmitting = false;
+      }
+    });
+  },
+  
+  //报名
+  // F2-3 售票门禁:招募/定价阶段点购票的提示
+  lockedTip() {
+    const lc = this.data.info && this.data.info.lifecycle;
+    if (![1, 2, 7].includes(Number(lc))) return false;
+    if (lc == 2 && this.data.info && this.data.info.isOwner == 1) {
+      const merchantScope = String(this.data.info.contentPublisherType || '').toUpperCase() === 'MERCHANT' ? '&scope=MERCHANT' : '';
+      // F10(FE-G13/14):自由探索作者回编辑器顶部的「开售票价」区填价直接发布;定价页留给俱乐部 / 城市定向。
+      const url = Number(this.data.info.productType) === 2
+        ? '/pages/publish/fabu/index?id=' + this.data.id + merchantScope
+        : '/pages/topic/pricing/index?topicId=' + this.data.id + merchantScope;
+      if (!this._navigating) { this._navigating = true; wx.navigateTo({ url: url, complete: () => { this._navigating = false; } }); }
+      return true;
+    }
+    toast(lc == 7 ? '该主题立项待审，暂未开售' : (lc == 1 ? '该主题招募中，暂未开售' : '该主题定价中，暂未开售'));
+    return true;
+  },
+
+  bmClick(e) {
+    if (app.ensureLoginFor && !app.ensureLoginFor('signup', () => this.bmClick(e), { owner: this, target: () => [this.data.id] })) return; // 2026-10-24 游客写前登录
+
+    if(app.getUserType()==2){
+      toast('商家用户不可报名主题');
+      return;
+    }
+    if (this.data.merchantClosed) { toast('商家暂停营业，暂不可报名', { icon: 'none' }); return; }
+    if (this.lockedTip()) return;
+
+    /* 2026-09-06 用户拍板:**主题报名没有废弃,是这里写错了**。
+       原来这段把人踢去 play-activity-detail 再选一遍票 —— 主题页上明明已经把场次
+       和价格都列出来了(det5 那一段),点一下却跳走,回来还得重新找。
+       现在按稿 11/11a 在主题页内开弹层选场次 + 票种,选完直接进结算。
+
+       ⚠️ 票仍然绑到具体场次(结算走 baoming?activityId=X&ticketId=Y,后端 ownerType=2),
+       「主题页内能买」说的是**交互层**,不是绕过场次买一张没人核销的票。
+       被删掉的那句老注释把这两件事混成了一件,顺带还写了一套靠
+       name/startTime 字符串去猜「这张票属于哪个场次」的映射 —— 弹层里直接按场次
+       拉它自己的票,那套猜测不需要了。 */
+    const activities = (this.data.info && this.data.info.activityList) || [];
+    if (!activities.length) {
+      toast('暂无可参加的场次', { icon: 'none' });
+      return;
+    }
+    // L06-073:从场次行点进来,预选点的那一张(按票名,弹层读到同名票时选中)
+    const tappedId = e && e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.id;
+    const tapped = tappedId ? ((this.data.info && this.data.info.omsTicketList) || []).filter((t) => String(t.id) === String(tappedId))[0] : null;
+    this.setData({ sessionPicker: { show: true }, sessionPreferName: tapped ? String(tapped.name || '').trim() : this.data.sessionPreferName });
+  },
+
+  closeSessionPicker() { this.setData({ 'sessionPicker.show': false, sessionPreferName: '' }); },
+
+  // 选完场次与票种 → 结算。参数形状与活动详情页那条入口一致,后端一处都不用改。
+  onSessionPicked(e) {
+    if (this.lockedTip()) return;
+    const picked = (e && e.detail) || {};
+    if (!picked.activityId || !picked.ticketId) return;
+    if (this._navigating) return; this._navigating = true; this.setData({ 'sessionPicker.show': false });
+    wx.navigateTo({ complete: () => { this._navigating = false; },
+      url: '/pages/activity/baoming/baoming?activityId=' + picked.activityId
+        + '&ticketId=' + picked.ticketId,
+    });
+  },
+
+  // Beta 转正式:清 beta_flag,主题从此不再挂 Beta 标识。仅主题作者(info.isOwner==1)可见入口。
+  // 服务端 WHERE beta_flag=1 才清,所以重复点击/并发只会成功一次,失败按「不在 Beta 期」回话。
+  onGraduateBeta() {
+    const that = this;
+    const topicId = that.data.id;
+    if (!topicId) return;
+    modal.show({
+      title: '转为正式主题',
+      content: '转正后不再显示 Beta 标记。主题内容、已售出的票和进行中的行程都不受影响。',
+      confirmText: '确认转正',
+      success(m) {
+        // L06-078:在途不重发;网络失败如实说
+        if (!m.confirm || that._graduating) return;
+        that._graduating = true;
+        app.sendRequest({
+          url: '/api/topic/beta/graduate',
+          method: 'POST',
+          data: { topicId: topicId },
+          success(r) {
+            if (r.code == '200') {
+              app.tips('已转为正式主题');
+              that.setData({ 'info.betaFlag': 0 });
+            } else {
+              app.tips(r.msg || '转正失败');
+            }
+          },
+          fail() { app.tips('网络异常，请刷新后查看'); },
+          complete() { that._graduating = false; }
+        });
+      }
+    });
+  },
+
+  // 移交给俱乐部承接:复制一份新的城市定向草稿挂到所选承接俱乐部,并下架原主题;发起人保留所有权。仅主题创建者(info.isOwner==1)可见入口。
+  onTransferToClub() {
+    const that = this;
+    const topicId = that.data.id;
+    if (!topicId) return;
+    // BL-201:移交每调一次服务端就复制一份新草稿;成功后入口仍在、页面不回读,本实例内不再放行。
+    if (that._transferredToClub) { app.tips('已移交，请到新主题继续配置'); return; }
+    if (that._transferringToClub || that._clubLookup) return;
+    that._clubLookup = true; // L06-078:连点只查一次、只开一次选择层
+    app.sendRequest({
+      hideLoading: true, url: '/api/club/my', method: 'POST', data: {},
+      complete() { that._clubLookup = false; },
+      success(res) {
+        const clubs = (res.code == '200' && res.data) || [];
+        if (!clubs.length) { app.tips('你还没有可承接的俱乐部'); return; }
+        const shown = clubs.slice(0, 6); // 上限 6 项:沿用原 ActionSheet 的口径,本轮不改行为
+        /* 2026-09-02:原来这里弹 wx.showActionSheet(系统弹层,设计体系外)。
+           选俱乐部属于「一次选择」,走 cy-option-sheet 默认形态;选中之后的二次确认
+           modal 保留 —— 移交是不可逆写,那一步不能省。 */
+        that._clubSheetClubs = shown.map(c => ({ id: c.id, name: c.name }));   // 同上,不渲染 ⇒ 不进 data
+        that.setData({
+          clubSheetShow: true,
+          clubSheetItems: shown.map(c => c.name),
+        });
+      },
+      fail() { app.tips('网络异常，请重试'); }
+    });
+  },
+
+  onClubSheetCancel() { this.setData({ clubSheetShow: false }); },
+
+  onClubSheetSelect(e) {
+    const that = this;
+    const topicId = that.data.id;
+    const club = (that._clubSheetClubs || [])[e.detail.index];
+    that.setData({ clubSheetShow: false });
+    if (!club || !topicId) return;
+    modal.show({
+      title: '移交给俱乐部承接',
+      content: '将复制一份新的城市定向主题(有人带)，挂到「' + club.name + '」承接；原主题会下架，历史票不受影响。',
+      confirmText: '确认移交',
+      success(m) {
+        if (!m.confirm) return;
+        if (that._transferredToClub || that._transferringToClub) return;
+        that._transferringToClub = true;
+        app.sendRequest({
+          url: '/api/topic/transfer-to-club',
+          // 后端 transferToClub(String topicId, String clubId, …) 是 form 绑定(ApiTopicController:783):
+          // 发 JSON body 时 getParameter 拿不到 → 恒「参数不完整」。
+          data: { topicId: topicId, clubId: club.id },
+          method: 'POST',
+          success(r) {
+            if (r.code == '200') {
+              that._transferredToClub = true; // 成功后保持在途标记,直到页面重新加载
+              const newId = r.data && r.data.newTopicId;
+              modal.show({
+                title: '已移交',
+                content: '已生成新的城市定向草稿，去配置票种并邀请该俱乐部承接？',
+                confirmText: '去配置', cancelText: '稍后',
+                success(g) {
+                  if (g.confirm && newId) {
+                    wx.navigateTo({ url: '/pages/topic/index/index?id=' + newId });
+                  }
+                }
+              });
+            } else {
+              that._transferringToClub = false;
+              app.tips(r.msg || '移交失败');
+            }
+          },
+          fail() { that._transferringToClub = false; app.tips('网络异常，请重试'); }
+        });
+      }
+    });
+  },
+
+  _initWorkflow() {
+    const that = this;
+    const verifyRegistrationPayment = createRegistrationPaymentVerifier(app);
+    that._workflow = createCheckoutWorkflow({
+      createOrder: function (payload, cb) {
+        const { topicId, realName, phone, requestId } = payload;
+        loading.show('提交中…');
+        const body = {
+          ownerType: 1,
+          ownerId: topicId,
+          realName: realName,
+          phone: phone,
+          isUsePoint: 0,
+          requestId: requestId
+        };
+        // OR-003:带上结算层报价的签名,服务端按它判价是否变过(老报价没有 quoteSign 就不带,沿用原链路)
+        const quoted = that._checkoutFacts && that._checkoutFacts.quote;
+        if (quoted && quoted.quoteSign) body.quoteSign = quoted.quoteSign;
+        // 3-5 票源归因:主题页这一单 ownerType=1,ownerId 就是「期」本身,
+        // 所以直接拿建单参数喂 attributionPayload(它内部已判「捕获期 ≠ 下单期 ⇒ 不带」)。
+        Object.assign(body, ticketSource.attributionPayload(topicId));
+        return app.sendRequest({
+          url: '/api/registration/create',
+          method: 'POST',
+          header: { 'Content-Type': 'application/json' },
+          data: JSON.stringify(body),
+          success: function (res) {
+            if (isTerminalOrderConflict(res)) {
+              // fix-be-0917(B-R2):旧幂等键对应的自玩单已取消/已过期,后端不再重放终态单。
+              // 作废旧键,交给 onOrderFail 换新键重建。
+              that._selfPlayReqId = null;
+              that._rebuildFallbackMessage = res.msg || '';
+              cb({ ok: false, msg: ORDER_REBUILD_REQUIRED });
+              return;
+            }
+            loading.hide(); if (openPendingOrderConflict(res, cb)) return; // j6 N1:已有待支付单就带去那一笔
+            // OR-003:价变 409 —— 作废本次意图键,结算层重新报价,原话提示后由玩家确认新价再付
+            if (res && res.code == 409 && body.quoteSign) {
+              that._selfPlayReqId = null;
+              that._refreshCheckoutQuote();
+              cb({ ok: false, msg: res.msg || '价格已更新，请确认后再支付' });
+              return;
+            }
+            if (res.code == '200' && res.data) {
+              var d = res.data;
+              const amount = d.payableAmount;
+              if (!d.registrationId || !['number', 'string'].includes(typeof amount) || String(amount).trim() === ''
+                  || !Number.isFinite(Number(amount)) || Number(amount) < 0) {
+                cb({ ok: false, msg: '订单金额待确认，请到订单查看' });
+                return;
+              }
+              if (xpayPay.needsSigning(d)) {
+                // 服务端决定走虚拟支付:wx.login 后到 /pay 签发(首次签发才冻结商品/环境/金额)
+                loading.show('正在发起支付…');
+                xpayPay.signIntent(app, wx, d.registrationId, function (r) {
+                  loading.hide();
+                  if (r.ok) {
+                    that._selfPlayReqId = null;
+                    cb({ ok: true, data: Object.assign({}, d, r.data) });
+                  } else if (r.expired) {
+                    that._selfPlayReqId = null;
+                    that._rebuildFallbackMessage = ORDER_EXPIRED_USER_MESSAGE;
+                    cb({ ok: false, msg: ORDER_REBUILD_REQUIRED });
+                  } else {
+                    cb({ ok: false, msg: r.msg });
+                  }
+                });
+                return;
+              }
+              if (d.payParams && d.payParams.package) {
+                that._selfPlayReqId = null;
+                cb({ ok: true, data: d });
+              } else if (Number(d.payableAmount) === 0) {
+                that._selfPlayReqId = null;
+                cb({ ok: true, data: d });
+              } else if (d.registrationId) {
+                // 重放命中已有订单,回到那张订单取支付参数
+                loading.show('正在发起支付…');
+                app.sendRequest({
+                  url: '/api/registration/pay',
+                  method: 'POST',
+                  data: { id: d.registrationId },
+                  success: function (payRes) {
+                    // 拍板 #21:自玩通行证的过期待支付单 —— 后端这次 /pay 已即时关单,
+                    // 旧幂等键重放只会再撞关单。不提示,交给 onOrderFail 换新键重建。
+                    if (isOrderExpiredFailure(payRes)) {
+                      that._selfPlayReqId = null;
+                      that._rebuildFallbackMessage = ORDER_EXPIRED_USER_MESSAGE;
+                      cb({ ok: false, msg: ORDER_REBUILD_REQUIRED });
+                      return;
+                    }
+                    loading.hide();
+                    if (payRes.code == '200' && payRes.data && payRes.data.payParams && payRes.data.payParams.package) {
+                      that._selfPlayReqId = null;
+                      cb({ ok: true, data: payRes.data });
+                    } else {
+                      cb({ ok: false, msg: payRes.msg || '支付信息不完整，请重试' });
+                    }
+                  },
+                  fail: function () {
+                    loading.hide();
+                    cb({ ok: false, msg: '网络错误，请重试' });
+                  }
+                });
+              } else {
+                cb({ ok: false, msg: '支付信息不完整，请重试' });
+              }
+            } else {
+              cb({ ok: false, msg: res.msg || '下单失败' });
+            }
+          },
+          fail: function () {
+            loading.hide();
+            cb({ ok: false, msg: '网络错误，请重试' });
+          }
+        });
+      },
+      requestPayment: function (orderData, rawCb) {
+        // 埋点:记下这次拉起的结果码,onPayFail 只报码(区分 SDK 失败与之后的服务端核对失败)
+        var cb = function (r) {
+          that._payFailReason = r && !r.ok ? (r.cancelled ? 'cancel' : (r.unsupported ? 'unsupported' : 'sdk_fail')) : 'verify_fail';
+          rawCb(r);
+        };
+        that._payFailReason = 'unknown';
+        if (xpayPay.isIntent(orderData)) { that._trackBuy('pay_start', { channel: 'xpay' }); xpayPay.pay(app, wx, orderData, cb); return; }
+        that._trackBuy('pay_start', { channel: 'wxpay' });
+        var p = orderData.payParams;
+        wx.requestPayment({
+          timeStamp: p.timeStamp,
+          nonceStr: p.nonceStr,
+          package: p.package,
+          signType: p.signType,
+          paySign: p.paySign,
+          success: function () { cb({ ok: true }); },
+          fail: function (res) {
+            cb({ ok: false, cancelled: res.errMsg === 'requestPayment:fail cancel', errMsg: res.errMsg });
+          }
+        });
+      },
+      verifyPayment: function (data, cb) {
+        var regId = data.registrationId;
+        if (!regId) { cb({ ok: false, errMsg: '缺少订单编号' }); return; }
+        if (xpayPay.isIntent(data)) return xpayPay.verify(app, verifyRegistrationPayment, data, cb);
+        return verifyRegistrationPayment({ registrationId: regId }, cb);
+      },
+      isPayable: function (data) { return !!(data && (data.payParams || xpayPay.isIntent(data) || Number(data.payableAmount) > 0)); },
+      validatePayment: function (data) {
+        return xpayPay.isIntent(data) ? xpayPay.hasVirtualPayment(data) : hasCompletePaymentParams(data);
+      }
+    });
+  },
+
+  // M2 购买自玩通行证:确认(90天有效期+安全须知)→ /create(ownerType=1) → 支付 → play?topicId=
+  selfPlayBuy() {
+    if (app.ensureLoginFor && !app.ensureLoginFor('checkout', () => this.selfPlayBuy(), { owner: this, target: () => [this.data.id, this.data.info && this.data.info.id] })) return; // 2026-10-24 游客写前登录
+    const that = this;
+    if (that.data.merchantClosed) { toast('商家暂停营业，暂不可报名', { icon: 'none' }); return; }
+    const info = that.data.info || {};
+    const topicId = info.id || that.data.id;
+    if (!topicId) return;
+    if (app.getUserType() == 2) {
+      toast('商家用户不可购买');
+      return;
+    }
+    if (that.lockedTip()) return;
+    that._selfPlayTopicId = topicId;
+    that.setData({
+      selfPlayConfirmShow: true, buyIn: false, buyOpts: motion.buyOptions(info, that._seatProducts), buySel: 0,
+      buyChips: motion.buyChips(info, that.data.storyMeta),
+      selfPlayValidText: motion.passWindow({ topicEnd: info.endDate }).line.split(' · ')[0],
+      selfPlayConsentChecked: !!that._hostShareConsentReady,
+      selfPlayConsentError: '',
+      selfPlayConsentHint: '',
+      selfPlayConfirmLoading: false
+    });
+    that._later(30, () => { if (that.data.selfPlayConfirmShow) that.setData({ buyIn: true }); });
+  },
+
+  onSelfPlayConsentChange(e) {
+    const checked = !!(e && e.detail && e.detail.checked);
+    if (!checked) this._hostShareConsentReady = false;
+    this.setData({ selfPlayConsentChecked: checked, selfPlayConsentError: '', selfPlayConsentHint: '' });
+  },
+
+  onSelfPlayCancel() {
+    if (this.data.selfPlayConfirmLoading || !this.data.selfPlayConfirmShow) return;
+    if (this.data.reducedMotion) { this.setData({ selfPlayConfirmShow: false, buyIn: false }); return; }
+    this.setData({ buyIn: false });
+    this._later(250, () => { if (!this.data.buyIn) this.setData({ selfPlayConfirmShow: false }); }); // 250 = --cy-motion-sheet-out
+  },
+
+  // 后端 /api/registration/create 与 /pay 硬校验「报名信息单独同意」已落库(activity_host_data_sharing /
+  // activity_signup)。这里必须先等 recordConsent 成功再建单,否则自玩单永远被拒。
+  onSelfPlayConfirm() {
+    const that = this;
+    if (that.lockedTip()) return;
+    const topicId = that._selfPlayTopicId || (that.data.info && that.data.info.id) || that.data.id;
+    if (!topicId || that.data.selfPlayConfirmLoading || that._selfPlaySubmitting) return;
+    if (!that.data.selfPlayConsentChecked) {
+      // 单独同意只能用户自己勾,按钮不代勾;这里只提示,不算错误态
+      that.setData({ selfPlayConsentHint: '请先勾选同意' });
+      return;
+    }
+    // E-B9:报价没取到不能付(屏上价格不是服务端价),让玩家先重新获取价格。
+    const facts = that._checkoutFacts;
+    if (that.data.selfPlayCheckoutShow && facts && (facts.quoteState === 'failed' || facts.quoteState === 'refused')) return;
+    // E-B10/D-24:「每次购买意图自动重建一次」——点击确认才是新意图,重建标记在这里复位(重建自己走 _createSelfPlayOrder,不经过这里)。
+    that._rebuildUsed = false; that._profileDoneTracked = false;
+    if (that.data.checkoutError) that.setData({ checkoutError: '' });
+    // 保持用户点击手势：订阅拒绝/失败不阻塞既有同意记录和支付链。
+    if (that._hostShareConsentReady || app.recordConsent) {
+      subscribe.request(['signupSuccess', 'activityStart', 'refund']);
+    }
+    const placeOrder = () => (facts && facts.option && that.data.selfPlayCheckoutShow ? that._createSeatProductOrder() : that._createSelfPlayOrder(topicId));
+    if (that._hostShareConsentReady) {
+      that.setData({ selfPlayConfirmShow: false });
+      placeOrder();
+      return;
+    }
+    if (!app.recordConsent) {
+      that.setData({ selfPlayConsentError: '同意记录服务暂不可用，请稍后重试' });
+      return;
+    }
+    that.setData({ selfPlayConfirmLoading: true, selfPlayConsentError: '' });
+    app.recordConsent({
+      docType: 'activity_host_data_sharing',
+      scene: 'activity_signup',
+      eventType: 'AGREE'
+    }).then(function () {
+      that._hostShareConsentReady = true;
+      that.setData({ selfPlayConfirmLoading: false, selfPlayConfirmShow: false });
+      placeOrder();
+    }).catch(function () {
+      that.setData({ selfPlayConfirmLoading: false, selfPlayConsentError: '同意记录未保存，请检查网络后重试' });
+    });
+  },
+
+  // 买家走查 1122:下单/付款失败原文留在结算层底栏(带「重试」),不再只闪 2 秒 toast;结算层没开时仍 toast。
+  _showCheckoutFailure(msg) {
+    if (this.data.selfPlayCheckoutShow) this.setData({ checkoutError: msg });
+    else toast(msg);
+  },
+
+  // /api/registration/create 的 realName/phone 是 @NotBlank(RegistrationRequest.java:37,42)。
+  // 本页原先 data.userInfo 从声明到使用之间没有任何一处赋值 ⇒ 自玩通行证建单恒以空姓名空号提交,
+  // 任何玩家、任何在架自玩主题都买不成。这里按报名页同一口径把资料取回来缓存。
+  // 只喂建单、页面不渲染,所以存实例字段而不是 setData(U4 A2:内部状态不该进 data)。
+  _loadSignupProfile(done) {
+    // R11 j3 F8:「姓名」取参与人信息(与活动结算同一份、同一选取口径),不是资料页的昵称;
+    // 手机号仍取资料页绑定的微信手机号(手机号规则不变)。两路都回来才判。
+    const that = this;
+    const seq = that._signupSeq = (that._signupSeq || 0) + 1;
+    // 被后一次读取顶掉的调用也要回话(用最新一次的结果):否则付款那次的回调永远不来,
+    // _selfPlaySubmitting 复不了位,「支付」和「返回」一起失灵(1122 结算层内补资料后可稳定复现)。
+    if (done) (that._signupWaiters = that._signupWaiters || []).push(done);
+    const parts = { realName: '', phone: '' };
+    let pending = 2;
+    let failed = false; // E-B8:请求失败 ≠ 资料为空。失败时不覆盖上一份已缓存的资料,也不当作「没填」
+    const settle = function () {
+      if (--pending > 0 || seq !== that._signupSeq) return;
+      that._signupLoadFailed = failed;
+      if (!failed) {
+        that._signupParts = parts;
+        that._signupProfile = parts.realName && parts.phone ? { realName: parts.realName, phone: parts.phone } : null;
+      }
+      const waiters = that._signupWaiters || []; that._signupWaiters = [];
+      waiters.forEach(function (fn) { fn(that._signupProfile, failed); });
+    };
+    const settleFail = function () { failed = true; settle(); };
+    const record = function (res) {
+      return res && res.code == '200' && res.data && typeof res.data === 'object' && !Array.isArray(res.data) ? res.data : null;
+    };
+    app.sendRequest({
+      hideLoading: true, autoErrorToast: false, url: '/api/user/info', method: 'POST', data: { member_id: app.getUserID() },
+      success(res) {
+        if (!res || String(res.code) !== '200') { settleFail(); return; }
+        const d = record(res); parts.phone = d ? String(d.phone || d.mobilePhone || '') : ''; settle();
+      },
+      fail: settleFail
+    });
+    app.sendRequest({
+      hideLoading: true, autoErrorToast: false, url: '/api/user/address/list', method: 'POST', data: {},
+      success(res) {
+        if (!res || String(res.code) !== '200') { settleFail(); return; }
+        const d = record(res);
+        const rows = d && Array.isArray(d.rows) ? d.rows : [];
+        const uid = app.getUserID && app.getUserID();
+        let picked = null;
+        try {
+          const cached = uid ? wx.getStorageSync('selectedAddressId_v1_' + String(uid)) : '';
+          if (cached !== '' && cached != null) picked = rows.find((r) => r && String(r.id) === String(cached)) || null;
+        } catch (e) { picked = null; }
+        if (!picked) picked = rows.find((r) => r && r.isDefault == 1) || rows[0] || null;
+        parts.realName = picked ? String(picked.fullName || picked.realName || '').trim() : '';
+        settle();
+      },
+      fail: settleFail
+    });
+  },
+
+  // 结算页开着时(进页、从参与人信息/个人资料回来)按最新资料刷新那一行
+  _fillCheckoutProfile(done) {
+    const that = this;
+    that._loadSignupProfile(function (profile, failed) {
+      if (!that.data.selfPlayCheckoutShow || failed) { if (done) done(profile, failed); return; } // 取失败时保留屏上已有资料,不刷成空
+      const p = that._signupParts || {};
+      const phone = String(p.phone || '');
+      that.setData({
+        'checkout.profileName': p.realName || '',
+        'checkout.profilePhone': phone.length >= 7 ? phone.slice(0, 3) + '****' + phone.slice(-4) : phone,
+        'checkout.profile': checkoutProfile.profileView(that._signupParts || null, that._profileUi),
+      });
+      if (done) done(profile, failed);
+    });
+  },
+
+  /* 1122 结算一屏:缺什么就在结算层里补,补完一律回到 _fillCheckoutProfile 重读同一真源 */
+  _renderCheckoutProfile(patch) {
+    this._profileUi = Object.assign({}, this._profileUi, patch);
+    this.setData({ 'checkout.profile': checkoutProfile.profileView(this._signupParts || null, this._profileUi) });
+  },
+
+  onCheckoutNameInput(e) {
+    const value = String((e && e.detail && e.detail.value) || '');
+    this._profileUi = Object.assign({}, this._profileUi, { nameDraft: value });
+    if (this._profileUi.nameError) this._renderCheckoutProfile({ nameError: '' });
+  },
+
+  onCheckoutNameSave(e) {
+    if (e && e.detail && typeof e.detail.value === 'string') this._profileUi = Object.assign({}, this._profileUi, { nameDraft: e.detail.value });
+    const p = this._signupParts || {};
+    const draft = (this._profileUi || {}).nameDraft;
+    if (p.realName || !String(draft || '').trim()) return; // 空着离开不报错,付款时再报
+    if (!p.phone) return; // 参与人要和手机号一起存:先留在输入框里,绑完手机号再存
+    this._saveCheckoutName();
+  },
+
+  // 存成默认参与人(/api/user/address/action,与参与人表单同一接口同一校验);失败原文红字留在字段下
+  _saveCheckoutName() {
+    const that = this;
+    const p = that._signupParts || {};
+    const draft = (that._profileUi || {}).nameDraft;
+    const err = checkoutProfile.validateName(draft);
+    if (err) { that._renderCheckoutProfile({ nameError: err }); return; }
+    if (that._nameSaving || !p.phone) return;
+    that._nameSaving = true;
+    if (!that._nameReqId) that._nameReqId = 'address_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+    that._renderCheckoutProfile({ nameBusy: true, nameError: '' });
+    const failWith = (msg) => { that._nameSaving = false; that._payAfterName = null; that._renderCheckoutProfile({ nameBusy: false, nameError: msg }); };
+    app.sendRequest({
+      url: '/api/user/address/action', method: 'POST', hideLoading: true, autoErrorToast: false,
+      data: checkoutProfile.participantPayload(draft, p.phone, that._nameReqId),
+      success(res) {
+        if (!res || res.code != '200') {
+          failWith(typeof app.getRequestErrorMessage === 'function' ? app.getRequestErrorMessage(res, '参与人信息暂时没有保存，请重试') : ((res && res.msg) || '参与人信息暂时没有保存，请重试'));
+          return;
+        }
+        that._nameReqId = null;
+        const id = res.data && (res.data.id || res.data.addressId);
+        const uid = app.getUserID && app.getUserID();
+        if (uid && id) { try { wx.setStorageSync('selectedAddressId_v1_' + String(uid), id); } catch (e) {} } // 与参与人页选中同一口径
+        that._profileFilledInSheet = true;
+        that._fillCheckoutProfile(function () {
+          that._nameSaving = false;
+          that._renderCheckoutProfile({ nameBusy: false });
+          // 玩家已经点过「支付」在等这次保存:存好就接着建单(层已关 / 页已卸则作罢)
+          const topicId = that._payAfterName; that._payAfterName = null;
+          if (topicId && that.data.selfPlayCheckoutShow && !that._unloaded) that._createSelfPlayOrder(topicId);
+        });
+      },
+      fail() { failWith('网络没连上，请检查后重试'); },
+    });
+  },
+
+  // 结算层「绑定手机号」:open-type=getPhoneNumber,一次点击一次请求,不自动、不重试
+  onCheckoutPhone(e) {
+    const that = this;
+    if (that._phoneBinding || that._unloaded) return;
+    const detail = e && e.detail;
+    that._phoneBinding = true;
+    const sent = wxPhoneBind.bindWxPhone(app, detail, function (r) {
+      const wasBusy = !!(that._profileUi && that._profileUi.phoneBusy);
+      that._phoneBinding = false;
+      if (that._unloaded) return;
+      if (!r.ok) { if (wasBusy) that._renderCheckoutProfile({ phoneBusy: false }); toast(r.msg); return; }
+      that._profileFilledInSheet = true;
+      that._fillCheckoutProfile(function () {
+        that._renderCheckoutProfile({ phoneBusy: false, phoneAlert: false });
+        const parts = that._signupParts || {};
+        if (!parts.realName && String((that._profileUi || {}).nameDraft || '').trim()) that._saveCheckoutName();
+      });
+    });
+    if (sent && that._phoneBinding) that._renderCheckoutProfile({ phoneBusy: true });
+  },
+
+  // 购买路径埋点:bizType=topic、bizId=主题 id,properties 只放枚举码;埋点失败不影响购买
+  _trackBuy(name, properties, eventKey) {
+    try {
+      const id = Number((this.data.info && this.data.info.id) || this.data.id) || null;
+      analytics.track(name, { bizType: 'topic', bizId: id, properties: properties || {}, eventKey: eventKey });
+    } catch (e) {}
+  },
+
+  // 缺手机号去资料页绑微信手机号;否则去参与人信息选/填姓名(同活动结算)
+  _goFixSignupProfile() {
+    if (this._navigating) return; this._navigating = true;
+    const p = this._signupParts || {};
+    const done = () => { this._navigating = false; };
+    if (!p.phone) { wx.navigateTo({ url: '/pages/gerenziliao/gerenziliao', complete: done }); return; }
+    const uid = app.getUserID && app.getUserID();
+    wx.navigateTo({
+      url: '/pages/address/address?mode=participant',
+      events: { addressSelected: (data) => {
+        const id = data && data.address && data.address.id;
+        if (uid && id) { try { wx.setStorageSync('selectedAddressId_v1_' + String(uid), id); } catch (e) {} }
+      } },
+      complete: done,
+    });
+  },
+
+  // 资料没补全时不要去打一发必被拒的建单:后端只会回「姓名不能为空」,
+  // 玩家看到的是一句跟自己无关的报错,而且没有任何出路。
+  _signupProfileMissing() {
+    const u = this._signupProfile || {};
+    return !u.realName || !u.phone;
+  },
+
+  // 结算层开着时付款前还缺资料:缺哪样把哪行标红。
+  // 只差「姓名已填好、还没存上」(刚输完就点支付 / 保存在途 / 上次保存失败)时,这一下替玩家把它存完再接着建单:
+  // 同一 requestId 不会多建参与人;不这样做,点「支付」既不建单也没有任何提示。
+  _completeProfileInSheet(topicId) {
+    const ui = this._profileUi || {};
+    const marks = checkoutProfile.missingMarks(this._signupParts, ui.nameDraft);
+    if (!marks.nameError && !marks.phoneAlert) {
+      this._payAfterName = topicId;
+      if (!this._nameSaving) this._saveCheckoutName();
+      return;
+    }
+    this._renderCheckoutProfile(marks);
+  },
+
+  _createSelfPlayOrder(topicId) {
+    const that = this;
+    if (that._selfPlaySubmitting) return;
+    that._selfPlaySubmitting = true;
+
+    if (!that._selfPlayReqId) {
+      that._selfPlayReqId = 'req_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+    }
+    if (that._signupProfileMissing()) {
+      // 进页预取可能还没回来(弱网、或进页就点购买)。先现取一次再判,
+      // 否则会把「资料其实全」的人误判成没填、推去补一个本来就填好的字段。
+      that._loadSignupProfile(function (profile, failed) {
+        that._selfPlaySubmitting = false;
+        if (failed) { toast('资料没取到，请检查网络后重试'); return; } // E-B8:不弹「还差姓名和手机号」,不跳资料页
+        if (profile) { that._createSelfPlayOrder(topicId); return; }
+        if (that.data.selfPlayCheckoutShow) { that._completeProfileInSheet(topicId); return; } // 1122:在结算层里补,不跳页
+        modal.show({
+          title: '还差姓名和手机号',
+          content: '下单需要真实姓名和手机号',
+          confirmText: '去补全',
+          cancelText: '稍后再说',
+          success(res) {
+            if (res && res.confirm) that._goFixSignupProfile();
+          }
+        });
+      });
+      return;
+    }
+
+    const u = that._signupProfile;
+    if (that.data.selfPlayCheckoutShow && !that._profileDoneTracked) {
+      that._profileDoneTracked = true; // 每次点「支付」(一个购买意图)只记一次;自动重建不重复记
+      that._trackBuy('checkout_profile_done', { how: that._profileFilledInSheet ? 'filled_in_sheet' : 'had' });
+    }
+    const payload = {
+      topicId: topicId,
+      realName: u.realName,
+      phone: u.phone,
+      requestId: that._selfPlayReqId
+    };
+
+    var submitted = that._workflow.submit(payload, {
+      onOrderFail: function (res) {
+        that._selfPlaySubmitting = false;
+        // 拍板 #21 / fix-be-0917:旧幂等键不可用(单已过期/已取消)先自动换新键重建一次;
+        // 重建后仍不可用才给可见提示。
+        if (res && res.msg === ORDER_REBUILD_REQUIRED) {
+          if (that._rebuildSelfPlayOrderWithNewKey(topicId)) return;
+          loading.hide();
+          res = { msg: that._rebuildFallbackMessage || ORDER_EXPIRED_USER_MESSAGE };
+        }
+        that._showCheckoutFailure(res && res.msg || '下单失败');
+      },
+      onFreeSuccess: function (data) {
+        that._selfPlaySubmitting = false;
+        that._selfPlayReqId = null;
+        that._onSelfPlayPaid(topicId, data);
+      },
+      onPayVerifying: function (data) {
+        if (!that._unknownPolling) loading.show('确认支付结果...');
+      },
+      onPaySuccess: function (data) {
+        that._unknownPolling = false;
+        that._selfPlaySubmitting = false;
+        that._selfPlayReqId = null;
+        loading.hide();
+        that._onSelfPlayPaid(topicId, data);
+      },
+      onPayCancel: function () {
+        that._unknownPolling = false;
+        that._selfPlaySubmitting = false;
+        that._trackBuy('pay_cancel', { reason: 'user_cancel' });
+        toast('已取消支付');
+      },
+      onPayFail: function (res) {
+        loading.hide();
+        that._unknownPolling = false;
+        that._selfPlaySubmitting = false;
+        that._showCheckoutFailure(res && res.errMsg || '支付失败');
+        that._trackBuy('pay_fail', { reason: that._payFailReason || 'unknown' });
+        // 付款失败不清幂等键,同一意图重试复用
+      },
+      onPayUnknown: function () {
+        loading.hide();
+        that._selfPlaySubmitting = false;
+        if (!that._unknownPolling) that._showPaymentUnknown(); // 轮询/手动刷新仍不明时不重复弹窗
+      }
+    });
+
+    if (!submitted) {
+      that._selfPlaySubmitting = false;
+      loading.hide();
+      // unknown 是 workflow 故意留的闸(防重复建单扣款),但闸不能是哑巴:
+      // 关掉「支付结果待确认」弹层后再点同一个按钮,原来什么都不说。
+      if (that._workflow.getState() === 'unknown') {
+        if (that._unknownPolling) toast('还在确认支付结果，请勿重复支付');
+        else that._showPaymentUnknown();
+      }
+    }
+  },
+
+  /**
+   * E-B7:支付结果未知。只提供「刷新订单状态」(核对原订单,不建新单)并在后台轮询一小段时间;
+   * 确认已付走 onPaySuccess → _onSelfPlayPaid;SDK 真回调迟到也照常处理(workflow 不再丢它)。
+   */
+  _showPaymentUnknown() {
+    const that = this;
+    if (that._unknownPolling) { toast('还在确认支付结果，请稍候'); return; }
+    that._unknownPolling = true;
+    modal.show({
+      title: '支付结果待确认',
+      content: '暂不要重复支付。可以刷新订单状态，确认后会自动进入通行证。',
+      confirmText: '刷新订单状态',
+      cancelText: '稍后再说',
+      success(res) {
+        if (res && res.confirm) { toast('正在刷新订单状态'); that._recheckPayment(); }
+      }
+    });
+    that._pollPayment(0);
+  },
+
+  _recheckPayment() {
+    const wf = this._workflow;
+    if (!wf || wf.getState() !== 'unknown') return;
+    wf.recheck();
+  },
+
+  _pollPayment(n, ticks) {
+    const that = this;
+    ticks = ticks || 0;
+    // L06-075:核对在途不占复查次数,但总轮询有上限(12 次 ≈ 1 分钟),核对一直不收尾也会停
+    if (n >= 6 || ticks >= 12) { that._unknownPolling = false; return; }
+    that._later(5000, function () {
+      const wf = that._workflow;
+      if (that._unloaded || !wf) { that._unknownPolling = false; return; }
+      const st = wf.getState();
+      if (st === 'verifying') { that._pollPayment(n, ticks + 1); return; } // 核对在途,不占复查次数
+      if (st !== 'unknown') { that._unknownPolling = false; return; }
+      wf.recheck();
+      that._pollPayment(n + 1, ticks + 1);
+    });
+  },
+
+  /**
+   * 2026-09-17 拍板 #21(+fix-be-0917 B-R2):旧幂等键不可用时自动换新键重建(与报名页同口径)。
+   * 触发面:① /pay 见过期拒绝(后端已即时关单);② /create 回终态单冲突 409(已取消/已过期)。
+   * 检测点已作废旧键,这里换新键回到正常建单接口重建(商家闭店/名额/价格等校验照走)。
+   * 每次购买意图只自动重建一次;重建后仍不可用由 onOrderFail 给可见提示(旧键此时已作废,
+   * 用户再点一次就是全新一单)。
+   */
+  _rebuildSelfPlayOrderWithNewKey(topicId) {
+    const that = this;
+    if (that._rebuildUsed) return false;
+    that._rebuildUsed = true;
+    // 与报名页同因:先收掉上一跳的 loading,避免重建路上任何早退把遮罩留在屏上。
+    loading.hide();
+    that._createSelfPlayOrder(topicId);
+    return true;
+  },
+
+  /* 自玩票买完的唯一落点(三个调用点都走这儿)。原来是 toast + 800ms 硬等,
+     现在换成结果面板:跳转挂在面板收掉之后,时长只此一处,不再两个数字各说各话。 */
+  /* 2026-10-22 业主:付完先播「通行证已到账」,再由动效里的「放进票夹 / 开始游戏」决定去向 */
+  _onSelfPlayPaid(topicId, data) {
+    const regId = data && (data.registrationId || data.id);
+    // 服务端确认已付(核对通过 / 0 元单建成)才记;同一订单重试按 eventKey 去重
+    if (Number(regId) > 0) this._trackBuy('solo_ticket_purchase', {}, 'solo_ticket_purchase_' + regId);
+    this._showPassReveal(topicId, Number(regId) > 0 ? regId : 0, data && data.expiresAt);
+  },
+
+  _goSelfPlay(topicId, offer) {
+    this.setData({
+      resultSheet: {
+        show: true, kind: 'success', title: '购买成功',
+        sub: '已放入票夹',
+        meta: '', pill: '', why: '', duration: RESULT_SHEET_MS,
+        consentName: '', consentChecked: false, consentState: 'idle', consentError: '',
+      },
+    });
+    // 2026-09-17 拍板第 40 条 A:这单背后有生效商家且尚未同意时,面板里多一行可选勾选。
+    // 拿不到 / 已同意 / 有歧义一律不出(见 utils/marketing-consent-entry.js)。
+    if (offer) { this._applyMarketingConsentOffer(offer); return; }
+    this._loadMarketingConsentOffer((this.data.info && this.data.info.memberId) || 0);
+  },
+
+  /* 同意入口:owner memberId 来自主题详情已返回的 memberId;商家一方 id 只认 GET 回包。
+     面板已收掉就不再补塞 —— 错过的用户在订单详情「权益已核销」处还有兜底入口。 */
+  _loadMarketingConsentOffer(ownerMemberId) {
+    const that = this;
+    that._consentOffer = null;
+    that._consentRequestId = null;
+    marketingConsent.loadOffer(app, ownerMemberId, function (offer) {
+      if (!offer) return;
+      if (!that.data.resultSheet || !that.data.resultSheet.show) return;
+      that._applyMarketingConsentOffer(offer);
+    });
+  },
+
+  _applyMarketingConsentOffer(offer) {
+    this._consentOffer = offer;
+    this._consentRequestId = marketingConsent.newRequestId('self-play');
+    this.setData({
+      'resultSheet.consentName': offer.merchantName,
+      'resultSheet.consentChecked': false,
+      'resultSheet.consentState': 'idle',
+      'resultSheet.consentError': '',
+    });
+  },
+
+  onResultConsentChange(e) {
+    const checked = !!(e.detail && e.detail.checked);
+    const state = this.data.resultSheet.consentState;
+    if (state === 'saving') return;                       // 在途结果说了算,勾选态不来回抖
+    if (!checked) {
+      this.setData({ 'resultSheet.consentChecked': false, 'resultSheet.consentState': 'idle', 'resultSheet.consentError': '' });
+      return;
+    }
+    const offer = this._consentOffer;
+    if (!offer) return;
+    this._submitMarketingConsent(offer);
+  },
+
+  onResultConsentRetry() {
+    if (!this._consentOffer || this.data.resultSheet.consentState === 'saving') return;
+    this._submitMarketingConsent(this._consentOffer);
+  },
+
+  /* 同一次勾选意图(含失败重试)复用同一个 requestId:重放由服务端识别,不写第二条。 */
+  _submitMarketingConsent(offer) {
+    const that = this;
+    if (!that._consentRequestId) that._consentRequestId = marketingConsent.newRequestId('self-play');
+    that.setData({ 'resultSheet.consentChecked': true, 'resultSheet.consentState': 'saving', 'resultSheet.consentError': '' });
+    marketingConsent.optIn(app, offer, that._consentRequestId, function (result) {
+      if (result.ok) {
+        // 成功态就是面板上那行「已同意,可在设置里随时退订」—— 不再补一发两秒就没的 toast
+        // (成功 toast 棘轮只减不增:提示不替代状态)。
+        that.setData({ 'resultSheet.consentState': 'saved', 'resultSheet.consentError': '' });
+        return;
+      }
+      that.setData({ 'resultSheet.consentState': 'failed',
+        'resultSheet.consentError': result.message || '同意没有保存成功，请重试' });
+    });
+  },
+
+  onResultSheetClose() {
+    this.setData({ 'resultSheet.show': false });
+    if (this._revealNext) { const kind = this._revealNext; this._revealNext = ''; this._goAfterReveal(kind); return; }
+    wx.navigateTo({ url: '/subpackageMember/signup/index?' + walletTopicQuery(this._revealTopicId || (this.data.info && this.data.info.id) || this.data.id, '') });
+  },
+
+  // 票夹的 focusId 是 registrationId(signup/index.js:118),这里手上只有 topicId,传 focusId 永远定位不到;
+  // 带 topicId 打开路线票 tab,票夹自己落在这个主题的票上。
+  goJoinedPlay() {
+    if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/subpackageMember/signup/index?stype=0' + walletTopicQuery((this.data.info && this.data.info.id) || this.data.id, '&'), complete: () => { this._navigating = false; } });
+  },
+
+  //投票弹框打开
+  voteClick() {
+    this.setData({
+      voteShow: true
+    })
+  },
+  
+  //投票弹框关闭
+  voteClose() {
+    this.setData({
+      voteShow: false,
+      answer: -1,
+      plnr: "",
+      uploadImages: [],
+      canSubmitComment: false
+    });
+  },
+  
+  // 上传图片
+  upLoadImg() {
+    const that = this;
+    // L06-074:最多 9 张,按剩余张数选;新数组再 setData,不就地改 data
+    const left = 9 - (that.data.uploadImages || []).length;
+    if (left <= 0) return;
+    app.chooseImage(function (res) {
+      const ll = (that.data.uploadImages || []).concat(res || []).slice(0, 9);
+      that.setData({
+        'uploadImages': ll
+      })
+    }, Math.min(6, left));
+  },
+  
+  // 删除图片
+  deleteImage(e) {
+    const index = e.currentTarget.dataset.index;
+    const images = (this.data.uploadImages || []).slice();
+    images.splice(index, 1);
+    this.setData({
+      uploadImages: images
+    });
+  },
+  
+  // 预览图片
+  onImgFadeLoad(e) { imgFade.onImgFadeLoad.call(this, e) },
+  onImgRenditionError(e) { imageUrl.onImgRenditionError.call(this, e) }, // 缩略图出错退回原图一次 + 会话熔断(utils/image-url.js)
+
+  previewImage(e) {
+    const src = e.currentTarget.dataset.src;
+    mediaPreview.open(this.data.uploadImages, src);
+  },
+  
+  
+  /**
+   * 评分组件选中处理 
+   */
+  changePic: function (e) {
+    let f = this
+    var index = e.currentTarget.dataset.index
+
+    f.setData({
+      answer: index
+    }, () => f.refreshCommentState())
+  },
+
+  /**
+   * 计算各屏高度和位置
+   */
+  calculateScreenHeights() {
+    const that = this;
+
+    // 延迟执行，确保页面渲染完成
+    setTimeout(() => {
+      const query = wx.createSelectorQuery();
+
+      // 获取第一屏高度和第二屏位置
+      query.select('#screen1').boundingClientRect();
+      query.select('#screen2').boundingClientRect();
+
+      query.exec((res) => {
+        if (res[0] && res[1]) {
+          const screen1Height = res[0].height;
+          const screen2Top = res[1].top + (that._scrollTop || 0); // 加上当前滚动位置
+
+          that.setData({
+            screen1Height: screen1Height,
+            screen2Top: screen2Top
+          });
+
+        } else {
+          // 如果获取失败，使用备用方案:窗口高度(L06-080:不再为此单独异步 getSystemInfo 存一个 screenHeight)
+          const h = that._windowSize().h;
+          that.setData({
+            screen1Height: h,
+            screen2Top: h
+          });
+        }
+      });
+    }, 800);
+  },
+
+  /**
+   * 格式化日期
+   */
+  formatDate(dateString) {
+    if (!dateString) return '';
+    if (typeof dateString === 'string' && /^\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]\d{1,2}:\d{1,2}(?::\d{1,2}(?:\.\d{1,9})?)?)?$/.test(dateString.trim())) {
+      const parts = chinaParts(dateString);
+      return parts ? `${parts.month}.${parts.day}` : '';
+    }
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) return '';
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    return `${month}.${day}`;
+  },
+
+  // 场地卡数据:addressName 形如「龙美术馆（上海市徐汇区龙腾大道3398号）」,拆成名称+地址;
+  // 主题本身没有经纬度字段,坐标借第一个有坐标的节点(即路线起点),没有就只展示不跳地图
+  buildVenue(data) {
+    const raw = String(data.addressName || '').trim();
+    if (!raw) return null;
+    const m = raw.match(/^(.*?)[（(](.+?)[）)]\s*$/);
+    const venue = { name: m ? m[1].trim() : raw, addr: m ? m[2].trim() : '' };
+    const chapters = data.chaptersList || [];
+    for (const chapter of chapters) {
+      for (const node of (chapter.nodes || [])) {
+        if (node.latitude && node.longitude) {
+          venue.latitude = node.latitude;
+          venue.longitude = node.longitude;
+          return venue;
+        }
+      }
+    }
+    return venue;
+  },
+
+  
+  formatTimeToChinese(seconds) { return durationText(seconds); },
+  
+  // 文本域失去焦点
+  onCommentInput(e) {
+    this.setData({
+      plnr: e.detail.value
+    }, () => this.refreshCommentState());
+  },
+
+  refreshCommentState() {
+    const canSubmitComment = this.data.answer !== -1 && !!(this.data.plnr || '').trim();
+    if (canSubmitComment !== this.data.canSubmitComment) this.setData({ canSubmitComment });
+  },
+   
+  //获取数据
+  /** 每章单独使用完整道路；缺失或损坏时只画本章节点虚线，不能跨章补线。 */
+  buildRouteMap: function (chaptersList) {
+    const route = routePreview.build(chaptersList);
+    // L06-071:路线来源提示只有广场路线卡展示,主题页不写这一项
+    delete route.routeSourceText;
+    this.setData(route, () => { if (String(this.data.activeTab) === '2') this._later(400, () => this._fitRouteMap()); });
+    // 2026-11-22 owner:玩家看到的路线跟主题配色(预览 / 商家 / 没设配色仍是原来的墨线,不再 setData)
+    const info = this._routeInfo, lines = info ? routeMapLines(this.data.routePolyline, info.lookJson, routeMapPreview(info)) : null;
+    if (lines && lines !== this.data.routePolyline) this.setData({ routePolyline: lines });
+  },
+
+  /**
+   * 点击节点 marker：提示节点名（后续可改成滚动到对应节点卡片）
+   */
+  onNodeTap: function (e) {
+    const markerId = (e.detail && e.detail.markerId !== undefined) ? e.detail.markerId : e.markerId;
+    const m = (this.data.routeMarkers || [])[markerId];
+    if (m && m.callout && m.callout.content) {
+      toast(m.callout.content);
+    }
+  },
+
+  getData: function () {
+    const that = this;
+    app.sendRequest({
+      hideLoading: true,
+      url: '/api/topic/info-to-user',
+      autoErrorToast: false, // 失败由整页 auto-back fail 半屏讲原因,不再叠 toast
+      data: {
+        id: that.data.id
+      },
+      method: "POST",
+      success: function (res) {
+        if (res.code == "200") {
+          const chaptersList = hasTopicDetail(res.data);
+          if (!chaptersList) {
+            that.setData({
+              loadError: true,
+              missingTopicId: false,
+              loadErrorTitle: '主题暂时无法打开',
+              loadErrorSub: safeUserMessage(res.msg, '主题详情暂时无法加载，请稍后重试。'),
+              topicLoaded: false,
+            });
+            return;
+          }
+          res.data['chaptersList'] = chaptersList
+          // 主题文字按纯文本展示:服务端过滤会把 x<y 存成 x&lt;y,在映射这一处解码。
+          for (const key of ['name', 'subtitle', 'description']) res.data[key] = decodeDisplayText(res.data[key])
+          const totalChapterCount = Number(res.data.totalChapterCount || 0)
+          const unlockedChapterCount = Number(
+            res.data.unlockedChapterCount != null
+              ? res.data.unlockedChapterCount
+              : res.data.chaptersList.filter((c) => !(c && c.locked === true)).length
+          )
+          res.data['lockedChapterCount'] = Math.max(0, totalChapterCount - unlockedChapterCount)
+          res.data['showStartDate'] = that.formatDate(res.data['startDate'])
+          res.data['showEndDate'] = that.formatDate(res.data['endDate'])
+          res.data['omsTicketList'] = that.processTopicDate(res.data['omsTicketList'])
+          // P-30:自由探索的场次卡写真实场次(activityList)的时间,不写主题票自己的窗口
+          if (Number(res.data.productType) === 2) {
+            const sessionText = sessionWindowsText(res.data['activityList'])
+            if (sessionText) res.data['omsTicketList'].forEach((t) => { t.sessionTimeText = sessionText })
+          }
+          res.data['perkCapacityText'] = that.formatPerkCapacity(res.data['perkSellableCapacity'])
+          res.data['totalTimeFormatted'] = that.formatTimeToChinese(res.data['totalTime'])
+
+
+          if (res.data['chaptersList']) {
+            res.data['chaptersList'] = that.processChaptersList(res.data['chaptersList'], res.data['imgUrl']);
+            that._routeInfo = res.data;
+            that.buildRouteMap(res.data['chaptersList']);
+          }
+          // 节点介绍:一章一张卡,结局章不出(防剧透)
+          res.data['chapterCards'] = chapterCards.buildChapterCards(res.data['chaptersList'], res.data['imgUrl'], (src) => app.getImgUrl(src));
+          // 放在 if 外面:没有章节的主题也可能有俱乐部,阵容不该跟着章节一起消失
+          res.data['lineup'] = that.buildLineup(res.data);
+          res.data['contentIncludes'] = that.buildContentIncludes(res.data);
+          // 2026-11-21:「活动内容」只放故事引子;安全 / 营业 / 路线这类实用话与价格、续玩、同票人数、通关所得收进「出发前」
+          const split = departNotes.splitDescription(res.data.description);
+          res.data['storyText'] = split.story;
+          res.data['departNotes'] = departNotes.buildDepartNotes(res.data, { buyOpts: motion.buyOptions(res.data), includes: res.data['contentIncludes'], notes: split.notes });
+          that._loadSeatProducts(res.data);
+
+          res.data['venue'] = that.buildVenue(res.data);
+          res.data['heroIntro'] = heroIntro(res.data.subtitle);
+          const rounded = Math.max(0, Math.min(5, Math.round(Number(res.data.averageRating) || 0)));
+          const ratingStars = [];
+          for (let i = 1; i <= rounded; i++) ratingStars.push({ star: i });
+
+          // V-23:详情正文不再放举报行,可否举报只作处理器内部闸,不进页面 data
+          that._canReport = canReportTopic(res.data, typeof app.getUserID === 'function' ? app.getUserID() : '');
+          const routeStyle = routeMapStyleOf(res.data);
+          that.setData({
+            info: res.data, mapSubkey: routeStyle.mapSubkey, mapLayerStyle: routeStyle.mapLayerStyle, castRow: castPlay.routeCastRow(castPlay.remember(that.data.id, res.data.castConfig)), openChapterKey: '',
+            // P0(2026-09-05 审核):已购态不再只信 URL 参数 is_join(全仓只有订单详情会传 1,
+            // 从首页/搜索进来的已购用户永远看不到「开始玩」)。/info-to-user 已按 ownerType=1 &
+            // registrationStatus=2 回填 isSignUp,与自玩通行证的建单口径同源,直接用它。
+            is_join: (String(that.data.is_join) === '1' || Number(res.data.isSignUp) === 1) ? 1 : 0,
+            // 稿 214:384 的数据条:与商家版 181:575 同一份格子(utils 里只有一份实现)
+            statBar: buildTopicStatBar(res.data, { withPlayers: true }),
+            ratingStars,
+            // 探店日/自由探索(productType=2):场次块换真场次卡,不再当「阵容」花名册渲染
+            isExplore: Number(res.data.productType) === 2,
+            ownerStateText: ownerStateText(res.data),
+            loadError: false,
+            topicLoaded: true,
+            everLoaded: true,   // 成功读到过一次:之后的刷新失败留在原页给重试,不 auto-back 把人踢走
+            missingTopicId: false,
+            merchantClosed: res.data.merchantClosed === true,
+            loadErrorTitle: '',
+            loadErrorSub: '',
+          });
+
+          if (!that._viewTracked) { that._viewTracked = true; that._trackBuy('content_view'); } // 购买漏斗起点:详情首次读成功
+          that._applyMotionData(res.data); if (!that._statCounted) { that._statCounted = true; pageMotion.countIn(that, 'statK'); } /* 细节打磨 G4:数据条读数第一次到达时滚上来 */
+          setTimeout(() => that._measureHero(), 300);
+        } else {
+          // j5 H1:服务端明确说「主题活动不存在」(审核中 / 已下架 / 未通过,对他人不可见)是终态:讲原因并给返回,不是加载失败留白。
+          const refused = refusalOf(res);
+          that.setData({
+            loadError: true,
+            missingTopicId: false,
+            loadRefused: !!refused,
+            loadErrorTitle: refused || '主题暂时无法打开',
+            loadErrorSub: refused ? '' : safeUserMessage(res.msg, '主题详情暂时无法加载，请稍后重试。'),
+            topicLoaded: false,
+          });
+        }
+      },
+      fail: function (res, statusCode) {
+        that.setData({
+          loadError: true,
+          missingTopicId: false,
+          loadRefused: false,
+          loadErrorTitle: '主题详情加载失败',
+          loadErrorSub: '',
+          topicLoaded: false,
+        });
+      }
+    });
+  },
+
+  // 详情加载失败重试(cy-error retry 事件)
+  onRetryLoad: function () {
+    if (this.data.missingTopicId) {
+      this.goTopicList();
+      return;
+    }
+    this.setData({ loadError: false, loadRefused: false, topicLoaded: false, loadErrorTitle: '', loadErrorSub: '' });
+    this.getData();
+  },
+
+  
+  /**
+   * 特殊数据处理函数 - 处理主题日期
+   */
+  processTopicDate: function (list, sellableCapacity) {
+    if (!isRecordList(list) || list.length === 0) return [];
+    
+    for (let i = 0; i < list.length; i++) {
+      // L06-010:按中国时区解析(utils/datetime),缺时分/ISO 格式都不抛错;解析不了就不出这一段文字
+      const sp = list[i]['startTime'] ? chinaParts(list[i]['startTime']) : null;
+      if (sp) list[i]['monthDayTime'] = mdhm(sp);
+      const ep = list[i]['endTime'] ? chinaParts(list[i]['endTime']) : null;
+      if (ep) list[i]['endMonthDayTime'] = mdhm(ep);
+      
+
+      // 探店日场次卡:同日场次压成「MM-DD HH:mm–HH:mm」,跨日保留两端全量
+      if (list[i]['monthDayTime'] && list[i]['endMonthDayTime']) {
+        const sd = list[i]['monthDayTime'].slice(0, 5), ed = list[i]['endMonthDayTime'].slice(0, 5);
+        list[i]['sessionTimeText'] = sd === ed
+          ? (list[i]['monthDayTime'] + '–' + list[i]['endMonthDayTime'].slice(6))
+          : (list[i]['monthDayTime'] + ' ~ ' + list[i]['endMonthDayTime']);
+      } else {
+        list[i]['sessionTimeText'] = list[i]['monthDayTime'] || '';
+      }
+      // 退改一律显示平台三档,不显示票上存的 refund_rule 原文(业主 2026-11-03)。
+      list[i]['refundRuleText'] = refundRuleText(list[i]);
+      // 场次余席属于 activity ticket；期级权益容量另行显示，不能把同一个数印到每张卡。
+      const rawRemaining = list[i]['remainingInventory'];
+      const remaining = rawRemaining === null || rawRemaining === undefined || rawRemaining === ''
+        ? NaN : Number(rawRemaining);
+      list[i]['remaining'] = Number.isFinite(remaining)
+        ? Math.max(0, remaining)
+        : null;
+    }
+    return list;
+  },
+
+  formatPerkCapacity(value) {
+    if (value === null || value === undefined || value === '') return '';
+    const capacity = Number(value);
+    if (!Number.isFinite(capacity) || capacity >= 2147483647) return '';
+    return '本期可售 ' + Math.max(0, capacity) + ' 张';
+  },
+  
+  processChaptersList(chaptersList, topicCover) {
+    if (!chaptersList || !Array.isArray(chaptersList)) return chaptersList;
+    let seq = 0, prevNode = null; // v13 路线:站号全主题连续编号;站间步行线跨章接上(原型每章标题下也有一段)
+
+    for (let j = 0; j < chaptersList.length; j++) {
+      const chapter = chaptersList[j];
+      chapter.name = decodeDisplayText(chapter.name);
+      chapter.description = decodeDisplayText(chapter.description);
+      // 稿 181:715:章节标题下面这行说的是**这一章**的时长 / 地点数 / 玩法数。
+      // 原来读的是 info.*(整个主题的合计),挨着章节标题印,看上去就像这一章的 ——
+      // 三章会印出三组一模一样的数,零报错。字段在 CmsTopicChapter 上本来就有。
+      // 拿不到的那一项不写,不补 0(补 0 会说成「这章 0 个地点」)。
+      chaptersList[j].metaTime = chapter.totalTime ? this.formatTimeToChinese(chapter.totalTime) : '';
+      // 单位跟着数一起在这里拼:wxml 里「{{x}} 个节点」这种插值紧跟单位的写法,
+      // 值缺了会变成孤零零一个「个节点」(有门禁专门拦)。
+      // CU-C-66:章节级同一个快照毛病 —— 按本章真实节点数列,不读 location_count
+      const nodeCount = (chapter.nodes || []).length || Number(chapter.locationCount) || 0;
+      chaptersList[j].metaPlace = nodeCount > 0 ? nodeCount + ' 个节点' : '';
+      chaptersList[j].metaPlay = Number(chapter.templateCount) > 0 ? chapter.templateCount + ' 个玩法' : '';
+      chaptersList[j].hasMeta = !!(chaptersList[j].metaTime || chaptersList[j].metaPlace || chaptersList[j].metaPlay);
+      chaptersList[j].chapLabel = motion.chapterHeading(j, chaptersList.length, chapter.name);
+      // 站间只写坐标直线距离；第一站没有上一站，不跨章计算。
+      const ns = chapter.nodes || [];
+      for (let n = 0; n < ns.length; n++) {
+        // CU-C-65:站点这一层的裸字段全部归一,别把 null 渲染给玩家
+        ns[n].businessTime = nodeText(ns[n].businessTime);
+        ns[n].address = nodeText(ns[n].address);
+        ns[n].name = nodeText(ns[n].name);
+        ns[n].description = decodeDisplayText(ns[n].description);
+        const firstMerchant = (ns[n].registrationMerchantList || [])[0];
+        if (firstMerchant && firstMerchant.mmsMerchant) {
+          firstMerchant.mmsMerchant.name = nodeText(firstMerchant.mmsMerchant.name);
+        }
+        // V-22b:节点介绍卡先用站点自己的图,再用玩法图;相对路径/http 签名链接/逗号多图在真机上都出不来,卡上一块空白。
+        if (ns[n].cmsMemberTemplate) ns[n].cmsMemberTemplate.imgUrl = templateCover(ns[n].cmsMemberTemplate, ns[n], topicCover);
+        // 站点缩略图走共用兜底链(utils/station-image):商家图 / 站点图 → 本章图 → 路线封面 → 纹理底
+        ns[n].photo = stationImage.resolveStationImage({ stationImg: stationImage.firstImage(firstMerchant && firstMerchant.picUrl) || ns[n].imgUrl, chapterImgArr: stationImage.firstImage(chapter.imgArr != null ? chapter.imgArr : chapter.img_arr) || chapter.cover, topicCover }).src;
+        ns[n].walkText = prevNode ? walkText(prevNode, ns[n]) : '';
+        seq += 1; ns[n].seq = seq; prevNode = ns[n];
+        ns[n].giftText = firstMerchant && firstMerchant.mmsMerchant ? nodeText(firstMerchant.mmsMerchant.derivativeBenefits) : '';
+      }
+    }
+    for (let j = 0; j < chaptersList.length; j++) {
+      for (let i = 0; i < chaptersList[j]['nodes'].length; i++) {
+        if (chaptersList[j]['nodes'][i]['registrationMerchantList']) {
+          for (let z = 0; z < chaptersList[j]['nodes'][i]['registrationMerchantList'].length; z++) {
+            if (chaptersList[j]['nodes'][i]['registrationMerchantList'][z]['startDate']) {
+              let [year, month, day] = chaptersList[j]['nodes'][i]['registrationMerchantList'][z]['startDate'].split('-');
+              chaptersList[j]['nodes'][i]['registrationMerchantList'][z]['month'] = month;
+              chaptersList[j]['nodes'][i]['registrationMerchantList'][z]['day'] = day;
+            }
+            if (chaptersList[j]['nodes'][i]['registrationMerchantList'][z]['endDate']) {
+              let [year, month, day] = chaptersList[j]['nodes'][i]['registrationMerchantList'][z]['endDate'].split('-');
+              chaptersList[j]['nodes'][i]['registrationMerchantList'][z]['endmonth'] = month;
+              chaptersList[j]['nodes'][i]['registrationMerchantList'][z]['endday'] = day;
+            }
+
+          }
+        }
+
+      }
+    }
+
+    return chaptersList;
+  },
+
+  // 节点介绍章节卡:点一下原地展开本章介绍,再点收起;一次只开一张
+  onChapterCardTap(e) {
+    const key = e && e.currentTarget && e.currentTarget.dataset ? e.currentTarget.dataset.key : '';
+    this.setData({ openChapterKey: chapterCards.toggleOpen(this.data.openChapterKey, key) });
+  },
+
+  // 修改展开/收起函数，支持独立控制每个票务
+
+  // FOLLOWUP-A-1:举报主题,流程与动态详情 reportSquare 同一套(utils/content-report.js)
+  reportTopic() {
+    if (app.ensureLoginFor && !app.ensureLoginFor('report', () => this.reportTopic(), { owner: this, target: () => [this.data.id] })) return; // 2026-10-24 游客写前登录
+    if (!this._canReport) return;
+    contentReport.reportTopic(this, app, this.data.id);
+  },
+  onReportReasonSelect(e) { reportSheet.select(this, e); },
+  onReportReasonCancel() { reportSheet.cancel(this); },
+
+  /**
+   * 用户点击右上角分享
+   */
+  onShareAppMessage() {
+    /* CU-C-38:标题原来写死成泛化的「主题详情」——接收人从卡片上看不出分享的是哪场活动。
+       主题名这一屏手上就有(与 :138 那处 {{info.name}} 同一份),没有才退回泛化文案。
+       卡片图同样从这一屏的封面取:走 utils/topic-share 与俱乐部「带票分享」共用一份口径,
+       取不到封面就不传 imageUrl(微信自己的默认卡片图),不拿占位图冒充。 */
+    const info = this.data.info || {};
+    const share = buildTopicShare({
+      topicId: this.data.id,
+      name: info.name,
+      cover: resolveTopicCover(info, (path) => app.getImgUrl(path)),
+    });
+    // §18 I:异步换推广来源凭据拼进 ref;失败静默降级为普通分享
+    return Object.assign({}, share, {
+      promise: referral.sharePathPromise(app, 1, this.data.id, share.path).then((r) => Object.assign({}, share, r)),
+    });
+  },
+
+  // 第七轮 C 第 1 项:朋友圈。落点固定是本页,只能给 query;单页模式下游客读 /api/topic/info(匿名放行)。
+  onShareTimeline() {
+    // L06-081:朋友圈只要标题/图/query,不起推广凭据的网络请求
+    const info = this.data.info || {};
+    const share = buildTopicShare({
+      topicId: this.data.id,
+      name: info.name,
+      cover: resolveTopicCover(info, (path) => app.getImgUrl(path)),
+    });
+    const timeline = { title: share.title, query: 'id=' + (this.data.id || '') };
+    if (share.imageUrl) timeline.imageUrl = share.imageUrl;
+    return timeline;
+  }
+})
+
+function refusalOf(res) { var c = Number(res && res.code), m = String(res && res.msg || ''); return c && c !== 200 && c !== 401 && c !== 2 && m && m !== '系统繁忙，请稍后重试' ? m : ''; }
+// j5 H2:作者看自己没公开的主题要知道它没公开(机审留置 / 待审 = 审核中,人工驳回 = 未通过,其余 = 已下架)。
+function ownerStateText(info) {
+  if (!info || Number(info.isOwner) !== 1 || Number(info.userStatus) === 1) return '';
+  if (Number(info.status) === 2) return '未通过';
+  return Number(info.status) === 0 || /内容安全/.test(String(info.rejectReason || '')) ? '审核中' : '已下架';
+}
+
+// 第十二轮 k1 第 5 项(j6 N1):服务端拒绝第二笔(同一主题已有一笔待支付的单)时,说一句再带玩家去那一笔订单。
+// 打开票夹时带上主题号,票夹落在这个主题的票上
+function walletTopicQuery(id, lead) { return /^[1-9]\d{0,18}$/.test(String(id || '')) ? lead + 'topicId=' + id : ''; }
+
+function openPendingOrderConflict(res, cb) {
+  if (!res || res.errorCode !== 'PENDING_ORDER_EXISTS' || !res.data || !res.data.registrationId) return false;
+  cb({ ok: false, msg: res.msg });
+  wx.navigateTo({ url: '/subpackageMember/orderinfo/orderinfo?id=' + res.data.registrationId });
+  return true;
+}

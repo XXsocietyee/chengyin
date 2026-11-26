@@ -1,0 +1,59 @@
+<!-- 调音台 · 2026-11-24 业主批准原型(第 6 站「谁把声音删掉了」):几条轨各一行,行里是装饰波形与静音开关;
+     点行 = 选中,点开关 = 开 / 关这一轨;底下只有一颗「就是这一轨」,选中的那一轨开着才点得了。
+     答对:台面「通过」章,点任意处收章,露出复原前 / 复原后对比卡。 -->
+<cy-play-stage id="cy-play-stage" skin="qadark" show="{{show}}" back-label="退出"
+               tries="{{maxTries}}" used="{{passed ? 0 : attempts}}" bind:back="onClose">
+  <view class="g-col mx {{reducedMotion ? 'mx--reduced' : ''}}">
+    <view class="mx__title pe pe--blur">{{title}}</view>
+
+    <view class="mx__list" wx:if="{{phase === 'play'}}">
+      <view class="mx__row {{item.on ? '' : 'is-muted'}} {{selectedId === item.id ? 'is-on' : ''}} pe pe--up"
+            wx:for="{{rows}}" wx:key="id">
+        <view class="mx__pick" data-id="{{item.id}}" bindtap="onPick"
+              aria-role="radio" aria-checked="{{selectedId === item.id}}"
+              aria-label="{{item.label}}{{item.on ? '' : '，静音'}}"
+              hover-class="mx__press" hover-stay-time="80">
+          <view class="mx__dot" aria-hidden="true"></view>
+          <view class="mx__name">{{item.label}}</view>
+          <view class="mx__wave" aria-hidden="true">
+            <view class="mx__bar" wx:for="{{item.bars}}" wx:for-item="h" wx:for-index="bi" wx:key="bi" style="height:{{h}}%"></view>
+            <view class="mx__strike"></view>
+          </view>
+        </view>
+        <view class="mx__sw" data-id="{{item.id}}" catchtap="onSwitch"
+              aria-role="switch" aria-checked="{{item.on}}" aria-label="{{item.label}}{{item.on ? '，开着' : '，静音'}}"
+              hover-class="mx__press" hover-stay-time="80">
+          <view class="mx__state" wx:if="{{!item.on}}">静音</view>
+          <view class="mx__track"><view class="mx__thumb"></view></view>
+        </view>
+      </view>
+    </view>
+
+    <view class="mx__fb" wx:if="{{phase === 'play' && feedback}}" aria-role="alert">{{feedback}}</view>
+
+    <view class="ab" wx:if="{{phase === 'ab'}}">
+      <view class="ab__seg">
+        <view class="ab__s {{seg === 'before' ? 'is-on' : ''}}" data-seg="before" bindtap="onSeg"
+              aria-role="button" aria-label="复原前，{{seg === 'before' && playing ? '点一下停' : '点一下播放'}}"
+              hover-class="mx__press" hover-stay-time="80">复原前</view>
+        <view class="ab__s {{seg === 'after' ? 'is-on' : ''}}" data-seg="after" bindtap="onSeg"
+              aria-role="button" aria-label="复原后，{{seg === 'after' && playing ? '点一下停' : '点一下播放'}}"
+              hover-class="mx__press" hover-stay-time="80">复原后</view>
+      </view>
+      <view class="ab__viz {{seg === 'after' ? 'is-after' : ''}}" aria-hidden="true">
+        <view class="ab__bar" wx:for="{{abBars}}" wx:for-item="h" wx:for-index="bi" wx:key="bi" style="height:{{h}}%"></view>
+        <view class="ab__track {{playing ? 'is-run' : ''}}" style="transform:translateX({{head}}%)"><view class="ab__head"></view></view>
+      </view>
+      <view class="ab__cap" aria-live="polite">{{seg === 'after' ? captionAfter : captionBefore}}</view>
+    </view>
+  </view>
+
+  <view wx:if="{{phase === 'play' && !finished}}" class="g-btn {{ready ? '' : 'g-btn--disabled'}} pe pe--up" bindtap="onConfirm"
+        aria-role="button" aria-label="就是这一轨" aria-disabled="{{!ready}}" hover-class="g-btn--press" hover-stay-time="80">
+    就是这一轨
+  </view>
+
+  <view class="mx__edge {{edge ? 'is-on' : ''}} {{reducedMotion ? 'mx__edge--reduced' : ''}}" aria-hidden="true"></view>
+  <view wx:if="{{phase === 'stamp'}}" class="mx__catch" bindtap="onStampTap"
+        aria-role="button" aria-label="通过，点一下继续" hover-class="mx__press" hover-stay-time="80"></view>
+</cy-play-stage>

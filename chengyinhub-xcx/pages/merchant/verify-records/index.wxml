@@ -1,0 +1,85 @@
+<view class="vrl-page theme-merchant" style="padding-top: {{statusBarHeight + navBarHeight}}px;">
+  <cy-toast id="cy-toast" />
+  <cy-access-gate kind="login" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+  <!-- BL-76:结构照 pages/merchant/aftercare(cy-nav-bar + cy-page-title 大标题 + chip 分段 + 按日分组行)。 -->
+  <cy-nav-bar custom-back bind:back="onNavBack" />
+  <cy-page-title title="核销记录" safe-top="{{false}}" />
+
+  <cy-skeleton wx:if="{{pageState === 'loading'}}" type="list" count="4" />
+  <cy-error wx:elif="{{pageState === 'error'}}" fill size="lg"
+            title="核销记录加载失败" sub="{{errorMessage}}"
+            retry="重新加载" bind:retry="retry" auto-back class="cy-fade-in" />
+  <cy-empty wx:elif="{{pageState === 'no-permission'}}" kind="no-permission" fill size="lg"
+            title="当前身份不能查看核销记录" cta="{{accessMember ? '返回' : '申请入驻'}}" bind:cta="onDenyCta" class="cy-fade-in" />
+
+  <scroll-view wx:else scroll-y class="vrl-scroll cy-fade-in"
+               enhanced show-scrollbar="{{false}}" bindscrolltolower="onReachBottom">
+    <!-- 今天:本店今天的有效核销,按主题、再按场次分组;与下面的记录列表各读各的,各有各的失败态 -->
+    <view class="vrl-today" wx:if="{{todayState}}">
+      <view class="vrl-group-head" aria-label="今天{{todayState === 'ready' ? '已核销 ' + todayTotal + ' 单' : ''}}">
+        <text class="vrl-group-label">今天</text>
+        <text class="vrl-group-total" wx:if="{{todayState === 'ready'}}">{{todayTotal || 0}} 单</text>
+      </view>
+      <cy-error wx:if="{{todayState === 'error'}}" title="今天的核销加载失败" retry="重新加载" bind:retry="retryToday" />
+      <block wx:elif="{{todayState === 'ready'}}">
+        <view class="fin-group" wx:for="{{todayTopics}}" wx:for-item="topic" wx:key="key">
+          <view class="vrl-group-head">
+            <text class="vrl-topic-label">{{topic.title}}</text>
+            <text class="vrl-group-total">{{topic.count || 0}} 单</text>
+          </view>
+          <view class="fin-card vrl-card" wx:for="{{topic.sessions}}" wx:for-item="session" wx:key="key">
+            <view class="vrl-session" wx:if="{{session.title}}">
+              <text class="vrl-topic-label">{{session.title}}</text>
+              <text class="vrl-group-total">{{session.count || 0}} 单</text>
+            </view>
+            <view class="fin-row vrl-row" wx:for="{{session.items}}" wx:key="id"
+                  aria-label="{{item.nameText}}{{item.timeText ? '，' + item.timeText : ''}}，已核销">
+              <view class="vrl-avatar" aria-hidden="true"><cy-icon name="check" size="36" /></view>
+              <view class="fin-row__main">
+                <text class="fin-row__t1">{{item.nameText}}</text>
+                <view class="fin-row__t2" wx:if="{{item.timeText}}"><text>{{item.timeText}}</text></view>
+              </view>
+            </view>
+          </view>
+        </view>
+      </block>
+    </view>
+
+    <!-- 2026-11-02 X-5:分段只挂一份,空态与列表之间切换时胶囊滑动而不是重建 -->
+    <view class="vrl-tabbar">
+      <cy-tabs class="vrl-filter" wx:if="{{pageState === 'empty' || pageState === 'ready'}}" variant="chip" tabs="{{tabs}}"
+        active="{{bucket}}" bind:change="switchBucket" />
+    </view>
+
+    <view class="vrl-shell" style="{{pmList === 1 ? '--pm-l:1;' : (pmList === 2 ? '--pm-l-d:.32s;--pm-l-s:1;' : '')}}">
+      <cy-error wx:if="{{pageState === 'list-error'}}" title="核销记录加载失败" sub="{{errorMessage}}"
+                retry="重新加载" bind:retry="retry" />
+      <cy-empty wx:elif="{{pageState === 'empty'}}" size="lg" kind="empty" title="{{bucket === 'VERIFIED' ? '还没有已核销记录' : '没有已撤销记录'}}" />
+      <block wx:else>
+        <view class="fin-group vrl-group" wx:for="{{groups}}" wx:for-item="group" wx:key="key" style="--pmi:{{index}};">
+          <view class="vrl-group-head">
+            <text class="vrl-group-label">{{group.label}}</text>
+            <text class="vrl-group-total">{{group.items.length || 0}} 条</text>
+          </view>
+          <view class="fin-card vrl-card">
+            <view class="fin-row vrl-row" wx:for="{{group.items}}" wx:key="id"
+                  aria-label="{{item.nameText}}，{{item.statusText}}{{item.subText ? '，' + item.subText : ''}}">
+              <view class="vrl-avatar" aria-hidden="true"><cy-icon name="check" size="36" /></view>
+              <view class="fin-row__main">
+                <text class="fin-row__t1">{{item.nameText}}</text>
+                <view class="fin-row__t2">
+                  <text wx:if="{{item.timeText}}">{{item.timeText}} ·</text>
+                  <text class="vrl-status vrl-status--{{item.statusTone}}">{{item.statusText}}</text>
+                </view>
+                <text class="vrl-sub" wx:if="{{item.subText}}">{{item.subText}}</text>
+              </view>
+            </view>
+          </view>
+        </view>
+        <text class="vrl-more">{{hasMore ? '正在加载更多…' : '已经到底了'}}</text>
+      </block>
+    </view>
+  </scroll-view>
+</view>

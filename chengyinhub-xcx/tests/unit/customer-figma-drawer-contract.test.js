@@ -1,0 +1,124 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const ROOT = path.resolve(__dirname, '../..');
+const read = (relative) => fs.readFileSync(path.join(ROOT, relative), 'utf8');
+
+test('客户页的四类业务筛选统一放入底部弹窗', () => {
+  const js = read('pages/merchant/customer/index.js');
+  const wxml = read('pages/merchant/customer/index.wxml');
+  const wxss = read('pages/merchant/customer/index.wxss');
+
+  const hero = wxml.indexOf('class="cu-hero"');
+  const segments = wxml.indexOf('class="cu-segs"');
+  const search = wxml.indexOf('<cy-search');
+  const list = wxml.indexOf('class="cu-list"');
+  assert.ok(hero >= 0 && hero < segments && segments < search && search < list,
+    '客户页应按标题 → 分段筛选 → 搜索 → 名单排列');
+  const sheet = wxml.indexOf('<cy-sheet show="{{filterOpen}}"');
+  const segmentTap = wxml.indexOf('bindtap="onSegmentTap"');
+  assert.ok(sheet > 0 && segmentTap > sheet, '分类只能出现在筛选弹窗内');
+  assert.doesNotMatch(wxml, /cu-filter-chip--on|cu-seg--on/);
+  assert.match(wxml, /wx:if="\{\{segment === item.key\}\}" name="check"/);
+  assert.match(wxml, /class="cu-hero-title">客户</);
+  assert.match(wxml, /class="cu-hero-sub" wx:if="\{\{!error && customerSummaryText\}\}">\{\{customerSummaryText\}\}<\/text>/);
+  // 2026-09-25 CU-M-120/147 给三段补了 emptyLabel(空态专用说法),这条原来把整个对象字面量写死,
+  // 多一个属性就红。钉的其实是「四枚分段的 key/label 与顺序」,所以只钉到 label 为止。
+  assert.match(js, /\{ key: 'all', label: '全部' \}[\s\S]*\{ key: 'repeat', label: '回头客'[\s\S]*\{ key: 'new', label: '新客'[\s\S]*\{ key: 'noted', label: '有备注'/);
+  assert.doesNotMatch(js, /\{ key: 'pending', label: '待核销' \}/);
+  assert.doesNotMatch(wxml, /class="cu-seg-num"/);
+  assert.match(wxml, /class="cu-note" wx:if="\{\{item\.latestNote\}\}"/);
+  assert.match(wxml, /class="cu-phone-row" wx:if="\{\{item\.phoneText\}\}"/);
+  assert.match(wxml, /catchtap="copyCustomerPhone"[^>]*data-memberid="\{\{item\.memberId\}\}"/);
+  assert.match(wxml, /class="cu-copy-img" src="\/pages\/merchant\/images\/icon_copy\.svg"/);
+  // F15:拨打/复制前先向服务端换取明文，拿到的号才用；列表里的脱敏号不得直接拨/复制。
+  assert.match(js, /copyCustomerPhone\(e\)\s*\{\s*this\._revealCustomerContact\(e, 'copy'\);\s*\}/);
+  assert.match(js, /callCustomer\(e\)\s*\{\s*this\._revealCustomerContact\(e, 'call'\);\s*\}/);
+  assert.match(js, /url: `\/api\/merchant\/crm\/customers\/\$\{memberId\}\/contact`/);
+  assert.match(js, /data: JSON\.stringify\(\{ purpose \}\)/);
+  assert.match(js, /wx\.setClipboardData\(\{ data: phone \}\)/);
+  assert.match(wxml, /<cy-icon class="cu-arrow" name="arrow-right"/);
+  assert.match(wxss, /\.cu-seg\s*\{[^}]*border-radius:\s*var\(--cy-radius-pill\)/s);
+  assert.match(wxss, /\.cu-search\s*\{[^}]*padding:\s*0 var\(--cy-page-x\)/s);
+  // 打磨第 3 轮:标题、筛选、搜索、名单同一左边
+  assert.match(wxss, /\.cu-hero\s*\{[^}]*padding:\s*44rpx var\(--cy-page-x\) 0/s);
+  assert.match(wxss, /\.cu-segs\s*\{[^}]*padding:\s*var\(--cy-space-3\) var\(--cy-page-x\)/s);
+  assert.match(wxss, /\.cu-row\s*\{[^}]*padding:\s*var\(--cy-space-3\) var\(--cy-page-x\)/s);
+});
+
+test('项目客户抽屉贴住安全区且只有一层面板背景', () => {
+  const wxml = read('pages/topic/components/project-drawer/index.wxml');
+  const wxss = read('pages/topic/components/project-drawer/index.wxss');
+
+  assert.doesNotMatch(wxml, /class="dw-stack"/, '导航下的长面板不得再向上伸出装饰堆叠层');
+  assert.match(wxml, /--cy-drawer-top:\{\{panelTop\}\}px/, '顶边必须消费胶囊实测坐标');
+  // 走查 v2 R07(业主 2026-10-30):客户弹窗和其他长面板一样到胶囊下沿,只保留裁切,不再单独卡 70vh
+  assert.match(wxss, /\.dw--customer\s*\{[^}]*overflow:\s*hidden;/s, '客户抽屉裁掉圆角外溢');
+  assert.doesNotMatch(wxss, /\.dw--customer\s*\{[^}]*70vh/s, '客户抽屉不再单独限高 70vh');
+  assert.match(wxml, /<view class="dw-scroll-pad"><\/view>/,
+    '客户抽屉安全区应留在同色面板内部');
+  assert.match(wxss, /\.dw\s*\{[^}]*top:\s*var\(--cy-drawer-top[^}]*bottom:\s*0;[^}]*overflow:\s*hidden;/s, '项目长面板避开导航并贴底，正文独立滚动');
+  assert.match(wxss, /\.dw--compact\s*\{[^}]*left:\s*var\(--cy-space-2\);[^}]*bottom:\s*var\(--cy-space-2\);/s,
+    '浮动抽屉底部留白且裁切圆角，不露出后面的灰色层');
+});
+
+test('主办与承接两套主题名单都使用客户和核销口径', () => {
+  for (const file of [
+    'pages/topic/components/project-host/index.wxml',
+    'pages/topic/components/project-join/index.wxml',
+  ]) {
+    const wxml = read(file);
+    assert.match(wxml, /<project-drawer[^>]*title="客户"[^>]*customer-mode="\{\{true\}\}"/s, `${file} 应使用客户弹窗外壳`);
+    // 走查 v2 R07(2026-10-30):汇总改成数字格(数字在上、名称在下),核销口径的名称不变
+    assert.match(wxml, /class="dsum-l">已核销</);
+    // 2026-10-30 走查 v2 R07(业主定稿 r_cust3):汇总格写「还没到店」,行内胶囊写「未到店」
+    assert.match(wxml, /class="dsum-l">还没到店</);
+    assert.doesNotMatch(wxml, /class="dsum-l">待核销</);
+    assert.doesNotMatch(wxml, /class="drun"/);
+    assert.doesNotMatch(wxml, /\{\{ p\.ticketNo \}\}/);
+    // 走查 v2 R07:核销时间并进场次那一行
+    assert.match(wxml, /class="dr-sub">\{\{ p\.when \}\}<block wx:if="\{\{ p\.arrivedTimeText \}\}"> · \{\{ p\.arrivedTimeText \}\} 核销<\/block><\/text>/);
+    assert.match(wxml, /class="dr-phone" wx:if="\{\{ p\.phone \}\}"/,
+      `${file} 每位有权限查看电话的客户都应显示电话行`);
+    assert.match(wxml, /data-act="copyText"[^>]*data-text="\{\{ p\.phone \}\}"[^>]*aria-label="复制电话"/,
+      `${file} 电话行应提供复制入口`);
+    assert.match(wxml, /wx:if="\{\{ playerSheet\.contactHint \}\}">\{\{ playerSheet\.contactHint \}\}<\/view>/,
+      `${file} 应在后端下发联系方式限制时如实说明`);
+  }
+
+  const hostJs = read('pages/topic/components/project-host/index.js');
+  const hostWxml = read('pages/topic/components/project-host/index.wxml');
+  const joinWxml = read('pages/topic/components/project-join/index.wxml');
+  const pageJs = read('pages/topic/merchantinfo/merchantinfo.js');
+  const pageWxml = read('pages/topic/merchantinfo/merchantinfo.wxml');
+  assert.match(hostJs, /playerActions:\s*\{ type: Array, value: \[\] \}/,
+    '主办组件必须接收客户抽屉动作');
+  assert.match(hostWxml, /<project-drawer[^>]*actions="\{\{ playerActions \}\}"[^>]*bind:action="emitDrawerAction"/s,
+    '主办客户抽屉必须保留唯一的查看记录入口');
+  assert.doesNotMatch(joinWxml, /actions="\{\{ playerActions \}\}"/,
+    '承接方已有页面内真实入口，客户抽屉不重复造入口');
+  assert.match(pageJs, /playerActions:\s*\[\]/);
+  // 2026-10-30 走查 v2 R07(业主定稿):客户弹窗不再下发台账入口,最后一行是「定向广播」(主办商家)
+  assert.match(read('pages/topic/components/project-host/index.wxml'), /data-act="openBroadcast"/,
+    '主办客户弹窗最后一行是定向广播');
+  assert.match(pageWxml, /<project-host[\s\S]*playerActions="\{\{ playerActions \}\}"[\s\S]*bind:act="onJoinAct"/,
+    '主办页必须把查看记录动作传入组件');
+
+  const icon = read('pages/topic/images/icon_copy.svg');
+  assert.match(icon, /<g id="copy-06">/);
+  assert.match(icon, /stroke="black"/);
+  assert.doesNotMatch(icon, /stroke="#999999"/);
+
+  for (const file of [
+    'pages/topic/components/project-host/index.wxss',
+    'pages/topic/components/project-join/index.wxss',
+  ]) {
+    const wxss = read(file);
+    assert.match(wxss, /\.player-row \.dr-phone \{[^}]*margin-top:\s*12rpx;/s,
+      `${file} 应拉开时间与电话的垂直间距`);
+  }
+});

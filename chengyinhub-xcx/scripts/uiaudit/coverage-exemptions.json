@@ -1,0 +1,31 @@
+{
+  "note": "截图覆盖率的**显式豁免**。只放「这一页根本没有可截的界面」或「模拟器结构性拍不了」的路由。⚠️ 豁免不是逃生口:每条必须写清 reason 与 altVerification(替代验证手段),两者缺一即门禁红 —— 否则这个文件就会变成新的「未判定」无限逃生口。",
+  "generatedAt": "2026-08-19",
+  "exemptions": [
+    {
+      "pagePath": "pages/topic/catalog/index",
+      "reason": "F14c(PG-025 业主定下线):城市合集两页已下线,本页只留旧分享卡重定向壳 —— onLoad 第一句就 redirectTo 主题页或 reLaunch 首页,wxml 只有一个空的 theme-dark view,没有可截的界面。原矩阵行 F301/F302 随页面一并删除。",
+      "altVerification": "tests/unit/qx-b8-public-catalog.test.js(锁住带 id 进主题页、其余回首页,以及旧 catalog/detail 分享卡经 onPageNotFound 转到主题页)。"
+    },
+    {
+      "pagePath": "subpackageP3/pages/stamp-camera/index/index",
+      "reason": "结构性拍不了:整页是相机取景器,模拟器给不出相机流,automator 也无法授予相机权限。拍出来只会是权限拒绝态或黑帧,而黑帧正是本仓最会反向制造假 bug 的那类图。",
+      "altVerification": "tests/unit/stamp-camera-layout.test.js + tests/unit/stamp-crop.test.js 锁布局与裁切;取景与拍照归真机手验(真机清单里单列)。"
+    },
+    {
+      "pagePath": "pages/club/workbench/index",
+      "reason": "纯重定向壳:onLoad 第一句就 wx.redirectTo 到 /pages/club/detail/index?id=…&tab=manage(无 id 时带 owner=1),自身 wxml 不渲染任何内容 —— 矩阵行 F05 的 DOM 断言 .cw-shell 这个 class 根本不存在。截它只能截到转跳前的一帧空白,那不是任何人会看到的界面;不标 blocked 还会让续跑循环把它当「没拍到」无限空转(2026-08-18 实测空转 17 轮)。与已豁免的 pages/coop/withdraw/records 同类。",
+      "altVerification": "行为断言:reLaunch 本路由后回读 getCurrentPages(),末项 route 必须是 pages/club/detail/index 且 options={id,tab:'manage'}(见 scripts/uiaudit/behavior-assertions.md §F,2026-08-18 实跑 PASS);转跳目标另由 tests/unit/club-workbench-contract.test.js 静态锁住。目标页本身由 C44/C45 拍到。"
+    },
+    {
+      "pagePath": "pages/playkit/index/index",
+      "reason": "分包占位页(2026-11-21 play 分包拆分):微信要求分包至少一页,pages/playkit 只放玩法组件,这一页站内没有任何入口;onLoad 第一句就 reLaunch 首页,wxml 只有一个空的 theme-dark view,没有可截的界面。与已豁免的 pages/topic/catalog/index 同类。",
+      "altVerification": "tests/unit/play-package-split-guard.test.js(锁住占位页 onLoad 只 reLaunch 到 /pages/index/index、wxml 不渲染实体内容);tests/unit/nav-route-exists.test.js 登记其为无入口占位页。"
+    },
+    {
+      "pagePath": "pages/publishkit/index/index",
+      "reason": "分包占位页(2026-11-22 主包/创作分包瘦身):微信要求分包至少一页,pages/publishkit 只放创作页非首屏组件,这一页站内没有任何入口;onLoad 第一句就 reLaunch 首页,wxml 只有一个空的 theme-dark view,没有可截的界面。与已豁免的 pages/topic/catalog/index 同类。",
+      "altVerification": "tests/unit/play-package-split-guard.test.js(与 playkit 占位页同一条用例锁住占位页 onLoad 只 reLaunch 到 /pages/index/index、wxml 不渲染实体内容);tests/unit/nav-route-exists.test.js 登记其为无入口占位页。"
+    }
+  ]
+}

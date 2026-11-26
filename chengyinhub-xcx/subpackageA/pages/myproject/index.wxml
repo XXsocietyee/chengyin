@@ -1,0 +1,181 @@
+<view class="mp-page {{operationScope ? 'theme-merchant' : 'theme-dark'}}">
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+  <cy-nav-bar />
+  <cy-page-title title="我的项目" />
+  <!-- C6:主结构 = 类型三 tab(主题 / 活动 / 模板) -->
+  <view class="mp-tabs">
+    <cy-tabs variant="fill" wide="{{true}}" tabs="{{typeTabs}}" active="{{typeTab}}" bind:change="switchTypeTab" />
+  </view>
+
+  <view class="mp-state" wx:if="{{authRequired}}">
+    <cy-empty kind="no-permission" title="登录后查看我的项目"
+      cta="登录" bind:cta="onLogin" fill size="lg" />
+  </view>
+  <!-- ===== 主题 / 活动 ===== -->
+  <block wx:elif="{{typeTab !== 'template'}}">
+    <view class="mp-state" wx:if="{{projectState === 'loading'}}">
+      <cy-empty kind="loading" title="项目加载中" fill size="lg" />
+    </view>
+    <view class="mp-state" wx:elif="{{projectState === 'error'}}">
+      <cy-empty wx:if="{{projectAccessDenied}}" kind="no-permission" title="当前身份不能查看这些项目" fill size="lg" />
+      <cy-error wx:else load-failure title="项目加载失败" sub="{{projectErrorMsg}}" bind:retry="loadProjects" fill size="lg" />
+    </view>
+    <view wx:if="{{loading && loaded}}" class="mp-refreshing cy-refresh-float" aria-role="status" aria-live="polite">正在同步最新项目…</view>
+
+    <!-- 2026-10-28 业主 m693:列表上方不放发布活动的按钮(没有活动时空态里仍可发起) -->
+    <view class="mp-list" wx:if="{{projectState === 'ready'}}" style="{{pmList === 1 ? '--pm-l:1;' : (pmList === 2 ? '--pm-l-d:.32s;--pm-l-s:1;' : '')}}">
+      <!-- 2026-11-17 PG-084 = A:卡片右上角放可见的「···」更多按钮,打开与长按同一个操作面板
+           (_openOps)。长按保留作快捷方式,但不再是任何动作的唯一入口(Apple HIG:上下文菜单
+           必须有可见替代入口)。点这一行本身仍是「下一步」(onCardTap 按状态分流)。
+           卡内顺序按稿:tag 行在最上面,再是「封面 | 档期/标题」,最后是底行统计。 -->
+      <view class="mp-card" wx:for="{{list}}" wx:key="id" data-index="{{index}}" bindtap="onCardTap" bindlongpress="onCardLong" hover-class="cy-pressed" hover-stay-time="80">
+        <!-- r2-create(a3-v3-38 业主「和我的订单一样」):卡片结构照「我的订单」——
+             左封面;右侧 顶行(档期 · 状态靠右)/ 标题 / 地址;分隔线下底行写报名·浏览或承接进度。
+             管理动作(上下架 / 删除…)走右上角「···」或长按。 -->
+        <view class="mp-main">
+          <view class="mp-cover cy-img-ph"><image lazy-load="true" class="mp-cover__im cy-img-fade {{imgOn['p' + item.id] ? 'cy-img-fade--on' : ''}}" src="{{item.cover || '/subpackageA/images/route_free_cover.png'}}" mode="aspectFill" data-fade-key="p{{item.id}}" bindload="onImgFadeLoad" /></view>
+          <view class="mp-body">
+            <view class="mp-head">
+              <view class="mp-dot" wx:if="{{item._dot}}"></view>
+              <text class="mp-when ep1">{{item._whenText}}</text>
+              <text class="mp-st mp-st--{{item._stateVariant}}">{{item.stateText}}</text>
+              <view class="mp-card-more" wx:if="{{item._hasOps}}" catchtap="onCardMore" data-index="{{index}}" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="更多">···</view>
+            </view>
+            <view class="mp-tit">{{item.title}}</view>
+            <view class="cy-addr-tap" wx:if="{{item._address}}" catchtap="onAddressTap" data-lat="{{item.latitude}}" data-lng="{{item.longitude}}" data-name="{{item.title}}" data-address="{{item._address}}" data-geo="1" hover-class="cy-pressed" hover-stay-time="80" hover-stop-propagation aria-role="button" aria-label="在地图中打开 {{item._address}}"><view class="mp-addr">{{item._address}}</view></view>
+          </view>
+        </view>
+        <view class="mp-bot">
+          <text class="mp-stat" wx:if="{{item._showPendingVerify}}">{{item._pendingVerifyText}}</text>
+          <text class="mp-stat" wx:elif="{{item._showAccept}}">{{item.acceptStatusText}}</text>
+          <text class="mp-stat" wx:else>{{item.signupCount || 0}} 报名 · {{item.viewCount || 0}} 浏览</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="mp-state" wx:if="{{projectState === 'ready' && list.length === 0}}">
+      <cy-empty kind="empty" title="{{emptyTit}}" sub="{{emptySub}}"
+        cta="{{typeTab === 'topic' ? '去发布' : (typeTab === 'activity' && canPublishActivity ? '发布单场活动' : '')}}"
+        bind:cta="onEmptyCta" fill size="lg" />
+    </view>
+
+    <view class="mp-more" wx:if="{{projectState === 'ready' && capped}}">仅显示最近 200 条</view>
+  </block>
+
+  <!-- ===== 模板(原 mytemplate 节点玩法列表收编) ===== -->
+  <block wx:else>
+    <view class="mp-list">
+      <view class="mp-card" wx:for="{{topicTemplates}}" wx:key="id" data-index="{{index}}" data-src="tpl" bindtap="onCardTap" hover-class="cy-pressed" hover-stay-time="80">
+        <view class="mp-main">
+          <view class="mp-cover cy-img-ph"><image lazy-load="true" class="mp-cover__im cy-img-fade {{imgOn['t' + item.id] ? 'cy-img-fade--on' : ''}}" src="{{item.cover || '/images/route_city_cover.png'}}" mode="aspectFill" data-fade-key="t{{item.id}}" bindload="onImgFadeLoad" /></view>
+          <view class="mp-body">
+            <view class="mp-tit">{{item.title}}</view>
+            <view class="mp-tags"><text class="mp-type">主题模板</text></view>
+          </view>
+        </view>
+      </view>
+      <view class="mp-card" wx:for="{{tplList}}" wx:key="id" data-id="{{item.id}}" bindtap="tplTap" hover-class="cy-pressed" hover-stay-time="80">
+        <!-- r2-create(a3-v3-39 业主「和我的订单一样」):顶行 类型标签 · 广场状态 / 个人审核状态靠右;标题;引用与时长;
+             审核意见;分隔线下底行放操作(同订单卡的按钮位)。 -->
+        <view class="mp-main">
+          <view class="mp-cover cy-img-ph"><image lazy-load="true" class="mp-cover__im cy-img-fade {{imgOn['l' + item.id] ? 'cy-img-fade--on' : ''}}" src="{{item.imgUrl || '/images/route_city_cover.png'}}" mode="aspectFill" data-fade-key="l{{item.id}}" bindload="onImgFadeLoad" /></view>
+          <view class="mp-body">
+            <view class="mp-head">
+              <text class="mp-type">节点玩法</text>
+              <text class="mp-when ep1">{{item._marketText}}</text>
+              <text class="mp-st mp-st--{{item._stateVariant}}">{{item._statusShort}}</text>
+            </view>
+            <view class="mp-tit">{{item.title}}</view>
+            <view class="mp-meta">
+              <text wx:if="{{item.useNum != null && item.useNum !== ''}}">{{ item.useNum || 0 }} 次引用</text>
+              <text class="mp-meta-sep" wx:if="{{item.useNum != null && item.useNum !== '' && item.duration}}">·</text>
+              <text wx:if="{{item.duration}}">{{ item.duration || 0 }} 分钟</text>
+            </view>
+            <view class="mp-stats" wx:if="{{item.reason}}"><text class="mp-stat">个人审核：{{item.reason}}</text></view>
+            <view class="mp-stats" wx:if="{{item.marketReason}}"><text class="mp-stat">广场：{{item.marketReason}}</text></view>
+          </view>
+        </view>
+        <view class="mp-ops">
+          <view wx:if="{{item._canSubmitMarket}}" class="mp-op mp-op-toggle" catchtap="tplSubmitMarket" data-id="{{item.id}}" aria-role="button" aria-label="提交广场审核" hover-class="cy-pressed" hover-stay-time="80" hover-stop-propagation="true">提交广场</view>
+          <view wx:if="{{item._canToggleMarket}}" class="mp-op mp-op-toggle" catchtap="tplToggle" data-id="{{item.id}}" data-target="{{item._marketStatusTarget}}" aria-role="button" aria-label="{{item._marketActionText}}" hover-class="cy-pressed" hover-stay-time="80" hover-stop-propagation="true">{{item._marketActionText}}</view>
+          <view wx:if="{{item._audit}}" class="mp-op mp-op-toggle" catchtap="tplAudit" data-biz="{{item._audit.bizType}}" data-bizid="{{item._audit.bizId}}" data-title="{{item.title}}" aria-role="button" aria-label="查看{{item.title}}的审核记录" hover-class="cy-pressed" hover-stay-time="80" hover-stop-propagation="true">审核记录</view>
+          <view class="mp-op mp-op-del" catchtap="tplDelete" data-id="{{item.id}}" data-title="{{item.title}}" data-pub="{{item.marketStatus}}" aria-role="button" aria-label="删除{{item.title}}" hover-class="cy-pressed" hover-stay-time="80" hover-stop-propagation="true">删除</view>
+        </view>
+      </view>
+    </view>
+
+    <cy-skeleton wx:if="{{tplLoading && !tplLoaded}}" type="card" count="{{skeletonItems.length}}" />
+    <cy-empty wx:if="{{tplAccessDenied}}" kind="no-permission" title="当前身份不能查看这些模板" fill size="lg" />
+    <cy-error load-failure wx:if="{{!tplAccessDenied && !tplLoading && tplErrorMsg && !tplLoaded}}" title="{{tplErrorMsg}}" sub="" retry="重试" bind:retry="retryTemplates" />
+    <view wx:if="{{tplLoading && tplLoaded}}" class="mp-refreshing cy-refresh-float" aria-role="status" aria-live="polite">正在同步最新节点玩法…</view>
+    <!-- 项目列表读失败时 loaded 恒 false:原条件会让模板页整页空白。项目侧失败在项目页签里报,这里照常给空态和下一步 -->
+    <cy-empty wx:if="{{tplLoaded && !tplErrorMsg && tplList.length===0 && (loaded || projectState === 'error') && topicTemplates.length===0}}" title="还没有模板" cta="做一个玩法" bind:cta="createTemplate" />
+  </block>
+
+</view>
+
+<!-- 卡片「···」与长按打开的同一个操作面板(_openOps):列表管理动作。
+     2026-10-28 业主 m694:统一成 Threads 式分组菜单(style/threads-menu.wxss)—— 文字左、图标右,不写说明;
+     删除单独一组标红。行是按这张卡的 _canEdit / _canToggle / _canDelete… 现算的,不可用的动作整行不出。 -->
+<cy-sheet show="{{opsSheet.show}}" inset bind:close="closeOpsSheet">
+  <view class="tm">
+    <view class="tm-group" wx:if="{{opsSheet.canEdit || opsSheet.canViewApplies || opsSheet.canToggle || opsSheet.canCancel || opsSheet.canAudit || opsSheet.canSaveAsTemplate}}">
+      <view class="tm-row" wx:if="{{opsSheet.canEdit}}" bindtap="onOpsPick" data-k="edit" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="编辑"><text class="tm-label">编辑</text><cy-icon class="tm-ico" name="edit" size="40" /></view>
+      <view class="tm-row" wx:if="{{opsSheet.canViewApplies}}" bindtap="onOpsPick" data-k="received" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="收到的申请"><text class="tm-label">收到的申请</text><cy-icon class="tm-ico" name="list" size="40" /></view>
+      <view class="tm-row" wx:if="{{opsSheet.canToggle}}" bindtap="onOpsPick" data-k="toggle" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="{{opsSheet.toggleLabel}}"><text class="tm-label">{{opsSheet.toggleLabel}}</text><cy-icon class="tm-ico" name="flag" size="40" /></view>
+      <view class="tm-row" wx:if="{{opsSheet.canCancel}}" bindtap="onOpsPick" data-k="cancel" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="{{opsSheet.biz === 'topic' ? '取消主题并退款' : '取消活动'}}"><text class="tm-label">{{opsSheet.biz === 'topic' ? '取消主题并退款' : '取消活动'}}</text><cy-icon class="tm-ico" name="close" size="40" /></view>
+      <view class="tm-row" wx:if="{{opsSheet.canAudit}}" bindtap="onOpsPick" data-k="audit" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="审核记录"><text class="tm-label">审核记录</text><cy-icon class="tm-ico" name="info" size="40" /></view>
+      <view class="tm-row" wx:if="{{opsSheet.canSaveAsTemplate}}" bindtap="onOpsPick" data-k="saveAsTemplate" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="另存为模板"><text class="tm-label">另存为模板</text><cy-icon class="tm-ico" name="draft" size="40" /></view>
+    </view>
+    <view class="tm-group" wx:if="{{opsSheet.canDelete}}">
+      <view class="tm-row tm-row--danger" bindtap="onOpsPick" data-k="delete" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="删除"><text class="tm-label">删除</text><cy-icon class="tm-ico" name="trash" size="40" /></view>
+    </view>
+  </view>
+</cy-sheet>
+
+<!-- FOLLOWUP-A-2:审核记录(GET /api/audit/timeline)。行样式沿用上面长按面板;申诉只在回包 canAppeal 时出现 -->
+<cy-sheet show="{{auditSheet.show}}" title="审核记录" bind:close="closeAuditSheet">
+  <view class="mp-ops-sheet">
+    <view class="mp-ops-row" wx:if="{{auditSheet.loading}}" aria-role="status" aria-live="polite">
+      <text class="mp-ops-sub">加载中</text>
+    </view>
+    <view class="mp-ops-row" wx:elif="{{auditSheet.error}}" bindtap="loadAudit" hover-class="cy-pressed" hover-stay-time="80">
+      <text class="mp-ops-label">{{auditSheet.error}}</text>
+      <text class="mp-ops-sub">重试</text>
+    </view>
+    <block wx:else>
+      <view class="mp-ops-row" wx:if="{{!auditSheet.rows.length}}">
+        <text class="mp-ops-sub">暂无记录</text>
+      </view>
+      <view class="mp-ops-row" wx:for="{{auditSheet.rows}}" wx:key="key">
+        <text class="mp-ops-label">{{item.label}}</text>
+        <text class="mp-ops-sub" wx:if="{{item.sub}}">{{item.sub}}</text>
+      </view>
+      <view class="mp-ops-row" wx:if="{{auditSheet.appealText}}">
+        <text class="mp-ops-label">申诉</text>
+        <text class="mp-ops-sub">{{auditSheet.appealText}}</text>
+      </view>
+      <view class="mp-ops-row" wx:if="{{auditSheet.appealError}}"><text class="mp-ops-sub">{{auditSheet.appealError}}</text></view>
+      <view class="mp-ops-row" wx:for="{{auditSheet.attachments}}" wx:key="*this">
+        <image src="{{item}}" mode="aspectFit" style="width:160rpx;height:160rpx" />
+        <text wx:if="{{!auditSheet.pending && !auditSheet.confirmed}}" data-index="{{index}}" bindtap="removeAuditAttachment" hover-class="cy-pressed" hover-stay-time="80">移除附件 {{index + 1}}</text>
+      </view>
+      <view class="mp-ops-row" wx:if="{{auditSheet.canAppeal && !auditSheet.pending && auditSheet.attachments.length < 6}}" bindtap="addAuditAttachment" hover-class="cy-pressed" hover-stay-time="80">
+        <text class="mp-ops-label">添加申诉图片</text>
+      </view>
+      <view class="mp-ops-row" wx:if="{{auditSheet.pending}}" bindtap="recoverAuditAppeal" hover-class="cy-pressed" hover-stay-time="80"><text class="mp-ops-label">读取原申诉结果</text></view>
+      <view class="mp-ops-row" wx:if="{{auditSheet.canAppeal && !auditSheet.pending}}" bindtap="appealAudit" hover-class="cy-pressed" hover-stay-time="80">
+        <text class="mp-ops-label">申诉</text>
+      </view>
+    </block>
+  </view>
+</cy-sheet>
+
+<!-- 危险动作三段式确认:文案来自 utils/danger-actions.js,页面只给 key -->
+<cy-danger-confirm id="dcActivity" bind:confirm="onConfirmDeleteActivity" bind:alt="onDeleteItemAlt" />
+<cy-danger-confirm id="dcCancel" bind:confirm="onConfirmCancelActivity" />
+<cy-danger-confirm id="dcCancelTopic" bind:confirm="onConfirmCancelTopic" />
+<cy-danger-confirm id="dcRoute" bind:confirm="onConfirmDeleteRoute" bind:alt="onDeleteItemAlt" />
+<cy-danger-confirm id="dcTpl" bind:confirm="onConfirmDeleteTemplate" bind:alt="onDeleteTemplateAlt" />

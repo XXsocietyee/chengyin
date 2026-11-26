@@ -1,0 +1,9 @@
+{
+  "component": true,
+  "styleIsolation": "isolated",
+  "usingComponents": {
+    "cy-icon": "/components/cy/icon/index",
+    "cy-nav-bar": "/components/cy/nav-bar/index",
+    "cy-page-title": "/components/cy/page-title/index"
+  }
+}

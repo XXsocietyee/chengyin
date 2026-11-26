@@ -1,0 +1,162 @@
+<view class="{{isMerchantView ? 'theme-merchant' : 'theme-dark'}}">
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+<view class="im-list" style="padding-top: {{statusBarHeight + navBarHeight}}px;">
+  <!-- 标题走 nav-bar 居中槽:二三级页统一「三角返回 + 居中标题 + 原生胶囊」。
+       曾用下方超大左对齐 hero-title(照 Airbnb 210.png),但那让本页成为全站唯一的左标题二级页,
+       与统一导航规范冲突,已撤销。 -->
+  <cy-nav-bar title="消息" custom-back bind:back="onBack" />
+  <view class="message-tools">
+    <cy-tabs class="tabs-row" tabs="{{tabs}}" active="{{activeTab}}" variant="fill" wide="{{true}}" bind:change="onTabChange" />
+  </view>
+
+
+  <!-- 竞猜待答:玩家押完了,答案得商家给,而且**有期限** ——
+       超过 48 小时不给,那一轮由平台作废、谁都拿不到奖。
+       所以它放在消息里:商家是在这儿被提醒的,不该等到自己想起来去翻点位。
+       没有待答的轮次就整行不出 —— 一个常驻的「0 条」入口等于每天骗一次点击。 -->
+  <cy-cell wx:if="{{canSettlePredict}}" class="pool-entry" title="预测待答"
+           description="待公布答案" bind:tap="goPredictInbox" />
+
+  <view wx:if="{{refreshing}}" class="refresh-status cy-refresh-float" aria-role="status" aria-live="polite">
+    <cy-icon name="clock" size="28" /><text>正在刷新消息</text>
+  </view>
+
+  <!-- 刷新失败但保留上次的列表:提示放在页签下、所有行之上,不夹在会话行中间 -->
+  <cy-inline-error wx:if="{{refreshError}}" kind="network" title="{{refreshError}}" action="重试" bind:action="retryConversations" />
+  <!-- 合作邀请:收到的在收件箱、我发出的在发件箱,点进邀约详情处理。与会话是两套数据源,读不到只在这里局部报错。 -->
+  <cy-inline-error wx:if="{{inviteError && !loginRequired}}" kind="data" title="{{inviteError}}" action="重试" bind:action="loadInvites" />
+  <!-- M-06(owner 2026-10-27 m681):商家视角的协作邀请不再是一条条消息,而是顶部一条横滑卡片带;
+       卡片同宽同高,点开进协作邀请详情。玩家视角保持下面原来的邀请行。 -->
+  <!-- W2-04 收口:收件箱没有邀约时也留「协作邀请 · 邀约提醒」这一行 —— 空列表时最需要先开提醒 -->
+  <view wx:if="{{isMerchantView && !loginRequired && (activeTab === 'in' || invitesOut.length)}}" class="invite-strip {{(activeTab === 'in' ? invitesIn.length : invitesOut.length) ? '' : 'invite-strip--bare'}}">
+    <!-- 走查 v2 IMG_0752:邀约提醒做成开关,放在「协作邀请」标题旁(原合作中心那一行「开启」按钮)。
+         订阅须在点击手势内请求,所以开关的 change 直接发起订阅;关掉只改本地显示,微信侧订阅随用随失效。 -->
+    <view class="invite-strip__head">
+      <text class="invite-strip__title">协作邀请</text>
+      <block wx:if="{{activeTab === 'in'}}">
+      <view class="invite-alert">
+        <text class="invite-alert__label">邀约提醒</text>
+        <cy-switch class="invite-alert__sw" checked="{{inviteAlertOn}}" bindchange="onInviteAlertChange" accessibility-label="邀约提醒" />
+      </view>
+      </block>
+    </view>
+    <scroll-view class="invite-strip__scroll" wx:if="{{activeTab === 'in' ? invitesIn.length : invitesOut.length}}" scroll-x enhanced show-scrollbar="{{false}}">
+      <view class="invite-strip__track">
+        <view wx:for="{{activeTab === 'in' ? invitesIn : invitesOut}}" wx:key="rowKey" class="invite-card"
+              data-id="{{item.inviteId}}" data-box="{{activeTab === 'in' ? 'received' : 'sent'}}" bindtap="openInvite"
+              aria-role="button" aria-label="协作邀请：{{item.partnerName || item.topicText}}，{{item.statusText}}"
+              hover-class="cy-pressed" hover-stay-time="80">
+          <!-- 2026-10-28 业主 m681:照 Figma 393:429 / 393:442 —— 状态 · 来自谁,封面 + 档期 / 主题名 / 地点,条款一行,待确认的直接给两颗按钮(进详情处理) -->
+          <view class="invite-card__top">
+            <text class="invite-status is-{{item.badgeTone}}">{{item.statusText}}</text>
+            <text class="invite-card__from">{{activeTab === 'in' ? '来自' : '发给'}} {{item.partnerName}}</text>
+          </view>
+          <view class="invite-card__main">
+            <image wx:if="{{item.topicImgUrl}}" class="invite-card__cover" src="{{item.topicImgUrl}}" mode="aspectFill" lazy-load />
+            <view wx:else class="invite-card__cover invite-card__cover--none" aria-hidden="true"><cy-icon name="connect" size="44" /></view>
+            <view class="invite-card__info">
+              <text class="invite-card__date" wx:if="{{item.dateText}}">{{item.dateText}} 起</text>
+              <text class="invite-card__name">{{item.topicText || item.partnerName}}</text>
+              <text class="invite-card__sub invite-card__target" wx:if="{{item.targetText}}">{{item.targetText}}</text>
+              <text class="invite-card__sub" wx:elif="{{item.topicAddressName}}">{{item.topicAddressName}}</text>
+            </view>
+          </view>
+          <!-- 走查 v2 R03:卡上写邀请语(对方留言),没有留言才退回条款 -->
+          <text class="invite-card__msg" wx:if="{{item.message}}">{{item.message}}</text>
+          <text class="invite-card__terms" wx:elif="{{item.termsText}}">{{item.termsText}}</text>
+          <view class="invite-card__acts" wx:if="{{activeTab === 'in' && item.status === 0}}">
+            <!-- PG-018:原「回复/拒绝/接受合作」三钮无绑定,改为单个「去处理」进邀请详情(同卡片 openInvite) -->
+            <view class="invite-card__btn invite-card__btn--primary" data-id="{{item.inviteId}}" data-box="received" catchtap="openInvite" aria-role="button" aria-label="去处理" hover-class="cy-pressed" hover-stay-time="80">去处理</view>
+          </view>
+          <text wx:else class="invite-card__time">{{item.timeText}}</text>
+        </view>
+      </view>
+    </scroll-view>
+  </view>
+  <view wx:for="{{isMerchantView ? [] : (activeTab === 'in' ? invitesIn : invitesOut)}}" wx:key="rowKey" class="invite-row cy-fly-in" style="animation-delay: {{index < 5 ? index * 40 : 200}}ms"
+        data-id="{{item.inviteId}}" data-box="{{activeTab === 'in' ? 'received' : 'sent'}}" bindtap="openInvite"
+        aria-role="button" aria-label="合作邀请：{{item.partnerName || item.topicText}}，{{item.statusText}}"
+        hover-class="cy-pressed-bg" hover-stay-time="80">
+    <view class="sys-avatar"><cy-icon name="connect" size="44" /></view>
+    <view class="conv-body">
+      <view class="conv-top">
+        <text class="conv-name">{{item.partnerName || item.topicText}}</text>
+        <text class="invite-status is-{{item.badgeTone}}">{{item.statusText}}</text>
+        <text class="conv-time">{{item.timeText}}</text>
+      </view>
+      <text class="conv-preview">{{activeTab === 'in' ? '邀请你合作' : '你发出的邀请'}}{{item.topicText ? ' · ' + item.topicText : ''}}</text>
+    </view>
+  </view>
+
+  <!-- 骨架 -->
+  <cy-skeleton wx:if="{{loading}}" type="list" count="{{6}}" />
+
+  <!-- 错误 -->
+  <!-- PR10 F-W1-12:未登录(无会话 / 401)给登录引导,不与加载失败一起留白 -->
+  <cy-empty wx:elif="{{error && loginRequired}}" kind="no-permission" fill size="lg"
+            title="登录后查看消息" cta="登录" bind:cta="loginConversations" class="cy-fade-in" />
+  <cy-error load-failure class="cy-fade-in" wx:elif="{{error}}" title="加载失败" sub="{{errorMsg}}" retry="重试" bind:retry="retryConversations" />
+
+  <!-- 空态 -->
+  <cy-empty wx:elif="{{loaded && viewList.length === 0 && !(activeTab === 'in' ? invitesIn.length : invitesOut.length)}}"
+            fill
+            size="lg"
+            title="{{activeTab === 'in' ? '还没有消息' : '还没有发出的邀请'}}"
+            cta="{{activeTab === 'in' && communityPostRead ? '去发现找人' : ''}}"
+            bindcta="onEmptyCta" class="cy-fade-in" />
+
+  <!-- 列表 -->
+  <scroll-view class="body" wx:else scroll-y enhanced show-scrollbar="{{false}}" style="{{pmList === 1 ? '--pm-l:1;' : (pmList === 2 ? '--pm-l-d:.32s;--pm-l-s:1;' : '')}}">
+    <text wx:if="{{isMerchantView && viewList.length && (activeTab === 'in' ? invitesIn.length : invitesOut.length)}}" class="invite-strip__title">消息</text>
+    <view class="conv-wrap" wx:for="{{viewList}}" wx:key="conversationId">
+      <!-- 左滑露出的操作 -->
+      <view class="conv-actions" style="opacity: {{item.offset ? 1 : 0}};">
+        <view class="act act-read" hover-class="cy-pressed" hover-stay-time="80" catchtap="onRowRead" data-id="{{item.conversationId}}" data-index="{{index}}" aria-role="button" aria-label="标记会话为已读">
+          <cy-icon class="act-icon" name="check" size="32" /><text class="act-label">标已读</text>
+        </view>
+        <view class="act act-mute" hover-class="cy-pressed" hover-stay-time="80" catchtap="onRowMute" data-id="{{item.conversationId}}" data-index="{{index}}" aria-role="button" aria-label="{{item.muted == 1 ? '恢复会话提醒' : '开启会话免打扰'}}">
+          <cy-icon class="act-icon" name="bell" size="32" /><text class="act-label">{{item.muted == 1 ? '恢复提醒' : '免打扰'}}</text>
+        </view>
+        <view class="act act-del" hover-class="cy-pressed" hover-stay-time="80" catchtap="onRowDelete" data-id="{{item.conversationId}}" data-index="{{index}}" aria-role="button" aria-label="删除会话">
+          <cy-icon class="act-icon" name="trash" size="32" /><text class="act-label">删除</text>
+        </view>
+      </view>
+      <!-- 行内容(可滑) -->
+      <view class="conv {{item.type==2?'is-sys':''}} {{item._dragging ? 'is-dragging' : ''}}"
+            style="transform: translateX({{item.offset || 0}}px);"
+            hover-class="cy-pressed-bg" hover-stay-time="80"
+            data-index="{{index}}"
+            bindtouchstart="onTouchStart" bindtouchmove="onTouchMove" bindtouchend="onTouchEnd"
+            bindtouchcancel="onTouchEnd"
+            bindtap="openChat" data-id="{{item.conversationId}}"
+            data-name="{{item.counterparty.nickname}}" data-avatar="{{item.counterparty.avatar}}"
+            data-type="{{item.type}}"
+            aria-role="button" aria-label="打开{{item.counterparty.nickname}}的会话">
+        <view class="avatar">
+          <view wx:if="{{item.type==2}}" class="sys-avatar">
+            <cy-icon name="bell" size="48" />
+          </view>
+          <image wx:else lazy-load="true" class="avatar-img" src="{{item.counterparty.avatar || '/images/d_profile.png'}}" mode="aspectFill" />
+        </view>
+        <view class="conv-body">
+          <view class="conv-top">
+            <text class="conv-name {{item.type==2?'sys-name':''}}">{{item.counterparty.nickname}}</text>
+            <text wx:if="{{item.type == 3}}" class="official-tag">官方</text>
+            <view wx:if="{{item.muted == 1}}" class="mute-ico" aria-label="已开启免打扰"><cy-icon name="bell" size="28" /></view>
+            <text class="conv-time">{{item.timeText}}</text>
+          </view>
+          <view class="conv-bottom">
+            <text class="conv-preview">{{item.previewText}}</text>
+            <view class="badge {{item.muted == 1 ? 'is-muted' : ''}}" wx:if="{{item.unread > 0}}">{{item.unread > 99 ? '99+' : item.unread}}</view>
+          </view>
+        </view>
+      </view>
+    </view>
+    <view style="height: 40rpx;"></view>
+  </scroll-view>
+</view>
+</view>
+<!-- 危险动作三段式确认(文案在 utils/danger-actions.js) -->
+<cy-danger-confirm id="dc" bind:confirm="onDangerConfirm" bind:cancel="onDangerCancel" bind:done="onDangerCancel" />

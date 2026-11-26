@@ -1,0 +1,1080 @@
+{
+  "sourceSha": "11c8055e179930cd63a1d6e296b8285b0586dd16",
+  "moves": [
+    {
+      "from": "utils/audit-timeline.js",
+      "to": "subpackageA/utils/audit-timeline.js",
+      "sourceBlob": "a41b88e7d374c140ad616eaadbc9fb6c37bbab75"
+    },
+    {
+      "from": "utils/citynode-redeem-outcome.js",
+      "to": "pages/merchant/utils/citynode-redeem-outcome.js",
+      "sourceBlob": "1bb991acbf15fbc4536fa4d237eabadbcdfce910"
+    },
+    {
+      "from": "utils/coop-invite-return.js",
+      "to": "subpackageMember/utils/coop-invite-return.js",
+      "sourceBlob": "52f726314d7554bc74a38cf9d90c844ef032600e"
+    },
+    {
+      "from": "utils/coop-publisher-access.js",
+      "to": "subpackageMember/utils/coop-publisher-access.js",
+      "sourceBlob": "ae793f02e77c058b5d4c670b95b35f3fca7fb9f1"
+    },
+    {
+      "from": "utils/coupon-credential.js",
+      "to": "subpackageMember/utils/coupon-credential.js",
+      "sourceBlob": "31d56fbd72ed5f307640a2aaac7e4cda22808144"
+    },
+    {
+      "from": "utils/features/exploration-anniversary.js",
+      "to": "subpackageTools/utils/features/exploration-anniversary.js",
+      "sourceBlob": "11c3b9af60b5bdda9d87b78344bb5f1b828aee6b"
+    },
+    {
+      "from": "utils/features/exploration-export.js",
+      "to": "subpackageTools/utils/features/exploration-export.js",
+      "sourceBlob": "57beaac18ae289d6023566c7b32c8da79100853f"
+    },
+    {
+      "from": "utils/features/monthly-recap-client.js",
+      "to": "subpackageTools/utils/features/monthly-recap-client.js",
+      "sourceBlob": "f4e2362e6a69319b2bc12617e8f97b4b480d8cc2"
+    },
+    {
+      "from": "utils/inbox-preview.js",
+      "to": "pages/merchant/utils/inbox-preview.js",
+      "sourceBlob": "58dae0ecde308dac2f4e45c6de04b26f0ed74fc4"
+    },
+    {
+      "from": "utils/publish/pro-editor-draft.js",
+      "to": "pages/square/utils/publish/pro-editor-draft.js",
+      "sourceBlob": "392c6ac6d7df119a69e87f465fa197a7b6c3a425"
+    },
+    {
+      "from": "utils/square-share.js",
+      "to": "pages/square/utils/square-share.js",
+      "sourceBlob": "bfafaf8e23ac2278f1aef7080dc8bd5e5c958c6b"
+    },
+    {
+      "from": "utils/team-up.js",
+      "to": "subpackageMember/utils/team-up.js",
+      "sourceBlob": "4623d744af8ce3b19af58155e8af5650afea9e97"
+    },
+    {
+      "from": "utils/publish/pro-editor-policy.js",
+      "to": "pages/publish/utils/publish/pro-editor-policy.js",
+      "sourceBlob": "5688bf2ef3733ae7ef44417fd31f6416214741d8"
+    },
+    {
+      "from": "style/tool-ui.wxss",
+      "to": "subpackageTools/style/tool-ui.wxss",
+      "sourceBlob": "b82114c50f8889f49a878cd3eaef83c151eb1e3a"
+    },
+    {
+      "from": "utils/wxs/chapter-title.wxs",
+      "to": "pages/publish/utils/wxs/chapter-title.wxs",
+      "sourceBlob": "385f28718f654d9caea9119ad32f4d5355c7fcda"
+    },
+    {
+      "from": "images/d_frametu.jpg",
+      "to": "pages/club/images/d_frametu.jpg",
+      "sourceBlob": "24db5cc5363bf36108992959ba9d08c211b9c9fb"
+    },
+    {
+      "from": "images/d_location2.png",
+      "to": "pages/searchmap/images/d_location2.png",
+      "sourceBlob": "d2f9e5ef5d95b354b0a9c436c1570e49bb0d873a"
+    },
+    {
+      "from": "images/d_orderIcon.png",
+      "to": "subpackageMember/images/d_orderIcon.png",
+      "sourceBlob": "218f59f2cff77c5c3f4a24227ab1d3a50641fab5"
+    },
+    {
+      "from": "images/d_orderIcon2.png",
+      "to": "subpackageMember/images/d_orderIcon2.png",
+      "sourceBlob": "12a3abb9eff03ea1281875fa4a24d1781640a997"
+    },
+    {
+      "from": "images/icon_set.png",
+      "to": "subpackageMember/images/icon_set.png",
+      "sourceBlob": "61a2ba30de56b317449773ceaa0230daa798d0e4"
+    },
+    {
+      "from": "images/icon_sjt.png",
+      "to": "subpackageMember/images/icon_sjt.png",
+      "sourceBlob": "133afaaecea8a0a02021dad6e62989c39c536814"
+    },
+    {
+      "from": "images/icon_sjt_h.png",
+      "to": "subpackageMember/images/icon_sjt_h.png",
+      "sourceBlob": "523bb08fcd59d2c6cc69754bc780a80a6d98869b"
+    },
+    {
+      "from": "images/icon_tag_check.svg",
+      "to": "pages/publish/images/icon_tag_check.svg",
+      "sourceBlob": "139417df8d156926610a580130abb52c53749d0b"
+    },
+    {
+      "from": "images/icon_ticket_empty.svg",
+      "to": "subpackageMember/images/icon_ticket_empty.svg",
+      "sourceBlob": "51345a001d1757ec247e28aab2a8e734b33e9014"
+    },
+    {
+      "from": "images/icon_xjt.png",
+      "to": "subpackageMember/images/icon_xjt.png",
+      "sourceBlob": "6de41f0efdcd1a46923bf7e5d85711839208a984"
+    },
+    {
+      "from": "images/icon_xjt_h.png",
+      "to": "subpackageMember/images/icon_xjt_h.png",
+      "sourceBlob": "48a443131e65409217c275fd5a19b20eccc53e5f"
+    },
+    {
+      "from": "images/merchant/reviews/icon-star-filled.svg",
+      "to": "pages/merchant/images/merchant/reviews/icon-star-filled.svg",
+      "sourceBlob": "41e8bcb414f613ee2ce59a40c37c2b2031cf1f6c"
+    },
+    {
+      "from": "images/merchant/reviews/icon-star-muted.svg",
+      "to": "pages/merchant/images/merchant/reviews/icon-star-muted.svg",
+      "sourceBlob": "75137db3362723985cf9e316cbe703c952a9b691"
+    },
+    {
+      "from": "images/merchant/reviews/icon-star-small.svg",
+      "to": "pages/merchant/images/merchant/reviews/icon-star-small.svg",
+      "sourceBlob": "15346853bfeee9ed618b48e420829af78e488c5e"
+    },
+    {
+      "from": "components/cy/coop-invite-sheet/index.js",
+      "to": "subpackageMember/components/cy/coop-invite-sheet/index.js",
+      "sourceBlob": "b09c538aea7a278f475ba8ec3187c3f6d828bc3b"
+    },
+    {
+      "from": "components/cy/coop-invite-sheet/index.json",
+      "to": "subpackageMember/components/cy/coop-invite-sheet/index.json",
+      "sourceBlob": "eba73b051189410cc2cd28003184d9506c3e776c"
+    },
+    {
+      "from": "components/cy/coop-invite-sheet/index.wxml",
+      "to": "subpackageMember/components/cy/coop-invite-sheet/index.wxml",
+      "sourceBlob": "848d8005c4754f6053346190b3857caa03ddab80"
+    },
+    {
+      "from": "components/cy/coop-invite-sheet/index.wxss",
+      "to": "subpackageMember/components/cy/coop-invite-sheet/index.wxss",
+      "sourceBlob": "112ca72556ff90eb64487148bbce8054d6d0ca99"
+    },
+    {
+      "from": "behaviors/replay-motion.js",
+      "to": "pages/playkit/behaviors/replay-motion.js",
+      "sourceBlob": "1978ee2a6c4fb3e657a384697fcc850555a62a7f"
+    },
+    {
+      "from": "components/cy/chapter-gate/index.js",
+      "to": "pages/publishkit/components/chapter-gate/index.js",
+      "sourceBlob": "266fdaae16f8133daa5992a354ef502866049176"
+    },
+    {
+      "from": "components/cy/chapter-gate/index.json",
+      "to": "pages/publishkit/components/chapter-gate/index.json",
+      "sourceBlob": "d80dd20a6bff3a1e4094d2712d37b3f370dfc189"
+    },
+    {
+      "from": "components/cy/chapter-gate/index.wxml",
+      "to": "pages/publishkit/components/chapter-gate/index.wxml",
+      "sourceBlob": "db700b3d39e89d978284672fd85cc8b5790050ee"
+    },
+    {
+      "from": "components/cy/chapter-gate/index.wxss",
+      "to": "pages/publishkit/components/chapter-gate/index.wxss",
+      "sourceBlob": "c14ab4b6e08415b663de48a1a73a513a1409af87"
+    },
+    {
+      "from": "components/cy/chips/index.js",
+      "to": "pages/publish/components/chips/index.js",
+      "sourceBlob": "84218538b63e1d343f5a755e2646693214a4d3f0"
+    },
+    {
+      "from": "components/cy/chips/index.json",
+      "to": "pages/publish/components/chips/index.json",
+      "sourceBlob": "357cf73347c36da494a686986585bba21cf11e92"
+    },
+    {
+      "from": "components/cy/chips/index.wxml",
+      "to": "pages/publish/components/chips/index.wxml",
+      "sourceBlob": "68b12f41a2d35e7d527eb43f923952bf75166ebc"
+    },
+    {
+      "from": "components/cy/chips/index.wxss",
+      "to": "pages/publish/components/chips/index.wxss",
+      "sourceBlob": "16e80e39241d16b2e785337d20889039a363afcd"
+    },
+    {
+      "from": "components/cy/choice-sheet/index.js",
+      "to": "pages/publish/components/choice-sheet/index.js",
+      "sourceBlob": "47f1610a979f835e681816f2243e0523d4b19d9c"
+    },
+    {
+      "from": "components/cy/choice-sheet/index.json",
+      "to": "pages/publish/components/choice-sheet/index.json",
+      "sourceBlob": "de5ba4fb0bb33043e3282334f6eb1cac6877868a"
+    },
+    {
+      "from": "components/cy/choice-sheet/index.wxml",
+      "to": "pages/publish/components/choice-sheet/index.wxml",
+      "sourceBlob": "5b968e8845cfb100e8d51e1eb88c3817bb0a5fe8"
+    },
+    {
+      "from": "components/cy/choice-sheet/index.wxss",
+      "to": "pages/publish/components/choice-sheet/index.wxss",
+      "sourceBlob": "246bcfca307729f3bc9195ded3cbfcd17738399e"
+    },
+    {
+      "from": "components/cy/club-pool-cards/index.js",
+      "to": "pages/merchant/components/cy/club-pool-cards/index.js",
+      "sourceBlob": "9d6c56a409cf6046dd9fb05d5b4f8880c9612652"
+    },
+    {
+      "from": "components/cy/club-pool-cards/index.json",
+      "to": "pages/merchant/components/cy/club-pool-cards/index.json",
+      "sourceBlob": "52dad47bd3bbf81819ec93a10981a1960f7f173a"
+    },
+    {
+      "from": "components/cy/club-pool-cards/index.wxml",
+      "to": "pages/merchant/components/cy/club-pool-cards/index.wxml",
+      "sourceBlob": "807228628f7c27bb678f1b2c06211d982c0a127b"
+    },
+    {
+      "from": "components/cy/club-pool-cards/index.wxss",
+      "to": "pages/merchant/components/cy/club-pool-cards/index.wxss",
+      "sourceBlob": "9dc07953a39fb9fc27fe96659c1efb1aa93c7b54"
+    },
+    {
+      "from": "components/cy/earnings-overview/index.js",
+      "to": "subpackageA/components/earnings-overview/index.js",
+      "sourceBlob": "6b30b912b74aaca09fafd49e255e6759e096d584"
+    },
+    {
+      "from": "components/cy/earnings-overview/index.json",
+      "to": "subpackageA/components/earnings-overview/index.json",
+      "sourceBlob": "52dad47bd3bbf81819ec93a10981a1960f7f173a"
+    },
+    {
+      "from": "components/cy/earnings-overview/index.wxml",
+      "to": "subpackageA/components/earnings-overview/index.wxml",
+      "sourceBlob": "bf9fa9d3ec1ddcabbffd77efa2c13106ba54e4ce"
+    },
+    {
+      "from": "components/cy/earnings-overview/index.wxss",
+      "to": "subpackageA/components/earnings-overview/index.wxss",
+      "sourceBlob": "3e9a1035d43891bf33ea9224f45c7f41a98ddf34"
+    },
+    {
+      "from": "components/cy/event-attendance/index.js",
+      "to": "pages/activity/components/event-attendance/index.js",
+      "sourceBlob": "f6a4ddd2f8c501716905a3be9ff028fd0fbb8149"
+    },
+    {
+      "from": "components/cy/event-attendance/index.json",
+      "to": "pages/activity/components/event-attendance/index.json",
+      "sourceBlob": "cca0f5820b604d54f91ad780d65c8491da1726fd"
+    },
+    {
+      "from": "components/cy/event-attendance/index.wxml",
+      "to": "pages/activity/components/event-attendance/index.wxml",
+      "sourceBlob": "ec9c5d34e0621142adacdedf966164b3565cb2d5"
+    },
+    {
+      "from": "components/cy/event-attendance/index.wxss",
+      "to": "pages/activity/components/event-attendance/index.wxss",
+      "sourceBlob": "8c4c383b3dc44330cdfe4dac13d463e304fa314d"
+    },
+    {
+      "from": "components/cy/list-group/index.js",
+      "to": "pages/publish/components/list-group/index.js",
+      "sourceBlob": "016ef768330b904b62e2fe759a4601595dd89900"
+    },
+    {
+      "from": "components/cy/list-group/index.json",
+      "to": "pages/publish/components/list-group/index.json",
+      "sourceBlob": "a89ef4dbeefa01f5cd7971973aa4db6498d139f7"
+    },
+    {
+      "from": "components/cy/list-group/index.wxml",
+      "to": "pages/publish/components/list-group/index.wxml",
+      "sourceBlob": "8842d497faada372ef3d1302fd524c7383422968"
+    },
+    {
+      "from": "components/cy/list-group/index.wxss",
+      "to": "pages/publish/components/list-group/index.wxss",
+      "sourceBlob": "b1b38df9dec05ebb652f899dcc702642647d1881"
+    },
+    {
+      "from": "components/cy/list-row/index.js",
+      "to": "pages/publish/components/list-row/index.js",
+      "sourceBlob": "78561a9419a2af85f2392c71d2490ee177134995"
+    },
+    {
+      "from": "components/cy/list-row/index.json",
+      "to": "pages/publish/components/list-row/index.json",
+      "sourceBlob": "357cf73347c36da494a686986585bba21cf11e92"
+    },
+    {
+      "from": "components/cy/list-row/index.wxml",
+      "to": "pages/publish/components/list-row/index.wxml",
+      "sourceBlob": "c11a2c88144d2075bae6c71295a5998235cf0acc"
+    },
+    {
+      "from": "components/cy/list-row/index.wxss",
+      "to": "pages/publish/components/list-row/index.wxss",
+      "sourceBlob": "f8386b0dcf27de3df5a6f5563aa68525e8e14e0d"
+    },
+    {
+      "from": "components/cy/media-model-preview/index.js",
+      "to": "pages/privacy/components/media-model-preview/index.js",
+      "sourceBlob": "562bca434269b79bfaa120b8069b07e7057cee5d"
+    },
+    {
+      "from": "components/cy/media-model-preview/index.json",
+      "to": "pages/privacy/components/media-model-preview/index.json",
+      "sourceBlob": "209fcc395678ef7d0ce67afc6efcfc1deccfdf24"
+    },
+    {
+      "from": "components/cy/media-model-preview/index.wxml",
+      "to": "pages/privacy/components/media-model-preview/index.wxml",
+      "sourceBlob": "cd22f108851add1231c7703e01494680d1b8ee7a"
+    },
+    {
+      "from": "components/cy/media-model-preview/index.wxss",
+      "to": "pages/privacy/components/media-model-preview/index.wxss",
+      "sourceBlob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+    },
+    {
+      "from": "components/cy/scene-asset-earnings/index.js",
+      "to": "subpackageA/components/scene-asset-earnings/index.js",
+      "sourceBlob": "b490c5653d088dec7a9019ca44fdcfd0a3b8827b"
+    },
+    {
+      "from": "components/cy/scene-asset-earnings/index.json",
+      "to": "subpackageA/components/scene-asset-earnings/index.json",
+      "sourceBlob": "cbc9903a5c1cbd6cdb3e9c304a0eab7b116c3a96"
+    },
+    {
+      "from": "components/cy/scene-asset-earnings/index.wxml",
+      "to": "subpackageA/components/scene-asset-earnings/index.wxml",
+      "sourceBlob": "d8393a0eacaa670959e00e1b3db5f92338662dc0"
+    },
+    {
+      "from": "components/cy/scene-asset-earnings/index.wxss",
+      "to": "subpackageA/components/scene-asset-earnings/index.wxss",
+      "sourceBlob": "50c935134022419d2e5a078c6cdc4ff02d7194c9"
+    },
+    {
+      "from": "components/cy/scene-asset-income-detail/index.js",
+      "to": "subpackageA/components/scene-asset-income-detail/index.js",
+      "sourceBlob": "e091ad27744a79a592a48f6613b25b8d14859a1d"
+    },
+    {
+      "from": "components/cy/scene-asset-income-detail/index.json",
+      "to": "subpackageA/components/scene-asset-income-detail/index.json",
+      "sourceBlob": "8d2f89ae4bd419abc206cef523a1ef0996629b63"
+    },
+    {
+      "from": "components/cy/scene-asset-income-detail/index.wxml",
+      "to": "subpackageA/components/scene-asset-income-detail/index.wxml",
+      "sourceBlob": "3c72ec0f3f636080b619214ab29f26f54139d632"
+    },
+    {
+      "from": "components/cy/scene-asset-income-detail/index.wxss",
+      "to": "subpackageA/components/scene-asset-income-detail/index.wxss",
+      "sourceBlob": "17620b652d3609f3f5fbf4bbe53b6ab024d2d7fc"
+    },
+    {
+      "from": "components/cy/scene-club-edit/index.js",
+      "to": "pages/club/components/cy/scene-club-edit/index.js",
+      "sourceBlob": "ce1d58db985ce918fc3ff9ed0ee32546db2064f0"
+    },
+    {
+      "from": "components/cy/scene-club-edit/index.json",
+      "to": "pages/club/components/cy/scene-club-edit/index.json",
+      "sourceBlob": "bc8f4403eab833e50beb92e0bca189fb8ede50fa"
+    },
+    {
+      "from": "components/cy/scene-club-edit/index.wxml",
+      "to": "pages/club/components/cy/scene-club-edit/index.wxml",
+      "sourceBlob": "3ce41e380bc6bb2c05ded3766df3dcfa2bd9b3c0"
+    },
+    {
+      "from": "components/cy/scene-club-edit/index.wxss",
+      "to": "pages/club/components/cy/scene-club-edit/index.wxss",
+      "sourceBlob": "cef3717a8e035b59228253c6521d2ed09018b5a6"
+    },
+    {
+      "from": "components/cy/scene-deep-link/index.js",
+      "to": "subpackageMember/components/cy/scene-deep-link/index.js",
+      "sourceBlob": "d6d194344285542f48a34985a86e7c710c51a401"
+    },
+    {
+      "from": "components/cy/scene-deep-link/index.json",
+      "to": "subpackageMember/components/cy/scene-deep-link/index.json",
+      "sourceBlob": "ada8b3cfcd41784ba9f228cb18187bb883bea26b"
+    },
+    {
+      "from": "components/cy/scene-deep-link/index.wxml",
+      "to": "subpackageMember/components/cy/scene-deep-link/index.wxml",
+      "sourceBlob": "2cb348dbaed81624993577cc884493810f391efa"
+    },
+    {
+      "from": "components/cy/scene-deep-link/index.wxss",
+      "to": "subpackageMember/components/cy/scene-deep-link/index.wxss",
+      "sourceBlob": "1daf9b4f969340e0ed5b2952bf8bc43be253b3fc"
+    },
+    {
+      "from": "components/cy/scene-member-invite-history/index.js",
+      "to": "subpackageA/components/scene-member-invite-history/index.js",
+      "sourceBlob": "ba16351ff4d1a5082621aa9d3650f4884a9f9e0d"
+    },
+    {
+      "from": "components/cy/scene-member-invite-history/index.json",
+      "to": "subpackageA/components/scene-member-invite-history/index.json",
+      "sourceBlob": "485bd57b66397394aed6c248212d562565f00a62"
+    },
+    {
+      "from": "components/cy/scene-member-invite-history/index.wxml",
+      "to": "subpackageA/components/scene-member-invite-history/index.wxml",
+      "sourceBlob": "b7dfa679fc95547ef71ef1174541ec741dcba251"
+    },
+    {
+      "from": "components/cy/scene-member-invite-history/index.wxss",
+      "to": "subpackageA/components/scene-member-invite-history/index.wxss",
+      "sourceBlob": "f0b0516d84c19b7fcb2f18f5116aeb02f9d250b4"
+    },
+    {
+      "from": "components/cy/scene-member-withdraw-history/index.js",
+      "to": "subpackageMember/components/cy/scene-member-withdraw-history/index.js",
+      "sourceBlob": "c4135671ebb4ef2827a73bdc87618d334dc398ba"
+    },
+    {
+      "from": "components/cy/scene-member-withdraw-history/index.json",
+      "to": "subpackageMember/components/cy/scene-member-withdraw-history/index.json",
+      "sourceBlob": "14310861103df5277180717859ae19c9017db34d"
+    },
+    {
+      "from": "components/cy/scene-member-withdraw-history/index.wxml",
+      "to": "subpackageMember/components/cy/scene-member-withdraw-history/index.wxml",
+      "sourceBlob": "d16422a69d748a674cbf9be3c51a7197c2d4996c"
+    },
+    {
+      "from": "components/cy/scene-member-withdraw-history/index.wxss",
+      "to": "subpackageMember/components/cy/scene-member-withdraw-history/index.wxss",
+      "sourceBlob": "a78869d81322b30db39a3ee5d1f04271aeb8b703"
+    },
+    {
+      "from": "components/cy/scene-merchant-profit/index.js",
+      "to": "subpackageA/components/scene-merchant-profit/index.js",
+      "sourceBlob": "5196b3be0c216ad054d34903e75245c8fa18f2b6"
+    },
+    {
+      "from": "components/cy/scene-merchant-profit/index.json",
+      "to": "subpackageA/components/scene-merchant-profit/index.json",
+      "sourceBlob": "0587192c059c104b99dfc90e6a1a3fc0c3b42ff3"
+    },
+    {
+      "from": "components/cy/scene-merchant-profit/index.wxml",
+      "to": "subpackageA/components/scene-merchant-profit/index.wxml",
+      "sourceBlob": "9ace794e4c37bf2b64b9d686ef21326bf6efa0ca"
+    },
+    {
+      "from": "components/cy/scene-merchant-profit/index.wxss",
+      "to": "subpackageA/components/scene-merchant-profit/index.wxss",
+      "sourceBlob": "c6d56f7a401fdf62cf3d646ba91423f08fff5589"
+    },
+    {
+      "from": "components/cy/scene-qr-ticket/index.js",
+      "to": "pages/play/components/scene-qr-ticket/index.js",
+      "sourceBlob": "aace8057fa7fafe703c7b58598df29299436f7fb"
+    },
+    {
+      "from": "components/cy/scene-qr-ticket/index.json",
+      "to": "pages/play/components/scene-qr-ticket/index.json",
+      "sourceBlob": "09066313324fe54d76bd5cbcd7154efe67da6e83"
+    },
+    {
+      "from": "components/cy/scene-qr-ticket/index.wxml",
+      "to": "pages/play/components/scene-qr-ticket/index.wxml",
+      "sourceBlob": "822a3858f6db2e4bb27fa7ab92378b6a2502a234"
+    },
+    {
+      "from": "components/cy/scene-qr-ticket/index.wxss",
+      "to": "pages/play/components/scene-qr-ticket/index.wxss",
+      "sourceBlob": "fa4fdb1838783b0c80ed2cef316995bae2ba533b"
+    },
+    {
+      "from": "components/cy/scene-roam-discover/index.js",
+      "to": "pages/play/components/scene-roam-discover/index.js",
+      "sourceBlob": "2b78378432d2253a048acb16f150b00e981cc94b"
+    },
+    {
+      "from": "components/cy/scene-roam-discover/index.json",
+      "to": "pages/play/components/scene-roam-discover/index.json",
+      "sourceBlob": "9475baa1f7df8036240a3f504a6be9c5341da7bc"
+    },
+    {
+      "from": "components/cy/scene-roam-discover/index.wxml",
+      "to": "pages/play/components/scene-roam-discover/index.wxml",
+      "sourceBlob": "f8bc3e6e66a6161c09bb0efe725c5828caae8874"
+    },
+    {
+      "from": "components/cy/scene-roam-discover/index.wxss",
+      "to": "pages/play/components/scene-roam-discover/index.wxss",
+      "sourceBlob": "98bfcfbbdba83331559e885764b07ae8e5b90c06"
+    },
+    {
+      "from": "components/cy/scene-route-content/index.js",
+      "to": "subpackageMember/components/cy/scene-route-content/index.js",
+      "sourceBlob": "245c79acc11597f18a00c0aa29a1e9245574eb1c"
+    },
+    {
+      "from": "components/cy/scene-route-content/index.json",
+      "to": "subpackageMember/components/cy/scene-route-content/index.json",
+      "sourceBlob": "93eba2467f0215c9e8e44e670edcfd610870e958"
+    },
+    {
+      "from": "components/cy/scene-route-content/index.wxml",
+      "to": "subpackageMember/components/cy/scene-route-content/index.wxml",
+      "sourceBlob": "c191bda4bfdd6212542a5c0e7cb755592d45f663"
+    },
+    {
+      "from": "components/cy/scene-route-content/index.wxss",
+      "to": "subpackageMember/components/cy/scene-route-content/index.wxss",
+      "sourceBlob": "484b3050b2a074c3160a5844397c0dfc6ebbe4f2"
+    },
+    {
+      "from": "components/cy/scene-settings-deregister/index.js",
+      "to": "pages/deregister/components/scene-settings-deregister/index.js",
+      "sourceBlob": "37f219fde7e65f3763c2d55d500611eb2280e42e"
+    },
+    {
+      "from": "components/cy/scene-settings-deregister/index.json",
+      "to": "pages/deregister/components/scene-settings-deregister/index.json",
+      "sourceBlob": "bed2571563f763a8be839406e0c3f2d0c93c68a8"
+    },
+    {
+      "from": "components/cy/scene-settings-deregister/index.wxml",
+      "to": "pages/deregister/components/scene-settings-deregister/index.wxml",
+      "sourceBlob": "b382cf1faaef0080f282525b89b035a8a18017d3"
+    },
+    {
+      "from": "components/cy/scene-settings-deregister/index.wxss",
+      "to": "pages/deregister/components/scene-settings-deregister/index.wxss",
+      "sourceBlob": "079d94d7c0ef7cb8f82466b181ee54bb25aaae80"
+    },
+    {
+      "from": "components/cy/scene-share-invite/index.js",
+      "to": "subpackageMember/components/cy/scene-share-invite/index.js",
+      "sourceBlob": "93e3c0ca724e9ef54ca540a0e1da7ec235242818"
+    },
+    {
+      "from": "components/cy/scene-share-invite/index.json",
+      "to": "subpackageMember/components/cy/scene-share-invite/index.json",
+      "sourceBlob": "a748d700e602e22c0f01e145672c4b8870d27b76"
+    },
+    {
+      "from": "components/cy/scene-share-invite/index.wxml",
+      "to": "subpackageMember/components/cy/scene-share-invite/index.wxml",
+      "sourceBlob": "999d3e694661eeb00c18cd37fd69539556f17097"
+    },
+    {
+      "from": "components/cy/scene-share-invite/index.wxss",
+      "to": "subpackageMember/components/cy/scene-share-invite/index.wxss",
+      "sourceBlob": "9c90c4fe0e4e64f3bf96a9f689bcce05386145fd"
+    },
+    {
+      "from": "components/cy/segmented/index.js",
+      "to": "pages/publish/components/segmented/index.js",
+      "sourceBlob": "069d9c99e2fddd37b95bef9b46b6ac896e3f3f19"
+    },
+    {
+      "from": "components/cy/segmented/index.json",
+      "to": "pages/publish/components/segmented/index.json",
+      "sourceBlob": "a89ef4dbeefa01f5cd7971973aa4db6498d139f7"
+    },
+    {
+      "from": "components/cy/segmented/index.wxml",
+      "to": "pages/publish/components/segmented/index.wxml",
+      "sourceBlob": "a693adeae052337ec17c991853c6dddfeb222de5"
+    },
+    {
+      "from": "components/cy/segmented/index.wxss",
+      "to": "pages/publish/components/segmented/index.wxss",
+      "sourceBlob": "1b04abd00ee3e609eb174caaa484c694af740eca"
+    },
+    {
+      "from": "components/cy/sheet-nav/index.js",
+      "to": "pages/publish/components/sheet-nav/index.js",
+      "sourceBlob": "98a592ebe0bef2c414a3c1db4d6316a580830ee9"
+    },
+    {
+      "from": "components/cy/sheet-nav/index.json",
+      "to": "pages/publish/components/sheet-nav/index.json",
+      "sourceBlob": "357cf73347c36da494a686986585bba21cf11e92"
+    },
+    {
+      "from": "components/cy/sheet-nav/index.wxml",
+      "to": "pages/publish/components/sheet-nav/index.wxml",
+      "sourceBlob": "b4bfc0d2f7c194d627cbab63fbcd3d8106938185"
+    },
+    {
+      "from": "components/cy/sheet-nav/index.wxss",
+      "to": "pages/publish/components/sheet-nav/index.wxss",
+      "sourceBlob": "41d574712019230e7bbc8424f3f9a7c2d41eaa2c"
+    },
+    {
+      "from": "components/cy/stepper/index.js",
+      "to": "pages/publish/components/stepper/index.js",
+      "sourceBlob": "e0f11105d5e9c44048a996d94aa1cca7498f78fc"
+    },
+    {
+      "from": "components/cy/stepper/index.json",
+      "to": "pages/publish/components/stepper/index.json",
+      "sourceBlob": "a89ef4dbeefa01f5cd7971973aa4db6498d139f7"
+    },
+    {
+      "from": "components/cy/stepper/index.wxml",
+      "to": "pages/publish/components/stepper/index.wxml",
+      "sourceBlob": "8e8773a40c3e8f9772cdd8e69aa255d79e8aaff8"
+    },
+    {
+      "from": "components/cy/stepper/index.wxss",
+      "to": "pages/publish/components/stepper/index.wxss",
+      "sourceBlob": "3ec8d1dc2d8f50e6e1112fa8e1c71f9d084a198a"
+    },
+    {
+      "from": "components/cy/swipe-row/index.js",
+      "to": "pages/publish/components/swipe-row/index.js",
+      "sourceBlob": "40287fdc46540f8058a0c25fb1b00ae7197ed3b2"
+    },
+    {
+      "from": "components/cy/swipe-row/index.json",
+      "to": "pages/publish/components/swipe-row/index.json",
+      "sourceBlob": "a89ef4dbeefa01f5cd7971973aa4db6498d139f7"
+    },
+    {
+      "from": "components/cy/swipe-row/index.wxml",
+      "to": "pages/publish/components/swipe-row/index.wxml",
+      "sourceBlob": "549eb19ef8320a62a3af065c195564aa7e99c74b"
+    },
+    {
+      "from": "components/cy/swipe-row/index.wxss",
+      "to": "pages/publish/components/swipe-row/index.wxss",
+      "sourceBlob": "332b79023479f9a7c32ee6c10708004823fe2b5c"
+    },
+    {
+      "from": "components/roleBadge/index.js",
+      "to": "subpackageMember/components/roleBadge/index.js",
+      "sourceBlob": "b76af099394526f91b878e9a904b8ff9bb64e136"
+    },
+    {
+      "from": "components/roleBadge/index.json",
+      "to": "subpackageMember/components/roleBadge/index.json",
+      "sourceBlob": "a89ef4dbeefa01f5cd7971973aa4db6498d139f7"
+    },
+    {
+      "from": "components/roleBadge/index.wxml",
+      "to": "subpackageMember/components/roleBadge/index.wxml",
+      "sourceBlob": "c1bee7a02ebbcbc44f9c2e5f60cd3f34414cf0f1"
+    },
+    {
+      "from": "components/roleBadge/index.wxss",
+      "to": "subpackageMember/components/roleBadge/index.wxss",
+      "sourceBlob": "4f65a4269d0f270befd9c0eb0a83c229263abd4a"
+    },
+    {
+      "from": "images/del.png",
+      "to": "pages/gerenziliao/images/del.png",
+      "sourceBlob": "70f27694c7ee7e4f2bdd095923b93478cba7437e"
+    },
+    {
+      "from": "images/figma-invite-qr.png",
+      "to": "subpackageMember/images/figma-invite-qr.png",
+      "sourceBlob": "efe0eda8a1ddaf4a0dd55aa874d3338f0a798e07"
+    },
+    {
+      "from": "images/icon_pen.svg",
+      "to": "subpackageMember/images/icon_pen.svg",
+      "sourceBlob": "80bb0564df80e66861bccd618326474d0cc634ed"
+    },
+    {
+      "from": "images/icon_qa_person.svg",
+      "to": "subpackageMember/images/icon_qa_person.svg",
+      "sourceBlob": "f31a7cac59a208011818cdc8098bb74924135e0e"
+    },
+    {
+      "from": "images/icon_search.svg",
+      "to": "pages/templatedetail/images/icon_search.svg",
+      "sourceBlob": "5cc73ca97272ab2b9cad73037e244d4bbf19cf96"
+    },
+    {
+      "from": "images/icon_star.png",
+      "to": "subpackageMember/images/icon_star.png",
+      "sourceBlob": "81c175d9e7f202c614f78fc4f2a919ee8f9007f5"
+    },
+    {
+      "from": "images/nav_msg.svg",
+      "to": "pages/merchant/images/nav_msg.svg",
+      "sourceBlob": "4a783cd4545c499f0f16daec79e28b47cb43d613"
+    },
+    {
+      "from": "images/tpl-tab-game.svg",
+      "to": "pages/templatedetail/images/tpl-tab-game.svg",
+      "sourceBlob": "6d0670d9d1c52c748032cf4e2ed531c7e1220fb1"
+    },
+    {
+      "from": "images/tpl-tab-topic.svg",
+      "to": "pages/templatedetail/images/tpl-tab-topic.svg",
+      "sourceBlob": "20b196e7e7563ddbfe08866ac06503512581e84a"
+    },
+    {
+      "from": "style/club-apply-form.wxss",
+      "to": "pages/club/style/club-apply-form.wxss",
+      "sourceBlob": "65223b3ffa1a9408a87d7f9b4023ab3a9e402376"
+    },
+    {
+      "from": "utils/club-edit-draft.js",
+      "to": "pages/club/utils/club-edit-draft.js",
+      "sourceBlob": "79292cb778b502c5124be8060afb6fc841b96222"
+    },
+    {
+      "from": "utils/club-phone-call.js",
+      "to": "pages/club/utils/club-phone-call.js",
+      "sourceBlob": "15b30b708e2698f68b21981af0630b34b979a47c"
+    },
+    {
+      "from": "utils/content-report.js",
+      "to": "pages/topic/utils/content-report.js",
+      "sourceBlob": "540cfff3e58169be38b543b371123c6d4d58258d"
+    },
+    {
+      "from": "utils/earnings-view.js",
+      "to": "subpackageA/utils/earnings-view.js",
+      "sourceBlob": "83dd5671a2adc6d9889ae44a9ebd9b63ef48d274"
+    },
+    {
+      "from": "utils/free-explore-bundle.js",
+      "to": "subpackageMember/utils/free-explore-bundle.js",
+      "sourceBlob": "a50bbf51bd62244b0c53ee10179591121a24b391"
+    },
+    {
+      "from": "utils/player-code.js",
+      "to": "subpackageMember/utils/player-code.js",
+      "sourceBlob": "4c1c40bcb83562adede4eacda2ad4838b56f1946"
+    },
+    {
+      "from": "utils/predict-entry.js",
+      "to": "subpackageB/utils/predict-entry.js",
+      "sourceBlob": "c68c63755d52403d3f58fabdb08c8f697d2b0783"
+    },
+    {
+      "from": "utils/profit-split.js",
+      "to": "pages/topic/utils/profit-split.js",
+      "sourceBlob": "5dac36bfb96f39ec828929620db26bd406b795b7"
+    },
+    {
+      "from": "utils/project-progress.js",
+      "to": "pages/topic/utils/project-progress.js",
+      "sourceBlob": "dcd9b83a3cc38c8c445fcafbcd412b600d4bca4c"
+    },
+    {
+      "from": "utils/refund-rule.js",
+      "to": "pages/topic/utils/refund-rule.js",
+      "sourceBlob": "180117b50f2fd820d6d9f0bfec9eb275dcb34dd3"
+    },
+    {
+      "from": "utils/roam-team-operation.js",
+      "to": "subpackageRoam/utils/roam-team-operation.js",
+      "sourceBlob": "0727c5c1b2b9b700b7aab2cfac3c2ce4d117f674"
+    },
+    {
+      "from": "utils/roam-team-recovery.js",
+      "to": "subpackageRoam/utils/roam-team-recovery.js",
+      "sourceBlob": "52a1fb193c1e8f9e9b4859be0672776e8c3ae91b"
+    },
+    {
+      "from": "utils/answer-text.js",
+      "to": "pages/publish/utils/answer-text.js",
+      "sourceBlob": "2d64dad83142a719fd1dab62b73efd51743fb6da"
+    },
+    {
+      "from": "utils/chapter-count.js",
+      "to": "pages/topic/utils/chapter-count.js",
+      "sourceBlob": "53354c75b8042c65ba745374e4e88a48a8704c5d"
+    },
+    {
+      "from": "components/cy/share-card/index.js",
+      "to": "subpackageRoam/components/cy/share-card/index.js",
+      "sourceBlob": "547ed7896b042657bba6a994d7619698094b240a"
+    },
+    {
+      "from": "components/cy/share-card/index.json",
+      "to": "subpackageRoam/components/cy/share-card/index.json",
+      "sourceBlob": "52dad47bd3bbf81819ec93a10981a1960f7f173a"
+    },
+    {
+      "from": "components/cy/share-card/index.wxml",
+      "to": "subpackageRoam/components/cy/share-card/index.wxml",
+      "sourceBlob": "9385473e2ea8d305fbbd132188254a44f9351f66"
+    },
+    {
+      "from": "components/cy/share-card/index.wxss",
+      "to": "subpackageRoam/components/cy/share-card/index.wxss",
+      "sourceBlob": "e5586e8b72aa3038b2ca5b319c1ecfbaa2f5f163"
+    },
+    {
+      "from": "components/cy/share-card/route-art.png",
+      "to": "subpackageRoam/components/cy/share-card/route-art.png",
+      "sourceBlob": "854e7bf8acd866226e5c5086b78cf1ab27440835"
+    },
+    {
+      "from": "utils/share-tint.js",
+      "to": "subpackageRoam/utils/share-tint.js",
+      "sourceBlob": "35fd47a761bc3c877d704b2bcceb53ce9cd39c70"
+    },
+    {
+      "from": "components/cy/scene-roam-history/index.js",
+      "to": "subpackageRoam/components/cy/scene-roam-history/index.js",
+      "sourceBlob": "af946690388f98a3e65338b406c693001735b517"
+    },
+    {
+      "from": "components/cy/scene-roam-history/index.json",
+      "to": "subpackageRoam/components/cy/scene-roam-history/index.json",
+      "sourceBlob": "232a3605965a261051bae44c437a54728256a3ed"
+    },
+    {
+      "from": "components/cy/scene-roam-history/index.wxml",
+      "to": "subpackageRoam/components/cy/scene-roam-history/index.wxml",
+      "sourceBlob": "339f1454954527ba936558d7709b244d4751dbce"
+    },
+    {
+      "from": "components/cy/scene-roam-history/index.wxss",
+      "to": "subpackageRoam/components/cy/scene-roam-history/index.wxss",
+      "sourceBlob": "aae5107fae9dd1a3c78f2041fb0d1d13cebc1843"
+    },
+    {
+      "from": "components/cy/route-thumb/index.js",
+      "to": "subpackageRoam/components/cy/route-thumb/index.js",
+      "sourceBlob": "83c3a8efff3768e362f71e503af77dc397c8cc2c"
+    },
+    {
+      "from": "components/cy/route-thumb/index.json",
+      "to": "subpackageRoam/components/cy/route-thumb/index.json",
+      "sourceBlob": "38b5ce3ca5b5e3b1af723c939e0057ac4be6255c"
+    },
+    {
+      "from": "components/cy/route-thumb/index.wxml",
+      "to": "subpackageRoam/components/cy/route-thumb/index.wxml",
+      "sourceBlob": "55432d2dd1f9c8b9bea1dc2a922146cfa127380b"
+    },
+    {
+      "from": "components/cy/route-thumb/index.wxss",
+      "to": "subpackageRoam/components/cy/route-thumb/index.wxss",
+      "sourceBlob": "6c59a4041ea7a0f23a2636a0779fbf7e99a4e548"
+    },
+    {
+      "from": "components/cy/scene-roam-session/index.js",
+      "to": "subpackageRoam/components/cy/scene-roam-session/index.js",
+      "sourceBlob": "ee4e933d44363c7b3636ab9eb755bd6d071ec492"
+    },
+    {
+      "from": "components/cy/scene-roam-session/index.json",
+      "to": "subpackageRoam/components/cy/scene-roam-session/index.json",
+      "sourceBlob": "08632f3d2ca2cc0efd054b3a31955f74a08c2a66"
+    },
+    {
+      "from": "components/cy/scene-roam-session/index.wxml",
+      "to": "subpackageRoam/components/cy/scene-roam-session/index.wxml",
+      "sourceBlob": "56a4b6f5595de68142302da3128c719fe1517164"
+    },
+    {
+      "from": "components/cy/scene-roam-session/index.wxss",
+      "to": "subpackageRoam/components/cy/scene-roam-session/index.wxss",
+      "sourceBlob": "fd885d59139abfdf7144ceebe5a2090f64745127"
+    },
+    {
+      "from": "components/cy/scene-roam-session/route-replay.js",
+      "to": "subpackageRoam/components/cy/scene-roam-session/route-replay.js",
+      "sourceBlob": "6830480c8dea78cc2ed41d8b44d23eaecb0d560e"
+    },
+    {
+      "from": "components/cy/scene-roam-task-list/index.js",
+      "to": "subpackageRoam/components/cy/scene-roam-task-list/index.js",
+      "sourceBlob": "ae26b9111e071d5929fc606dbb85cda3aebde09a"
+    },
+    {
+      "from": "components/cy/scene-roam-task-list/index.json",
+      "to": "subpackageRoam/components/cy/scene-roam-task-list/index.json",
+      "sourceBlob": "8df5bea0cbfd46e9685ac93c34cf79a84d03b060"
+    },
+    {
+      "from": "components/cy/scene-roam-task-list/index.wxml",
+      "to": "subpackageRoam/components/cy/scene-roam-task-list/index.wxml",
+      "sourceBlob": "252f09c61c8f10e6e5d954c5869f29ea07639b27"
+    },
+    {
+      "from": "components/cy/scene-roam-task-list/index.wxss",
+      "to": "subpackageRoam/components/cy/scene-roam-task-list/index.wxss",
+      "sourceBlob": "13421e0f429566e0e9bd12c7aba4693b8dd0b5bd"
+    },
+    {
+      "from": "components/cy/scene-roam-stamp-album/index.js",
+      "to": "subpackageRoam/components/cy/scene-roam-stamp-album/index.js",
+      "sourceBlob": "812b047587913ed9c6c7e10cdd1c76f2cc501246"
+    },
+    {
+      "from": "components/cy/scene-roam-stamp-album/index.json",
+      "to": "subpackageRoam/components/cy/scene-roam-stamp-album/index.json",
+      "sourceBlob": "f8a2aea716a80de3d9057dc3cfa0ffbe99ff0838"
+    },
+    {
+      "from": "components/cy/scene-roam-stamp-album/index.wxml",
+      "to": "subpackageRoam/components/cy/scene-roam-stamp-album/index.wxml",
+      "sourceBlob": "3d616de097a3949132c7033eb8c7e4ad238cdf55"
+    },
+    {
+      "from": "components/cy/scene-roam-stamp-album/index.wxss",
+      "to": "subpackageRoam/components/cy/scene-roam-stamp-album/index.wxss",
+      "sourceBlob": "50e11da11c621d28a364f218ea10d2d26e5610bd"
+    },
+    {
+      "from": "components/cy/scene-qr-group-code/index.js",
+      "to": "subpackageRoam/components/cy/scene-qr-group-code/index.js",
+      "sourceBlob": "0c91099b722bba8cb4a3b636f27b1aacf7c7ce7c"
+    },
+    {
+      "from": "components/cy/scene-qr-group-code/index.json",
+      "to": "subpackageRoam/components/cy/scene-qr-group-code/index.json",
+      "sourceBlob": "ebcaf85df747de3ce4742faa4c659ddbba4f5085"
+    },
+    {
+      "from": "components/cy/scene-qr-group-code/index.wxml",
+      "to": "subpackageRoam/components/cy/scene-qr-group-code/index.wxml",
+      "sourceBlob": "49a608081f7b227c3e7bf282c987507325fd8f13"
+    },
+    {
+      "from": "components/cy/scene-qr-group-code/index.wxss",
+      "to": "subpackageRoam/components/cy/scene-qr-group-code/index.wxss",
+      "sourceBlob": "cf314e55ac3f4e9e6b5340c1fae891cef467f9df"
+    },
+    {
+      "from": "components/cy/scene-qr-citynode/index.js",
+      "to": "subpackageRoam/components/cy/scene-qr-citynode/index.js",
+      "sourceBlob": "52025cf09bd8dfcea9e85f83e4ba15535a043796"
+    },
+    {
+      "from": "components/cy/scene-qr-citynode/index.json",
+      "to": "subpackageRoam/components/cy/scene-qr-citynode/index.json",
+      "sourceBlob": "0684b75cc166649e0d5776d8c4c5e94c8d02202f"
+    },
+    {
+      "from": "components/cy/scene-qr-citynode/index.wxml",
+      "to": "subpackageRoam/components/cy/scene-qr-citynode/index.wxml",
+      "sourceBlob": "66ca71099fd2f6e30088f2ee1cdce28d62c2c361"
+    },
+    {
+      "from": "components/cy/scene-qr-citynode/index.wxss",
+      "to": "subpackageRoam/components/cy/scene-qr-citynode/index.wxss",
+      "sourceBlob": "35f401ee7bf9963495633847987c240e8cc98812"
+    },
+    {
+      "from": "components/cy/slide-confirm/index.js",
+      "to": "subpackageRoam/components/cy/slide-confirm/index.js",
+      "sourceBlob": "3700c4a9a75b86d9b0b85d020653aa65586fb324"
+    },
+    {
+      "from": "components/cy/slide-confirm/index.json",
+      "to": "subpackageRoam/components/cy/slide-confirm/index.json",
+      "sourceBlob": "ec866866033bf45eeda2901428004fc3e346cc07"
+    },
+    {
+      "from": "components/cy/slide-confirm/index.wxml",
+      "to": "subpackageRoam/components/cy/slide-confirm/index.wxml",
+      "sourceBlob": "8712f54872bf289905f9e7efbe0a817a571e7075"
+    },
+    {
+      "from": "components/cy/slide-confirm/index.wxss",
+      "to": "subpackageRoam/components/cy/slide-confirm/index.wxss",
+      "sourceBlob": "8aad2d13df3a804f4fee2758055ac66d46aa1f00"
+    },
+    {
+      "from": "components/cy/proto-cam/index.js",
+      "to": "subpackageRoam/components/cy/proto-cam/index.js",
+      "sourceBlob": "58d4a2a3143a06156dbf9fd49a5b528185483a1a"
+    },
+    {
+      "from": "components/cy/proto-cam/index.json",
+      "to": "subpackageRoam/components/cy/proto-cam/index.json",
+      "sourceBlob": "3207c3a2d4b4f4448a18c5dda9ff9dded21a615c"
+    },
+    {
+      "from": "components/cy/proto-cam/index.wxml",
+      "to": "subpackageRoam/components/cy/proto-cam/index.wxml",
+      "sourceBlob": "b52e35e30fe3cc877d6de035da0264cc5a0cf63e"
+    },
+    {
+      "from": "components/cy/proto-cam/index.wxss",
+      "to": "subpackageRoam/components/cy/proto-cam/index.wxss",
+      "sourceBlob": "fabb80092aefeb693c4fd5ba0cb432342cf4b3e0"
+    },
+    {
+      "from": "utils/user-invoice.js",
+      "to": "subpackageMember/utils/user-invoice.js",
+      "sourceBlob": "0e56be4ef79097126da97ab00f56eb538f1dcc34"
+    },
+    {
+      "from": "utils/play-menu-share.js",
+      "to": "pages/play/utils/play-menu-share.js",
+      "sourceBlob": "760ee44ceac1c19139c5681bcf3ab67ef7a72ceb"
+    },
+    {
+      "from": "utils/reading-motion.js",
+      "to": "pages/play/utils/reading-motion.js",
+      "sourceBlob": "a25b624fbd0d1e788ed779590e7d98dbd1c1cbf8"
+    },
+    {
+      "from": "utils/ticket-game.js",
+      "to": "subpackageMember/utils/ticket-game.js",
+      "sourceBlob": "0b4b254010081a4a78db1a11879d8d84ae42e187"
+    },
+    {
+      "from": "components/cy/datetime-range/index.js",
+      "to": "pages/publishkit/components/cy/datetime-range/index.js",
+      "sourceBlob": "2fe55ed6a385d9ba9308fc2514c22648aadb756f"
+    },
+    {
+      "from": "components/cy/datetime-range/index.json",
+      "to": "pages/publishkit/components/cy/datetime-range/index.json",
+      "sourceBlob": "58c69ae4088df78ab178ef40aae5021c0ea55dc4"
+    },
+    {
+      "from": "components/cy/datetime-range/index.wxml",
+      "to": "pages/publishkit/components/cy/datetime-range/index.wxml",
+      "sourceBlob": "48cc6ce28bb5eac402518440bbf0e015060e2f12"
+    },
+    {
+      "from": "components/cy/datetime-range/index.wxss",
+      "to": "pages/publishkit/components/cy/datetime-range/index.wxss",
+      "sourceBlob": "be9a549fd5ef2a58d4eccd227cdd986b4be75058"
+    },
+    {
+      "from": "utils/datetime-range.js",
+      "to": "pages/publishkit/utils/datetime-range.js",
+      "sourceBlob": "370d326f03116fd28f0bc1e2f1445ec60d1ca0fe"
+    },
+    {
+      "from": "utils/gesture-physics.js",
+      "to": "pages/playkit/utils/gesture-physics.js",
+      "sourceBlob": "147960e231da3a4ef970da5bcf47890943531163"
+    }
+  ]
+}

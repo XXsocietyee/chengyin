@@ -1,0 +1,276 @@
+// cy-playkit-photocheck · 拍照审核(契约 §2.2,2026-09-17 改版:接真视觉模型)
+//
+// 两步走,与 qa 拍照题同一条路:**先选/拍一张 → 页面把它传上去拿地址 → 再提交**。
+// 组件这里只做前一半:选完就把临时路径抛给页面,**本组件不发任何请求、也不再读像素**。
+//
+// ★ 判定全在服务端(契约 §2.2):照片交给视觉模型按作者写的 requirement 判,
+//   客户端只报原始输入。原先「本地算亮区/边缘/清晰度 → 随图上报 score」那套整段删除 ——
+//   客户端报的分可伪造,也判不了「有没有拍到『新』字招牌」这种语义要求。
+//
+// 服务端可能给降级态(degraded:模型不可用/超时/解析失败):这时**不判死也不假装通过**,
+// 这一屏只说清「这次没能审」,不许出现「审核通过 / 不通过」这类假结论。
+
+const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
+const replayMotionBehavior = require('../../behaviors/replay-motion.js');
+const motion = require('../../../../utils/motion.js');
+const cyToast = require('../../../../utils/toast.js');
+const mediaDenied = require('../../utils/media-denied.js');
+const { tidyText } = require('../../utils/keep-numerals.js');
+// C1:核验说明只认服务端 photoVerified=true;兜底放行另有一句,不说「这张过了」
+const { PHOTO_VERIFIED_NOTE, PHOTO_FALLBACK_VERDICT, rewardNote } = require('../../utils/sensor-contract.js');
+const cyModal = require('../../../../utils/modal.js');
+
+Component({
+  behaviors: [reducedMotionBehavior, replayMotionBehavior],
+  properties: {
+    show: { type: Boolean, value: false },
+    title: { type: String, value: '' },
+    shotNote: { type: String, value: '' },
+    maxTries: { type: Number, value: 0 },
+    fallback: { type: String, value: 'retake' },
+    tries: { type: Number, value: 0 },
+    passed: { type: Boolean, value: false },
+    flagged: { type: Boolean, value: false },
+    // 模型不可用等降级态 + 服务端给的那句不过的理由(契约 §2.2 state.photoCheck)
+    degraded: { type: Boolean, value: false },
+    lastReason: { type: String, value: '' },
+    lastUrl: { type: String, value: '' },
+    // C1:服务端 photoVerified(视觉模型当场真判 PASS)与奖励上限;缺失时不说核验、不承诺奖励
+    photoVerified: { type: Boolean, value: false },
+    rewardCeiling: { type: String, value: '' },
+    // 内嵌呈现(故事流里就地玩)。只影响取不取景,不影响判定 —— 见 onShoot 的说明
+    inline: { type: Boolean, value: false },
+    // 取景轮廓(S1):作者给的半透明轮廓，玩家把实物套进去再按快门。没配则整块取景逻辑不启动
+    frameUrl: { type: String, value: '' },
+    frameOpacity: { type: Number, value: 40 },
+    // 拍物成卡:判过时服务端随本次回包带回来的那张卡(契约 §10.2)。null = 这一屏没有卡。
+    card: { type: Object, value: null },
+    // P-24:页面上传失败一次就 +1(单调递增);组件只认比见过的大,屏上写「上传失败，请重拍」
+    photoFailSeq: { type: Number, value: 0 },
+    // 失败发生在哪一步:'submit' = 照片已传上去、提交没成(保留地址,可重新提交);其它 = 上传失败
+    photoFailKind: { type: String, value: '' },
+    // 页面正等服务端视觉判分
+    judging: { type: Boolean, value: false },
+    // CG-ALL-12 只记录(photoCheck.mode=RECORD):不审、不判对错,拍了就记(页面发 SUBMIT_PHOTO_RECORD);
+    // 服务端没下发 mode 时为 false,行为与今天相同。相机被拒时可文字确认「不拍照，继续」
+    recordOnly: { type: Boolean, value: false },
+    // 只记录站上本局是文字确认继续的(服务端 state.photoCheck.textConfirmed),不是拍了照
+    textConfirmed: { type: Boolean, value: false },
+  },
+  data: {
+    busy: false,
+    uploadFail: '',
+    resubmit: false,
+    triesLabel: '',
+    verdict: '',
+    verdictKind: '',
+    reason: '',
+    verifiedNote: '',
+    rewardNote: '',
+    // framing:页内取景中。取景器起不来过没有(camErr)只影响下一条快门走哪条路，
+    // 屏上没有任何东西看它 —— 那是实例状态，不进 data(见 onFrameError 的 this._camErr)。
+    framing: false,
+    // 轮廓图没加载出来:只把那条线藏掉，取景与提交照常
+    outlineFailed: false,
+    // CG-ALL-29:拍完先在框里预览,玩家点「提交这张」才交给页面上传;没提交就不上传
+    pendingPath: '',
+    // 只记录站上相机被拒后才亮出「不拍照，继续」
+    skipOffer: false,
+  },
+  observers: {
+    'photoFailSeq, photoFailKind': function (seq, kind) {
+      const n = Number(seq) || 0;
+      if (n <= (this._seenFailSeq || 0)) return;
+      this._seenFailSeq = n;
+      const submit = kind === 'submit';
+      this.setData({ uploadFail: submit ? '提交失败，照片已保留' : '上传失败，请重拍', resubmit: submit, busy: false });
+    },
+    judging: function (on) { if (on) this.setData({ uploadFail: '', resubmit: false }); },
+    'photoVerified, rewardCeiling, passed': function (photoVerified, rewardCeiling, passed) {
+      this.setData({
+        uploadFail: passed ? '' : this.data.uploadFail,   // 过了就不再留着上一次的失败提示
+        verifiedNote: passed && photoVerified === true ? PHOTO_VERIFIED_NOTE : '',
+        rewardNote: passed ? rewardNote(rewardCeiling) : '',
+      });
+    },
+    'show, tries, maxTries, passed, flagged, degraded, fallback, lastReason': function (show, tries, maxTries, passed, flagged, degraded, fallback, lastReason) {
+      if (!show) return;
+      const total = Number(maxTries) || 0;
+      const used = Number(tries) || 0;
+      const left = total > 0 ? Math.max(0, total - used) : 0;
+      let verdict = '';
+      let verdictKind = '';
+      let reason = '';
+      if (degraded) {
+        /* 降级:这次没有结论。不许说「通过 / 不通过」。R11 g1 F3:跟服务端走 ——
+           还有机会就重拍(服务端 passed=false),机会用完服务端放行(passed=true)才说先往下走。 */
+        verdict = passed ? '这次没能审，先往下走' : '这次没能审，再拍一张';
+        verdictKind = '';
+        if (!passed) reason = tidyText(String(lastReason || '').trim());
+      } else if (passed && this.data.recordOnly) {
+        // 只记录:没有对错,拍了就是记下了;没拍、文字确认继续的另说一句
+        verdict = this.data.textConfirmed ? '没拍照，已继续' : '已记录';
+        verdictKind = 'ok';
+      } else if (passed && flagged) {
+        // 次数用尽兜底放行:服务端 passed 与 flagged 同时为真。这张是「先算过」,不是「过了」
+        verdict = PHOTO_FALLBACK_VERDICT;
+        verdictKind = 'ok';
+      } else if (passed) {
+        verdict = '这张过了';
+        verdictKind = 'ok';
+      } else if (used > 0) {
+        verdict = '还差一点，再拍一张';
+        verdictKind = 'no';
+        // 真实理由(服务端给的),有就摆给玩家看,别只丢一句「再拍一张」
+        reason = tidyText(String(lastReason || '').trim());
+      }
+      /* 第二次判定要重播。`wx:if="{{verdict}}"` 一旦为真就恒真,节点复用 ——
+         连「这张过了」都不播,判定像是本来就在那。
+         判据带上 used:再拍一张仍没过时文案一模一样,只看文案会漏掉这一次。
+         首次出判定时 wx:if 由假转真、节点是新建的,prevVerdict 为空不走这里。 */
+      const prevVerdict = this.data.verdict;
+      const prevUsed = this._seenUsed;
+      this._seenUsed = used;
+      this.setData({
+        triesLabel: total > 0 && !this.data.recordOnly ? ('还能重拍 ' + left + ' 次') : '',
+        verdict,
+        verdictKind,
+        reason,
+      });
+      if (prevVerdict && verdict && (verdict !== prevVerdict || used !== prevUsed)) this.replayMotion();
+    },
+  },
+  methods: {
+    /**
+     * 拍/选一张 → 直接抛给页面走「上传再提交」两步;判定全在服务端。
+     *
+     * <p>作者配了取景轮廓(frameUrl)时先进**页内取景**:镜头里浮着那条轮廓,
+     * 把实物套进去再按快门。取景起不来(相机被拒/不可用)就回落到 chooseMedia ——
+     * ⚠️ 轮廓是取景辅助,不是判定条件,绝不能因为它没起来就不让玩家拍这一张。
+     */
+    onShoot() {
+      // R11 g1 F3:只认服务端 passed。flagged 是留给商家的痕迹,不是「这一站定了」
+      if (this.data.busy || this.data.judging || this.data.passed) return;
+      if (this.data.pendingPath) { this._submitPending(); return; }
+      if (this.data.resubmit) { this.setData({ uploadFail: '', resubmit: false }); this.triggerEvent('resubmit'); return; }
+      if (this.data.uploadFail) this.setData({ uploadFail: '' });
+      /* ⚠️ 内嵌呈现(故事流里就地玩)不进页内取景:.chfull__para 恒带 transform:scale() 与
+         filter:blur()(见 pages/play/index.wxml 那一行的行内样式,值永远是数字、不是 none),
+         非 none 的 transform/filter 会成为 position:fixed 后代的包含块 —— 取景层会被圈进
+         190rpx 高的段落里、跟着一起糊。仓里 play-stage 为同一件事开了 --pk-stage-pos 注入点。
+         photoCheck 不在 PRESENT_FULLSCREEN_ONLY 里,作者确实配得出 present:'inline'。
+         轮廓是取景辅助不是判定条件,内嵌就直接走选图,玩法照常能完成。 */
+      if (this.data.frameUrl && !this._camErr && !this.data.inline) {
+        this.setData({ framing: true, outlineFailed: false });
+        return;
+      }
+      this.chooseViaMedia();
+    },
+
+    /** 原来那条路:相册/系统相机选一张。没配轮廓时的默认，也是取景失败后的回落。 */
+    chooseViaMedia() {
+      // busy 与改版前一致:选图期间按钮压在「看一眼…」，连点不会起第二个选择器
+      this.setData({ framing: false, busy: true });
+      wx.chooseMedia({
+        count: 1, mediaType: ['image'], sourceType: ['camera', 'album'], sizeType: ['compressed'],
+        success: (res) => {
+          const file = (res && res.tempFiles && res.tempFiles[0]) || {};
+          this._emitShot(file.tempFilePath || '', file.size, !res);
+        },
+        fail: (err) => {
+          this.setData({ busy: false });
+          const msg = String((err && err.errMsg) || '');
+          // 只记录站:相机 / 相册被拒(不是主动取消)时亮出「不拍照，继续」,不再弹去设置的引导
+          if (this.data.recordOnly && !/cancel/i.test(msg)) { this.setData({ skipOffer: true }); return; }
+          mediaDenied.guideIfDenied(err);
+        },
+      });
+    },
+
+    /** CG-ALL-29:预览里点「提交这张」才把临时路径交给页面去上传 + 提交。 */
+    _submitPending() {
+      const path = this.data.pendingPath;
+      this.setData({ pendingPath: '' });
+      if (!path) return;
+      motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
+      this.triggerEvent('shoot', { tempFilePath: path, size: this._pendingSize });
+    },
+    /** 预览里「重拍」:丢掉这张(本来就没传),回到拍照。 */
+    onRetake() {
+      if (this.data.busy || this.data.judging) return;
+      this.setData({ pendingPath: '' });
+      this.onShoot();
+    },
+    /** 「不拍照，继续」:文字确认后页面发 SUBMIT_PHOTO_RECORD {textConfirmed:true},服务端记这一站没拍、照常完成。 */
+    onTextConfirm() {
+      if (!this.data.recordOnly || this.data.busy || this.data.judging || this.data.passed) return;
+      cyModal.show({
+        title: '不拍照，继续？',
+        content: '这一站不留照片，直接往下走。',
+        confirmText: '继续',
+        cancelText: '再试试拍照',
+        success: (res) => { if (res && res.confirm) this.triggerEvent('textconfirm'); },
+      });
+    },
+
+    /** 页内取景按快门:整屏就是取景器,快门只出这一张。 */
+    onFrameShutter() {
+      if (this.data.busy) return;
+      this.setData({ busy: true });
+      // L02-170:与物件卡同一种取法 —— 组件里按实例取相机,不传一个模板里不存在的 id
+      wx.createCameraContext(this).takePhoto({
+        quality: 'high',
+        success: (res) => {
+          this._emitShot(res && res.tempImagePath, undefined, false);
+        },
+        fail: () => {
+          this.setData({ busy: false });
+          /* 连着两次拍不上就别耗着:相机可能被别的应用占着,或这台机器的 takePhoto 不兼容 ——
+             这两种都不触发 camera 的 binderror,onFrameError 那条回落路永远够不着,
+             玩家会卡在取景器里只能弃玩。同上:轮廓是辅助不是判定。 */
+          this._shutterFails = (this._shutterFails || 0) + 1;
+          if (this._shutterFails >= 2) {
+            this._camErr = true;
+            cyToast('相机拍不出来，改用相册或系统相机');
+            this.chooseViaMedia();
+            return;
+          }
+          cyToast('这张没拍上，再按一次');
+        },
+      });
+    },
+
+    /** 一张照片到手:退出取景，没路径就说清，有路径才抖一下并抛给页面。 */
+    _emitShot(tempFilePath, size, aborted) {
+      this.setData({ busy: false, framing: false, uploadFail: '', resubmit: false });   // 新一次尝试开始:清掉上一次的失败提示
+      if (!tempFilePath) {
+        if (!aborted) cyToast('没拿到照片');
+        return;
+      }
+      // CG-ALL-29:先预览,不上传;玩家点「提交这张」才交出去
+      this._pendingSize = size;
+      this.setData({ pendingPath: tempFilePath, skipOffer: false });
+    },
+
+    /** 轮廓图自身加载失败:只藏掉那条线，取景器与快门照常。 */
+    onOutlineError() { this.setData({ outlineFailed: true }); },
+
+    /** 取景器起不来(权限被拒 / 设备不支持):说清楚，然后回落到选图，玩法照常能完成。 */
+    onFrameError() {
+      if (!this.data.framing) return;
+      this._camErr = true;
+      this.setData({ framing: false });
+      cyToast('取景器无法打开，改用相册或相机拍');
+      this.chooseViaMedia();
+    },
+
+    /** 退出取景。⚠️ 快门在途(busy)时不给退:退了 takePhoto 的回调照样会到、照样提交,
+        玩家以为取消了却被吃掉一次机会 —— 配了 maxTries 的段上这是真丢机会。 */
+    onFrameCancel() {
+      if (this.data.busy) return;
+      this.setData({ framing: false });
+    },
+
+    onClose() { this.triggerEvent('close'); },
+  },
+});

@@ -1,0 +1,1725 @@
+'use strict'
+/* 活动导演台的状态机与处理器。
+ *
+ * 2026-09-03:`pages/club/game-director` 那一整页**已删除**——它的十张卡按 Figma
+ * 新的全流程稿收编进本页(活动详情),渲染改用 cy-club-director-* 八个组件。
+ * 但页面里这 600 行不是 UI,是**状态机与写入安全**:executeAction 的
+ * 「回执未知」落盘、onReconcileUnknownWrite 对账、retryUnknownWrite 重试——
+ * 这些一行都不能重写,所以整段原样搬过来,只做两处改动:
+ *   · onLoad(options) → initDirector(activityId):宿主页决定何时进入
+ *   · goBack 留给宿主页(活动详情有自己的返回语义)
+ * 网络层仍是 utils/club-game-director-adapter.js,未动。
+ */
+const modal = require('../../../utils/modal.js');
+const toast = require('../../../utils/toast.js');
+const { chinaParts } = require('../../../utils/datetime.js');
+
+const { createClubGameDirectorAdapter, genericOpsActions, genericOpsFields, genericOpsPayload, numberOrNull, isAbnormalTeam } = require('../utils/club-game-director-adapter.js')
+// Round5 #4:通用玩法运行状态只出中文,不显示 RUNNING / ONLINE 等后端代码
+const GENERIC_OPS_STATUS = { RUNNING: '进行中', PAUSED: '已暂停', INTERRUPTED: '已中断', CANCELLED: '已取消' }
+const GENERIC_OPS_AUTHORITY = { ONLINE: '线上判定', MANUAL: '人工接管' }
+function genericOpsStatusText(run) {
+  const r = run || {}
+  return (GENERIC_OPS_STATUS[r.operationStatus] || '状态待确认') + ' · ' + (GENERIC_OPS_AUTHORITY[r.authorityMode] || '判定方式待确认')
+}
+let requestSequence = 0
+
+function genericOpsForm(action, draft, control) {
+  let ready = action !== 'QUEST_GUIDE' && !(action === 'STAFF_MANUAL_SIGN' && draft.signedAction === 'QUEST_GUIDE')
+  if (!ready) try { genericOpsPayload(action, draft, control); ready = true } catch (_) {}
+  return { genericOpsFields: genericOpsFields(action, draft, control), genericOpsReady: ready }
+}
+
+const numeric = numberOrNull  // L08-041:与适配层同一份
+
+function readinessText(readiness) {
+  const ready = numeric(readiness && readiness.readyStations)
+  const required = numeric(readiness && readiness.requiredStations)
+  if (ready === null || required === null) return '—'
+  return ready + '/' + required + ' 站就绪'
+}
+
+function statusText(status) {
+  const labels = {
+    NOT_PREPARED: '未准备',
+    DRAFT: '草稿',
+    PREPARING: '准备中',
+    READY: '待开局',
+    RUNNING: '进行中',
+    FINISHED: '已结束',
+    CANCELLED: '已取消',
+  }
+  return labels[String(status || '').toUpperCase()] || '状态待确认'
+}
+
+// C-09 第三轮:准备总览的节点行直接喂收编行列表,要 {id,title,subtitle,value};状态码不外露。
+const STATION_STATUS_TEXT = { INVITED: '已邀请', ACCEPTED: '已接受', READY: '就绪', ACTIVE: '进行中', PAUSED: '已暂停', CLOSED: '已关闭' }
+
+function stationView(station, index) {
+  const item = station || {}
+  const nameText = item.name || item.stationName || item.nodeName || '未命名节点'
+  const status = String(item.status || '').toUpperCase()
+  const statusText = STATION_STATUS_TEXT[status] || '待确认'
+  const issueText = item.issue || item.blockedReason || item.pauseReason || item.exception || ''
+  return Object.assign({}, item, {
+    nameText: nameText,
+    statusText: statusText,
+    issueText: issueText,
+    id: item.stationId != null ? item.stationId : (item.nodeId != null ? item.nodeId : 's' + (index || 0)),
+    title: nameText,
+    subtitle: issueText,
+    value: statusText,
+    valueTone: status === 'READY' || status === 'ACTIVE' ? 'success' : (status === 'PAUSED' ? 'warning' : 'default'),
+  })
+}
+
+function teamView(team) {
+  const item = team || {}
+  const completed = numeric(item.completedNodes)
+  const total = numeric(item.totalNodes)
+  const status = String(item.status || '').toUpperCase()
+  const stuckNode = item.currentStuckNode && typeof item.currentStuckNode === 'object'
+    ? item.currentStuckNode : null
+  const hintLevel = numeric(item.hintLevel)
+  const recentEvent = item.recentEvent && typeof item.recentEvent === 'object'
+    ? item.recentEvent : null
+  const eventActions = {
+    CONFIRM_ROLE: '身份确认',
+    PLAYER_CHOICE: '剧情选择',
+    PLAYER_SUBMIT: '任务提交',
+    PLAYER_HINT: '玩家提示',
+    PLAYER_REVEAL: '答案揭示',
+  }
+  const eventOutcomes = { APPLIED: '已生效', FAILED: '未生效' }
+  const actionText = eventActions[String((recentEvent && recentEvent.action) || '').toUpperCase()]
+  const outcomeText = eventOutcomes[String((recentEvent && recentEvent.outcome) || '').toUpperCase()]
+  const occurredAt = typeof (recentEvent && recentEvent.occurredAt) === 'string'
+    ? recentEvent.occurredAt.trim() : ''
+  return Object.assign({}, item, {
+    nameText: item.name || item.teamName || '未命名队伍',
+    // C-26:队伍状态用中文,不露枚举。
+    statusText: ({ PREPARING: '未出发', RUNNING: '进行中', COMPLETED: '已完成', BLOCKED: '受阻', PAUSED: '暂停', ERROR: '异常' })[status] || '待确认',
+    progressText: completed !== null && total !== null ? completed + '/' + total + ' 节点' : '—',
+    issueText: item.blockedReason || item.issue || '',
+    isAbnormal: isAbnormalTeam(item),
+    stuckNodeText: stuckNode && typeof stuckNode.nodeName === 'string' && stuckNode.nodeName.trim()
+      ? stuckNode.nodeName.trim() : '待确认',
+    hintLevelText: hintLevel === 1 ? '一级提示' : (hintLevel === 2 ? '二级提示' : '待确认'),
+    recentEventText: actionText && outcomeText
+      ? [actionText, outcomeText, occurredAt].filter(Boolean).join(' · ')
+      : '待确认',
+  })
+}
+
+function roleOptionView(option) {
+  const item = option || {}
+  const roleCode = item.roleCode || item.code || item.key || ''
+  return {
+    roleCode: roleCode,
+    label: item.roleName || item.name || item.label || roleCode || '未命名角色',
+  }
+}
+
+function roleView(role) {
+  const item = role || {}
+  const status = String(item.confirmationStatus || item.status || '').toUpperCase()
+  const labels = { CONFIRMED: '已确认', PENDING: '待确认', REJECTED: '未接受' }
+  labels.ASSIGNED = '待确认'
+  return Object.assign({}, item, {
+    memberNameText: item.memberName || item.name || (item.memberId == null ? '成员更新中' : '城瘾用户'),
+    roleNameText: item.roleName || item.roleLabel || item.roleCode || '角色待分配',
+    confirmationStatus: status,
+    confirmationText: !item.roleCode ? '待分配' : (labels[status] || '确认状态更新中'),
+  })
+}
+
+// E-04(2026-09-16):D6 弹层的「选择成员」原来喂的是 teams(队伍行)—— 行点击没有 teamId+memberId,
+// 落不到 openRoleAssignment 的定位。改成 roles 的行投影,入口与行点选共用同一份数据。
+// id = "teamId:memberId";弹层只列当前队伍成员。
+function roleMemberRows(roles, selectedTeamId, selectedMemberId) {
+  return (Array.isArray(roles) ? roles : [])
+    .filter(function (item) {
+      return item && item.memberId != null && item.teamId != null
+        && (selectedTeamId == null || String(item.teamId) === String(selectedTeamId))
+    })
+    .map(function (item) {
+      return {
+        id: String(item.teamId) + ':' + String(item.memberId),
+        teamId: item.teamId,
+        memberId: item.memberId,
+        title: item.memberNameText,
+        subtitle: item.roleCode ? item.roleNameText : '待分配',
+        value: item.roleNameText,
+        valueTone: item.roleCode ? 'default' : 'muted',
+        disabled: selectedMemberId != null && String(item.memberId) === String(selectedMemberId),
+      }
+    })
+}
+
+function broadcastView(broadcast, index) {
+  const item = broadcast || {}
+  const targetType = String(item.targetType || item.scope || '').toUpperCase()
+  const targetLabels = { ALL: '全部玩家', TEAM: '定向队伍', ROLE: '定向角色', MEMBERS: '指定玩家' }
+  const status = String(item.receiptStatus || item.status || '').toUpperCase()
+  const statusLabels = {
+    CONFIRMED: '已确认送达',
+    APPLIED: '已确认送达',
+    SUCCESS: '已确认送达',
+    REJECTED: '发送未生效',
+    FAILED: '发送未生效',
+    PENDING: '—',
+    SENDING: '发送中',
+    SENT: '已送达',
+    PARTIAL: '部分送达',
+  }
+  const view = Object.assign({}, item, {
+    contentText: item.content || '广播内容更新中',
+    targetText: item.targetName || item.roleName || targetLabels[targetType] || '—',
+    receiptText: statusLabels[status] || '发送状态更新中',
+  })
+  view.id = item.id != null ? item.id : (item.broadcastId != null ? item.broadcastId : 'b' + (index || 0))
+  view.title = view.contentText
+  view.subtitle = view.targetText
+  view.value = view.receiptText
+  return view
+}
+
+function broadcastTargets(targetType, teams, roleOptions) {
+  if (targetType === 'TEAM') {
+    return (teams || []).filter(function (item) { return item.teamId != null }).map(function (item) {
+      return { id: item.teamId, label: item.nameText, memberCount: numeric(item.memberCount) }
+    })
+  }
+  if (targetType === 'ROLE') {
+    return (roleOptions || []).map(function (item) { return { id: item.roleCode, label: item.label } })
+  }
+  return [{ id: '', label: '全部在场玩家' }]
+}
+
+function roleRecipientCount(roleCode, roles) {
+  // 没组队的付款玩家(teamId 为空)不会有角色,不参与角色人数计算
+  const rows = (roles || []).filter(function (item) { return item && item.teamId != null })
+  if (rows.length === 0) return null
+  const completeAggregates = rows.every(function (item) {
+    return !!item.roleCode && numeric(item.memberCount) !== null
+  })
+  if (completeAggregates) {
+    return rows.reduce(function (sum, item) {
+      return sum + (item.roleCode === roleCode ? item.memberCount : 0)
+    }, 0)
+  }
+  const completeAssignments = rows.every(function (item) { return !!item.roleCode && item.memberId != null })
+  if (!completeAssignments) return null
+  const members = {}
+  rows.forEach(function (item) {
+    if (item.roleCode === roleCode) members[String(item.memberId)] = true
+  })
+  return Object.keys(members).length
+}
+
+function broadcastRecipientCount(targetType, selectedTarget, teams, roles) {
+  if (!selectedTarget) return null
+  if (targetType === 'TEAM') return numeric(selectedTarget.memberCount)
+  if (targetType === 'ROLE') return roleRecipientCount(selectedTarget.id, roles)
+  const rows = teams || []
+  if (rows.length === 0 || rows.some(function (item) { return numeric(item.memberCount) === null })) return null
+  return rows.reduce(function (sum, item) { return sum + item.memberCount }, 0)
+}
+
+// 2026-11-01 业主定稿(审阅页 65gFrW…):弹层顶部横滑头像,点头像单个加减,点队伍 / 角色行整组加减。
+// 名单来自导演台 roles,一人一行。名单和队伍人数对不上(没下发全)时不给按人选,退回整组发,不拿半份名单冒充全部。
+function broadcastRoster(roles) {
+  const seen = {}
+  return (Array.isArray(roles) ? roles : []).filter(function (item) {
+    if (!item || item.memberId == null || seen[item.memberId]) return false
+    seen[item.memberId] = true
+    return true
+  }).map(function (item) {
+    const name = item.memberNameText || ''
+    // 第十一轮 h4 L3:没组队的付款玩家也在名单里,teamId 为空串(不属于任何一队)
+    return { id: String(item.memberId), teamId: item.teamId == null ? '' : String(item.teamId), roleCode: item.roleCode || '', name: name, initial: name.slice(0, 1) || '?', sub: item.roleNameText || '' }
+  })
+}
+
+function broadcastRosterComplete(roster, teams) {
+  const rows = teams || []
+  if (!roster.length || !rows.length || rows.some(function (item) { return numeric(item.memberCount) === null })) return false
+  return rows.reduce(function (sum, item) { return sum + item.memberCount }, 0) === roster.length
+}
+
+function broadcastGroupIds(targetType, target, roster) {
+  return roster.filter(function (member) {
+    if (targetType === 'TEAM') return member.teamId === String(target.id)
+    if (targetType === 'ROLE') return member.roleCode === target.id
+    return true
+  }).map(function (member) { return member.id })
+}
+
+function sameIds(a, b) {
+  return a.length === b.length && a.every(function (id) { return b.indexOf(id) >= 0 })
+}
+
+// 选中的人恰好是全部 / 一队 / 一个角色时仍按原范围发(服务端按范围取人);否则才按人发。
+function broadcastPayloadTarget(picked, roster, targetType, options) {
+  if (sameIds(picked, roster.map(function (member) { return member.id }))) return { targetType: 'ALL' }
+  const hit = (options || []).find(function (item) { return targetType !== 'ALL' && sameIds(picked, broadcastGroupIds(targetType, item, roster)) })
+  if (hit && targetType === 'TEAM') return { targetType: 'TEAM', targetId: hit.id }
+  if (hit && targetType === 'ROLE') return { targetType: 'ROLE', roleCode: hit.id }
+  return { targetType: 'MEMBERS', memberIds: picked.map(Number) }
+}
+
+function broadcastTeamCount(picked, roster) {
+  const teams = {}
+  roster.forEach(function (member) { if (picked.indexOf(member.id) >= 0 && member.teamId) teams[member.teamId] = true })
+  return Object.keys(teams).length
+}
+
+function recapMetricView(metric) {
+  const item = metric || {}
+  const label = item.label || item.name || item.key || ''
+  const value = item.value
+  if (!label || value == null) return null
+  return { key: item.key || '', label: label, valueText: String(value), unit: item.unit || '' }
+}
+
+// C-11 第三轮(Figma D9 289:523):漏斗前三个数做大块,其余进「完成情况」行。
+function recapCompletionRow(metric, index) {
+  return { id: metric.key || ('m' + index), title: metric.label, value: metric.valueText + (metric.unit ? ' ' + metric.unit : '') }
+}
+
+// C-11:复盘「节点完成」行。服务端给的是原始计数对象,行组件要 {id,title,subtitle}。
+function recapStationRow(station) {
+  const item = station || {}
+  const id = normalizedPositiveId(item.nodeId)
+  if (!id || !item.nodeName) return null
+  const parts = []
+  if (item.arrivedPlayers != null) parts.push('到达 ' + item.arrivedPlayers + ' 人')
+  if (item.normalCompletedCount != null) parts.push('完成 ' + item.normalCompletedCount)
+  if (Number(item.fallbackCompletedCount) > 0) parts.push('兜底 ' + item.fallbackCompletedCount)
+  if (Number(item.rejectedCount) > 0) parts.push('打回 ' + item.rejectedCount)
+  return { id: id, title: item.nodeName, subtitle: parts.join(' · ') }
+}
+
+function normalizedPositiveId(value) {
+  const number = Number(value)
+  return Number.isSafeInteger(number) && number > 0 ? number : null
+}
+
+function isConfirmedRoleSource(item) {
+  const source = item || {}
+  return !!source.roleCode
+    && String(source.confirmationStatus || source.status || '').toUpperCase() === 'CONFIRMED'
+}
+
+function takeoverPayload(roles, draft) {
+  const source = draft || {}
+  const teamId = normalizedPositiveId(source.teamId)
+  const sourceMemberId = normalizedPositiveId(source.sourceMemberId)
+  const targetMemberId = normalizedPositiveId(source.targetMemberId)
+  const reason = String(source.reason || '').trim()
+  if (!teamId || !sourceMemberId || !targetMemberId || sourceMemberId === targetMemberId
+    || !reason || reason.length > 200) return null
+  const rows = Array.isArray(roles) ? roles : []
+  const sourceRow = rows.find(function (item) {
+    return String(item.teamId) === String(teamId) && String(item.memberId) === String(sourceMemberId)
+  })
+  const targetRow = rows.find(function (item) {
+    return String(item.teamId) === String(teamId) && String(item.memberId) === String(targetMemberId)
+  })
+  if (!isConfirmedRoleSource(sourceRow) || !targetRow || targetRow.roleCode) return null
+  return { teamId, sourceMemberId, targetMemberId, reason }
+}
+
+// 5-04:D7 的范围 chip 选项。通用 chip 组件要 {id,label},原来喂的是字符串数组 → 标签空白、
+// 点击也切不动;这里在宿主页投影,组件协议不动。
+const BROADCAST_SCOPE_OPTIONS = [
+  { id: 'ALL', label: '全部' },
+  { id: 'TEAM', label: '队伍' },
+  { id: 'ROLE', label: '角色' },
+]
+
+function hasAction(actions, action) {
+  return Array.isArray(actions) && actions.indexOf(action) >= 0
+}
+
+// CU-C-76(2026-09-24 走查):「不能发」有两种,以前说出来的只有一种。
+// 后端投影按判据给原因码(场次没跑起来 / 跑起来了但没人可送达),这里只负责把码念成人话。
+// NO_RECIPIENT 的句子必须带下一步 —— 走查抱怨的是「只说不能,不说怎样才能」。
+const BROADCAST_BLOCKER_TEXT = {
+  NO_RECIPIENT: '本场还没有可送达的玩家。等玩家报名进场后，这里才能发送。',
+}
+
+function broadcastBlockerText(blocker, sessionStatusText) {
+  const specific = BROADCAST_BLOCKER_TEXT[String(blocker || '').toUpperCase()]
+  if (specific) return specific
+  return '只有本场进行中才能发送' + (sessionStatusText ? '（当前 ' + sessionStatusText + '）' : '') + '。'
+}
+
+// 发送被后端驳回时的原因码 → 文案。GAME_BROADCAST_NO_RECIPIENT 是投影算完到点发送之间的
+// 时间窗里没人进场,光说「操作未生效」等于让人再点一次。认不出的原因交 null,由调用方留原话。
+const BROADCAST_REJECTED_TEXT = {
+  GAME_BROADCAST_NO_RECIPIENT: '刚刚没有可送达的玩家了，广播没有发出。等玩家报名进场后再发。',
+}
+
+function rejectedActionText(action, result) {
+  const code = String((result && result.reasonCode) || '').toUpperCase()
+  if (action === 'BROADCAST' && BROADCAST_REJECTED_TEXT[code]) return BROADCAST_REJECTED_TEXT[code]
+  // 第十轮 f2(j2 F-07):开始活动被服务端拒(如「当前不在活动服务时段」)要说出原因,不能只剩一句笼统的未生效。
+  const reason = result && typeof result.reason === 'string' ? result.reason.trim()
+    : (result && typeof result.message === 'string' ? result.message.trim() : '')
+  // x-fix5 R3-1:开始准备被拒(GAME_TEAM_REQUIRED「共享玩法需要本场有效队伍」等)同样原话回给队长
+  if ((action === 'START' || action === 'PREPARE') && reason) return reason
+  return null
+}
+
+function classifyLoadError(error) {
+  const code = String((error && error.code) || '').toUpperCase()
+  if (code === 'SESSION_NOT_FOUND' || code === 'NOT_FOUND') return 'empty'
+  if (error && (error.network === true || error.kind === 'network-error' || code === 'NETWORK_ERROR')) {
+    return 'network-error'
+  }
+  return 'business-error'
+}
+
+function nextRequestId(activityId) {
+  requestSequence += 1
+  return 'gd-' + activityId + '-' + Date.now() + '-' + requestSequence
+}
+
+function pendingWriteKey(activityId, memberId) {
+  return memberId === null || memberId === undefined || memberId === '' || !activityId
+    ? '' : 'cy.gameDirector.pendingWrite.m' + memberId + '.a' + String(activityId)
+}
+
+function legacyPendingWriteKey(activityId) {
+  return 'cy.gameDirector.pendingWrite.' + String(activityId || '')
+}
+
+function normalizePendingReceiptIndex(value, activityId) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const allowedKeys = ['activityId', 'requestId', 'action', 'nodeId', 'expectedRevision']
+  if (Object.keys(value).some(function (key) { return allowedKeys.indexOf(key) < 0 })) return null
+  const requestId = String(value.requestId || '')
+  const action = String(value.action || '')
+  const revision = Number(value.expectedRevision)
+  const nodeId = value.nodeId == null ? null : Number(value.nodeId)
+  if (String(value.activityId) !== String(activityId)
+    || !/^[A-Za-z0-9_-]{8,64}$/.test(requestId) || !action
+    || !Number.isSafeInteger(revision) || revision < 0
+    || (nodeId !== null && (!Number.isSafeInteger(nodeId) || nodeId <= 0))) return null
+  return {
+    activityId: String(activityId),
+    nodeId: nodeId,
+    requestId: requestId,
+    expectedRevision: revision,
+    action: action,
+  }
+}
+
+function readPendingWrite(activityId, memberId) {
+  const key = pendingWriteKey(activityId, memberId)
+  try {
+    wx.removeStorageSync(legacyPendingWriteKey(activityId))
+    const value = key ? wx.getStorageSync(key) : null
+    const receiptIndex = normalizePendingReceiptIndex(value, activityId)
+    if (receiptIndex) return receiptIndex
+    if (value) wx.removeStorageSync(key)
+  } catch (_) {}
+  return null
+}
+
+function savePendingWrite(activityId, command, memberId) {
+  const key = pendingWriteKey(activityId, memberId)
+  if (!key) return false
+  try {
+    wx.setStorageSync(key, {
+      activityId: String(activityId),
+      nodeId: command.nodeId == null ? null : command.nodeId,
+      requestId: command.requestId,
+      expectedRevision: command.expectedRevision,
+      action: command.action,
+    })
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+function clearPendingWrite(activityId, memberId, requestId) {
+  try {
+    const key = pendingWriteKey(activityId, memberId)
+    const saved = key && wx.getStorageSync(key)
+    // 同一账号的另一个页面可能已写入更新命令；迟到回调也不能删掉它。
+    if (saved && saved.requestId === requestId) wx.removeStorageSync(key)
+    const legacyKey = legacyPendingWriteKey(activityId)
+    if (wx.getStorageSync(legacyKey)) wx.removeStorageSync(legacyKey)
+  } catch (_) {}
+}
+
+
+// 导演台自己的 data 默认值。宿主页把它并进自己的 data —— 键名保持原样,
+// 组件与合同都按这些名字对。
+// 预计恢复时间:后端强制必填,不接受「暂停到不知道什么时候」。
+function resumeEtaIn(minutes) {
+  const d = chinaParts(Date.now() + minutes * 60 * 1000)
+  const pad = function (n) { return n < 10 ? '0' + n : String(n) }
+  return d.year + '-' + pad(d.month) + '-' + pad(d.day)
+    + ' ' + pad(d.hours) + ':' + pad(d.minutes) + ':00'
+}
+
+// Figma D8「现场事件」的事件清单。三类都从已有投影推出:
+//   商家暂停   = 站点 status=PAUSED(带原因、预计恢复、兜底方案绑没绑)
+//   待核验积压 = 站点 pendingVerificationCount > 0
+//   提交       = submissions 里 PENDING(可打回)/ REJECTED(已打回,只读)
+// ⚠️ 俱乐部拿不到 evidence_json,所以只出「驳回重交」,不出「通过」。
+function incidentRows(stations, submissions) {
+  const rows = []
+  const list = Array.isArray(stations) ? stations : []
+  for (let i = 0; i < list.length; i++) {
+    const st = list[i]
+    if (!st || st.nodeId == null) continue
+    if (st.status === 'PAUSED') {
+      rows.push({
+        key: 'pause:' + st.nodeId,
+        kind: 'PAUSED',
+        nodeId: st.nodeId,
+        label: '商家暂停',
+        text: (st.nodeName || '未命名节点') + ' · ' + (st.pauseReason || st.pauseReasonCode || '未填原因')
+          + (st.resumeEta ? ('，预计 ' + st.resumeEta + ' 恢复') : ''),
+        // 绑了兜底方案的,玩家走到兜底站点会自动记「兜底完成」—— 不是这里点出来的
+        sub: st.fallbackPlanCode ? ('已绑备用方案 ' + st.fallbackPlanCode) : '未绑备用方案',
+        planOptions: Array.isArray(st.fallbackPlanOptions) ? st.fallbackPlanOptions : [],
+      })
+    } else if (Number(st.pendingVerificationCount) > 0) {
+      rows.push({
+        key: 'backlog:' + st.nodeId,
+        kind: 'BACKLOG',
+        nodeId: st.nodeId,
+        label: '待核验积压',
+        text: (st.nodeName || '未命名节点') + ' · ' + st.pendingVerificationCount + ' 条待商家核验',
+        sub: '',
+        planOptions: Array.isArray(st.fallbackPlanOptions) ? st.fallbackPlanOptions : [],
+      })
+    }
+  }
+  const subs = Array.isArray(submissions) ? submissions : []
+  for (let i = 0; i < subs.length; i++) {
+    const sm = subs[i]
+    if (!sm || sm.submissionId == null) continue
+    const rejected = sm.status === 'REJECTED'
+    rows.push({
+      key: 'sub:' + sm.submissionId,
+      kind: rejected ? 'REJECTED' : 'PENDING_SUBMIT',
+      submissionId: sm.submissionId,
+      label: rejected ? '任务驳回' : '待核验提交',
+      text: (sm.teamId ? ('队 ' + sm.teamId + ' · ') : '') + (sm.nodeName || '未命名节点')
+        + (rejected ? ' 已驳回待重交' : ' 提交待核验'),
+      sub: rejected ? (sm.decisionReason || '') : '',
+      planOptions: [],
+    })
+  }
+  return rows
+}
+
+// 5-01:通用行组件 cy-club-director-row-list 只认 {id,title,subtitle} 并把点击回传成
+// {id}(组件协议不改,别的页面也在用)。事件行的内部字段名是 key/label/text,
+// 在喂给组件之前统一投影 —— 少这一层,整列空白、点不中。
+function incidentRowList(stations, submissions) {
+  return incidentRows(stations, submissions).map(function (row) {
+    return Object.assign({}, row, { id: row.key, title: row.label, subtitle: row.text })
+  })
+}
+
+// 选中一条事件后,处理方式只出**这条事件真能做**的那些。
+// 已驳回是终态,没有可执行动作 —— 「没有动作」本身就是一种状态,不给假选项。
+function incidentModesFor(row) {
+  if (!row) return []
+  if (row.kind === 'PAUSED') return [{ id: 'resume', label: '恢复本站' }]
+  if (row.kind === 'BACKLOG') return [{ id: 'pause', label: '暂停本站' }]
+  if (row.kind === 'PENDING_SUBMIT') return [{ id: 'reject', label: '驳回重交' }]
+  return []
+}
+
+const DIRECTOR_DATA = {
+    genericOpsKnown: false,
+    genericOpsActions: [],
+    genericOpsStatus: '',
+    genericOpsTeams: '',
+    genericOpsSheet: false,
+    genericOpsAction: '',
+    genericOpsTitle: '',
+    genericOpsDraft: {},
+    genericOpsFields: [],
+    genericOpsReady: false,
+    genericOpsError: '',
+    genericOpsLedgerRows: [],
+    // 导航高度由宿主页(活动详情)提供,这里不重复取 —— 顺带让本模块不依赖
+    // getApp(),可以被单测直接 require 进来跑状态机。
+    loadState: 'loading',
+    errorText: '',
+    sessionStatusText: '状态待确认',
+    revision: null,
+    chapterOptions: [],
+    unlockButtonText: '手动解锁章节',
+    readiness: { requiredStations: null, readyStations: null, teamsReady: null, canStart: false },
+    readinessText: '—',
+    canPrepare: false,
+    blockers: [],
+    startFailText: '',
+    merchantHoldBlocked: false,
+    incidentRows: [],
+    incidentSelectedKey: '',
+    incidentModes: [],
+    incidentMode: '',
+    stations: [],
+    teams: [],
+    roles: [],
+    // E-04:D6 弹层成员行(roles 的可定位投影,id="teamId:memberId")
+    roleMemberRows: [],
+    // 5-02:D6 角色 chip 的选项({id:roleCode,label});原来直接喂 roles 行 → 整排空白
+    roleOptions: [],
+    canAssignRoles: false,
+    roleSheetVisible: false,
+    roleDraft: { teamId: null, memberId: null, memberName: '', roleIndex: 0, roleCode: '' },
+    canTakeoverRoles: false,
+    takeoverSheetVisible: false,
+    takeoverTargetLabels: [],
+    takeoverDraft: {
+      teamId: null, sourceMemberId: null, sourceMemberName: '', targetIndex: 0, targetMemberId: null, reason: '',
+    },
+    broadcasts: [],
+    canBroadcast: false,
+    // CU-C-76:不可发送的原因码与那句解释都由投影算好放这里,置灰行直接念
+    broadcastBlocker: '',
+    broadcastDisabledText: '',
+    broadcastSheetVisible: false,
+    // 5-04:D7 范围 chip 是 {id,label};目标行是 {id,title} 投影(组件读 detail.id 回传)
+    broadcastScopeOptions: BROADCAST_SCOPE_OPTIONS,
+    broadcastTargetRows: [],
+    broadcastAudience: [],
+    broadcastCountText: '',
+    broadcastSendText: '发送',
+    broadcastPreviewReady: false,
+    broadcastPreviewText: '—',
+    broadcastDraft: { targetType: 'ALL', targetIndex: 0, content: '' },
+    canUnlockChapter: false,
+    unlockSheetVisible: false,
+    unlockChapterIndex: 0,
+    unlockReason: '',
+    leaderboard: null,
+    leaderboardVisibleKnown: false,
+    canToggleLeaderboard: false,
+    recap: null,
+    recapMetrics: [],
+    recapTiles: [],
+    recapCompletionRows: [],
+    recapStationRows: [],
+    canExportRecap: false,
+    exportState: 'idle',
+    canFinish: false,
+    writeState: 'idle',
+    writeMessage: '',
+    writeLocked: false,
+    canRetryUnknownWrite: false,
+}
+
+// 弹窗确认也必须属于打开弹窗时的主体/登录代次/场次/页面。
+function showDirectorModal(page, options) {
+  const context = page._directorOperationContext()
+  if (!context) return
+  const guarded = Object.assign({}, options)
+  for (const name of ['success', 'fail', 'complete']) {
+    if (typeof options[name] === 'function') guarded[name] = result => {
+      if (page._isDirectorContextCurrent(context)) options[name](result)
+    }
+  }
+  return modal.show(guarded)
+}
+
+const DIRECTOR_METHODS = {
+  _captureDirectorContext() {
+    const app = typeof getApp === 'function' ? getApp() : null
+    const owner = String(app && app.getUserID ? app.getUserID() || '' : '')
+    let issuedAt = ''
+    try { issuedAt = wx.getStorageSync('authorization_issued_at') || '' } catch (_) {}
+    return { owner, authorization: app && app.getAuthorization ? app.getAuthorization() : undefined,
+      loginGeneration: String(app && app._loginEpoch || 0) + ':' + String(issuedAt),
+      activityId: String(this._activityId || ''), pageEpoch: this._directorPageEpoch || 0 }
+  },
+  _isDirectorContextCurrent(context, pending) {
+    if (!context || context !== this._directorContext || this._directorRetired) return false
+    if (typeof getCurrentPages === 'function' && !getCurrentPages().includes(this)) { this._directorRetired = true; return false }
+    const current = this._captureDirectorContext()
+    const same = !!context.owner && context.owner === current.owner && context.authorization === current.authorization
+      && context.loginGeneration === current.loginGeneration && context.activityId === current.activityId
+      && context.pageEpoch === current.pageEpoch
+    if (!same) { this._directorRetired = true; return false }
+    return !pending || pending === (this._pendingCommand || this._pendingReceiptIndex)
+  },
+  _directorOperationContext() {
+    if (!this._directorContext) this._directorContext = this._captureDirectorContext()
+    return this._isDirectorContextCurrent(this._directorContext) ? this._directorContext : null
+  },
+  /* ——— Figma D8 现场事件的三个处理动作 ———
+   * 组件(club-director-incident-sheet)只负责展示与抛事件,写入在这里。
+   * 三个动作走 CLUB_ 前缀的俱乐部专用 action —— 不复用商家那三个词:
+   * 那些词的实现写死了「站点属于当前商家」,俱乐部走进去必然被拒。
+   */
+  onIncidentSelect(e) {
+    // 组件回传 {id}(= incidentRowList 投影出来的 row.id);detail.key 只为老测试夹具兼容。
+    const key = String((e.detail && (e.detail.id || e.detail.key)) || '')
+    const row = (this.data.incidentRows || []).find(function (x) { return String(x.id) === key })
+    const modes = incidentModesFor(row)
+    this.setData({
+      incidentSelectedKey: key,
+      incidentModes: modes,
+      // 只有一个可选动作时直接选中,省一次点击;没有可选动作时清空
+      incidentMode: modes.length === 1 ? modes[0].id : '',
+    })
+  },
+
+  onIncidentModeChange(e) {
+    this.setData({ incidentMode: (e.detail && (e.detail.value || e.detail.id)) || '' })
+  },
+
+  submitIncident() {
+    if (this.data.writeLocked) return
+    const row = (this.data.incidentRows || []).find(
+      (x) => String(x.id) === String(this.data.incidentSelectedKey))
+    if (!row) { toast('先选一条要处理的事件'); return }
+    const mode = this.data.incidentMode
+    if (!mode) { toast('先选处理方式'); return }
+    const that = this
+
+    if (mode === 'resume') {
+      this.setData({ incidentSheetVisible: false })
+      this.executeAction('CLUB_STATION_RESUME', {}, row.nodeId)
+      return
+    }
+
+    if (mode === 'reject') {
+      showDirectorModal(this, {
+        danger: true,
+        title: '驳回重交',
+        content: '',
+        editable: true,
+        placeholderText: '驳回原因（至少 2 个字，玩家会看到）',
+        confirmText: '确认驳回',
+        cancelText: '再想想',
+        // L08-045:原因不足 2 字时弹层不关、已输入的字留着,在框下提示(原来关掉后 toast,得重开重打)
+        validate(content) { return String(content || '').trim().length < 2 ? '请填写驳回原因（至少 2 个字）' : '' },
+        success(r) {
+          if (!r.confirm) return
+          const reason = (r.content || '').trim()
+          // 和商家驳回同一条:驳回必须给原因,否则玩家不知道要改什么
+          if (reason.length < 2) { toast('请填写驳回原因'); return }
+          that.setData({ incidentSheetVisible: false })
+          that.executeAction('CLUB_REJECT_SUBMISSION', {
+            submissionId: row.submissionId, reasonCode: 'ONSITE_REJECT', reason: reason,
+          })
+        },
+      })
+      return
+    }
+
+    // 暂停本站:后端要原因 + 预计恢复时间;备用方案 R9-38 起选填(clubStationPause 无方案不绑兜底)。
+    // 方案不是这里挑的:没有 → 只停本站;恰好一个 → 带上;多个 → 不替主理人挑也不丢,去后台指定。
+    const plans = row.planOptions || []
+    if (plans.length > 1) {
+      toast('有多个备用方案，请到后台指定')
+      return
+    }
+    const plan = plans[0]
+    showDirectorModal(this, {
+      danger: true,
+      title: '暂停本站',
+      content: plan
+        ? '暂停只影响本站，不改变已发放的权益与已完成的提交。'
+        : '这一站没有已批准的备用方案：玩家会看到本站暂停和预计恢复时间，不会被引导到其他节点。',
+      editable: true,
+      placeholderText: '暂停原因（至少 2 个字，会同步给商家与玩家）',
+      confirmText: '确认暂停',
+      cancelText: '再想想',
+      validate(content) { return String(content || '').trim().length < 2 ? '请填写暂停原因（至少 2 个字）' : '' },
+      success(r) {
+        if (!r.confirm) return
+        const reason = (r.content || '').trim()
+        if (reason.length < 2) { toast('请填写暂停原因'); return }
+        that.setData({ incidentSheetVisible: false })
+        const payload = { reasonCode: 'ONSITE', reason: reason, resumeEta: resumeEtaIn(30) }
+        if (plan) {
+          payload.fallbackPlanCode = plan.planCode
+          payload.fallbackPlanVersion = plan.version
+        }
+        that.executeAction('CLUB_STATION_PAUSE', payload, row.nodeId)
+      },
+    })
+  },
+
+
+  _getAdapter() {
+    if (!this._directorAdapter) this._directorAdapter = createClubGameDirectorAdapter()
+    return this._directorAdapter
+  },
+
+  // 原 game-director 页的 onLoad。那一页已删,逻辑一行未改地搬到这里,
+  // 由宿主页(活动详情)在自己的 onLoad 里按需调用 —— 只有拿得到 activityId
+  // 且当前身份能管活动时才进导演台那套状态机。
+  initDirector(activityId) {
+    this._activityId = activityId || null
+    this._directorPageEpoch = (this._directorPageEpoch || 0) + 1
+    this._directorRetired = false
+    this._directorAuthorityUnknown = false
+    this._directorContext = this._captureDirectorContext()
+    const pendingWrite = activityId ? readPendingWrite(activityId, this._directorContext.owner) : null
+    this._pendingCommand = null
+    this._pendingReceiptIndex = pendingWrite
+    this._unknownRequestId = pendingWrite ? pendingWrite.requestId : ''
+    this._autoReceiptStarted = false
+    this._offlineAnchorPending = null
+    try {
+      const key = pendingWriteKey(activityId, this._directorContext.owner), pending = key ? wx.getStorageSync(key + ':offline-start') : null
+      if (pending && Number.isSafeInteger(pending.epoch) && pending.epoch > 0) this._offlineAnchorPending = pending
+    } catch (_) {}
+    this.setData({
+      writeState: pendingWrite || this._offlineAnchorPending ? 'unknown-write' : 'idle',
+      writeMessage: pendingWrite || this._offlineAnchorPending ? '检测到上次未确认的操作，正在准备确认' : '',
+      writeLocked: !!(pendingWrite || this._offlineAnchorPending),
+      canRetryUnknownWrite: false,
+    })
+    if (!activityId) {
+      this.setData({ loadState: 'empty', errorText: '缺少活动信息' })
+      return
+    }
+    this.loadProjection()
+  },
+
+  loadProjection() {
+    const that = this
+    if (!this._activityId) return
+    const context = this._directorOperationContext()
+    if (!context) return
+    const seq = this._projectionSeq = (this._projectionSeq || 0) + 1
+    const background = this.data.loadState === 'ready'
+    if (!background) this.setData({ loadState: 'loading', errorText: '' })
+    this._getAdapter().load(this._activityId).then(function (projection) {
+      if (!that._isDirectorContextCurrent(context) || seq !== that._projectionSeq) return
+      that.applyProjection(projection)
+      if (typeof that.loadPlanFallback === 'function') that.loadPlanFallback()
+    }).catch(function (error) {
+      if (!that._isDirectorContextCurrent(context) || seq !== that._projectionSeq) return
+      if (background) {
+        toast((error && error.message) || '导演台没刷新成功')
+        return
+      }
+      that.setData({
+        loadState: classifyLoadError(error),
+        errorText: (error && error.message) || '活动导演台暂时无法打开',
+      })
+    })
+  },
+
+  applyProjection(projection) {
+    const that = this
+    const readiness = projection.readiness || {}
+    const availableActions = projection.availableActions || []
+    const roleOptions = (projection.roleOptions || []).map(roleOptionView).filter(function (item) { return !!item.roleCode })
+    const leaderboard = projection.leaderboard || null
+    const leaderboardVisibleKnown = !!leaderboard && typeof leaderboard.visible === 'boolean'
+    const recap = projection.recap || null
+    const recapMetrics = recap && Array.isArray(recap.metrics)
+      ? recap.metrics.map(recapMetricView).filter(function (item) { return !!item })
+      : []
+    const teamsView = (projection.teams || []).map(teamView)
+    const rolesView = (projection.roles || []).map(roleView)
+    this._genericControl = projection.genericControl || null
+    this._roleOptions = roleOptions
+    this._takeoverTargetOptions = []
+    this._broadcastTargetOptions = []
+    const chapterOptions = (projection.chapterOptions || []).filter(function (item) {
+      return item && numeric(item.chapterId) !== null && item.chapterId > 0
+        && (projection.currentChapterId == null || String(item.chapterId) !== String(projection.currentChapterId))
+    }).map(function (item) {
+      // 5-04(D4):行组件按 id 找行、回传 {id};缺 id 的章节行点哪一行都落回第 0 项。
+      const title = item.title || '未命名'
+      // C-04:路线局只给相邻下一章,并带上已完成本章、在等放行的队伍数。
+      const waiting = numeric(item.waitingTeams)
+      return { id: item.chapterId, chapterId: item.chapterId, title: title, waitingTeams: waiting,
+        subtitle: waiting === null ? '' : (waiting > 0 ? waiting + ' 队已完成本章，在等放行' : '还没有队伍完成本章') }
+    })
+    const unlockText = chapterOptions.length === 1
+      ? '放行「' + chapterOptions[0].title + '」' + (chapterOptions[0].waitingTeams > 0 ? ' · ' + chapterOptions[0].waitingTeams + ' 队在等' : '')
+      : '手动解锁章节'
+    // 宿主页(index.js)提供 applyProjectionStatus:场次状态 → 页面六态。director 与宿主是同一个 Page 作用域。
+    // 契约测试用裸 host 装载 director,没有这个方法;真页面(index.js)一定有
+    if (typeof this.applyProjectionStatus === 'function') this.applyProjectionStatus(projection.status)
+    this.setData({
+      loadState: 'ready',
+      errorText: '',
+      sessionStatusText: statusText(projection.status),
+      revision: projection.revision,
+      authorityEpoch: projection.authorityEpoch == null ? null : projection.authorityEpoch,
+      genericOpsKnown: !!this._genericControl,
+      genericOpsActions: this._genericControl ? genericOpsActions(this._genericControl) : [],
+      genericOpsStatus: this._genericControl ? genericOpsStatusText(this._genericControl.run) : '',
+      genericOpsTeams: this._genericControl ? this._genericControl.teams.map(team => '队伍 ' + team.teamId + (team.exited ? '（已退出）' : '')).join(' · ') : '',
+      chapterOptions: chapterOptions,
+      unlockButtonText: unlockText,
+      readiness: readiness,
+      readinessText: readinessText(readiness),
+      canPrepare: hasAction(availableActions, 'PREPARE'),
+      blockers: Array.isArray(readiness.blockers) ? readiness.blockers : [],
+      blockerText: Array.isArray(readiness.blockers) && readiness.blockers.length && projection.status !== 'RUNNING'
+        ? '还不能开始：' + readiness.blockers.filter(Boolean).join('；') : '',
+      // 第十轮 f2 第 5 项:卡在商家(待商家接受 / 没有合作单)时,主理人能直接去联系那家商家。
+      merchantHoldBlocked: projection.status !== 'RUNNING' && Array.isArray(readiness.blockers)
+        && readiness.blockers.some(function (item) { return /待商家接受|合作单/.test(String(item || '')) }),
+      startFailText: projection.status === 'RUNNING' ? '' : this.data.startFailText,
+      // D8 现场事件:全部由已有投影推出,不新造事实。
+      // 站点暂停 / 待核验积压来自 stations,待核验与已驳回的提交来自 submissions。
+      incidentRows: incidentRowList(projection.stations, projection.submissions),
+      stations: (projection.stations || []).map(stationView),
+      teams: teamsView,
+      roles: rolesView,
+      roleMemberRows: roleMemberRows(rolesView, null, null),
+      roleOptions: roleOptions.map(function (item) { return { id: item.roleCode, label: item.label } }),
+      canAssignRoles: hasAction(availableActions, 'ASSIGN_ROLES') && roleOptions.length > 0,
+      canTakeoverRoles: hasAction(availableActions, 'TAKEOVER_ROLE'),
+      broadcasts: (projection.broadcasts || []).map(broadcastView),
+      // CU-C-76:BROADCAST 在 availableActions 里只代表「本场允许有这个动作」,
+      // 真正发得出去与否看后端另给的 broadcastBlocker(零成员的场子不能让人点进去才发现)。
+      broadcastBlocker: projection.broadcastBlocker || '',
+      broadcastDisabledText: broadcastBlockerText(projection.broadcastBlocker, statusText(projection.status)),
+      canBroadcast: hasAction(availableActions, 'BROADCAST') && !projection.broadcastBlocker,
+      canUnlockChapter: !this._genericControl && hasAction(availableActions, 'UNLOCK_CHAPTER') && chapterOptions.length > 0,
+      leaderboard: leaderboard,
+      leaderboardVisibleKnown: leaderboardVisibleKnown,
+      canToggleLeaderboard: leaderboardVisibleKnown && hasAction(availableActions, 'SET_LEADERBOARD_VISIBILITY'),
+      recap: recap,
+      recapMetrics: recapMetrics,
+      recapTiles: recapMetrics.slice(0, 3),
+      recapCompletionRows: recapMetrics.slice(3).map(recapCompletionRow),
+      recapStationRows: recap && Array.isArray(recap.stations)
+        ? recap.stations.map(recapStationRow).filter(function (item) { return !!item })
+        : [],
+      canExportRecap: !!(recap && recap.exportAvailable === true),
+      canFinish: hasAction(availableActions, 'FINISH'),
+    }, function () {
+      if (that.data.writeLocked && (that._unknownRequestId || that._offlineAnchorPending) && !that._autoReceiptStarted) {
+        that._autoReceiptStarted = true
+        that.onReconcileUnknownWrite()
+      }
+    })
+    // 角色/接管权限刚落地,立刻重算接管候选(守卫在宿主页,见 index.js)
+    if (typeof this.refreshTakeoverCandidates === 'function') this.refreshTakeoverCandidates()
+    if (typeof this.refreshTeamRows === 'function') this.refreshTeamRows()
+  },
+
+  openGenericOps(event) {
+    if (this.data.writeLocked || this.data.loadState !== 'ready' || !this._genericControl) return
+    const action = event && event.currentTarget && event.currentTarget.dataset.action
+    const option = genericOpsActions(this._genericControl).find(item => item.id === action)
+    if (!option) return
+    if (action === 'OFFLINE_ANCHOR') return this.startOfflineRecord()
+    const draft = { signedAction: 'ARRIVAL_ATTEST', reviewKind: 'HIGH_WATER', unknownRequests: '[]' }
+    this.setData(Object.assign({ genericOpsSheet: true, genericOpsAction: action, genericOpsTitle: option.title, genericOpsDraft: draft,
+      genericOpsError: '', genericOpsLedgerRows: [] }, genericOpsForm(action, draft, this._genericControl)))
+    if (!['MANUAL_BEGIN', 'STAFF_MANUAL_SIGN', 'MANUAL_IMPORT', 'MANUAL_REVIEW'].includes(action)) return
+    const revision = this.data.revision
+    this._getAdapter().loadSharedExport(this._activityId).then(snapshot => {
+      if (!this.data.genericOpsSheet || this.data.genericOpsAction !== action || this.data.revision !== revision) return
+      if (snapshot.revision !== revision || snapshot.authorityEpoch !== this.data.authorityEpoch) {
+        this.setData({ genericOpsError: '本局版本已变化，请关闭并重新读取' }); return
+      }
+      this._genericExport = snapshot
+      const filled = Object.assign({}, this.data.genericOpsDraft)
+      if (action === 'MANUAL_BEGIN') Object.assign(filled, { highWaterHash: snapshot.highWaterHash, configHash: snapshot.configHash })
+      if (action === 'STAFF_MANUAL_SIGN' && snapshot.manual) filled.sequence = snapshot.manual.nextSequence
+      const ledger = snapshot.manual || {}
+      const rows = Object.keys(ledger.signatures || {}).map(id => {
+        const signature = ledger.signatures[id]
+        return '签名 ' + id + ' · 序号 ' + signature.sequence + ' · ' + (signature.command && signature.command.action || '') + (signature.used ? ' · 已使用' : ' · 待处理')
+      }).concat((ledger.unknownRequests || []).map(item => '会员 ' + item.memberId + ' · 操作 ' + item.requestId + ' · ' + item.outcome))
+      this.setData(Object.assign({ genericOpsDraft: filled,
+        genericOpsLedgerRows: rows,
+        genericOpsError: snapshot.manual && snapshot.manual.needsReview ? '人工账高水位尚待复核，不能先签署或执行' : '' }, genericOpsForm(action, filled, this._genericControl)))
+    }).catch(error => this.setData({ genericOpsError: error.message || '本局账本未读到，请关闭后重试' }))
+  },
+
+  closeGenericOps() {
+    if (!this.data.writeLocked) this.setData({ genericOpsSheet: false })
+  },
+
+  startOfflineRecord() {
+    const context = this._directorOperationContext()
+    if (!context) return false
+    if (this.data.writeLocked || !this._genericControl || this._genericControl.offlineAnchorAvailable !== true) return false
+    const epoch = this.data.authorityEpoch, revision = this.data.revision
+    showDirectorModal(this, { title: '开始离线记录', content: '先记下当前进度，现场操作写在纸上。恢复网络后先暂停本局，再导入纸质记录。',
+      confirmText: '开始记录', cancelText: '暂不开始', success: result => {
+        if (!this._isDirectorContextCurrent(context) || !result.confirm || this.data.writeLocked) return
+        if (!this._genericControl || this._genericControl.offlineAnchorAvailable !== true || this.data.authorityEpoch !== epoch || this.data.revision !== revision) {
+          toast('本局状态已变化，请重新读取'); return
+        }
+        const key = pendingWriteKey(context.activityId, context.owner)
+        if (!key) { toast('请先确认当前登录身份'); return }
+        try { wx.setStorageSync(key + ':offline-start', { epoch }) }
+        catch (_) { toast('无法保存确认状态，未开始离线记录'); return }
+        this._offlineAnchorPending = { epoch }
+        this.setData({ writeLocked: true, writeState: 'submitting', writeMessage: '正在确认离线记录起点…', canRetryUnknownWrite: false })
+        this._getAdapter().anchorSharedRun(this._activityId).then(response => {
+          if (!this._isDirectorContextCurrent(context)) return false
+          if (response && response.status === 'business-error') {
+            this._clearOfflineAnchorPending()
+            this.setData({ writeLocked: false, writeState: 'idle', writeMessage: response.message || '离线记录未开始' })
+            toast(response.message || '离线记录未开始，请重新确认后再试')
+            this.loadProjection(); return
+          }
+          return this._reconcileOfflineAnchor()
+        }).catch(() => this._isDirectorContextCurrent(context) && this._reconcileOfflineAnchor())
+      }
+    })
+    return true
+  },
+
+  _clearOfflineAnchorPending() {
+    const context = this._directorOperationContext()
+    if (!context) return
+    try { wx.removeStorageSync(pendingWriteKey(context.activityId, context.owner) + ':offline-start') } catch (_) {}
+    this._offlineAnchorPending = null
+  },
+
+  _reconcileOfflineAnchor() {
+    const context = this._directorOperationContext()
+    if (!context) return false
+    if (!this._offlineAnchorPending || this._offlineAnchorReading) return false
+    this._offlineAnchorReading = true
+    this._autoReceiptStarted = true
+    return this._getAdapter().load(this._activityId).then(projection => {
+      if (!this._isDirectorContextCurrent(context)) return false
+      this.applyProjection(projection)
+      const control = projection.genericControl, anchor = control && control.offlineAnchor
+      if (!anchor || anchor.epoch !== this._offlineAnchorPending.epoch || anchor.epoch !== control.run.authorityEpoch
+        || !Number.isSafeInteger(anchor.at) || anchor.at < 1 || !/^[a-f0-9]{64}$/.test(anchor.highWaterHash || '') || !/^[a-f0-9]{64}$/.test(anchor.configHash || '')) {
+        this.setData({ writeLocked: true, writeState: 'unknown-write', writeMessage: '尚未读到本局离线记录，请确认结果；不会重复开始。', canRetryUnknownWrite: false })
+        return false
+      }
+      this._clearOfflineAnchorPending()
+      this.setData({ writeLocked: false, writeState: 'idle', writeMessage: '离线记录已开始；恢复网络后请先暂停并导入纸质记录。', canRetryUnknownWrite: false })
+      toast('离线记录起点已确认')
+      return true
+    }).catch(() => {
+      if (!this._isDirectorContextCurrent(context)) return false
+      this.setData({ writeLocked: true, writeState: 'unknown-write', writeMessage: '离线记录结果待确认，请重新确认；不会重复开始。', canRetryUnknownWrite: false })
+      return false
+    }).finally(() => { if (this._isDirectorContextCurrent(context)) this._offlineAnchorReading = false })
+  },
+
+  inputGenericOps(event) {
+    if (this.data.writeLocked) return
+    const key = event.currentTarget.dataset.key
+    const field = this.data.genericOpsFields.find(item => item.key === key)
+    if (!field) return
+    const value = field.options.length ? field.options[Number(event.detail.value)] : event.detail.value
+    const draft = Object.assign({}, this.data.genericOpsDraft, { [key]: value })
+    if (key === 'signedAction') {
+      for (const obsolete of ['teamId', 'questKey', 'operationKind', 'operationKey', 'nonce', 'reason']) delete draft[obsolete]
+    }
+    if (key === 'questKey' || key === 'signedAction') for (const answerKey of Object.keys(draft)) if (answerKey.startsWith('guide_')) delete draft[answerKey]
+    if (key === 'reviewKind') {
+      for (const obsolete of ['signatureId', 'memberId', 'requestId', 'acceptLateConflict']) delete draft[obsolete]
+    }
+    this.setData(Object.assign({ genericOpsDraft: draft, genericOpsError: '' }, genericOpsForm(this.data.genericOpsAction, draft, this._genericControl)))
+  },
+
+  confirmGenericOps() {
+    if (this.data.writeLocked || this.data.loadState !== 'ready' || !this._genericControl) return false
+    const action = this.data.genericOpsAction
+    const option = genericOpsActions(this._genericControl).find(item => item.id === action)
+    if (!option || this._genericControl.revision !== this.data.revision || this._genericControl.run.authorityEpoch !== this.data.authorityEpoch) return false
+    let payload
+    try { payload = genericOpsPayload(action, this.data.genericOpsDraft, this._genericControl) }
+    catch (error) { this.setData({ genericOpsError: error.message }); return false }
+    const revision = this.data.revision, epoch = this.data.authorityEpoch
+    showDirectorModal(this, { title: '确认' + option.title,
+      content: (option.irreversible ? '此操作不可撤销' : '将按本局规则核验并应用本次操作。') + (payload.reason ? '原因：' + payload.reason : '请确认现场凭证与输入准确。'),
+      confirmText: '确认提交',
+      success: result => {
+        if (!result.confirm || this.data.writeLocked) return
+        if (revision !== this.data.revision || epoch !== this.data.authorityEpoch || !genericOpsActions(this._genericControl).some(item => item.id === action)) {
+          this.setData({ genericOpsError: '场次状态已变化，请重新确认' }); return
+        }
+        this.setData({ genericOpsSheet: false })
+        this.executeAction(action, payload)
+      } })
+    return true
+  },
+
+  _readGenericUnknown() {
+    const command = this._pendingCommand
+    if (command && this._genericControl && genericOpsActions(this._genericControl).some(item => item.id === command.action)) this.onReconcileUnknownWrite()
+  },
+
+  openRoleAssignment(e) {
+    const dataset = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    this.openRoleRow(dataset.teamId, dataset.memberId)
+  },
+
+  // E-04(2026-09-16):统一入口。原来只有「从某行带 teamId+memberId 点进来」一条路,
+  // 而页面上根本没有任何行会带这两个值 —— 弹层因此永远打不开。
+  // 现在「现场工具 → 角色分配」与弹层内选成员都走这里。
+  openRoleRow(teamId, memberId) {
+    if (this.data.writeLocked) return
+    if (!this.data.canAssignRoles) {
+      toast('当前不能调整角色')
+      return
+    }
+    const row = (this.data.roles || []).find(function (item) {
+      return String(item.teamId) === String(teamId) && String(item.memberId) === String(memberId)
+    })
+    if (!row || row.teamId == null || row.memberId == null) {
+      toast('成员信息更新中')
+      return
+    }
+    const roleOptions = this._roleOptions || []
+    let roleIndex = roleOptions.findIndex(function (item) { return item.roleCode === row.roleCode })
+    if (roleIndex < 0) roleIndex = 0
+    const selected = roleOptions[roleIndex]
+    this.setData({
+      roleSheetVisible: true,
+      roleMemberRows: roleMemberRows(this.data.roles, row.teamId, row.memberId),
+      roleDraft: {
+        teamId: row.teamId,
+        memberId: row.memberId,
+        memberName: row.memberNameText,
+        roleIndex: roleIndex,
+        roleCode: selected ? selected.roleCode : '',
+      },
+    })
+  },
+
+  // 现场工具入口:先开弹层,成员从 roleMemberRows 里选(选中后按 id 回落到 openRoleRow)
+  openRoleSheet() {
+    if (this.data.writeLocked) return
+    if (!this.data.canAssignRoles) {
+      toast('当前不能调整角色')
+      return
+    }
+    if (!(this.data.roleMemberRows || []).length) {
+      toast('还没有可分角色的成员')
+      return
+    }
+    this.setData({ roleSheetVisible: true })
+  },
+
+  onRoleMemberPick(e) {
+    const id = String((e && e.detail && e.detail.id) || '')
+    const parts = id.split(':')
+    if (parts.length !== 2) return
+    this.openRoleRow(parts[0], parts[1])
+  },
+
+  onRoleOptionChange(e) {
+    // chip 组件回传 {id: roleCode}(旧写法读 detail.value 恒为 NaN → 永远选不中)
+    const picked = String((e && e.detail && e.detail.id) || '')
+    const index = (this._roleOptions || []).findIndex(function (item) { return String(item.roleCode) === picked })
+    const option = index >= 0 ? this._roleOptions[index] : null
+    if (!option) return
+    this.setData({ roleDraft: Object.assign({}, this.data.roleDraft, { roleIndex: index, roleCode: option.roleCode }) })
+  },
+
+  closeRoleAssignment() {
+    if (this.data.writeLocked) return
+    this.setData({ roleSheetVisible: false })
+  },
+
+  confirmRoleAssignment() {
+    if (this.data.writeLocked) return
+    const draft = this.data.roleDraft || {}
+    if (!this.data.canAssignRoles || draft.teamId == null || draft.memberId == null || !draft.roleCode) {
+      toast('请先选择有效角色')
+      return
+    }
+    this.setData({ roleSheetVisible: false })
+    this.executeAction('ASSIGN_ROLES', {
+      teamId: draft.teamId,
+      assignments: [{ memberId: draft.memberId, roleCode: draft.roleCode }],
+    })
+  },
+
+  openTakeoverRole(e) {
+    if (this.data.writeLocked) return
+    if (!this.data.canTakeoverRoles) {
+      toast('当前不能接管角色')
+      return
+    }
+    // 5-03:行组件只回传 {id}(= "teamId:memberId"),没有 currentTarget.dataset ——
+    // 旧写法读 dataset 恒为空,点哪一行都提示「来源角色待确认」。
+    const picked = String((e && e.detail && e.detail.id) || '')
+    const parts = picked.split(':')
+    const source = parts.length === 2 ? this.data.roles.find(function (item) {
+      return String(item.teamId) === parts[0] && String(item.memberId) === parts[1]
+    }) : null
+    if (!source || !isConfirmedRoleSource(source) || source.teamId == null || source.memberId == null) {
+      toast('来源角色待确认')
+      return
+    }
+    const targets = this.data.roles.filter(function (item) {
+      return String(item.teamId) === String(source.teamId)
+        && String(item.memberId) !== String(source.memberId)
+        && item.memberId != null && !item.roleCode
+    })
+    if (!targets.length) {
+      toast('同队没有待分配成员')
+      return
+    }
+    this._takeoverTargetOptions = targets
+    this.setData({
+      takeoverSheetVisible: true,
+      takeoverTargetLabels: targets.map(function (item) { return item.memberNameText }),
+      takeoverDraft: {
+        teamId: source.teamId,
+        sourceMemberId: source.memberId,
+        sourceMemberName: source.memberNameText,
+        targetIndex: 0,
+        targetMemberId: targets[0].memberId,
+        reason: '',
+      },
+    })
+  },
+
+  onTakeoverTargetChange(e) {
+    const index = Number(e && e.detail && e.detail.value)
+    const target = (this._takeoverTargetOptions || [])[index]
+    if (!target) return
+    this.setData({ takeoverDraft: Object.assign({}, this.data.takeoverDraft, {
+      targetIndex: index, targetMemberId: target.memberId,
+    }) })
+  },
+
+  onTakeoverReasonInput(e) {
+    this.setData({ takeoverDraft: Object.assign({}, this.data.takeoverDraft, {
+      reason: String((e && e.detail && e.detail.value) || ''),
+    }) })
+  },
+
+  closeTakeoverRole() {
+    if (this.data.writeLocked) return
+    this.setData({ takeoverSheetVisible: false })
+  },
+
+  confirmTakeoverRole() {
+    if (this.data.writeLocked) return
+    if (!this.data.canTakeoverRoles) {
+      toast('当前不能接管角色')
+      return
+    }
+    const payload = takeoverPayload(this.data.roles, this.data.takeoverDraft)
+    if (!payload) {
+      toast('请选同队待分配成员并填写原因')
+      return
+    }
+    this.setData({ takeoverSheetVisible: false })
+    this.executeAction('TAKEOVER_ROLE', payload)
+  },
+
+  _setBroadcastTargetType(targetType) {
+    const normalized = ['ALL', 'TEAM', 'ROLE'].indexOf(targetType) >= 0 ? targetType : 'ALL'
+    const targets = broadcastTargets(normalized, this.data.teams, this._roleOptions || [])
+    const selected = targets[0] || null
+    const recipientCount = broadcastRecipientCount(normalized, selected, this.data.teams, this.data.roles)
+    const targetLabel = selected ? selected.label : '定向范围待选择'
+    this._broadcastTargetOptions = targets
+    this.setData({
+      // 5-04:行组件要 {id,title} 并回传 {id};原来喂的是 teamView 原始行 → 空白且点不中
+      broadcastPreviewReady: recipientCount !== null && recipientCount > 0 && !!selected,
+      broadcastPreviewText: targetLabel + (recipientCount === null ? '' : ' · ' + recipientCount + ' 人'),
+      broadcastDraft: {
+        targetType: normalized,
+        targetIndex: 0,
+        content: (this.data.broadcastDraft && this.data.broadcastDraft.content) || '',
+      },
+    })
+    const roster = broadcastRoster(this.data.roles)
+    this._broadcastRoster = broadcastRosterComplete(roster, this.data.teams) ? roster : []
+    this._broadcastPicked = selected && this._broadcastRoster.length ? broadcastGroupIds(normalized, selected, this._broadcastRoster) : []
+    this._refreshBroadcastPicks(selected, recipientCount)
+  },
+
+  // 头像、行上的「已选 / 选择」、人数、发送按钮都从这一份选中名单算,不分两处存。
+  _refreshBroadcastPicks(selected, recipientCount) {
+    const roster = this._broadcastRoster || []
+    const picked = this._broadcastPicked || []
+    const targetType = this.data.broadcastDraft.targetType
+    const options = this._broadcastTargetOptions || []
+    if (!roster.length) {
+      // 名单不全:整组单选,人数只信服务端给的成员数
+      const teamText = targetType === 'TEAM' ? ' · 1 队' : (targetType === 'ALL' ? ' · ' + (this.data.teams || []).length + ' 队' : '')
+      this.setData({
+        broadcastAudience: [],
+        broadcastTargetRows: options.map(function (item) {
+          return { id: item.id, title: item.label, subtitle: numeric(item.memberCount) === null ? '' : item.memberCount + ' 人', on: item === selected }
+        }),
+        broadcastCountText: recipientCount === null || recipientCount === undefined ? '' : recipientCount + ' 人' + teamText,
+        broadcastSendText: recipientCount ? '发送给 ' + recipientCount + ' 人' : '发送',
+      })
+      return
+    }
+    const teamCount = broadcastTeamCount(picked, roster)
+    this.setData({
+      broadcastAudience: roster.map(function (member) { return Object.assign({}, member, { picked: picked.indexOf(member.id) >= 0 }) }),
+      broadcastTargetRows: options.map(function (item) {
+        const ids = broadcastGroupIds(targetType, item, roster)
+        return { id: item.id, title: item.label, subtitle: ids.length + ' 人', on: ids.length > 0 && ids.every(function (id) { return picked.indexOf(id) >= 0 }) }
+      }),
+      broadcastCountText: picked.length + ' 人' + (teamCount ? ' · ' + teamCount + ' 队' : ''),
+      broadcastSendText: picked.length ? '发送给 ' + picked.length + ' 人' : '先选收件人',
+      broadcastPreviewReady: picked.length > 0,
+      broadcastPreviewText: picked.length + ' 人',
+    })
+  },
+
+  onBroadcastPersonToggle(e) {
+    if (this.data.writeLocked) return
+    const id = String((e && e.detail && e.detail.id) == null ? '' : e.detail.id)
+    if (!id || !(this._broadcastRoster || []).some(function (member) { return member.id === id })) return
+    const picked = this._broadcastPicked || []
+    this._broadcastPicked = picked.indexOf(id) >= 0 ? picked.filter(function (item) { return item !== id }) : picked.concat(id)
+    this._refreshBroadcastPicks()
+  },
+
+  openBroadcast() {
+    if (this.data.writeLocked) return
+    if (!this.data.canBroadcast) {
+      toast(this.data.broadcastDisabledText || '当前不能发送广播')
+      return
+    }
+    this.setData({ broadcastSheetVisible: true, broadcastDraft: Object.assign({ targetType: 'ALL', targetIndex: 0, content: '' }, this.data.broadcastDraft) })
+    this._setBroadcastTargetType('ALL')
+  },
+
+  closeBroadcast() {
+    if (this.data.writeLocked) return
+    this.setData({ broadcastSheetVisible: false })
+  },
+
+  selectBroadcastTargetType(e) {
+    if (this.data.writeLocked) return
+    // chip 组件回传 {id}(旧写法读 currentTarget.dataset → 恒空 → 永远回落 ALL)
+    const targetType = String((e && e.detail && e.detail.id) || '').toUpperCase()
+    this._setBroadcastTargetType(targetType)
+  },
+
+  onBroadcastTargetChange(e) {
+    const picked = String((e && e.detail && e.detail.id) == null ? '' : e.detail.id)
+    const index = (this._broadcastTargetOptions || []).findIndex(function (item) {
+      return String(item.id) === picked
+    })
+    const selected = index >= 0 ? this._broadcastTargetOptions[index] : null
+    if (!selected) return
+    const targetType = this.data.broadcastDraft.targetType
+    const recipientCount = broadcastRecipientCount(targetType, selected, this.data.teams, this.data.roles)
+    this.setData({
+      broadcastPreviewReady: recipientCount !== null && recipientCount > 0,
+      broadcastPreviewText: selected.label + (recipientCount === null ? '' : ' · ' + recipientCount + ' 人'),
+      broadcastDraft: Object.assign({}, this.data.broadcastDraft, { targetIndex: index }),
+    })
+    const roster = this._broadcastRoster || []
+    if (roster.length) {
+      // 点一行把这一组选上或取消,其他组不动(稿:可以同时选两队)
+      const ids = broadcastGroupIds(targetType, selected, roster)
+      const current = this._broadcastPicked || []
+      const allOn = ids.length > 0 && ids.every(function (id) { return current.indexOf(id) >= 0 })
+      this._broadcastPicked = allOn
+        ? current.filter(function (id) { return ids.indexOf(id) < 0 })
+        : current.concat(ids.filter(function (id) { return current.indexOf(id) < 0 }))
+    }
+    this._refreshBroadcastPicks(selected, recipientCount)
+  },
+
+  onBroadcastContentInput(e) {
+    const content = String((e && e.detail && e.detail.value) || '')
+    this.setData({ broadcastDraft: Object.assign({}, this.data.broadcastDraft, { content: content }) })
+  },
+
+  confirmBroadcast() {
+    if (this.data.writeLocked) return
+    const draft = this.data.broadcastDraft || {}
+    const content = String(draft.content || '').trim()
+    const selected = (this._broadcastTargetOptions || [])[draft.targetIndex]
+    if (!this.data.canBroadcast || !this.data.broadcastPreviewReady || !selected) {
+      toast('接收范围待确认，暂不能发送')
+      return
+    }
+    if (!content) {
+      toast('请输入广播内容')
+      return
+    }
+    const payload = { targetType: draft.targetType, content: content }
+    if (draft.targetType === 'TEAM') payload.targetId = selected.id
+    if (draft.targetType === 'ROLE') payload.roleCode = selected.id
+    if ((this._broadcastRoster || []).length) {
+      delete payload.targetId
+      delete payload.roleCode
+      Object.assign(payload, broadcastPayloadTarget(this._broadcastPicked || [], this._broadcastRoster, draft.targetType, this._broadcastTargetOptions))
+    }
+    this.setData({ broadcastSheetVisible: false })
+    this.executeAction('BROADCAST', payload)
+  },
+
+  openManualUnlock() {
+    if (this.data.writeLocked) return
+    if (!this.data.canUnlockChapter || this.data.chapterOptions.length === 0) {
+      toast('当前没有可解锁的章节')
+      return
+    }
+    this.setData({ unlockSheetVisible: true, unlockChapterIndex: 0, unlockReason: '' })
+  },
+
+  closeManualUnlock() {
+    if (this.data.writeLocked) return
+    this.setData({ unlockSheetVisible: false })
+  },
+
+  onUnlockReasonInput(e) {
+    this.setData({ unlockReason: String((e && e.detail && e.detail.value) || '') })
+  },
+
+  onUnlockChapterChange(e) {
+    // 行组件回传 {id}(= chapterId),按 id 反查索引;旧写法读 detail.value 恒 NaN → 永远解第 1 章
+    const picked = String((e && e.detail && e.detail.id) == null ? '' : e.detail.id)
+    const index = (this.data.chapterOptions || []).findIndex(function (item) {
+      return String(item.id) === picked
+    })
+    if (index < 0 || !this.data.chapterOptions[index]) return
+    this.setData({ unlockChapterIndex: index })
+  },
+
+  confirmManualUnlock() {
+    if (this.data.writeLocked) return
+    const reason = String(this.data.unlockReason || '').trim()
+    const selected = this.data.chapterOptions[this.data.unlockChapterIndex]
+    // C-04(2026-11-02 用户):放行原因选填,填了才带上
+    if (!this.data.canUnlockChapter || !selected) {
+      toast('请选择要放行的章节')
+      return
+    }
+    this.setData({ unlockSheetVisible: false })
+    const payload = { chapterId: selected.chapterId }
+    if (reason) payload.reason = reason
+    this.executeAction('UNLOCK_CHAPTER', payload)
+  },
+
+  onToggleLeaderboard() {
+    if (this.data.writeLocked) return
+    if (!this.data.canToggleLeaderboard || !this.data.leaderboardVisibleKnown) {
+      toast('当前版本暂不能调整榜单')
+      return
+    }
+    const visible = !this.data.leaderboard.visible
+    const that = this
+    showDirectorModal(this, {
+      title: visible ? '显示榜单' : '隐藏榜单',
+      content: visible ? '确认对玩家显示当前榜单？' : '隐藏后玩家将暂时看不到榜单。',
+      confirmText: '确认',
+      success(result) { if (result.confirm) that.executeAction('SET_LEADERBOARD_VISIBILITY', { visible: visible }) },
+    })
+  },
+
+  // 「结束活动」的确认已由宿主页的 T2 居中确认(cy-club-director-end-confirm)承担,
+  // 这里不再叠第二道弹窗(2026-09-05 审核:双重确认)。
+  onFinishSession() {
+    if (this.data.writeLocked) return
+    if (!this.data.canFinish) {
+      toast('当前不能结束活动')
+      return
+    }
+    this.executeAction('FINISH', {})
+  },
+
+  copyRecap() {
+    if (!this.data.canExportRecap || this.data.exportState === 'loading') {
+      toast('复盘还没生成，稍后再导出')
+      return false
+    }
+    const that = this
+    this.setData({ exportState: 'loading' })
+    this._getAdapter().exportRecap(this._activityId).then(function (data) {
+      let text
+      try { text = JSON.stringify(data) } catch (_) { text = '' }
+      if (!text) throw new Error('复盘导出数据无效')
+      wx.setClipboardData({
+        data: text,
+        success() {
+          that.setData({ exportState: 'idle' })
+          toast.success('复盘数据已复制')
+        },
+        fail() {
+          that.setData({ exportState: 'idle' })
+          toast('复制失败，请稍后重试')
+        },
+      })
+    }).catch(function (error) {
+      that.setData({ exportState: 'idle' })
+      const network = error && (error.network === true || String(error.code || '').toUpperCase() === 'NETWORK_ERROR')
+      toast(network ? '网络异常，复制失败' : '复盘数据复制失败')
+    })
+    return true
+  },
+
+  onStartSession() {
+    if (this.data.writeLocked) return
+    if (!this.data.readiness || !this.data.readiness.canStart) {
+      // C-09:服务端已给出卡点(如「尚无有效报名队伍」),直接说出来;只有带队人能看到导演台。
+      const blockers = Array.isArray(this.data.blockers) ? this.data.blockers.filter(Boolean) : []
+      toast(blockers.length ? '还不能开始：' + blockers.join('；') : '准备未完成，暂时不能开局')
+      return
+    }
+    const that = this
+    showDirectorModal(this, {
+      title: '确认开局',
+      content: '开局后玩家将按当前角色和节点状态进入活动。',
+      confirmText: '开始活动',
+      success(result) { if (result.confirm) that.executeAction('START', {}) },
+    })
+  },
+
+  onPrepareSession() {
+    if (this.data.writeLocked) return
+    if (!this.data.canPrepare) {
+      toast('当前不能进入准备')
+      return
+    }
+    const that = this
+    showDirectorModal(this, {
+      title: '进入准备',
+      content: '进入后将开始收集节点和队伍的就绪状态。',
+      confirmText: '开始准备',
+      success(result) { if (result.confirm) that.executeAction('PREPARE', {}) },
+    })
+  },
+
+  executeAction(action, payload, nodeId) {
+    const context = this._directorOperationContext()
+    if (!context) return false
+    if (this.data.writeLocked) return
+    if (this.data.loadState !== 'ready') return
+    if (this.data.revision == null) {
+      toast('状态已变化，请先刷新')
+      return
+    }
+    if (action === 'TAKEOVER_ROLE') {
+      if (!this.data.canTakeoverRoles) return
+      const normalizedTakeover = takeoverPayload(this.data.roles, payload)
+      if (!normalizedTakeover) return
+      payload = normalizedTakeover
+    }
+    const that = this
+    const requestId = nextRequestId(this._activityId)
+    const command = {
+      activityId: this._activityId,
+      nodeId: nodeId == null ? null : nodeId,
+      requestId: requestId,
+      expectedRevision: this.data.revision,
+      ...(this.data.authorityEpoch != null ? { authorityEpoch: this.data.authorityEpoch } : {}),
+      action: action,
+      payload: payload || {},
+    }
+    this._directorAuthorityUnknown = false
+    this.setData({
+      writeState: 'submitting',
+      writeMessage: '正在提交…',
+      writeLocked: true,
+      canRetryUnknownWrite: false,
+    })
+    this._unknownRequestId = ''
+    this._pendingCommand = command
+    this._pendingReceiptIndex = normalizePendingReceiptIndex({
+      activityId: command.activityId,
+      nodeId: command.nodeId,
+      requestId: command.requestId,
+      expectedRevision: command.expectedRevision,
+      action: command.action,
+    }, this._activityId)
+    if (!savePendingWrite(this._activityId, command, context.owner)) {
+      this._pendingCommand = null
+      this._pendingReceiptIndex = null
+      this.setData({
+        writeState: 'storage-error',
+        writeMessage: '无法安全保存本次操作，请检查小程序存储后重试',
+        writeLocked: false,
+        canRetryUnknownWrite: false,
+      })
+      toast('无法安全保存，请稍后重试')
+      return false
+    }
+    this._getAdapter().submit(command).then(function (result) {
+      if (!that._isDirectorContextCurrent(context, command)) return
+      if (that._handleDirectorAuthorityConflict(result)) return
+      if (result && (result.state === 'unknown-write' || result.state === 'business-error'
+        || (command.action === 'PLAN_FALLBACK' || that._genericControl) && result.raw && result.raw.receipt && result.raw.receipt.replayed)) {
+        that._unknownRequestId = requestId
+        that.setData({
+          writeState: 'unknown-write',
+          writeMessage: '结果待确认，确认前暂停所有操作',
+          writeLocked: true,
+          canRetryUnknownWrite: command.action !== 'PLAN_FALLBACK',
+        })
+        if (command.action === 'PLAN_FALLBACK') that.onReconcileUnknownWrite()
+        else that._readGenericUnknown()
+        return
+      }
+      if (result && result.state === 'rejected') {
+        clearPendingWrite(context.activityId, context.owner, command.requestId)
+        that._pendingCommand = null
+        that._pendingReceiptIndex = null
+        that._unknownRequestId = ''
+        that.setData({ writeState: 'idle', writeMessage: '', writeLocked: false, canRetryUnknownWrite: false })
+        // CU-C-76:后端把驳回原因放在 reasonCode 里(如 GAME_BROADCAST_NO_RECIPIENT),
+        // 以前这里不分原因统一一句「操作未生效」,把可执行的下一步抹掉了。
+        const rejectedText = rejectedActionText(command.action, result.raw)
+        if (command.action === 'START') that.setData({ startFailText: rejectedText ? '没能开始：' + rejectedText : '没能开始，请刷新后重试' })
+        toast(rejectedText || '操作未生效，请刷新后重试')
+        // F-L3-01:驳回(含 GAME_STATE_CONFLICT)说明本地投影已落后，自动重读，下一次操作带新 revision
+        that.loadProjection()
+        return
+      }
+      clearPendingWrite(context.activityId, context.owner, command.requestId)
+      that._pendingCommand = null
+      that._pendingReceiptIndex = null
+      that._unknownRequestId = ''
+      that.setData({ writeState: 'idle', writeMessage: '', writeLocked: false, canRetryUnknownWrite: false })
+      if (command.action === 'BROADCAST') that.setData({ broadcastDraft: Object.assign({}, that.data.broadcastDraft, { content: '' }) })
+      if (command.action === 'PLAN_FALLBACK' && typeof that.applyPlanFallbackReceipt === 'function') that.applyPlanFallbackReceipt(result)
+      that.loadProjection()
+      // 写成功后主题维度的核销数/场次也变了,宿主页一起刷,别停在旧态
+      if (typeof that.fetchDetail === 'function') that.fetchDetail()
+    }).catch(function () {
+      if (!that._isDirectorContextCurrent(context, command)) return
+      that._unknownRequestId = requestId
+      that.setData({
+        writeState: 'unknown-write',
+        writeMessage: '结果待确认，确认前暂停所有操作',
+        writeLocked: true,
+        canRetryUnknownWrite: command.action !== 'PLAN_FALLBACK',
+      })
+      toast('结果待确认，请勿重复操作')
+      if (command.action === 'PLAN_FALLBACK') that.onReconcileUnknownWrite()
+      else that._readGenericUnknown()
+    })
+    return true
+  },
+
+  onReconcileUnknownWrite() {
+    const context = this._directorOperationContext()
+    if (!context) return false
+    if (this._offlineAnchorPending) return this._reconcileOfflineAnchor()
+    if (!this.data.writeLocked || !this._unknownRequestId) return
+    const that = this
+    const requestId = this._unknownRequestId
+    const pending = this._pendingCommand || this._pendingReceiptIndex
+    this.setData({ writeState: 'receipt-reading', writeMessage: '正在确认最终结果…' })
+    this._getAdapter().readReceipt(this._activityId, requestId,
+      pending).then(function (result) {
+      if (!that._isDirectorContextCurrent(context, pending) || that._unknownRequestId !== requestId) return
+      if (!result || result.state === 'pending' || result.state === 'business-error') {
+        that.setData({
+          writeState: 'unknown-write',
+          writeMessage: '结果仍待确认，操作继续暂停',
+          writeLocked: true,
+        })
+        return
+      }
+      const confirmed = result.state === 'confirmed'
+      // CU-C-76:_pendingCommand 下面就被清掉,动作名要在清之前拿 —— 驳回原因按动作给文案
+      const pendingAction = ((that._pendingCommand || that._pendingReceiptIndex || {}).action) || ''
+      clearPendingWrite(context.activityId, context.owner, requestId)
+      that._pendingCommand = null
+      that._pendingReceiptIndex = null
+      that._unknownRequestId = ''
+      that.setData({
+        writeState: 'idle',
+        writeMessage: '',
+        writeLocked: false,
+        canRetryUnknownWrite: false,
+      })
+      if (confirmed && pendingAction === 'PLAN_FALLBACK' && typeof that.applyPlanFallbackReceipt === 'function') that.applyPlanFallbackReceipt(result)
+      toast(confirmed ? '结果已确认' : (rejectedActionText(pendingAction, result.raw) || '操作未生效'),
+        { icon: confirmed ? 'success' : 'none' })
+      that.loadProjection()
+    }).catch(function () {
+      if (!that._isDirectorContextCurrent(context, pending) || that._unknownRequestId !== requestId) return
+      that.setData({
+        writeState: 'unknown-write',
+        writeMessage: '暂时无法确认，操作继续暂停',
+        writeLocked: true,
+      })
+    })
+  },
+
+  _handleDirectorAuthorityConflict(result) {
+    const context = this._directorOperationContext()
+    if (!context) return true
+    const raw = result && result.raw
+    if (!raw || raw.status !== 'business-error' || raw.reasonCode !== 'GAME_AUTHORITY_CONFLICT') return false
+    this._directorAuthorityUnknown = true
+    this._unknownRequestId = (this._pendingCommand || this._pendingReceiptIndex || {}).requestId || ''
+    this.setData({ writeState: 'unknown-write', writeMessage: (raw.message || '本局权威版本已更新') + '；原操作结果待确认', writeLocked: true, canRetryUnknownWrite: false })
+    toast(raw.message || '本局权威版本已更新，请刷新')
+    this.loadProjection()
+    return true
+  },
+
+  retryUnknownWrite() {
+    const context = this._directorOperationContext()
+    if (!context) return false
+    if (this._directorAuthorityUnknown && this.data.writeState === 'unknown-write' && this._unknownRequestId) { this.onReconcileUnknownWrite(); return false }
+    if (this._offlineAnchorPending) return this._reconcileOfflineAnchor()
+    if ((this._pendingCommand || this._pendingReceiptIndex || {}).action === 'PLAN_FALLBACK') return this.onReconcileUnknownWrite()
+    if (this._genericControl && this._pendingCommand && genericOpsActions(this._genericControl).some(item => item.id === this._pendingCommand.action)) return this.onReconcileUnknownWrite()
+    const command = this._pendingCommand
+    if (!this.data.writeLocked || this.data.writeState !== 'unknown-write' || !command) return false
+    const that = this
+    if (!savePendingWrite(this._activityId, command, context.owner)) {
+      this.setData({
+        writeState: 'unknown-write',
+        writeMessage: '无法保存重试状态，上次操作仍待确认',
+        writeLocked: true,
+        canRetryUnknownWrite: true,
+      })
+      toast('无法安全保存，未发送重试')
+      return false
+    }
+    this.setData({ writeState: 'submitting', writeMessage: '正在重试…', writeLocked: true })
+    this._getAdapter().submit(command).then(function (result) {
+      if (!that._isDirectorContextCurrent(context, command)) return
+      if (that._handleDirectorAuthorityConflict(result)) return
+      if (!result || result.state === 'unknown-write' || result.state === 'business-error') {
+        that.setData({
+          writeState: 'unknown-write', writeMessage: '结果仍待确认，操作继续暂停', writeLocked: true,
+        })
+        return
+      }
+      const confirmed = result.state === 'confirmed'
+      clearPendingWrite(context.activityId, context.owner, command.requestId)
+      that._pendingCommand = null
+      that._pendingReceiptIndex = null
+      that._unknownRequestId = ''
+      that.setData({
+        writeState: 'idle', writeMessage: '', writeLocked: false, canRetryUnknownWrite: false,
+      })
+      toast(confirmed ? '结果已确认' : '操作未生效', { icon: confirmed ? 'success' : 'none' })
+      that.loadProjection()
+    }).catch(function () {
+      if (!that._isDirectorContextCurrent(context, command)) return
+      that.setData({
+        writeState: 'unknown-write', writeMessage: '重试结果仍待确认，操作继续暂停', writeLocked: true,
+      })
+    })
+    return true
+  },
+
+  // 分享/扫码直达时本页可能是根栈，裸 navigateBack 会死路（all-page-back-stack-contract 门禁）。
+}
+
+module.exports = { DIRECTOR_DATA, DIRECTOR_METHODS }

@@ -1,0 +1,35 @@
+<view class="er-page {{merchantView ? 'theme-merchant' : 'theme-dark'}}">
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+<!-- 2026-10-28 G-9:商家走同一页的浅色(?theme=merchant) -->
+<cy-nav-bar />
+<view style="height: {{statusBarHeight + navBarHeight}}px;"></view>
+<cy-page-title title="账户收益" safe-top="{{false}}" />
+
+<view class="er-shell">
+  <cy-scene-asset-earnings id="assetEarnings" class="er-earnings" theme="{{merchantView ? 'merchant' : 'player'}}" bind:open="openScene" />
+</view>
+
+<view class="er-scene-host" wx:if="{{sceneCurrent && sceneCurrent.id === 'asset-income-detail'}}" catchtouchmove="blockSceneTouch">
+  <cy-scene-sheet show="{{true}}" variant="{{sceneCurrent.variant}}" theme="{{sceneCurrent.theme}}" title="{{sceneCurrent.title}}" can-back="{{sceneCurrent.canBack}}" mask-closable="{{sceneCurrent.maskClosable}}" bind:requestclose="closeScene" bind:back="closeScene">
+    <cy-scene-asset-income-detail theme="{{sceneCurrent.theme}}" bind:close="closeScene" />
+  </cy-scene-sheet>
+</view>
+<view class="er-scene-host" wx:if="{{sceneCurrent && sceneCurrent.id === 'member-withdraw-history'}}" catchtouchmove="blockSceneTouch">
+  <cy-scene-sheet show="{{true}}" variant="{{sceneCurrent.variant}}" theme="{{sceneCurrent.theme}}" title="{{sceneCurrent.title}}" can-back="{{sceneCurrent.canBack}}" mask-closable="{{sceneCurrent.maskClosable}}" bind:requestclose="closeScene" bind:back="closeScene">
+    <cy-scene-member-withdraw-history theme="{{sceneCurrent.theme}}" />
+  </cy-scene-sheet>
+</view>
+<view class="er-scene-host" wx:if="{{sceneCurrent && sceneCurrent.id === 'member-invite-history'}}" catchtouchmove="blockSceneTouch">
+  <cy-scene-sheet show="{{true}}" variant="{{sceneCurrent.variant}}" theme="{{sceneCurrent.theme}}" title="{{sceneCurrent.title}}" can-back="{{sceneCurrent.canBack}}" mask-closable="{{sceneCurrent.maskClosable}}" bind:requestclose="closeScene" bind:back="closeScene">
+    <cy-scene-member-invite-history theme="{{sceneCurrent.theme}}" />
+  </cy-scene-sheet>
+</view>
+<view class="er-scene-host" wx:if="{{sceneCurrent && sceneCurrent.id === 'merchant-profit'}}" catchtouchmove="blockSceneTouch">
+  <cy-scene-sheet show="{{true}}" variant="{{sceneCurrent.variant}}" theme="{{sceneCurrent.theme}}" title="{{sceneCurrent.title}}" can-back="{{sceneCurrent.canBack}}" mask-closable="{{sceneCurrent.maskClosable}}" bind:requestclose="closeScene" bind:back="closeScene">
+    <cy-scene-merchant-profit theme="{{sceneCurrent.theme}}" bind:close="closeScene" />
+  </cy-scene-sheet>
+</view>
+
+</view>

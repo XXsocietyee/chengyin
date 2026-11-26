@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.chengyinhub.business.mapper.MerchantSubscriptionMapper">
+
+    <resultMap type="MerchantSubscription" id="MerchantSubscriptionResult">
+        <result property="id"    column="id"    />
+        <result property="merchantId"    column="merchant_id"    />
+        <result property="sourceOrderId" column="source_order_id" />
+        <result property="subscriptionType"    column="subscription_type"    />
+        <result property="startDate"    column="start_date"    />
+        <result property="endDate"    column="end_date"    />
+        <result property="maxUsage"    column="max_usage"    />
+        <result property="usedCount"    column="used_count"    />
+        <result property="isActive"    column="is_active"    />
+        <result property="remark"    column="remark"    />
+        <result property="createTime"    column="create_time"    />
+        <result property="updateTime"    column="update_time"    />
+    </resultMap>
+
+    <sql id="selectVo">
+        select id, merchant_id, source_order_id, subscription_type, start_date, end_date, max_usage, used_count, is_active, remark, create_time, update_time from merchant_subscription
+    </sql>
+
+    <select id="selectMerchantSubscriptionList" parameterType="MerchantSubscription" resultMap="MerchantSubscriptionResult">
+        <include refid="selectVo"/>
+        <where>
+            <if test="merchantId != null"> and merchant_id = #{merchantId}</if>
+            <if test="subscriptionType != null and subscriptionType != ''"> and subscription_type = #{subscriptionType}</if>
+            <if test="isActive != null"> and is_active = #{isActive}</if>
+            <if test="isActive != null and isActive == 1"> and (start_date is null or start_date &lt;= now()) and (end_date is null or end_date &gt; now())</if>
+        </where>
+        order by id desc
+    </select>
+
+    <insert id="insertMerchantSubscription" parameterType="MerchantSubscription" useGeneratedKeys="true" keyProperty="id">
+        insert into merchant_subscription
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="merchantId != null">merchant_id,</if>
+            <if test="subscriptionType != null">subscription_type,</if>
+            <if test="startDate != null">start_date,</if>
+            <if test="endDate != null">end_date,</if>
+            <if test="maxUsage != null">max_usage,</if>
+            <if test="usedCount != null">used_count,</if>
+            <if test="isActive != null">is_active,</if>
+            <if test="remark != null">remark,</if>
+            create_time,
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="merchantId != null">#{merchantId},</if>
+            <if test="subscriptionType != null">#{subscriptionType},</if>
+            <if test="startDate != null">#{startDate},</if>
+            <if test="endDate != null">#{endDate},</if>
+            <if test="maxUsage != null">#{maxUsage},</if>
+            <if test="usedCount != null">#{usedCount},</if>
+            <if test="isActive != null">#{isActive},</if>
+            <if test="remark != null">#{remark},</if>
+            now(),
+        </trim>
+    </insert>
+
+    <insert id="grantMerchantSubscription" parameterType="MerchantSubscription">
+        insert into merchant_subscription
+        (merchant_id, source_order_id, subscription_type, start_date, end_date, max_usage, used_count, is_active, create_time, update_time)
+        values
+        (#{merchantId}, #{sourceOrderId}, #{subscriptionType}, #{startDate}, #{endDate}, #{maxUsage}, 0, 1, now(), now())
+    </insert>
+    <insert id="createCommerceRefund">
+        INSERT INTO merchant_commerce_refund (order_id, refund_no, create_time)
+        VALUES (#{id}, CONCAT('RMC', #{id}), NOW())
+        ON DUPLICATE KEY UPDATE order_id=order_id
+    </insert>
+    <select id="selectCommerceRefundForUpdate" resultType="map" useCache="false" flushCache="true">
+        SELECT order_id, refund_no, refund_fact_id, refund_fact_hash
+        FROM merchant_commerce_refund WHERE order_id=#{orderId} FOR UPDATE
+    </select>
+    <update id="settleCommerceRefund">
+        UPDATE merchant_commerce_refund
+        SET refund_fact_id=#{factId}, refund_fact_hash=#{factHash}, settled_time=NOW()
+        WHERE order_id=#{orderId} AND refund_fact_id IS NULL AND refund_fact_hash IS NULL
+    </update>
+    <update id="revokeCommerceSubscription">
+        UPDATE merchant_subscription SET is_active=0, update_time=NOW()
+        WHERE source_order_id=#{orderId} AND is_active=1
+    </update>
+    <select id="selectCommerceSubscriptionForUpdate" resultMap="MerchantSubscriptionResult" useCache="false" flushCache="true">
+        <include refid="selectVo"/> WHERE source_order_id=#{orderId} FOR UPDATE
+    </select>
+</mapper>

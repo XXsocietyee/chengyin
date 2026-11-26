@@ -1,0 +1,408 @@
+// 2026-09-16 用户裁决:「项目已结束就不显示了」。
+// 契约:工作台首页项目卡过滤掉已结束项目、右上角「全部 N」只数未结束的、
+// 过滤后为空走现有空态;完整列表页不动,历史项目仍可在那里查到。
+// 判据必须复用卡片自己的状态签(statusLabel / isEndedProject),不另算一套日期。
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const ROOT = path.resolve(__dirname, '../..');
+const PAGE_PATH = path.join(ROOT, 'pages/merchant/index/index.js');
+const { buildProjectCards, isEndedProject } = require('../../utils/merchant-workbench.js');
+
+const TODAY = '2026-09-16';
+
+let pageConfig;
+let requests = [];
+
+global.getApp = () => ({
+  globalData: { statusBarHeight: 44, navBarHeight: 44 },
+  getUserID: () => 9,
+  getRequestErrorMessage: (res, fallback) => (res && res.msg) || fallback,
+  sendRequest: (request) => { requests.push(request); },
+});
+
+global.wx = {
+  getStorageSync: () => '',
+  setStorageSync() {},
+  getWindowInfo: () => ({ statusBarHeight: 44 }),
+  getSystemInfoSync: () => ({ statusBarHeight: 44 }),
+  getAccountInfoSync: () => ({ miniProgram: { envVersion: 'release' } }),
+  showToast() {},
+  switchTab() {},
+  navigateTo() {},
+  stopPullDownRefresh() {},
+  setNavigationBarColor() {},
+  setBackgroundColor() {},
+  setNavigationBarTitle() {},
+};
+
+global.Page = (config) => { pageConfig = config; };
+
+function loadPage() {
+  requests = [];
+  delete require.cache[require.resolve(PAGE_PATH)];
+  require(PAGE_PATH);
+  const page = Object.assign({}, pageConfig);
+  page.data = JSON.parse(JSON.stringify(pageConfig.data));
+  page.setData = function (patch) { Object.assign(this.data, patch); };
+  page._dataEpoch = 1;
+  page._dataMemberId = '9';
+  page._merchantGameEntries = [];
+  page._gameSessionClient = null;
+  return page;
+}
+
+function assertNoEndedCard(cards) {
+  assert.equal(
+    (cards || []).some((card) => card && card.statusLabel === '已结束'),
+    false,
+    '已结束项目不得出现在工作台卡片列表',
+  );
+}
+
+test('工作台项目卡过滤已结束项目,未开始/进行中/档期未知都保留', () => {
+  const page = loadPage();
+  page._projectList = [
+    { id: 1, topicId: 1, topicName: '已结束的路线', startDate: '2000-01-01', endDate: '2000-01-02' },
+    { id: 2, topicId: 2, topicName: '进行中的路线', startDate: '2000-01-01', endDate: '2999-12-31' },
+    { id: 3, topicId: 3, topicName: '还没开始的路线', startDate: '2999-12-01' },
+    { id: 4, topicId: 4, topicName: '档期未知的路线' },
+  ];
+  page._hostProjectList = [
+    { id: 9, bizType: 'activity', titleText: '已结束的活动', startTime: '2000-01-01', endTime: '2000-01-02' },
+  ];
+
+  page.data.todo = { byProject: [] };
+  page._todoError = false;
+  page.refreshProjectCards();
+
+  assertNoEndedCard(page.data.projectCards);
+  assert.deepEqual(page.data.projectCards.map((card) => card.title), [
+    '进行中的路线', '还没开始的路线', '档期未知的路线',
+  ], '档期未知不是结束，不能静默吞掉');
+});
+
+test('过滤后没有卡片时隐藏项目整块', () => {
+  const page = loadPage();
+  page._projectList = [
+    { id: 1, topicId: 1, topicName: '已结束的路线', startDate: '2000-01-01', endDate: '2000-01-02' },
+  ];
+  page.data.todo = { byProject: [] };
+  page._todoError = false;
+  page.refreshProjectCards();
+
+  assert.deepEqual(page.data.projectCards, []);
+  const wxml = fs.readFileSync(path.join(ROOT, 'pages/merchant/index/index.wxml'), 'utf8');
+  assert.match(wxml, /merchantAccess\.canManageProjects && \(projectCards\.length \|\| joinLoading \|\| hostLoading/,
+    '项目整块只在有卡片、加载中或失败时出现');
+  assert.doesNotMatch(wxml, /title="还没有项目"/,
+    '项目为零时不保留空态占位');
+});
+
+test('「全部 N」只数未结束的项目:承接与主办两侧都按状态签真源计数', () => {
+  const page = loadPage();
+  page.loadJoinList(1);
+  const joinRequest = requests.find((item) => item.url === '/api/registration/merchant/list');
+  assert.ok(joinRequest);
+  assert.equal(joinRequest.data.status, '0', 'searchStatus1仅档期进行中，必须读取全部再按真实status筛确认关系');
+  joinRequest.success({
+    code: 200,
+    data: {
+      rows: [
+        { id: 1, topicId: 1, status: 1, topicName: '已结束', startDate: '2000-01-01', endDate: '2000-01-02' },
+        { id: 2, topicId: 2, status: 1, topicName: '进行中', startDate: '2000-01-01', endDate: '2999-12-31' },
+        { id: 3, topicId: 3, status: 1, topicName: '没结束的', startDate: '2999-12-01' },
+        { id: 4, topicId: 4, status: 0, topicName: '申请中', startDate: '2000-01-01' },
+        { id: 5, topicId: 5, topicName: '未知关系', startDate: '2000-01-01' },
+      ],
+    },
+  });
+  assert.equal(page.data.joinTotal, 2, 'joinTotal 不得把已结束、未确认或未知关系算进去');
+  assert.deepEqual(page._projectList.map(row => row.id), [2, 3], '未来已确认项目仍保留，结束/未确认行不占前两张');
+
+  page.loadHostProjects(1);
+  const hostRequest = requests.find((item) => item.url === '/api/project/my');
+  assert.ok(hostRequest);
+  hostRequest.success({
+    code: 200,
+    data: {
+      rows: [
+        { id: 9, bizType: 'activity', titleText: '已结束的活动', startTime: '2000-01-01', endTime: '2000-01-02' },
+        { id: 10, bizType: 'topic', titleText: '进行中的主题', startTime: '2000-01-01', endTime: '2999-12-31' },
+      ],
+      total: 30,
+      activeTotal: 28,
+    },
+  });
+  assert.equal(page.data.hostProjectTotal, 28,
+    'hostProjectTotal 必须用后端下发的全量未结束总数，不能数当前这一页');
+});
+
+test('工作台把已通过且供给生效的章节承接投影为可进入的项目卡', () => {
+  const page = loadPage();
+  page.loadChapterProjectList(1);
+  const request = requests.find((item) => item.url === '/api/merchant/chapter-application/mine');
+  assert.ok(request, '章节承接必须读取权威 application/offer 投影');
+  request.success({
+    code: 200,
+    data: [
+      { id: 71, topicId: 990027, topicName: 'E2E 探店日一期', chapterId: 31,
+        chapterName: '咖啡章节', status: 1, offerActive: true,
+        startDate: '2026-09-30', endDate: '2999-12-31', topicImgUrl: '/images/real-cover.png' },
+      { id: 72, topicId: 990028, topicName: '仍在申请', chapterId: 32,
+        chapterName: '书店章节', status: 0, offerActive: false },
+    ],
+  });
+
+  // chapterProjectList 只喂 projectCards 计算、不进 WXML,已按死数据字段门禁移出 data;
+  // 断言内容不变:两行里只有「已通过且供给生效」那一行被留下。
+  assert.equal(page._chapterProjectList.length, 1);
+  assert.equal(page.data.projectCards.length, 1);
+  assert.equal(page.data.projectCards[0].ownerId, 990027);
+  assert.equal(page.data.projectCards[0].projectSource, 'chapter');
+  assert.equal(page.data.projectCards[0].thumb, '/images/real-cover.png',
+    '章节承接卡必须消费真实主题封面，不能退成灰色占位');
+  const startDateText = page.formatDate('2026-09-30');
+  assert.equal(page._chapterProjectList[0].startDateStr, startDateText,
+    '章节承接档期必须复用现有上海日期 formatter');
+  assert.ok(page.data.projectCards[0].meta.includes(startDateText),
+    '真实章节承接日期必须进入卡片副文案');
+
+  const navigations = [];
+  global.wx.navigateTo = (options) => navigations.push(options.url);
+  page.openProjectCard({ currentTarget: { dataset: {
+    role: 'join', id: 71, topicid: 990027, source: 'chapter',
+  } } });
+  assert.equal(navigations.at(-1),
+    '/pages/topic/merchantinfo/merchantinfo?topicId=990027&scope=MERCHANT');
+  for (const dataset of [
+    { role: 'join', id: 900071, topicid: 990027, source: 'registration' },
+    { role: 'host', id: 990027, topicid: 990027, biztype: 'topic' },
+  ]) {
+    page.openProjectCard({ currentTarget: { dataset } });
+    assert.equal(navigations.at(-1), '/pages/topic/merchantinfo/merchantinfo?topicId=990027&scope=MERCHANT',
+      '报名ID/applicationID不能代替主题ID，也不能绕过/home真实身份');
+  }
+  const validCount = navigations.length;
+  for (const topicid of [undefined, '', null, 0, -1, 'not-a-topic']) {
+    page.openProjectCard({ currentTarget: { dataset: { role: 'join', id: 900071, topicid } } });
+  }
+  assert.equal(navigations.length, validCount, '缺少合法主题ID不得回退报名ID导航');
+});
+
+test('已结束判据与卡片状态签同源:复用 isEndedProject,不另算日期', () => {
+  assert.equal(isEndedProject('2026-09-01', '2026-09-02', TODAY), true);
+  assert.equal(isEndedProject('2026-09-10', '2026-09-20', TODAY), false);
+  assert.equal(isEndedProject('2026-10-01', '', TODAY), false);
+  assert.equal(isEndedProject('', '', TODAY), false, '档期未知不算结束');
+
+  const source = fs.readFileSync(PAGE_PATH, 'utf8');
+  // 2026-11-01:过滤收进 isHiddenProjectCard(已结束 / 已取消 / 草稿),仍只看卡片自己的状态签
+  assert.match(source, /\.filter\(\(card\) => !isHiddenProjectCard\(card\)\)/,
+    '卡片过滤必须消费卡片自己的状态签');
+  const { isHiddenProjectCard } = require('../../utils/merchant-workbench.js');
+  assert.equal(isHiddenProjectCard({ statusLabel: '已结束' }), true);
+  assert.equal(isHiddenProjectCard({ statusLabel: '进行中' }), false);
+  assert.match(source, /isEndedProject\(item\.startDate, item\.endDate, today\)/,
+    '承接总数必须复用 isEndedProject');
+  assert.match(source, /finiteCount\(res\.data\.activeTotal\)/,
+    '主办总数必须读后端下发的全量未结束项目总数(不能数被截断的这一页)');
+  assert.doesNotMatch(source, /只数这一页/,
+    '按页计数的 ponytail 说明与逻辑必须删除');
+});
+
+test('负控:主办总数若回到只数当前页,与后端全量总数会对不上必须判红', () => {
+  const page = loadPage();
+  page.loadHostProjects(1);
+  const hostRequest = requests.find((item) => item.url === '/api/project/my');
+  hostRequest.success({
+    code: 200,
+    data: {
+      rows: [
+        { id: 10, bizType: 'topic', titleText: '进行中的主题', startTime: '2000-01-01', endTime: '2999-12-31' },
+        { id: 11, bizType: 'topic', titleText: '还没开始的主题', startTime: '2999-12-01', endTime: '2999-12-02' },
+      ],
+      total: 12,
+      activeTotal: 12,
+    },
+  });
+  const pageCount = 2; // 只数当前页时会是 2
+  assert.notEqual(pageCount, page.data.hostProjectTotal,
+    '把总数换回本页计数时,「用后端全量数」的断言必须不再成立');
+  assert.throws(() => assert.equal(pageCount, page.data.hostProjectTotal), assert.AssertionError);
+});
+
+test('负控:去掉已结束过滤后,卡片列表会重新出现已结束项目,门禁必须判红', () => {
+  const source = fs.readFileSync(PAGE_PATH, 'utf8');
+  const anchor = "    }).filter((card) => !isHiddenProjectCard(card));";
+  assert.ok(source.includes(anchor), '负控锚点失效:找不到卡片过滤');
+  const mutated = source.replace(anchor, '    });');
+
+  const tmp = path.join(ROOT, 'pages/merchant/index/.index.mutant.js');
+  fs.writeFileSync(tmp, mutated);
+  try {
+    delete require.cache[require.resolve(tmp)];
+    require(tmp);
+    const page = Object.assign({}, pageConfig);
+    page.data = JSON.parse(JSON.stringify(pageConfig.data));
+    page.setData = function (patch) { Object.assign(this.data, patch); };
+    page._projectList = [
+      { id: 1, topicId: 1, topicName: '已结束的路线', startDate: '2000-01-01', endDate: '2000-01-02' },
+    ];
+    page.data.todo = { byProject: [] };
+    page._todoError = false;
+    page.refreshProjectCards();
+
+    assert.throws(() => assertNoEndedCard(page.data.projectCards), /已结束项目不得出现在工作台卡片列表/);
+  } finally {
+    fs.unlinkSync(tmp);
+  }
+});
+
+test('负控:把已结束项目重新算进「全部 N」时必须判红', () => {
+  const page = loadPage();
+  page.loadJoinList(1);
+  const joinRequest = requests.find((item) => item.url === '/api/registration/merchant/list');
+  joinRequest.success({
+    code: 200,
+    data: {
+      rows: [
+        { id: 1, topicId: 1, status: 1, topicName: '已结束', startDate: '2000-01-01', endDate: '2000-01-02' },
+        { id: 2, topicId: 2, status: 1, topicName: '进行中', startDate: '2000-01-01', endDate: '2999-12-31' },
+      ],
+    },
+  });
+  // 变异检查器:把总数换回 list.length 就会让下面这条断言不成立
+  const legacyTotal = 2; // list.length
+  assert.notEqual(legacyTotal, page.data.joinTotal,
+    '把总数换回未过滤的 list.length 时,「只数未结束」的断言必须不再成立');
+  assert.throws(() => assert.equal(legacyTotal, page.data.joinTotal), assert.AssertionError);
+});
+
+ test('预批准章节邀请无需先有生效供给即可从工作台进入补资料', () => {
+  const page = loadPage()
+  page.loadChapterProjectList(1)
+  requests.find(r => r.url === '/api/merchant/chapter-application/mine').success({ code: 200, data: [
+    { id: 73, topicId: 990028, topicName: '新邀约', chapterId: 32, chapterName: '书店', status: 1, source: 1, offerActive: false }
+  ] })
+  assert.equal(page._chapterProjectList.length, 1)
+  assert.equal(page.data.projectCards[0].ownerId, 990028)
+})
+
+
+test('不同表相同ID的承接与章节在工作台和全部项目均有唯一key', () => {
+  const page = loadPage();
+  const legacy = [{ id: 101, topicId: 77, status: 1, addressName: '原点位', endDate: '2999-12-31' }];
+  const chapter = [{ id: 101, topicId: 88, status: 0, source: 1 }];
+  page.loadJoinList(1);
+  requests.find(r => r.url === '/api/registration/merchant/list').success({ code: 200, data: { rows: legacy } });
+  page.loadChapterProjectList(1);
+  requests.find(r => r.url === '/api/merchant/chapter-application/mine').success({ code: 200, data: chapter });
+  assert.equal(page.data.joinTotal, 2);
+  assert.equal(new Set(page.data.projectCards.map(card => card.key)).size, 2);
+  assert.deepEqual(new Set(page.data.projectCards.map(card => card.ownerId)), new Set([77, 88]));
+  assert.equal(page.data.projectCards.find(card => card.ownerId === 77).acceptorName, '原点位');
+  const { joinProjects } = require('../../subpackageA/utils/merchant-join-projects.js');
+  const all = joinProjects(legacy, chapter);
+  assert.equal(all.total, 2);
+  assert.equal(new Set(all.items.map(card => card.key)).size, 2);
+});
+
+test('同主题多个已承接点位只覆盖首张邀请卡，其余点位与全部项目一致保留', () => {
+  const page = loadPage();
+  const legacy = [
+    { id: 101, topicId: 77, status: 1, topicName: '双点主题', addressName: '书店', endDate: '2999-12-31' },
+    { id: 102, topicId: 77, status: 1, topicName: '双点主题', addressName: '咖啡', endDate: '2999-12-31' },
+  ];
+  const invite = { id: 501, topicId: 77, topicName: '双点主题', status: 0, source: 1 };
+  page.loadJoinList(1);
+  requests.find(r => r.url === '/api/registration/merchant/list').success({ code: 200, data: { rows: legacy } });
+  page.loadChapterProjectList(1);
+  requests.find(r => r.url === '/api/merchant/chapter-application/mine').success({ code: 200, data: [invite] });
+  const cards = page.data.projectCards;
+  assert.equal(cards.length, 2);
+  assert.equal(new Set(cards.map(card => card.key)).size, 2, 'wx:key 不得重复');
+  assert.equal(cards.filter(card => card.roleLabel === '待接受邀请').length, 1);
+  assert.equal(cards.find(card => card.id === 102).acceptorName, '咖啡', '第二个已承接点位仍保留');
+  const { joinProjects } = require('../../subpackageA/utils/merchant-join-projects.js');
+  const all = joinProjects(legacy, [invite]);
+  assert.equal(all.total, cards.length);
+  assert.equal(all.items.filter(card => card._pendingChapterInvite).length, 1);
+  assert.equal(all.items.find(card => card.key === 'join-102').addressName, '咖啡');
+});
+
+test('本人待接受章节邀请进入项目卡，普通待审申请不得混入', () => {
+  const page = loadPage();
+  page.loadJoinList(1);
+  requests.find(r => r.url === '/api/registration/merchant/list').success({ code: 200, data: { rows: [
+    { id: 9, topicId: 990041, status: 1, endDate: '2999-12-31' },
+  ] } });
+  page.loadChapterProjectList(1);
+  requests.find(r => r.url === '/api/merchant/chapter-application/mine').success({ code: 200, data: [
+    { id: 5, topicId: 990041, status: 1, offerActive: true, chapterName: '已有承接章节' },
+    { id: 1, topicId: 990041, chapterId: 173, chapterName: '咖啡章节', topicName: '待接受邀请', status: '0', source: '1', offerActive: false },
+    { id: 2, topicId: 990042, status: 0, source: 0 },
+    { id: 3, topicId: 990043, status: 2, source: 1 },
+    { id: 4, topicId: 0, status: 0, source: 1 },
+  ] });
+  assert.deepEqual(page.data.projectCards.map(card => card.ownerId), [990041]);
+  assert.equal(page.data.projectCards[0].statusLabel, '待接受');
+  assert.equal(page.data.projectCards[0].roleLabel, '待接受邀请');
+  assert.equal(page.data.joinTotal, 1, '同主题有已承接章节和新邀请仍只是一项目');
+  const navigations = [];
+  global.wx.navigateTo = options => navigations.push(options.url);
+  page.openProjectCard({ currentTarget: { dataset: { topicid: 990041, source: 'chapter' } } });
+  assert.equal(navigations[0], '/pages/topic/merchantinfo/merchantinfo?id=990041&scope=MERCHANT',
+    '待接受邀请走原招商浏览入口，不能先要求已承接的private home');
+});
+
+// L07-011:七路加载各自触发重建;内容没变不再整表 setData,空列表不重播入场动画
+test('项目卡重建内容不变时不重复下发,空列表不触发入场动画', () => {
+  const page = loadPage();
+  const patches = [];
+  const set = page.setData;
+  page.setData = function (patch) { patches.push(Object.keys(patch)); return set.call(this, patch); };
+  page._projectList = [{ id: 2, topicId: 2, topicName: '进行中的路线', startDate: '2000-01-01', endDate: '2999-12-31' }];
+  page.data.todo = { byProject: [] };
+  page._todoError = false;
+  page.refreshProjectCards();
+  page.refreshProjectCards();
+  page.refreshProjectCards();
+  assert.equal(patches.filter((keys) => keys.includes('projectCards')).length, 1);
+  assert.equal(page.data.projectCards.length, 1);
+
+  const empty = loadPage();
+  const emptyPatches = [];
+  const emptySet = empty.setData;
+  empty.setData = function (patch) { emptyPatches.push(Object.keys(patch)); return emptySet.call(this, patch); };
+  empty.data.todo = { byProject: [] };
+  empty.refreshProjectCards();
+  empty.refreshProjectCards();
+  assert.equal(emptyPatches.some((keys) => keys.includes('pmProj')), false, '没有卡片时不播入场');
+});
+
+// L07-082:三处待办空态同源,且不带 byProject(缺它才是「未取到」)
+test('待办空态只有一份定义，初值/无权限/换主体都用它，且不冒充已取到的空待办', () => {
+  const src = require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../../pages/merchant/index/index.js'), 'utf8')
+  assert.equal((src.match(/todo: emptyTodo\(\)/g) || []).length, 3)
+  assert.doesNotMatch(src, /todo: \{\s*biddingTopics/)
+  const body = /function emptyTodo\(\) \{([\s\S]*?)\n\}/.exec(src)[1]
+  const todo = new Function(body)()
+  assert.equal(todo.pendingPredict, 0)
+  assert.equal('byProject' in todo, false)
+  assert.equal((src.match(/this\.resetJoinState\(\)/g) || []).length, 2)
+})
+
+// L09-131
+// 两个依赖回到文件头(U1 基线已按内容哈希锚定),文件尾不再有迟到的 require
+test('L09-131 myproject 依赖都在文件头声明', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../subpackageA/pages/myproject/index.js'), 'utf8');
+  const pageAt = src.indexOf('Page({');
+  for (const dep of ["require('../../utils/audit-timeline.js')", "require('../../utils/merchant-join-projects.js')"]) {
+    const at = src.indexOf(dep);
+    assert.ok(at > 0 && at < pageAt, dep + ' 应在 Page({ 之前');
+  }
+  assert.doesNotMatch(src.slice(pageAt), /^const .* = require\(/m);
+});

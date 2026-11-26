@@ -1,0 +1,103 @@
+// 积分明细。POST /api/points/list:后端一次返回全部明细,这里按 20 条一页展开。
+const app = getApp()
+const cyToast = require('../../utils/toast.js'); const pageMotion = require('../../utils/page-motion.js')
+const { isBizOk } = require('../../utils/response-shape.js')
+const { PAGE_SIZE, FILTERS, normalizeRows, filterRows, groupByMonth, visibleRows } = require('./rows.js')
+
+Page({
+  data: {
+    statusBarHeight: app.globalData.statusBarHeight || 20, // PG-056:全局值缺失时兜底,不让顶距算成 NaN
+    navBarHeight: app.globalData.navBarHeight || 44,
+    state: 'loading', // loading | ready | empty | error
+    groups: [],
+    hasMore: false,
+    // BL-04 全部/获得/使用(端上对全量列表筛选) + 月份分组
+    filters: FILTERS,
+    filter: 'all',
+    filterEmpty: false,
+    paged: false,
+    refreshing: false,
+  },
+  onLoad() { this.load() },
+  onPullDownRefresh() { this.load(true) },
+  load(fromPull) {
+    const that = this
+    const seq = (this._seq = (this._seq || 0) + 1)
+    const keep = this.data.state === 'ready'
+    if (!keep) this.setData({ state: 'loading' })
+    app.sendRequest({
+      url: '/api/points/list', method: 'POST', data: {}, hideLoading: true, silentError: true,
+      success(res) {
+        if (seq !== that._seq) return
+        if (fromPull) wx.stopPullDownRefresh()
+        const all = isBizOk(res) ? normalizeRows(res.data) : null
+        if (!all) {
+          // 已经有数据时下拉刷新失败:保留旧列表,只提示
+          if (keep) cyToast('刷新失败，稍后再试')
+          else that.setData({ state: 'error' })
+          return
+        }
+        that._all = visibleRows(all)
+        that._shown = Math.min(PAGE_SIZE, that._filtered().length)
+        that._sync()
+      },
+      fail() {
+        if (seq !== that._seq) return
+        if (fromPull) wx.stopPullDownRefresh()
+        if (keep) cyToast('刷新失败，稍后再试')
+        else that.setData({ state: 'error' })
+      },
+    })
+  },
+  _filtered() { return filterRows(this._all || [], this.data.filter) },
+  // L09-111
+  // 入场动效只在首屏;「加载更多」只把新的一页按路径追加进最后一组 / 新组,不再整表重发、整表重放动效
+  _sync(appendFrom) {
+    const all = this._all || []
+    const list = this._filtered()
+    if (appendFrom != null && this._groups) {
+      const add = groupByMonth(list.slice(appendFrom, this._shown))
+      let gi = this._groups.length - 1
+      if (add.length && gi >= 0 && this._groups[gi].month === add[0].month) {
+        const rows = this._groups[gi].rows.concat(add.shift().rows)
+        this._groups[gi] = Object.assign({}, this._groups[gi], { rows })
+        this.setData({ ['groups[' + gi + '].rows']: rows })
+      }
+      add.forEach((g) => {
+        gi += 1
+        const group = Object.assign({}, g, { key: (g.month || 'unknown') + '-' + gi })
+        this._groups.push(group)
+        this.setData({ ['groups[' + gi + ']']: group })
+      })
+      this.setData({ hasMore: this._shown < list.length })
+      return
+    }
+    this._groups = groupByMonth(list.slice(0, this._shown))
+    pageMotion.enter(this, 'pmList', { once: true }); this.setData({
+      groups: this._groups,
+      hasMore: this._shown < list.length,
+      filterEmpty: !list.length,
+      paged: list.length > PAGE_SIZE,
+      state: all.length ? 'ready' : 'empty',
+    })
+  },
+  onFilter(e) {
+    const key = e && e.detail && e.detail.key
+    if (!key || key === this.data.filter) return
+    this.setData({ filter: key })
+    this._shown = Math.min(PAGE_SIZE, this._filtered().length)
+    this._sync()
+  },
+  onReachBottom() { this.loadMore() },
+  loadMore() {
+    const list = this._filtered()
+    if (this._shown >= list.length) return
+    const from = this._shown
+    this._shown = Math.min(this._shown + PAGE_SIZE, list.length)
+    this._sync(from)
+  },
+  goBack() {
+    if (getCurrentPages().length > 1) wx.navigateBack()
+    else wx.switchTab({ url: '/pages/member/index/index' })
+  },
+})

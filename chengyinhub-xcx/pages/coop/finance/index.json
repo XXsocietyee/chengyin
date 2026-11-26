@@ -1,0 +1,18 @@
+{
+  "navigationStyle": "custom",
+  "navigationBarTextStyle": "white",
+  "backgroundColor": "#000000",
+  "backgroundColorTop": "#000000",
+  "backgroundColorBottom": "#000000",
+  "usingComponents": {
+    "cy-nav-bar": "/components/cy/nav-bar/index",
+    "cy-page-title": "/components/cy/page-title/index",
+    "cy-scene-merchant-profit": "/subpackageA/components/scene-merchant-profit/index",
+    "cy-toast": "/components/cy/toast/index",
+    "cy-loading-mask": "/components/cy/loading-mask/index",
+    "cy-modal-host": "/components/cy/modal-host/index"
+  },
+  "componentPlaceholder": {
+    "cy-scene-merchant-profit": "view"
+  }
+}

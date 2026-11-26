@@ -1,0 +1,99 @@
+@import '../../../style/merchant-light.wxss';
+@import '../decor/design.wxss';
+
+page { background: var(--cy-bg-page); }
+
+/* M-18:版式照门店信息(decor/design.wxss 的 dc-page / dc-card / dc-fields / dc-heading),本页只留自有块。 */
+.tm-page {
+  min-height: 100vh;
+  box-sizing: border-box;
+  background: var(--cy-bg-page);
+}
+
+.tm-scroll { flex: 1; height: 0; min-height: 0; }
+.tm-content {
+  padding: var(--cy-space-2) var(--cy-page-x) calc(46rpx + env(safe-area-inset-bottom)); /* ds-ok: 与 dc-content 同一底距 */
+  display: flex;
+  flex-direction: column;
+  gap: 38.5rpx; /* ds-ok: 与 dc-content 同一卡距 */
+  box-sizing: border-box;
+}
+
+.tm-state {
+  flex: 1;
+  min-height: 0;
+  padding: var(--cy-space-2) var(--cy-page-x) 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.tm-state--section { padding: 0; }
+
+.tm-skeleton-card {
+  overflow: hidden;
+  padding-bottom: var(--cy-space-3);
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-bg-card);
+}
+
+.tm-card-head { padding: 31rpx 31rpx 8rpx; } /* ds-ok: 与 dc-inset / cy-cell 同一内距 */
+.tm-members { --cy-comp-cell-icon-size: 64rpx; --cy-comp-cell-icon-radius: 50%; } /* ds-ok: 成员头像行 */
+.tm-card-empty { padding: 8rpx 31rpx 31rpx; color: var(--cy-text-secondary); font-size: var(--cy-type-label); } /* ds-ok: 同上 */
+
+.tm-share-card {
+  padding: 31rpx; /* ds-ok: 与 dc-inset 同一内距 */
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2-5);
+}
+.tm-share-main { flex: 1; min-width: 0; }
+.tm-share-title { display: block; color: var(--cy-text-title); font-size: var(--cy-type-body); font-weight: 600; }
+.tm-share-sub { display: block; margin-top: var(--cy-space-1); color: var(--cy-text-secondary); font-size: var(--cy-type-label); line-height: 1.5; }
+
+.tm-share-btn {
+  flex-shrink: 0;
+  min-width: 152rpx;
+  height: var(--cy-btn-h-sm);
+  margin: 0;
+  padding: 0 var(--cy-space-2-5);
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-btn-solid-bg);
+  color: var(--cy-btn-solid-fg);
+  font-size: var(--cy-font-label);
+  line-height: var(--cy-btn-h-sm);
+  position: relative;
+  overflow: visible;
+  transition: var(--cy-tr-press);
+}
+.tm-share-btn::after { border: 0; }
+/* 小号胶囊视觉高 btn-h-sm;热区上下外扩到 88rpx,不改外观 */
+.tm-share-btn::before { content: ''; position: absolute; left: 0; right: 0; top: calc((var(--cy-btn-h-sm) - 88rpx) / 2); bottom: calc((var(--cy-btn-h-sm) - 88rpx) / 2); }
+
+.tm-invite-landing {
+  margin: var(--cy-space-4) 0 0;
+  padding: var(--cy-space-4);
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-bg-card);
+}
+.tm-invite-title { display: block; margin-top: var(--cy-space-2); color: var(--cy-text-title); font-size: var(--cy-font-title); font-weight: 700; }
+.tm-invite-copy { display: block; margin: var(--cy-space-2) 0 var(--cy-space-4); color: var(--cy-text-secondary); font-size: var(--cy-font-body); line-height: 1.65; }
+.tm-result { padding: 0 31rpx 31rpx; font-size: var(--cy-type-label); line-height: 1.5; } /* ds-ok: 卡内同一内距 */
+.tm-invite-landing .tm-result { padding: var(--cy-space-2) 0 0; }
+.tm-result--error { color: var(--cy-color-status-danger); }
+/* 第十二轮 k3(j1 N10):加入成功不再用错误红 */
+.tm-result--ok { color: var(--cy-color-status-success); }
+
+.tm-role-sheet { padding: 0; }
+.tm-role-option { min-height: 112rpx; display: flex; align-items: center; gap: var(--cy-space-2); }
+.tm-role-option + .tm-role-option { border-top: 1rpx solid var(--cy-border-card); }
+.tm-role-option-main { flex: 1; min-width: 0; }
+.tm-role-option-name { display: block; color: var(--cy-text-title); font-size: var(--cy-font-body); font-weight: 600; }
+.tm-role-option-copy { display: block; margin-top: var(--cy-space-1); color: var(--cy-text-secondary); font-size: var(--cy-font-caption); }
+.tm-role-current { color: var(--cy-text-secondary); font-size: var(--cy-font-caption); }
+.tm-role-chev { color: var(--cy-text-secondary); }
+.tm-role-option--current { opacity: .62; }
+.tm-role-option--danger .tm-role-option-name { color: var(--cy-color-status-danger); }
+
+/* 细节打磨二期 L1/L5/L7 */
+.tm-role-option { transition: var(--cy-tr-press); }

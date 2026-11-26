@@ -1,0 +1,545 @@
+// 成长中心(深色版):足迹概览 + 我的排名摘要(点开去完整排行榜) + 徽章墙
+// 数据:排行榜 = /api/growth/leaderboard(只取 me);足迹 = /api/growth/center + /api/play/{growth,my-completed}
+// 完整榜单(领奖台+全量名次)已拆到 subpackageP3/pages/growthcenter/leaderboard,本页只展示自己的排名。
+const app = getApp()
+const { recoverReadSession } = require('../../../../utils/session/login-reload.js')
+const { buildGrowthOverview } = require('../../../utils/growth-overview.js')
+const { chinaParts } = require('../../../../utils/datetime.js'); const pageMotion = require('../../../../utils/page-motion.js')
+const imgFade = require('../../../../utils/img-fade.js') // motion-1118 v2:头像加载淡入
+
+function fmt(n) {
+  // UI-04(2026-09-18):数字统计没取到显示 0,不再显示横杠
+  if (n === null || n === undefined || n === '') return '0'
+  const v = Number(n)
+  if (!Number.isFinite(v)) return '0'
+  return v.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+}
+
+function initial(name) {
+  return name ? String(name).trim().charAt(0) : '?'
+}
+
+// 徽章行直接显示获得日期(没有 unlock_time 就不显示,不写「查看获得时刻」之类的说明)。后端 selectMemberBadges 下发的是 unlock_time(不带时区的中国时间串),
+// 用 chinaParts 锚定后再格式化 —— 直接 new Date().getHours() 在非 +8 环境会整体偏移。
+// ⚠️ 地点一面:member_badge 只有 source_type / source_id,没有任何地点名字段,
+// 所以这里只展示时间,不去凑一个「在某地解锁」的假句子。
+function unlockDate(value) {
+  const p = chinaParts(value)
+  if (!p) return ''
+  const pad = (n) => (n < 10 ? '0' + n : String(n))
+  return p.year + '.' + pad(p.month) + '.' + pad(p.day)
+}
+
+function requestGrowthData(url, onFailure) {
+  return new Promise((resolve) => {
+    app.sendRequest({
+      hideLoading: true,
+      silentError: true,
+      url,
+      method: 'POST',
+      data: {},
+      success: (res) => resolve(res || {}),
+      fail: (error, statusCode) => { const failure = Object.assign({}, error || {}, { statusCode: statusCode || error && (error.statusCode || error.code) }); if (onFailure) onFailure(failure); resolve({ __requestFailed: true, __requestError: failure }); },
+      successStatusAbnormal: (error, statusCode) => resolve({ __requestFailed: true, __requestError: Object.assign({}, error || {}, { statusCode: statusCode || error && (error.statusCode || error.code) }) })
+    })
+  })
+}
+
+function isSuccess(response) {
+  return !!(response && (response.code === 200 || response.code === '200'))
+}
+
+function isObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isFiniteNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function isNonNegativeNumber(value) {
+  return isFiniteNumber(value) && value >= 0
+}
+
+function isPositiveInteger(value) {
+  return Number.isInteger(value) && value > 0
+}
+
+function isNonBlankString(value) {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function isRankItem(value) {
+  return isObject(value)
+    && isPositiveInteger(value.rank)
+    && isNonNegativeNumber(value.score)
+}
+
+function isMyRank(value) {
+  return isObject(value)
+    && (value.rank === null || isPositiveInteger(value.rank))
+    && isNonNegativeNumber(value.score)
+}
+
+function isBadgeItem(value) {
+  return isObject(value)
+    && (isNonBlankString(value.badgeCode) || isNonBlankString(value.badgeName))
+}
+
+function isCompletedItem(value) {
+  return isObject(value) && isPositiveInteger(value.topicId)
+}
+
+function isRankResponse(response, metric, period) {
+  const data = response && response.data
+  return isSuccess(response)
+    && isObject(data)
+    && data.metric === metric
+    && data.period === period
+    && Array.isArray(data.list)
+    && data.list.every(isRankItem)
+    && isMyRank(data.me)
+}
+
+function isCenterResponse(response) {
+  const data = response && response.data
+  return isSuccess(response)
+    && isObject(data)
+    && isObject(data.growth)
+    && isPositiveInteger(data.growth.levelNo)
+    && Number.isInteger(data.growth.expValue)
+    && data.growth.expValue >= 0
+    && Array.isArray(data.badges)
+    && data.badges.every(isBadgeItem)
+}
+
+function isPlayResponse(response) {
+  return isSuccess(response) && isObject(response.data) && isNonNegativeNumber(response.data.totalMileage)
+}
+
+function isCompletedResponse(response) {
+  return isSuccess(response) && Array.isArray(response.data) && response.data.every(isCompletedItem)
+}
+
+function isTransportFailure(error) {
+  return /request:fail|timeout/i.test(String(error && error.errMsg || ''))
+}
+
+function rankHttpFailure(error) {
+  const rawCode = error && (error.statusCode !== undefined ? error.statusCode : error.code)
+  const code = String(rawCode == null ? '' : rawCode)
+  if (code === '401' || code === '403') {
+    return {
+      boardState: 'permission',
+      message: '登录状态失效或当前身份不能查看，请重新进入'
+    }
+  }
+  return {
+    boardState: 'error',
+    message: (app.getRequestErrorMessage && app.getRequestErrorMessage(error, '排行榜加载失败'))
+      || '排行榜加载失败'
+  }
+}
+
+Page({
+  badgeLoadError: false,
+  overviewError: '',
+  overviewErrorKind: 'data',
+  boardState: 'error',
+  rankErrorKind: 'data',
+  errorMsg: '',
+  data: {
+    imgOn: {}, // motion-1118 v2:头像在占位色上淡入
+    growthAuthRequired: false,
+    growthAccessDenied: false,
+    rankState: 'loading', // loading | refreshing | ready | stale-error | error
+    metric: 'point',
+    period: 'total',
+    unit: '积分',
+    me: null,
+    profile: { name: '', avatarUrl: '' },
+    scoreText: '—',
+    rankLoaded: false,
+    badges: [],
+    badgeCountText: '0',
+    showBadges: false,
+    showBadgeEmpty: false,
+    overviewState: 'loading', // loading | refreshing | ready | partial | stale-error | error
+    overviewLoaded: false,
+    celebrationEvent: '',
+    badgeAnnouncement: '',
+    overview: buildGrowthOverview({}),
+    overviewAvailable: { center: false, play: false, completed: false },
+  },
+
+  onLoad() {
+    const profile = {
+      name: typeof app.getNickname === 'function' ? app.getNickname() || '' : '',
+      avatarUrl: typeof app.getAvatar === 'function' ? app.getAvatar() || '' : ''
+    }
+    this._growthSessionProfile = { owner: String(app.getUserID && app.getUserID() || ''), ...profile }
+    this.setData({ profile })
+    this.loadOverview()
+    this.loadMyRank()
+  },
+
+  onShow() {
+    this._hidden = false
+    const profile = {
+      name: typeof app.getNickname === 'function' ? app.getNickname() || '' : this.data.profile.name,
+      avatarUrl: typeof app.getAvatar === 'function' ? app.getAvatar() || '' : this.data.profile.avatarUrl
+    }
+    const owner = String(app.getUserID && app.getUserID() || '')
+    const previous = this._growthSessionProfile
+    const profileChanged = !!previous && previous.owner === owner
+      && (profile.name !== previous.name || profile.avatarUrl !== previous.avatarUrl)
+    this._growthSessionProfile = { owner, ...profile }
+    if (profileChanged) {
+      this._growthProfileOverride = Object.assign({}, this._growthProfileOverride && this._growthProfileOverride.owner === owner
+        ? this._growthProfileOverride : {}, { owner })
+      if (profile.name !== previous.name) this._growthProfileOverride.name = profile.name
+      if (profile.avatarUrl !== previous.avatarUrl) this._growthProfileOverride.avatarUrl = profile.avatarUrl
+      this.setData({ profile: {
+        name: this._growthProfileOverride.name !== undefined ? this._growthProfileOverride.name : this.data.profile.name,
+        avatarUrl: this._growthProfileOverride.avatarUrl !== undefined ? this._growthProfileOverride.avatarUrl : this.data.profile.avatarUrl
+      } })
+      // 资料已保存后，旧排名回包不能再把本人昵称和头像覆盖回去。
+      this._rankEpoch = (this._rankEpoch || 0) + 1
+      this._rankLoading = false
+    }
+    if (this._readSessionChanged) { this._readSessionChanged = false; this.loadOverview(); this.loadMyRank(); return }
+    if (this._growthOwner !== undefined && owner !== this._growthOwner) { this.loadOverview(); this.loadMyRank(); }
+    else if (profileChanged && owner && owner !== '0') this.loadMyRank()
+  },
+
+  onPullDownRefresh() {
+    let pending = 2
+    const done = () => {
+      pending -= 1
+      if (pending === 0 && typeof wx.stopPullDownRefresh === 'function') wx.stopPullDownRefresh()
+    }
+    this.loadOverview(done)
+    this.loadMyRank(done)
+  },
+
+  onHide() { this._hidden = true },
+
+  // L09-050
+  // 首次读取失败后的重试:成长数据与排名各重读一次
+  retryGrowth() {
+    this.loadOverview()
+    this.loadMyRank()
+  },
+
+  onUnload() {
+    this._unloaded = true
+    this._rankEpoch = (this._rankEpoch || 0) + 1
+    this._overviewEpoch = (this._overviewEpoch || 0) + 1
+    this._rankLoading = false
+    this._overviewLoading = false
+  },
+
+  _recoverGrowthSession(res, statusCode, epoch, key) {
+    if (this._unloaded || epoch !== this['_' + key + 'Epoch']) return false
+    return recoverReadSession(this, app, res, function (anonymous) {
+      this._growthOwner = undefined; this._syncGrowthOwner()
+      this.setData({ rankState: 'error', overviewState: 'error', growthAuthRequired: anonymous, growthAccessDenied: false })
+    }, () => { this.loadOverview(); this.loadMyRank() }, statusCode)
+  },
+
+  _syncGrowthOwner() {
+    const owner = String(app.getUserID && app.getUserID() || '')
+    if (owner !== this._growthOwner) {
+      this._growthOwner = owner
+      this._growthProfileOverride = null
+      this._rankEpoch = (this._rankEpoch || 0) + 1
+      this._overviewEpoch = (this._overviewEpoch || 0) + 1
+      this._rankLoading = false; this._overviewLoading = false; this._badgeCodes = null
+      this.setData({ me: null, rankLoaded: false, scoreText: '—', overviewLoaded: false, badges: [],
+        overview: buildGrowthOverview({}), overviewAvailable: {center:false,play:false,completed:false},
+        showBadges: false, showBadgeEmpty: false, badgeAnnouncement: '', celebrationEvent: '',
+        growthAuthRequired: !owner || owner === '0', growthAccessDenied: false })
+    }
+    return owner && owner !== '0' ? owner : ''
+  },
+
+  _setGrowthAccessFailure(res, statusCode) {
+    const code = Number(statusCode || res && (res.code || res.statusCode))
+    if (code !== 401 && code !== 403) return false
+    this.setData({ growthAuthRequired: code === 401, growthAccessDenied: code === 403,
+      me: null, rankLoaded: false, scoreText: '—', overviewLoaded: false, badges: [], showBadges: false,
+      showBadgeEmpty: false, overviewAvailable: {center:false,play:false,completed:false}, badgeAnnouncement: '' })
+    return true
+  },
+
+  onLoginGrowth() {
+    if (!this.data.growthAuthRequired) { this.loadOverview(); this.loadMyRank(); return }
+    if (this._loginPending) return
+    this._loginPending = true
+    const login = app.getUserID && app.getUserID() && typeof app.reLogin === 'function' ? app.reLogin()
+      : typeof app.firstLogin === 'function' ? app.firstLogin() : null
+    Promise.resolve(login).then(result => {
+      this._loginPending = false
+      if (!this._unloaded && app.getUserID && app.getUserID() && !(result && result.ok === false)) { this.loadOverview(); this.loadMyRank(); }
+    }).catch(() => { this._loginPending = false })
+  },
+
+  // ---- 我的排名摘要(不拉完整榜单,完整榜单在 leaderboard 子页) ----
+  loadMyRank(done) {
+    const owner = this._syncGrowthOwner()
+    if (!owner || this._unloaded) { if (typeof done === 'function') done(); return }
+    if (this._rankLoading) {
+      if (typeof done === 'function') done()
+      return
+    }
+    this._rankLoading = true
+    const epoch = (this._rankEpoch || 0) + 1
+    this._rankEpoch = epoch
+    const hasRankSnapshot = this.data.rankLoaded === true
+    Object.assign(this, {
+      rankErrorKind: 'data',
+      errorMsg: '',
+      boardState: 'error'
+    })
+    this.setData({
+      rankState: hasRankSnapshot ? 'refreshing' : 'loading'
+    })
+    let settled = false
+    const finish = () => {
+      if (settled || epoch !== this._rankEpoch || this._unloaded || owner !== String(app.getUserID && app.getUserID() || '')) return
+      settled = true
+      this._rankLoading = false
+      return true
+    }
+    const notifyDone = () => {
+      if (typeof done === 'function') done()
+    }
+    app.sendRequest({
+      hideLoading: true,
+      silentError: true,
+      url: '/api/growth/leaderboard',
+      method: 'POST',
+      data: { metric: this.data.metric, period: this.data.period, limit: 1 },
+      success: (res) => {
+        if (epoch !== this._rankEpoch || this._unloaded || owner !== String(app.getUserID && app.getUserID() || '')) return
+        if (isRankResponse(res, this.data.metric, this.data.period)) {
+          if (!finish()) return
+          this.buildMyRank(res.data)
+          Object.assign(this, { errorMsg: '', boardState: 'error', rankErrorKind: 'data' })
+          this.setData({ rankLoaded: true, rankState: 'ready', growthAuthRequired: false, growthAccessDenied: false })
+        } else {
+          if (!finish()) return
+          this._setGrowthAccessFailure(res)
+          Object.assign(this, {
+            boardState: 'error',
+            rankErrorKind: 'data',
+            errorMsg: isSuccess(res)
+              ? '排行榜加载失败，请重试'
+              : ((app.getRequestErrorMessage && app.getRequestErrorMessage(res, '排行榜加载失败')) || '排行榜加载失败')
+          })
+          this.setData({
+            rankState: hasRankSnapshot ? 'stale-error' : 'error'
+          })
+        }
+        notifyDone()
+      },
+      fail: (error, statusCode) => {
+        if (this._recoverGrowthSession(error, statusCode, epoch, 'rank') || !finish()) return
+        this._setGrowthAccessFailure(error, statusCode)
+        Object.assign(this, {
+          boardState: 'error',
+          rankErrorKind: isTransportFailure(error) ? 'network' : 'data',
+          errorMsg: isTransportFailure(error)
+            ? '网络异常，请检查连接后重试'
+            : ((error && (error.msg || error.message)) || '排行榜加载失败')
+        })
+        this.setData({
+          rankState: hasRankSnapshot ? 'stale-error' : 'error'
+        })
+        notifyDone()
+      },
+      successStatusAbnormal: (error, statusCode) => {
+        if (this._recoverGrowthSession(error, statusCode, epoch, 'rank') || !finish()) return
+        this._setGrowthAccessFailure(error, statusCode)
+        const failure = rankHttpFailure(error)
+        Object.assign(this, {
+          boardState: failure.boardState,
+          rankErrorKind: 'data',
+          errorMsg: failure.message
+        })
+        this.setData({
+          rankState: hasRankSnapshot ? 'stale-error' : 'error'
+        })
+        notifyDone()
+      },
+      complete: () => {
+        if (!finish()) return
+        Object.assign(this, {
+          boardState: 'error',
+          rankErrorKind: 'data',
+          errorMsg: '排行榜加载没有完成，请重试'
+        })
+        this.setData({
+          rankState: hasRankSnapshot ? 'stale-error' : 'error'
+        })
+        notifyDone()
+      }
+    })
+  },
+
+  buildMyRank(data) {
+    const unit = this.data.metric === 'exp' ? 'EXP' : '积分'
+    const owner = String(app.getUserID && app.getUserID() || '')
+    const savedProfile = this._growthProfileOverride && this._growthProfileOverride.owner === owner ? this._growthProfileOverride : {}
+    const profile = {
+      name: savedProfile.name !== undefined ? savedProfile.name : data.me.nickname || this.data.profile.name || '',
+      avatarUrl: savedProfile.avatarUrl !== undefined ? savedProfile.avatarUrl : data.me.avatar || this.data.profile.avatarUrl || ''
+    }
+    let me = null
+    if (data.me && data.me.rank !== null && data.me.rank !== undefined) {
+      const name = profile.name || '我'
+      me = {
+        rank: data.me.rank,
+        name,
+        initial: initial(name),
+        scoreText: fmt(data.me.score),
+        avatarUrl: profile.avatarUrl
+      }
+    }
+    const scoreText = fmt(data.me.score)
+    if (!this._scoreCounted) { this._scoreCounted = true; pageMotion.countIn(this, 'gsK') } // 2026-10-23:积分第一次到达时从 0 数上去
+    else if (scoreText !== this.data.scoreText) { // motion-1118 v2:新回包改写已显示的积分时从旧值数过去,不跳;起点比例与新值同一次 setData
+      this.setData({ unit, me, scoreText, profile, gsK: pageMotion.countFrom(this, 'gsK', this.data.scoreText, scoreText) })
+      return
+    }
+    this.setData({ unit, me, scoreText, profile })
+  },
+
+  onImgFadeLoad(e) { imgFade.onImgFadeLoad.call(this, e) },
+
+  goLeaderboard() {
+    wx.navigateTo({ url: '/subpackageP3/pages/growthcenter/leaderboard/index?metric=' + this.data.metric + '&period=' + this.data.period })
+  },
+
+  // ---- 足迹概览 + 徽章(复用三条已上线读取接口；失败不把数据伪装为零) ----
+  loadOverview(done) {
+    const owner = this._syncGrowthOwner()
+    if (!owner || this._unloaded) { if (typeof done === 'function') done(); return }
+    if (this._overviewLoading) {
+      if (typeof done === 'function') done()
+      return
+    }
+    this._overviewLoading = true
+    const epoch = (this._overviewEpoch || 0) + 1
+    this._overviewEpoch = epoch
+    const hadOverview = this.data.overviewLoaded
+    Object.assign(this, {
+      overviewErrorKind: 'data',
+      overviewError: ''
+    })
+    this.setData({
+      overviewState: hadOverview ? 'refreshing' : 'loading',
+      badgeAnnouncement: ''
+    })
+    Promise.all([
+      requestGrowthData('/api/growth/center', res => this._recoverGrowthSession(res, undefined, epoch, 'overview')),
+      requestGrowthData('/api/play/growth', res => this._recoverGrowthSession(res, undefined, epoch, 'overview')),
+      requestGrowthData('/api/play/my-completed', res => this._recoverGrowthSession(res, undefined, epoch, 'overview'))
+    ]).then(([center, play, completed]) => {
+      if (epoch !== this._overviewEpoch || this._unloaded || owner !== String(app.getUserID && app.getUserID() || '')) return
+      const responses = [center, play, completed]
+      if (responses.some(res => this._setGrowthAccessFailure(res.__requestFailed ? res.__requestError : res))) { if (typeof done === 'function') done(); return }
+      const validSources = [isCenterResponse(center), isPlayResponse(play), isCompletedResponse(completed)]
+      const successCount = validSources.filter(Boolean).length
+      const allSuccess = successCount === responses.length
+      const failedErrors = responses.filter((item) => item && item.__requestFailed)
+        .map((item) => item.__requestError)
+      const overview = hadOverview && !allSuccess
+        ? this.data.overview
+        : buildGrowthOverview({
+          center: validSources[0] ? center : null,
+          play: validSources[1] ? play : null,
+          completed: validSources[2] ? completed : null
+        })
+      const hasBadgeSource = validSources[0]
+      const raw = hasBadgeSource ? center.data.badges : []
+      const badges = raw.map((b) => {
+        const name = b.badgeName || b.badgeCode || '徽章'
+        return {
+          name,
+          code: b.badgeCode || name,
+          initial: initial(name),
+          iconUrl: b.iconUrl || '',
+          // 获得日期:拿不到 unlock_time 就不显示,不填占位符
+          unlockText: unlockDate(b.obtainTime || b.unlockTime)
+        }
+      })
+      const newlyUnlocked = hasBadgeSource ? this._trackNewlyUnlocked(badges) : []
+      const state = allSuccess ? 'ready'
+        : (hadOverview ? 'stale-error' : (successCount > 0 ? 'partial' : 'error'))
+      const networkFailure = failedErrors.some(isTransportFailure)
+      let nextBadges = this.data.badges
+      let nextBadgeCountText = this.data.badgeCountText
+      let nextShowBadges = this.data.showBadges
+      let nextShowBadgeEmpty = this.data.showBadgeEmpty
+      if (hasBadgeSource) {
+        nextBadges = badges
+        nextBadgeCountText = String(badges.length)
+        nextShowBadges = badges.length > 0
+        nextShowBadgeEmpty = badges.length === 0
+      }
+      let celebrationEvent = this.data.celebrationEvent
+      let badgeAnnouncement = ''
+      if (newlyUnlocked.length) {
+        this._celebrationSeq = (this._celebrationSeq || 0) + 1
+        celebrationEvent = 'badge:' + this._celebrationSeq + ':' + newlyUnlocked.map((item) => item.code).join('|')
+        badgeAnnouncement = '新徽章已点亮：' + newlyUnlocked.map((item) => item.name).join('、')
+      }
+      this._overviewLoading = false
+      Object.assign(this, {
+        overviewErrorKind: networkFailure ? 'network' : 'data',
+        overviewError: allSuccess ? '' : (hadOverview ? '足迹更新没有完成，现有数据仍可查看' : '部分成长数据暂时不可用'),
+        badgeLoadError: !hasBadgeSource
+      })
+      if (!this.data.overviewLoaded) { pageMotion.enter(this, 'pmPage'); pageMotion.countIn(this, 'gcK') } // 2026-10-23:足迹与徽章行依次浮上来
+      this.setData({
+        overview,
+        overviewAvailable: hadOverview && !allSuccess ? this.data.overviewAvailable : {
+          center: validSources[0], play: validSources[1], completed: validSources[2]
+        },
+        overviewState: state,
+        overviewLoaded: hadOverview || successCount > 0,
+        // 第十二轮 k9(p1 N-7):新玩家的足迹四行全是 0 时不画这一节,空的徽章卡已经说明还没开始
+        footprintEmpty: allSuccess && (overview.stats || []).every((item) => !Number(item && item.value)),
+        badges: nextBadges,
+        badgeCountText: nextBadgeCountText,
+        showBadges: nextShowBadges,
+        showBadgeEmpty: nextShowBadgeEmpty,
+        celebrationEvent,
+        badgeAnnouncement
+      })
+      if (allSuccess) this.setData({ growthAuthRequired: false, growthAccessDenied: false })
+      if (typeof done === 'function') done()
+    })
+  },
+
+  // 全屏庆祝的接线点(ADA §二F)。这里只负责「算出这次真的新点亮了哪几枚」——
+  // 判据是本次徽章码集合相对上一次多出来的部分,首次加载不算新增(否则一进页面就放全屏庆祝)。
+  // 动效只复用共享 cy-celebrate；真实徽章图仍来自服务端，不拿 CSS/字符伪造 3D 奖励资产。
+  _trackNewlyUnlocked(badges) {
+    const codes = (badges || []).map((b) => b.code)
+    const prev = this._badgeCodes
+    this._badgeCodes = codes
+    if (!prev) return []
+    return (badges || []).filter((badge) => prev.indexOf(badge.code) < 0)
+  },
+
+  goExplore() {
+    wx.switchTab({ url: '/pages/index/index', fail: () => wx.navigateBack({ fail: () => {} }) })
+  },
+
+  // 第九轮 m2 补充第 7 项:不实现 onShareAppMessage。收到的人点开看到的是他自己的成就页,
+  // 标题却说「来看看我的城市探索成就」,对不上 —— 好友分享整条撤掉,右上菜单不出「转发」。
+  // 第七轮 C 第 1 项:不实现 onShareTimeline。本页只显示「当前登录者」的成就,朋友圈单页模式没有登录态,
+  // 点开只有「登录后查看」且登录不可用 —— 看不到分享者的任何内容。
+})

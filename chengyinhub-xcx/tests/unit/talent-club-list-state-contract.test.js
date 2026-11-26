@@ -1,0 +1,210 @@
+'use strict'
+
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const test = require('node:test')
+
+const ROOT = path.resolve(__dirname, '../..')
+const PAGE_JS = 'pages/talent/list/index.js'
+const PAGE_WXML = 'pages/talent/list/index.wxml'
+const PAGE_JSON = 'pages/talent/list/index.json'
+const POST_CARD_WXML = 'components/cy/post-card/index.wxml'
+const read = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath), 'utf8')
+
+function setPath(target, dotted, value) {
+  const parts = dotted.split('.')
+  let cursor = target
+  parts.slice(0, -1).forEach((part) => { cursor = cursor[part] || (cursor[part] = {}) })
+  cursor[parts.at(-1)] = value
+}
+
+function loadPage(initialRole) {
+  const requests = []
+  let definition
+  let role = initialRole || 'player'
+  const app = {
+    globalData: { statusBarHeight: 20, navBarHeight: 44, menuButtonInfo: { left: 300 } },
+    sendRequest(options) { requests.push(options) },
+    getRequestErrorMessage(res, fallback) { return (res && res.msg) || fallback },
+    getUserID() { return 7 },
+    getUserRole() { return role },
+    getUserType() { return role === 'merchant' ? 2 : 1 },
+    getImgUrl(value) { return value || '' },
+  }
+  global.getApp = () => app
+  global.Page = (page) => { definition = page }
+  global.wx = {
+    getStorageSync() { return '' },
+    showToast() {}, showModal() {}, navigateTo() {}, stopPullDownRefresh() {},
+  }
+  const modulePath = path.join(ROOT, PAGE_JS)
+  delete require.cache[require.resolve(modulePath)]
+  require(modulePath)
+  const page = Object.assign({}, definition, {
+    data: JSON.parse(JSON.stringify(definition.data)),
+    setData(patch, callback) {
+      Object.entries(patch).forEach(([key, value]) => setPath(this.data, key, value))
+      if (callback) callback.call(this)
+    },
+  })
+  return { page, requests, app, setRole(next) { role = next } }
+}
+
+function validHome() {
+  return {
+    code: '200',
+    data: {
+      owned: [{ id: 1, name: '夜行俱乐部' }],
+      joined: [],
+      nearby: [{ id: 2, name: '骑行社' }],
+      leaderStatus: { isClubLeader: true, canCreate: true, ownedCount: 1, maxOwned: 3 },
+    },
+  }
+}
+
+function validFeed() {
+  return {
+    code: '200',
+    data: {
+      rows: [{ id: 8, clubId: 1, nickname: '小城', images: '', createTime: '2026-08-23 12:30:00' }],
+      hasMore: false,
+    },
+  }
+}
+
+const flush = () => new Promise((resolve) => setImmediate(resolve))
+
+test('首页与 feed 的同一资源重复加载只发一个请求(成员管理面板 L10-039 已删)', async () => {
+  const clubs = loadPage()
+  clubs.page.loadClubHome()
+  clubs.page.loadClubHome()
+  assert.equal(clubs.requests.length, 1)
+
+  const feed = loadPage()
+  feed.page.loadFeed()
+  feed.page.loadFeed()
+  await flush()
+  assert.equal(feed.requests.length, 1)
+  assert.deepEqual(JSON.parse(feed.requests[0].data), { scope: 'all', limit: 20 })
+})
+
+test('俱乐部首页刷新业务失败保留已展示分区并进入 stale-error', () => {
+  const { page, requests } = loadPage()
+  page.loadClubHome()
+  assert.equal(requests[0].silentError, true)
+  requests[0].success(validHome())
+  assert.equal(page.data.clubsState, 'ready')
+
+  page.loadClubHome()
+  assert.equal(page.data.clubsState, 'refreshing')
+  requests[1].success({ code: '200', data: { owned: [], joined: {}, nearby: [] } })
+  assert.equal(page.data.clubsState, 'stale-error')
+  assert.deepEqual(page.data.myClubs.map((item) => item.id), [1])
+  assert.deepEqual(page.data.nearbyClubs.map((item) => item.id), [2])
+})
+
+test('俱乐部 feed 刷新网络失败保留旧帖，合法空结果进入 empty', async () => {
+  const { page, requests } = loadPage()
+  page.loadFeed()
+  await flush()
+  requests[0].success(validFeed())
+  await flush()
+  assert.equal(page.data.feedState, 'ready')
+
+  page.loadFeed()
+  assert.equal(page.data.feedState, 'refreshing')
+  await flush()
+  requests[1].fail({ errMsg: 'request:fail offline' })
+  await flush()
+  assert.equal(page.data.feedState, 'stale-error')
+  assert.deepEqual(page.data.feed.map((item) => item.id), [8])
+
+  page.loadFeed()
+  await flush()
+  requests[2].success({ code: '200', data: { rows: [], hasMore: false } })
+  await flush()
+  assert.equal(page.data.feedState, 'empty')
+  assert.deepEqual(page.data.feed, [])
+})
+
+test('商户同城范围读取失败以内联部分错误披露，并静默保留俱乐部列表', () => {
+  const { page, requests } = loadPage('merchant')
+  page._nearbyAll = [{ id: 2, city: '上海' }, { id: 3, city: '杭州' }]
+  page.data.nearbyClubs = page._nearbyAll.slice()
+  page.detectMerchant()
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].url, '/api/merchant/info')
+  assert.equal(requests[0].hideLoading, true)
+  assert.equal(requests[0].silentError, true)
+  requests[0].success({ code: '500', msg: '店铺资料不可用' })
+  assert.equal(page.data.merchantCityState, 'error')
+  assert.equal(page.data.merchantCityError, '店铺资料不可用')
+  assert.equal(page.data.merchantCityErrorKind, 'data')
+  assert.deepEqual(page.data.nearbyClubs.map((item) => item.id), [2, 3])
+})
+
+function assertStateMarkup(wxml, json, postCardWxml = read(POST_CARD_WXML)) {
+  assert.equal(json.usingComponents['cy-inline-error'], '/components/cy/inline-error/index')
+  assert.equal(json.usingComponents['cy-progress-status'], '/components/cy/progress-status/index')
+  assert.equal(json.usingComponents['cy-post-card'], '/components/cy/post-card/index')
+  assert.match(wxml, /feedState === 'refreshing'/)
+  assert.match(wxml, /clubsState === 'refreshing'/)
+  // 刷新失败横幅退役:旧内容留在屏上,静默降级
+  assert.doesNotMatch(wxml, /<cy-inline-error[^>]*State === 'stale-error'/)
+  assert.match(wxml, /merchantCityState === 'error'[^>]*kind="\{\{merchantCityErrorKind\}\}"[^>]*bind:action="detectMerchant"/)
+  // 2026-11-24 L10-039(业主默认项 A):打不开的成员管理面板与其状态整删
+  assert.doesNotMatch(wxml, /clubMembers|retryClubMembers|clubManageShow/)
+  assert.match(wxml, /class="club-create-btn"[^>]*bindtap="onClubApply"[^>]*aria-role="button"[^>]*aria-label="创建俱乐部"/)
+  // 2026-09-18 UI-19 用户:邀约情况不在俱乐部 tab 看,也不分「我的 / 附近」—— 这里是一张完整的俱乐部列表
+  assert.doesNotMatch(wxml, /goCoopCenter|俱乐部邀约情况|>附近</)
+  assert.match(wxml, /<cy-post-card\b[^>]*post="\{\{item\}\}"/)
+  // 点赞图标已从位图 <image heart-filled.svg> 换成矢量 <cy-icon name="heart-filled">(已赞态)。
+  assert.match(postCardWxml, /class="post-card__action[^>]*[\s\S]*?<cy-icon[^>]*class="post-card__heart[^>]*name="heart-filled"/)
+  assert.doesNotMatch(wxml, /class="post-card__heart"/)
+}
+
+test('loading/refreshing/error/stale-error/empty 都有 DS 状态组件与可访问重试', () => {
+  assertStateMarkup(read(PAGE_WXML), JSON.parse(read(PAGE_JSON)))
+})
+
+test('负控：把 stale-error 刷新失败横幅加回来时，状态闸门必须判红', () => {
+  const wxml = read(PAGE_WXML).replace('</view>',
+    '<cy-inline-error wx:if="{{clubsState === \'stale-error\'}}" bind:action="loadClubHome" /></view>')
+  assert.throws(() => assertStateMarkup(wxml, JSON.parse(read(PAGE_JSON))), /stale-error/)
+})
+
+// 2026-10-24 owner 拍板「游客可浏览，写入时弹窗登录」:游客不请求私有聚合 /api/club/home 与 IM 未读,
+// 改读匿名公开目录 /api/club/list;目录读失败才退回「登录后查看我的俱乐部」入口,登录点击成功才回读私有聚合。
+test('游客不请求私有俱乐部聚合和IM未读，登录点击成功才真实回读', async () => {
+  const h=loadPage();let owner='';let loginCalls=0;h.app.getUserID=()=>owner;
+  h.app.firstLogin=()=>{loginCalls++;owner='9';return Promise.resolve();};
+  h.page.loadClubHome();h.page.loadImUnread();
+  assert.deepEqual(h.requests.map(r=>r.url),['/api/club/list'],'游客只读公开目录');
+  h.requests[0].success({code:200,data:[{id:5,name:'公开团',logo:''}]});
+  assert.equal(h.page.data.clubsLoginRequired,false);assert.equal(h.page.data.nearbyClubs.length,1);
+  assert.equal(h.page.data.clubsState,'ready');assert.equal(h.page.data.myClubs.length,0);
+  owner='';const g=loadPage();g.app.getUserID=()=>owner;g.app.firstLogin=()=>{loginCalls++;owner='9';return Promise.resolve();};
+  g.page.loadClubHome();g.requests[0].fail({errMsg:'offline'});
+  assert.equal(g.page.data.clubsLoginRequired,false);assert.match(g.page.data.clubsErrorText,/加载失败/);
+  g.page.retryClubs();g.page.retryClubs();await Promise.resolve();
+  assert.equal(loginCalls,0);assert.equal(g.requests.length,3);assert.equal(g.requests[1].url,'/api/club/list');
+});
+test('真实401/403保留不同可见反馈，网络读取失败不伪装登录或权限', () => {
+  for(const code of [401,403,500]){
+    const h=loadPage();h.page.loadClubHome();h.requests[0].success({code,msg:'真实反馈'});
+    assert.equal(h.page.data.clubsLoginRequired,code===401);assert.equal(h.page.data.clubsPermissionDenied,code===403);
+    assert.equal(h.page.data.clubsError,true);
+  }
+  const h=loadPage();h.page.loadClubHome();h.requests[0].fail({errMsg:'offline'});
+  assert.equal(h.page.data.clubsLoginRequired,false);assert.equal(h.page.data.clubsPermissionDenied,false);
+});
+test('俱乐部身份切换立即清理旧列表，旧账号回包不得恢复；登录失败可重试', async () => {
+  const h=loadPage();let owner='7';h.app.getUserID=()=>owner;
+  h.page.loadClubHome();h.requests[0].success(validHome());h.page.loadClubHome();const old=h.requests[1];
+  owner='';h.page.loadClubHome();assert.equal(h.page.data.myClubs.length,0);
+  h.requests.at(-1).fail({errMsg:'offline'});assert.equal(h.page.data.clubsLoginRequired,false); // 2026-11-14：公开目录失败不要求登录
+  old.success(validHome());assert.equal(h.page.data.myClubs.length,0);
+  h.app.firstLogin=()=>{throw Error('public retry must not log in')};h.page.retryClubs();await Promise.resolve();
+  assert.equal(h.requests.at(-1).url,'/api/club/list');assert.match(h.page.data.clubsErrorText,/加载失败/);
+});

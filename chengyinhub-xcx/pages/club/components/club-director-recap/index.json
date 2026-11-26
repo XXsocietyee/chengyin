@@ -1,0 +1,8 @@
+{
+  "component": true,
+  "styleIsolation": "isolated",
+  "usingComponents": {
+    "cy-club-director-row-list": "../club-director-row-list/index",
+    "cy-empty": "/components/cy/empty/index"
+  }
+}

@@ -1,0 +1,94 @@
+<!-- Figma K3 核销详情 · 俱乐部端。八张稿是同一页的八个态:
+     A–E 五个业务态走同一套布局,只换状态字/核销行/履约轨迹;
+     F 无权限、G 加载失败是整屏态;H 是手机号无查看权限的变体(由服务端决定,不是前端分支)。 -->
+<view class="ckd theme-merchant">
+  <cy-toast id="cy-toast" />
+  <cy-access-gate kind="login" />
+  <cy-nav-bar plain />
+  <cy-nav-spacer />
+  <cy-page-title title="核销详情" safe-top="{{false}}" flush="{{true}}" />
+
+  <cy-skeleton wx:if="{{state === 'loading'}}" type="card" count="2" loading-label="正在加载核销详情" />
+  <cy-error wx:elif="{{state === 'denied'}}" fill size="lg"
+            title="核销记录不可见" sub="{{errorText}}" retry="" bind:back="goBack" auto-back custom-back class="cy-fade-in" />
+  <cy-empty wx:elif="{{state === 'missing'}}" kind="not-found" fill size="lg" title="{{errorText}}" cta="返回" bind:cta="goBack" class="cy-fade-in" />
+  <cy-error load-failure wx:elif="{{state !== 'ready'}}" fill size="lg" title="核销凭证加载失败"
+            sub="{{errorText}}" retry="重新加载" bind:retry="retry" auto-back class="cy-fade-in" />
+
+  <block wx:else>
+    <!-- 客户与核销状态 -->
+    <view class="ckd-head cy-fade-in">
+      <cy-avatar class="ckd-ava" size="96" src="{{detail.avatar || '/images/d_profile.png'}}" name="{{detail.displayName}}" />
+      <view class="ckd-head-main">
+        <text class="ckd-name">{{detail.displayName}}</text>
+        <text class="ckd-session">{{detail.sessionTimeText}}</text>
+        <view class="ckd-phone-row">
+          <!-- 服务端已按岗位权限裁过:有权限是号码,没权限是替代说明。前端原样显示。 -->
+          <text class="ckd-phone {{detail.phoneVisible ? '' : 'ckd-phone--masked'}}">{{detail.phoneText}}</text>
+          <!-- 2026-11-02 用户:有号码权限的岗位拿到完整号码(phoneCallable),给拨号键;其余仍是掩码或替代说明,不给。 -->
+          <view wx:if="{{detail.phoneCallable}}" class="ckd-call" bindtap="callParticipant"
+            aria-role="button" aria-label="拨打 {{detail.displayName}} 的电话" hover-class="cy-pressed" hover-stay-time="80">
+            <cy-icon name="phone" size="32" />
+          </view>
+        </view>
+      </view>
+      <view class="ckd-head-state">
+        <text class="ckd-state ckd-state--{{detail.statusCode}}">{{detail.statusText}}</text>
+        <text wx:if="{{detail.statusTimeText}}" class="ckd-state-time">{{detail.statusTimeText}}</text>
+      </view>
+    </view>
+
+    <!-- 凭证本体 -->
+    <view class="ckd-card cy-fade-in">
+      <view class="ckd-topic">
+        <image wx:if="{{detail.topicCover}}" class="ckd-cover" src="{{detail.topicCover}}" mode="aspectFill" lazy-load="true" />
+        <view wx:else class="ckd-cover ckd-cover--empty"></view>
+        <view class="ckd-topic-main">
+          <text class="ckd-topic-time">{{detail.sessionTimeText}}</text>
+          <text class="ckd-topic-name">{{detail.topicName || '未命名主题'}}</text>
+          <text wx:if="{{detail.orderNo}}" class="ckd-topic-order">单号 {{detail.orderNo}}</text>
+        </view>
+      </view>
+
+      <view class="ckd-divider"></view>
+
+      <!-- 六行值一律右对齐到卡片内边缘(照稿) -->
+      <view class="ckd-kv"><text class="ckd-k">票种</text><text class="ckd-v">{{detail.ticketText}}</text></view>
+      <view class="ckd-kv"><text class="ckd-k">下单时间</text><text class="ckd-v">{{detail.orderTimeText}}</text></view>
+      <view class="ckd-kv"><text class="ckd-k">实付</text>
+        <text class="ckd-v ckd-v--amount {{detail.statusCode === 'REFUNDED' ? 'ckd-v--muted' : ''}}">{{detail.paidAmountText}}</text></view>
+      <view class="ckd-kv"><text class="ckd-k">核销时间</text>
+        <text class="ckd-v {{detail.statusCode === 'VERIFIED' ? 'ckd-v--verified' : ''}}">{{detail.verifyTimeText}}</text></view>
+      <view class="ckd-kv"><text class="ckd-k">核销门店</text><text class="ckd-v">{{detail.storeName}}</text></view>
+      <view class="ckd-kv"><text class="ckd-k">操作人</text><text class="ckd-v">{{detail.operatorName}}</text></view>
+
+      <view class="ckd-divider"></view>
+
+      <!-- 履约轨迹。已退款(railStep = -1)整条不亮 —— 这条单没走完履约。 -->
+      <view class="ckd-rail">
+        <view class="ckd-rail-line"></view>
+        <view class="ckd-rail-step" wx:for="{{rail}}" wx:key="key">
+          <view class="ckd-dot ckd-dot--{{item.tone}}"></view>
+          <text class="ckd-rail-label ckd-rail-label--{{item.tone}} {{item.current ? 'is-current' : ''}}">{{item.label}}</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 清退退款(2026-09-09 从报名名册行内挪来)。canRefund 由服务端判:
+         主理人本人 + 这单已付款未核销,两条都成立才给按钮。 -->
+    <view wx:if="{{detail.canRefund}}" class="ckd-foot cy-fade-in">
+      <cy-inline-error wx:if="{{refundErrorUnknown}}" kind="network" title="退款结果待确认" sub="{{refundErrorText}}"
+                       action="重新查询" bind:action="retryRefundReadback" />
+      <cy-inline-error wx:elif="{{refundErrorText}}" kind="data" title="退款没有完成" sub="{{refundErrorText}}"
+                       action="重试" bind:action="refund" />
+      <view class="ckd-refund {{refunding || refundErrorUnknown ? 'is-disabled' : ''}}" bindtap="refund"
+            aria-role="button" aria-label="清退并退款给 {{detail.displayName || '该玩家'}}"
+            aria-disabled="{{refunding || refundErrorUnknown}}"
+            hover-class="{{refunding || refundErrorUnknown ? 'none' : 'cy-pressed'}}" hover-stay-time="80">
+        {{refunding ? '正在退款…' : '清退并退款'}}
+      </view>
+    </view>
+  </block>
+  <!-- MC-038:宿主放进浅色根容器内,确认弹窗跟着主办方浅色 -->
+  <cy-modal-host id="cy-modal-host" />
+</view>

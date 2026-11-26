@@ -1,0 +1,253 @@
+'use strict'
+
+const test = require('node:test')
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+
+const ROOT = path.resolve(__dirname, '../..')
+function mountShelf() {
+  const calls = [], previous = { getApp: global.getApp, Component: global.Component }
+  let definition
+  const app = { getUserID: () => '7', getRequestErrorMessage: (res, fallback) => res && res.msg || fallback,
+    sendRequest: request => { calls.push(request) } }
+  global.getApp = () => app
+  global.Component = value => { definition = value }
+  const file = path.join(ROOT, 'pages/templatedetail/shelf/index.js')
+  try { delete require.cache[require.resolve(file)]; require(file) }
+  finally { global.getApp = previous.getApp; global.Component = previous.Component }
+  const shelf = Object.assign({}, definition.methods, { data: JSON.parse(JSON.stringify(definition.data)) })
+  for (const [key, prop] of Object.entries(definition.properties)) shelf.data[key] = prop.value
+  shelf.setData = patch => Object.assign(shelf.data, patch)
+  shelf.triggerEvent = () => {}
+  definition.lifetimes.attached.call(shelf)
+  return { shelf, definition, calls, latest: url => calls.filter(r => r.url === url).at(-1) }
+}
+let pageConfig
+let requests
+let navigations
+let toasts
+let currentPagePath
+
+global.getApp = () => ({
+  ...(currentPagePath === 'subpackageA/pages/myproject/index.js' ? { getAuthorization: () => 'current-session' } : {}),
+  globalData: { statusBarHeight: 44, navBarHeight: 44, menuButtonInfo: {} },
+  getUserID: () => 7,
+  getUserRole: () => 'merchant',
+  getUserType: () => 2,
+  setUserRole() {},
+  getRequestErrorMessage: (res, fallback) => (res && res.msg) || fallback,
+  sendRequest: (request) => { requests.push(request) },
+  tips(message) { toasts.push(message) },
+})
+
+global.wx = {
+  getStorageSync: () => '',
+  getSystemInfoSync: () => ({ statusBarHeight: 44, windowWidth: 375 }),
+  getWindowInfo: () => ({ statusBarHeight: 44, windowWidth: 375 }),
+  getAccountInfoSync: () => ({ miniProgram: { envVersion: 'release' } }),
+  setNavigationBarColor() {},
+  setBackgroundColor() {},
+  hideTabBar() {},
+  hideLoading() {},
+  showLoading() {},
+  showToast(options) { toasts.push(options.title) },
+  navigateBack() {},
+  navigateTo(options) { navigations.push(options.url) },
+  redirectTo(options) { navigations.push(options.url) },
+  switchTab(options) { navigations.push(options.url) },
+  reLaunch(options) { navigations.push(options.url) },
+  showModal() {},
+}
+
+global.Page = (config) => { pageConfig = config }
+
+function loadPage(relativePath) {
+  currentPagePath = relativePath
+  pageConfig = null
+  requests = []
+  navigations = []
+  toasts = []
+  const absolute = path.join(ROOT, relativePath)
+  delete require.cache[require.resolve(absolute)]
+  require(absolute)
+  const page = Object.assign({}, pageConfig)
+  page.data = JSON.parse(JSON.stringify(pageConfig.data))
+  page.setData = function (patch, done) {
+    Object.entries(patch).forEach(([key, value]) => {
+      const segments = key.split('.')
+      let target = this.data
+      for (let i = 0; i < segments.length - 1; i += 1) {
+        target[segments[i]] = target[segments[i]] || {}
+        target = target[segments[i]]
+      }
+      target[segments[segments.length - 1]] = value
+    })
+    if (done) done()
+  }
+  return page
+}
+
+function read(relativePath) {
+  return fs.readFileSync(path.join(ROOT, relativePath), 'utf8')
+}
+
+test('终价预览保留旧结果并只接受最新请求', () => {
+  const page = loadPage('pages/topic/pricing/index.js')
+  page.data.topicId = 8
+  page.data.floor = 20
+  page.data.floorText = '20.00'
+  page.data.hasPreview = true
+  page.preview()
+  page.preview()
+
+  assert.equal(page.data.floorText, '20.00', '静默刷新不得先清掉旧价格')
+  assert.equal(requests.length, 2)
+  requests[1].success({ code: 200, data: { priceMin: 30, cityReferencePrice: 40, cityReferenceSampleSize: 2 } })
+  requests[1].complete()
+  requests[0].success({ code: 200, data: { priceMin: 10 } })
+  requests[0].complete()
+  assert.equal(page.data.floorText, '30.0')
+  assert.equal(page.data.loading, false)
+})
+
+test('终价确认失败保留可恢复的页内错误，且重复点击只发一次', () => {
+  const page = loadPage('pages/topic/pricing/index.js')
+  Object.assign(page.data, { topicId: 8, canConfirmPrice: true, finalPrice: 45 })
+  page.confirmPrice()
+  page.confirmPrice()
+  assert.equal(requests.length, 1)
+  assert.equal(page.data.saving, true)
+  requests[0].fail({ msg: '网络断开' })
+  requests[0].complete()
+  assert.match(page.data.submitError, /网络/)
+  assert.equal(page.data.saving, false)
+})
+
+test('我的项目刷新失败保留最后一次成功列表并显示局部恢复入口', () => {
+  const page = loadPage('subpackageA/pages/myproject/index.js')
+  page._seq = 1
+  page._all = [{ id: 1, bizType: 'topic', ownerType: 'merchant', state: 'running' }]
+  Object.assign(page.data, { loaded: true, projectState: 'ready', list: [{ id: 1 }] })
+  page.loadProjects()
+  requests[0].fail({ msg: '网络断开' })
+  requests[0].complete()
+  assert.deepEqual(page.data.list, [{ id: 1 }])
+  assert.equal(page.data.projectState, 'ready')
+  assert.match(page.data.projectErrorMsg, /网络断开/)
+
+  const wxml = read('subpackageA/pages/myproject/index.wxml')
+  assert.doesNotMatch(wxml, /<cy-inline-error\b[^>]*projectErrorMsg/)
+  assert.match(read('subpackageA/pages/myproject/index.json'), /"cy-inline-error"/)
+})
+
+// 2026-10-28:模板页货架移进 pages/templatedetail/shelf(业主定稿原型 v21),原来挂在
+// pages/template 上的五条在新位置重钉;行为级用例见 template-shelf-redesign-20261028.test.js。
+test('模板货架刷新失败保留旧货架，错误只在从没加载成功时整块显示', () => {
+  const h = mountShelf()
+  h.latest('/api/template/topic-template/list').success({ code: 200, data: [{ id: 1, name: '原主题' }] })
+  h.latest('/api/template/list').success({ code: 200, data: { rows: [{ id: 21, title: '今晚的暗号', packType: 0 }], total: 1 } })
+  const topics = h.shelf._topics, games = h.shelf._games
+  h.shelf.loadTopics(); h.shelf.loadGames()
+  h.latest('/api/template/topic-template/list').fail({ msg: '主题刷新失败' })
+  h.latest('/api/template/list').fail({ msg: '玩法刷新失败' })
+  assert.equal(h.shelf.data.topicLoaded, true); assert.equal(h.shelf.data.gameLoaded, true)
+  assert.equal(h.shelf._topics, topics); assert.equal(h.shelf._games, games)
+  assert.equal(h.shelf.data.topicError, ''); assert.equal(h.shelf.data.gameError, '')
+  const first = mountShelf()
+  first.latest('/api/template/topic-template/list').fail({ msg: '初次主题失败' })
+  first.latest('/api/template/list').fail({ msg: '初次玩法失败' })
+  assert.equal(first.shelf.data.topicLoaded, false); assert.equal(first.shelf.data.gameLoaded, false)
+  assert.equal(first.shelf.data.topicError, '初次主题失败'); assert.equal(first.shelf.data.gameError, '初次玩法失败')
+  assert.match(read('pages/templatedetail/shelf/index.wxml'), /topicError && !topicLoaded/)
+  assert.match(read('pages/templatedetail/shelf/index.wxml'), /gameError && !gameLoaded/)
+  assert.doesNotMatch(read('pages/templatedetail/shelf/index.wxml'), /<cy-inline-error\b/)
+})
+
+test('标签切换不发请求，因此不存在标签与货架错位的窗口', () => {
+  const js = read('pages/templatedetail/shelf/index.js')
+  const body = js.slice(js.indexOf('    pickTag(e) {'), js.indexOf('    onRailScroll(e) {'))
+  assert.ok(body.length > 0)
+  assert.doesNotMatch(body, /request\(|load(Topics|Games)\(/, '切标签不许再发网络请求')
+})
+
+test('模板货架回到页面时静默刷新两个 tab', () => {
+  for (const loaded of [false, true]) {
+    const h = mountShelf(), oldTopic = h.latest('/api/template/topic-template/list'), oldGame = h.latest('/api/template/list')
+    if (loaded) {
+      oldTopic.success({ code: 200, data: [{ id: 1, name: '原主题' }] })
+      oldGame.success({ code: 200, data: { rows: [{ id: 21, title: '今晚的暗号', packType: 0 }], total: 1 } })
+    }
+    h.definition.pageLifetimes.hide.call(h.shelf)
+    const before = h.calls.length
+    // D-01:已加载且仍在新鲜期内回前台不重拉；过了新鲜期才静默刷新
+    const realNow = Date.now
+    if (loaded) {
+      h.definition.pageLifetimes.show.call(h.shelf)
+      assert.deepEqual(h.calls.slice(before).map(r => r.url), [], '新鲜期内不重拉')
+      h.definition.pageLifetimes.hide.call(h.shelf)
+      Date.now = () => realNow() + 60000
+    }
+    try { h.definition.pageLifetimes.show.call(h.shelf) } finally { Date.now = realNow }
+    assert.deepEqual(h.calls.slice(before).map(r => r.url), ['/api/template/topic-template/list', '/api/template/list'])
+    const snapshot = JSON.stringify(h.shelf.data)
+    oldTopic.fail({ msg: '旧主题失败' }); oldGame.fail({ msg: '旧玩法失败' })
+    assert.equal(JSON.stringify(h.shelf.data), snapshot, '离页前回包不能改新刷新状态或缓存')
+    assert.notEqual(h.latest('/api/template/topic-template/list'), oldTopic)
+    assert.notEqual(h.latest('/api/template/list'), oldGame)
+  }
+})
+
+test('模板货架不用首字、字符星星或 CSS 渐变冒充图形资产，缺图给明确失败态', () => {
+  const js = read('pages/templatedetail/shelf/index.js')
+  const wxml = read('pages/templatedetail/shelf/index.wxml')
+  assert.doesNotMatch(js, /ICON_COLORS|_initial:|_c1:|_c2:/)
+  assert.doesNotMatch(wxml, /\{\{\s*item\._initial\s*\}\}/)
+  assert.doesNotMatch(wxml, /★★★★★/)
+  assert.doesNotMatch(wxml, /linear-gradient/)
+  assert.doesNotMatch(wxml, /hot-divider|class="hot-/)
+  assert.match(wxml, /class="lc__img cv-err"/)
+  assert.doesNotMatch(wxml, /封面暂不可用/)
+})
+
+test('模板货架加载、失败与重试走设计系统组件；复制失败后入口立即可再点', () => {
+  const wxml = read('pages/templatedetail/shelf/index.wxml')
+  assert.match(wxml, /<cy-skeleton wx:if="\{\{ !topicLoaded && !topicError \}\}"/)
+  assert.match(wxml, /<cy-error wx:elif="\{\{ topicError && !topicLoaded \}\}"[^>]*bindretry="retry"/,
+    '列表加载失败必须有可见重试入口')
+  assert.doesNotMatch(wxml + read('pages/template/index.wxml'), /circleThemes/)
+  // 2026-10-30 V-24:整包复制从卡堆预览搬到主题模板详情(topic-detail)
+  const preview = read('pages/templatedetail/utils/topic-use-flow.js')
+  assert.match(preview, /fail\(\) \{\s*page\._using = false;/, '复制失败要放行下一次')
+})
+
+test('模板上下架重复点击只发一次', () => {
+  // 2026-10-28:整包复制挪到主题预览页(topic-preview),失败放行见上一条。
+  const project = loadPage('subpackageA/pages/myproject/index.js')
+  const event = { currentTarget: { dataset: { id: 9, target: 1 } } }
+  project.tplToggle(event)
+  project.tplToggle(event)
+  assert.equal(requests.length, 1)
+  // 广场状态独立于个人发布状态，按钮由广场投影及审核资格决定。
+  assert.match(read('subpackageA/pages/myproject/index.wxml'),
+    /<view wx:if="\{\{item\._canToggleMarket\}\}" class="mp-op mp-op-toggle" catchtap="tplToggle"/)
+
+})
+
+test('独立提现页随资金建单链路一起下线(PG-042)', () => {
+  assert.equal(fs.existsSync(path.join(ROOT, 'subpackageMember/tixian')), false)
+})
+
+test('设置页查询俱乐部失败不再假装用户未申请，并用真实图标替代字符箭头', () => {
+  const page = loadPage('pages/shezhi/shezhi.js')
+  page.closeScene = () => {}
+  page.pickClub()
+  requests[0].fail({ msg: '网络断开' })
+  assert.deepEqual(navigations, [])
+  assert.match(toasts[0], /加载失败|网络/)
+
+  const wxml = read('pages/shezhi/shezhi.wxml')
+  assert.doesNotMatch(wxml, />›</)
+  assert.match(wxml, /<cy-icon[^>]*name="arrow-right"/)
+  assert.match(read('pages/shezhi/shezhi.json'), /"cy-icon"/)
+})

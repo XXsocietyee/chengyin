@@ -1,0 +1,36 @@
+'use strict';
+// f-merchant(G-8 / M-12 收尾,2026-11-11):俱乐部「活动倾向」与快速配置的主题兴趣接入标签库。
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const ROOT = path.resolve(__dirname, '../..');
+const lib = require(path.join(ROOT, 'utils/tag-library.js'));
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+
+test('俱乐部活动倾向:库里一份,创建与编辑两处都从库取,不再各抄一份', () => {
+  assert.deepEqual(lib.tagLabels('club', '活动倾向'),
+    ['轻社交', '深度社交', 'RPG体验', '城市定向', '解谜路线', '沉浸式剧情', '运动路线', '艺术体验', '美食体验', '主题聚会'],
+    '词与顺序沿用原两页(后端按原词存 activityPrefs)');
+  for (const rel of ['pages/club/create/index.js', 'pages/club/components/cy/scene-club-edit/index.js']) {
+    const js = read(rel);
+    assert.match(js, /tagLibrary\.tagLabels\('club', '活动倾向'\)/, rel);
+    assert.doesNotMatch(js, /\['轻社交', '深度社交'/, rel + ' 不得再写死选项');
+  }
+  assert.match(read('pages/club/create/index.wxml'), /<image wx:if="\{\{item\.icon\}\}" class="cc-chip-ico"/);
+  assert.match(read('pages/club/components/cy/scene-club-edit/index.wxml'), /<image wx:if="\{\{dirIcons\[item\]\}\}" class="chip-ico"/);
+});
+
+test('图标文件放在使用它的分包里,且每个库标签都有图', () => {
+  const check = (kind, group, dir) => lib.tagSet(kind).filter((g) => !group || g.group === group).forEach((g) => g.tags.forEach((t) => {
+    const deco = lib.decorateTags([t.label], kind, dir)[0];
+    assert.ok(deco.iconSrc, t.label + ' 没有图标');
+    assert.ok(fs.existsSync(path.join(ROOT, deco.iconSrc)), deco.iconSrc + ' 不存在');
+  }));
+  check('club', '活动倾向', lib.CLUB_ICON_DIR);
+  // L04-018:publish/images/tags 无产品引用(publish/simple 已删),图标随之删除,不再检主题图标目录
+  assert.ok(lib.CLUB_ICON_DIR.startsWith('/pages/club/'));
+});
+
+// PG-021:快速配置(publish/simple)整页已删除,原「兴趣即主题标签」用例随页删除。

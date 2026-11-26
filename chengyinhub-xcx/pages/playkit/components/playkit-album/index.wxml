@@ -1,0 +1,24 @@
+<wxs module="gs" src="../../../../utils/wxs/gesture.wxs" />
+<!-- qx-u1:左缘侧滑返回 = 「收起相册」同一出口(close);只从左缘起手,不和相册左右翻页抢手势 -->
+<view class="album" wx:if="{{show}}"
+      bindtouchstart="{{gs.edgeStart}}" bindtouchmove="{{gs.edgeMove}}" bindtouchend="{{gs.edgeEnd}}" bindtouchcancel="{{gs.edgeEnd}}"
+      bindtransitionend="{{gs.edgeSettle}}" data-glayer="1" data-close="close" data-rm="{{reducedMotion}}">
+  <text class="album__title">{{title || '相册'}}</text>
+  <cy-album-glass class="album__glass" images="{{images}}" cur="{{cur}}" bind:change="onChange" />
+  <text class="album__count" wx:if="{{images.length}}">{{cur + 1}} / {{images.length}}</text>
+  <!-- L02-029(业主 2026-11-24 默认 A):说明、提交状态、按钮自下而上排成一列,放在页码上方,谁也不压谁 -->
+  <view class="album__stack">
+  <text class="album__line" wx:if="{{images[cur].line}}">{{images[cur].line}}</text>
+  <text class="album__line" wx:if="{{completionEnabled && done}}" aria-live="polite">照片已提交，相册仅供查看，不能再更换</text>
+  <view class="album__line" wx:if="{{completionEnabled && !done}}">
+    <text wx:if="{{uploadFailure === 'review_pending'}}" aria-live="polite">照片审核中</text>
+    <text wx:elif="{{uploadFailure === 'rejected'}}" aria-live="polite">照片未通过审核</text>
+    <text wx:elif="{{uploadFailure === 'retry'}}" aria-live="polite">网络或服务暂时异常，照片还没提交；可以重试上传同一张</text>
+    <text wx:elif="{{uploadFailure === 'reselect'}}" aria-live="polite">这张照片没能上传，请重新选择照片</text>
+    <!-- 第十二轮 k8 N11:完成相册这一步是这一屏的主动作,画成主按钮;「收起相册」退成次按钮 -->
+    <view bindtap="onCta" class="album__cta" aria-role="button" aria-label="{{uploadFailure === 'review_pending' ? '查看/重试审核，批准后提交相册' : uploadFailure === 'retry' ? '重试上传这张照片' : uploaded ? '重新提交照片' : uploadFailure === 'rejected' || uploadFailure === 'reselect' ? '重新选择照片' : '拍照或选择照片'}}" hover-class="album__cta--press" hover-stay-time="80">{{uploadFailure === 'review_pending' ? '查看/重试审核' : uploadFailure === 'retry' ? '重试上传这张照片' : uploaded ? '重新提交照片' : uploadFailure === 'reselect' || uploadFailure === 'rejected' ? '重新选择照片' : '拍照或选择照片完成相册'}}</view>
+    <view wx:if="{{uploaded || uploadFailure === 'retry'}}" bindtap="choosePhoto" aria-role="button" aria-label="重新选择照片" style="transform: none" hover-class="album__back--press">重新选择照片</view>
+  </view>
+  </view>
+  <view class="album__back {{completionEnabled && !done ? 'album__back--ghost' : ''}}" bindtap="close" aria-role="button" aria-label="收起相册" hover-class="album__back--press" hover-stay-time="80">收起相册</view>
+</view>

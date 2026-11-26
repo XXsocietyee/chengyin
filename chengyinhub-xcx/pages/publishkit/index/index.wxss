@@ -1,0 +1,2 @@
+page { background: var(--cy-color-bg-page); }
+.publishkit-holder { min-height: 100vh; background: var(--cy-color-bg-page); }

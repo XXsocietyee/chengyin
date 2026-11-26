@@ -1,0 +1,109 @@
+<!-- 2026-10-28 业主:票夹只放能用的票(registrationStatus 2 已报名、未核验),卡上不写状态,
+     也没有「可用 / 已用 / 已过期」切换 —— 没付钱、用过、过期的票不进票夹。
+     点卡翻面出示入场码(/api/verify/dyncode/issue,和 scene-qr-ticket 同一接口);底部「开始游戏」进 play。 -->
+<view class="theme-dark">
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+<view class="signup flex-col {{reduced ? 'signup--reduced' : ''}} {{entering ? 'signup--go' : ''}}">
+  <!-- UI-17 二次返修(2026-09-18 用户追加):全屏背景 = 当前票主题图(固定层,压在整页下面)。
+       卡在导航以下、底部安全区以上的区域里水平垂直居中并整体放大;票名移到卡外、紧贴卡顶之上,
+       卡面本身仍然零叠字。 -->
+  <image wx:if="{{wbg[0]}}" src="{{wbg[0]}}" mode="aspectFill" class="ztbg wbg {{wbgOn === 0 ? 'vis' : ''}}" />
+  <image wx:if="{{wbg[1]}}" src="{{wbg[1]}}" mode="aspectFill" class="ztbg wbg {{wbgOn === 1 ? 'vis' : ''}}" />
+  <view class="signup-scrim wmask"></view>
+  <cy-nav-bar overlay pill pillDark tint="light" title="" />
+  <!-- r3-visual 票夹(refs4/ticket-holder-frames):导航下一行 = 左「票夹」大标题,右「+」去探索拿票、本人头像回「我的」。
+       没有状态筛选:业主 2026-10-28 定票夹只放能用的票、不做「可用 / 已用 / 已过期」切换。 -->
+  <!-- F13(OR-011):不做筛选 —— 一个列表,可用的在前、即将开始的置灰排后;已通关 / 未通关是卡上的标签。右边「+」加票 -->
+  <view class="wl-nav" style="top: {{navTop}}px;">
+    <view class="wl-nav__flt">
+      <text aria-role="heading" class="wl-nav__b">票夹</text>
+    </view>
+    <view class="wl-nav__add" bindtap="goExplore" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="去探索主题"><cy-icon name="plus" size="32" /></view>
+    <view class="wl-nav__me" wx:if="{{meAvatar}}" bindtap="goMe" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="我的"><cy-avatar size="64" src="{{meAvatar}}" /></view>
+  </view>
+
+  <!-- 2026-07-31:优惠券已独立(subpackageMember/coupon),「票夹/优惠券」那层 tab 已删。
+       2026-09-09 用户裁决:「路线 / 场次」这层 tab 也删掉,两种票放一起。
+       两类票在后端确实是两回事(ownerType 1/2,两个接口),但那是数据模型的区分,
+       不是用户要做的选择 —— 打开票夹只想看「我有哪些票」。合并只在渲染层做,
+       落点差异由每张票自己带的 kind 分流(见 index.js goTicket)。 -->
+
+  <view class="davidwu" wx:if="{{focusState === 'loading'}}">
+    <cy-skeleton class="fill-slot" type="ticket" count="1" loading-label="正在定位原报名凭证" />
+  </view>
+  <view class="davidwu" wx:elif="{{focusState === 'missing'}}">
+    <cy-state-shell class="fill-slot" kind="error" title="未定位到原报名凭证" sub="{{focusError}}" primary="重试" fill="{{true}}" size="lg" theme="player" bind:primary="retryFocus" />
+  </view>
+  <view class="davidwu" wx:elif="{{walletState === 'loading'}}">
+    <cy-skeleton class="fill-slot" type="ticket" count="1" loading-label="正在加载我的票" />
+  </view>
+  <view class="davidwu" wx:elif="{{walletState === 'error'}}">
+    <!-- j6 F3(第十轮 owner):票夹读失败要看得见并能重试,不按「加载失败留白」 -->
+    <cy-empty class="fill-slot" kind="data" title="票夹没能打开" sub="{{walletErrorMsg}}" cta="重试" fill="{{true}}" size="lg" bind:cta="retryWallet" />
+  </view>
+  <!-- PR10 F-W1-12:未登录(无会话 / 401)给登录引导,不与加载失败一起留白 -->
+  <view class="davidwu" wx:elif="{{walletState === 'login'}}">
+    <cy-state-shell class="fill-slot" kind="no-permission" title="登录后查看票夹" primary="登录" fill="{{true}}" size="lg" theme="player" bind:primary="loginWallet" />
+  </view>
+  <view class="davidwu" wx:elif="{{walletState === 'empty'}}">
+    <cy-state-shell class="fill-slot" kind="empty" title="还没有票" primary="去探索" fill="{{true}}" size="lg" theme="player" bind:primary="goExplore" />
+  </view>
+
+  <view class="flex-a flex-col main" wx:if="{{walletState === 'ready' && (!focusState || focusState === 'ready')}}" style="padding-top:{{navTop}}px;">
+    <!-- r3-visual 票夹:一次只放一张大卡;左右滑动换票,离开的那张像翻书页一样卷走,下一张从侧边滑进来;点卡翻面出示入场码 -->
+    <view class="deck {{deckStill ? 'deck--still' : ''}}" bindtouchstart="onDeckStart" bindtouchmove="onDeckMove" bindtouchend="onDeckEnd" bindtouchcancel="onDeckEnd">
+      <!-- 2026-10-28 业主:点卡片翻到背面出示入场码,再点翻回;进游戏改由底部「开始游戏」。
+           票夹只放能用的票(已付款、未核验、未过期),卡上不写状态。 -->
+      <!-- F13:即将开始 / 退款中的票整卡置灰、不能点(aria-disabled),标签写「M月D日开始」/「退款中」 -->
+      <view wx:for="{{ticketList}}" wx:key="wKey" class="wc" style="{{deckPoses[index]}}{{index === currentSwiperTicket ? '' : 'pointer-events: none;'}}" bindtap="onCardTap" data-index="{{index}}" hover-class="{{item.wLocked ? 'none' : 'cy-pressed'}}" hover-stay-time="80"
+        aria-role="button" aria-disabled="{{item.wLocked}}" aria-label="{{item.wLocked ? item.wTag : (flipped && index === currentSwiperTicket ? '翻回正面' : '出示入场码')}}，{{item.wTitle}}" aria-hidden="{{index !== currentSwiperTicket}}">
+        <view class="wc__flip {{flipped && index === currentSwiperTicket ? 'wc__flip--back' : ''}}">
+          <view class="wc__face wc__front {{item.wLocked ? 'wc__front--locked' : ''}}">
+            <view class="wc__go" style="background: {{item.wColor}};"><image src="./icon_go.svg" mode="aspectFit" /></view>
+            <view class="wc__t"><text class="wc__b">{{item.wTitle}}</text><text class="wc__s">{{item.wSub}}</text><text wx:if="{{item.wTag}}" class="wc__tag {{item.wLocked ? 'wc__tag--locked' : ''}}">{{item.wTag}}</text></view>
+            <view class="wc__im cy-img-ph" wx:if="{{item.wImg}}"><image lazy-load="true" class="cy-img-fade {{imgOn[item.wKey] ? 'cy-img-fade--on' : ''}}" src="{{item.wImg}}" mode="aspectFill" data-fade-key="{{item.wKey}}" bindload="onImgFadeLoad" /></view>
+            <!-- x-fix2 P-18:没封面不拿假路线图充数(k8 F13),但卡身也不留一大块空:放一枚票夹插画 -->
+            <view class="wc__im wc__im--illus cy-cover-fb" wx:else aria-hidden="true"><image class="cy-cover-fb__art" src="/images/cover-route.svg" mode="aspectFit" /></view>
+            <view class="wc__curl" aria-hidden="true"></view>
+            <!-- l-after 镜面:卷页时一道跟着手指走的高光带(--sx),静止时不出 -->
+            <view class="wc__spec" aria-hidden="true"></view>
+          </view>
+          <view class="wc__face wc__back" wx:if="{{index === currentSwiperTicket && !item.wLocked}}">
+            <text class="wc__bn ep1">{{item.wTitle}}</text>
+            <view class="wc__qr" wx:if="{{!item.topicCompleted}}">
+              <!-- 2026-10-29 业主:码居中、码心黑色 logo、彩色波动效(cy-dot-qr);翻到背面才挂画布 -->
+              <cy-dot-qr wx:if="{{qrState === 'ready' && flipped}}" src="{{qrUrl}}" size="{{360}}" reduced-motion="{{reduced}}" />
+              <text wx:elif="{{qrState === 'error'}}" class="wc__qr-tip" catchtap="retryQr" aria-role="button" aria-label="重新生成入场码" hover-class="cy-pressed" hover-stay-time="80">重新生成</text>
+              <!-- 第十二轮 k8 F13:只在真的在取码时写「生成中…」,没翻面(idle)不留一句永远不会填上的话 -->
+              <text wx:elif="{{qrState === 'loading'}}" class="wc__qr-tip">生成中…</text>
+            </view>
+            <text wx:if="{{item.wExpiry}}" class="wc__exp">{{item.wExpiry}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 2026-09-04 判定表:「票夹全页没有任何队伍入口」。这一行跟着当前那张票走 ——
+         队伍是挂在具体某场/某条路线上的,放在票外面写死一个「我的队伍」会指向别的票。
+         没有队伍就整行不出:不摆一个点进去是空的入口。 -->
+    <view class="team-entry" wx:if="{{currentTeam}}" style="top: {{navTop + 52}}px;" bindtap="goMyTeam"
+      hover-class="cy-pressed" hover-stay-time="80"
+      aria-role="button" aria-label="打开我的队伍{{currentTeam.title ? '：' + currentTeam.title : ''}}">
+      <view class="team-entry__main">
+        <text class="team-entry__k">我的队伍</text>
+        <text class="team-entry__v ep1" wx:if="{{currentTeam.title}}">{{currentTeam.title}}</text>
+      </view>
+      <!-- 人数拿不到就不写,不补 0/0 -->
+      <text class="team-entry__n" wx:if="{{currentTeam.joinedCount !== null && currentTeam.maxMembers !== null}}">{{currentTeam.joinedCount}}/{{currentTeam.maxMembers}}</text>
+      <cy-icon name="arrow-right" size="24" />
+    </view>
+  </view>
+  <view class="wl-start {{entering ? 'wl-start--go' : ''}} {{startLit ? 'wl-start--lit' : ''}}" wx:if="{{walletState === 'ready' && ticketList.length && !ticketList[currentSwiperTicket].wNoGame && !ticketList[currentSwiperTicket].wLocked}}" bindtap="goTicket" data-index="{{currentSwiperTicket}}" data-go="1" aria-role="button" aria-label="{{ticketList[currentSwiperTicket].topicCompleted ? '查看记录' : '开始游戏'}}：{{ticketList[currentSwiperTicket].wTitle}}" hover-class="cy-pressed" hover-stay-time="80">
+    <view class="wl-start__fill"></view><view class="wl-start__shine" wx:if="{{!reduced}}"></view>
+    <view class="wl-start__lbl"><image class="wl-start__play" src="./icon_play.svg" mode="aspectFit" /><text>{{ticketList[currentSwiperTicket].topicCompleted ? '查看记录' : '开始游戏'}}</text></view>
+  </view>
+  <view class="wl-burst {{entering ? 'wl-burst--go' : ''}}" wx:if="{{walletState === 'ready'}}"></view>
+</view>
+</view>

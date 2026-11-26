@@ -1,0 +1,11 @@
+<cy-modal
+  show="{{show}}"
+  danger
+  title="{{title}}"
+  content="{{content}}"
+  cancel-text="{{cancelText}}"
+  confirm-text="{{confirmText}}"
+  loading="{{loading}}"
+  bind:cancel="onCancel"
+  bind:confirm="onConfirm"
+/>

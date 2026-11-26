@@ -1,0 +1,780 @@
+package com.chengyinhub.web.service.play;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import org.springframework.beans.factory.annotation.Autowired;
+
+import com.chengyinhub.business.domain.CmsActivity;
+import com.chengyinhub.business.domain.CmsRegistration;
+import com.chengyinhub.common.constant.PurchaseKind;
+import com.chengyinhub.business.domain.CmsTopicNode;
+import com.chengyinhub.business.domain.PlayerNodeProgress;
+import com.chengyinhub.business.domain.TopicRouteSession;
+import com.chengyinhub.business.service.ICmsActivityService;
+import com.chengyinhub.business.service.ICommunityPostService;
+import com.chengyinhub.business.service.ICmsRegistrationService;
+import com.chengyinhub.business.service.ICmsTopicNodeService;
+import com.chengyinhub.business.service.IPlayerNodeProgressService;
+import com.chengyinhub.business.service.ITopicRouteRuntimeService;
+import com.chengyinhub.business.util.PlayNarrativeSupport;
+import com.chengyinhub.business.util.ChapterBlockReadSupport;
+import com.chengyinhub.common.core.domain.AjaxResult;
+import com.chengyinhub.business.domain.GameRuntimeSession;
+import com.chengyinhub.business.domain.TopicRouteAction;
+import com.chengyinhub.business.mapper.GameRuntimeSessionMapper;
+import com.chengyinhub.business.mapper.PlayJourneyReadMapper;
+import com.chengyinhub.business.mapper.TopicRouteSessionMapper;
+import com.chengyinhub.business.service.support.NodeJourneySnapshot;
+import com.chengyinhub.business.service.support.TopicRouteEngine;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import org.springframework.stereotype.Service;
+import static com.chengyinhub.common.core.domain.AjaxResult.error;
+
+/** Authorized ending and completed-play projections. */
+@Service
+public class PlayHistoryQueryApplication {
+
+    @Autowired
+    private ICmsActivityService cmsActivityService;
+    @Autowired
+    private com.chengyinhub.business.service.support.CompletedRouteFactReader completedRouteFactReader;
+    @Autowired
+    private ICommunityPostService communityPostService;
+    @Autowired
+    private com.chengyinhub.business.service.ICmsTopicService cmsTopicService;
+    @Autowired
+    private ICmsTopicNodeService cmsTopicNodeService;
+    @Autowired
+    private ICmsRegistrationService cmsRegistrationService;
+    @Autowired
+    private IPlayerNodeProgressService playerNodeProgressService;
+    @Autowired(required = false)
+    private ITopicRouteRuntimeService topicRouteRuntimeService;
+    @Autowired
+    private PlayCompletionFacts playCompletionFacts;
+    @Autowired
+    private TopicRouteSessionMapper historySessionMapper;
+    @Autowired
+    private PlayJourneyReadMapper historyReadMapper;
+    @Autowired
+    private GameRuntimeSessionMapper historyGameMapper;
+
+    /** Original-run reading only: never call a runtime view that may sync/start/settle the run. */
+    public AjaxResult history(Long memberId, Long activityId, Long topicId, Long routeSessionId)
+    {
+        if (memberId == null || memberId <= 0) return error("请先登录");
+        if (activityId == null || activityId < 0 || topicId == null || topicId <= 0
+                || routeSessionId == null || routeSessionId <= 0) return error("必须提供原游玩会话");
+        TopicRouteSession session = historySessionMapper.selectAccessibleById(routeSessionId, memberId);
+        if (session == null || !routeSessionId.equals(session.getId()) || !memberId.equals(session.getMemberId())
+                || !activityId.equals(session.getActivityId()) || !topicId.equals(session.getTopicId()))
+            return error("本局不存在或无权查看");
+        com.chengyinhub.business.domain.CmsTopic topic = cmsTopicService.selectCmsTopicById(topicId);
+        if (topic == null || playCompletionFacts.topicHistoryBlocked(topic)) return error("历史内容不可用");
+        ObjectMapper json = new ObjectMapper();
+        final JsonNode snapshot;
+        final TopicRouteEngine.State state;
+        try {
+            snapshot = json.readTree(session.getConfigSnapshotJson());
+            state = json.readValue(session.getStateJson(), TopicRouteEngine.State.class);
+            if (snapshot == null || !snapshot.isObject() || state == null || state.getCompletedNodeIds() == null
+                    || state.getTags() == null || state.getVariables() == null) return error("本局历史快照不可用");
+            NodeJourneySnapshot.requireContentSnapshot(snapshot);
+        } catch (Exception invalid) { return error("本局历史快照不可用"); }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("routeSessionId", session.getId().toString());
+        data.put("activityId", activityId.toString()); data.put("topicId", topicId.toString());
+        data.put("configVersion", session.getConfigVersion() == null ? null : session.getConfigVersion().toString());
+        data.put("readOnly", true);
+        List<Map<String, Object>> chapters = new ArrayList<>();
+        Map<Long, Map<String, Object>> nodes = new LinkedHashMap<>();
+        // Old snapshots cannot establish original prose; current author edits are never a history fallback.
+        data.put("narrativeAvailable", snapshot.path("thoughtChapters").isArray());
+        for (Long nodeId : state.getCompletedNodeIds()) {
+            if (nodeId == null || nodeId <= 0 || playCompletionFacts.historyReadableNode(nodeId, topic) == null) continue;
+            JsonNode answer;
+            try { answer = NodeJourneySnapshot.answerFromSnapshot(snapshot, nodeId); }
+            catch (IllegalStateException invalid) { continue; }
+            if (!NodeJourneySnapshot.hasContent(answer)) continue;
+            JsonNode original = answer.path("nodePresentation");
+            if (original.path("id").asLong() != nodeId || original.path("topicId").asLong() != topicId) continue;
+            Map<String, Object> node = new LinkedHashMap<>();
+            node.put("nodeId", nodeId.toString()); node.put("done", true); node.put("history", true);
+            copyHistoryText(node, original, "name", "description", "imgUrl", "fragmentText");
+            if (original.path("chapterId").isIntegralNumber()) node.put("chapterId", original.path("chapterId").asText());
+            copyHistoryText(node, answer.path("templatePresentation"), "storyText", "storyImg");
+            node.put("results", new ArrayList<Map<String, Object>>());
+            nodes.put(nodeId, node);
+        }
+        Set<Long> seenChapters = new HashSet<>();
+        JsonNode frozenChapters = snapshot.path("thoughtChapters");
+        if (frozenChapters.isArray()) for (JsonNode chapter : frozenChapters) {
+            JsonNode id = chapter.path("chapterId");
+            if (!id.isIntegralNumber() || !id.canConvertToLong() || id.asLong() <= 0
+                    || !seenChapters.add(id.asLong()) || !chapter.path("blocks").isArray()) continue;
+            boolean opening = chapter.path("opening").asBoolean(false);
+            if ((opening || chapter.path("requiresOpening").asBoolean(false))
+                    && !state.getTags().contains("sys.opening.done")) continue;
+            boolean pathCompleted = historyPathCompleted(snapshot, chapter, state, nodes.keySet(), json);
+            if (!pathCompleted && (!historyIdsCompleted(chapter.path("nodeIds"), nodes.keySet())
+                    || !historyIdsCompleted(chapter.path("requiredBefore"), nodes.keySet()))) continue;
+            // Empty optional chapters have no completion receipt; do not manufacture completion from allDone.
+            if (chapter.path("nodeIds").isEmpty() && !opening) continue;
+            JsonNode readableBlocks = chapter.path("blocks");
+            if (pathCompleted) {
+                // The saved path ended this chapter; the ordinary player projection still stops at any unearned node.
+                List<Object> frozenBlocks = json.convertValue(readableBlocks, new com.fasterxml.jackson.core.type.TypeReference<List<Object>>() {});
+                readableBlocks = json.valueToTree(ChapterBlockReadSupport.projectForPlayer(frozenBlocks, nodes.keySet(), state.getTags()));
+            }
+            List<Map<String, Object>> blocks = historyBlocks(readableBlocks, state, nodes.keySet(), pathCompleted);
+            if (blocks == null) continue;
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("chapterId", id.asText()); row.put("complete", true); row.put("blocks", blocks);
+            chapters.add(row);
+        }
+        List<TopicRouteAction> actions = historyReadMapper.selectActionsBySession(routeSessionId);
+        Map<Long, Set<String>> taskInstances = new HashMap<>();
+        if (actions != null) for (TopicRouteAction action : actions) {
+            if (action == null || !routeSessionId.equals(action.getSessionId())
+                    || !memberId.equals(action.getMemberId())) continue;
+            JsonNode receipt;
+            try { receipt = json.readTree(action.getResponseJson()); }
+            catch (Exception invalid) { receipt = json.createObjectNode(); }
+            if (receipt == null) receipt = json.createObjectNode();
+            Long nodeId = action.getNodeId();
+            String code = action.getOutcomeCode();
+            if ("QUEST_START".equals(code) || "OPERATION_START".equals(code) || "QUEST_RESOLVE".equals(code)) {
+                // Gameplay actions save node_id=0 and a theme view with a nested settlement, not scalar facts.
+                if (receipt.path("sessionId").asLong() != routeSessionId
+                        || receipt.path("activityId").asLong(-1) != activityId
+                        || receipt.path("topicId").asLong() != topicId
+                        || !"PLAYER".equals(receipt.path("runtimeScope").asText())) continue;
+                JsonNode settlement = receipt.path("settlement");
+                boolean quest = !"OPERATION_START".equals(code);
+                String key = settlement.path("QUEST_RESOLVE".equals(code) ? "questKey"
+                        : quest ? "activeQuest" : "activeOperation").asText();
+                nodeId = historyTaskNode(snapshot, key, quest);
+                if (nodeId == null || !nodes.containsKey(nodeId)) continue;
+                if (!"QUEST_RESOLVE".equals(code)) {
+                    if (quest ? !key.equals(receipt.path("activeQuest").asText())
+                            : !key.equals(receipt.path("activeOperation").path("operationKey").asText())
+                              || receipt.path("activeOperation").path("nodeId").asLong() != nodeId) continue;
+                    if (action.getActionId() == null || action.getActionId().isEmpty()) continue;
+                    taskInstances.computeIfAbsent(nodeId, ignored -> new HashSet<>())
+                            .add(historyTaskInstance(routeSessionId, action.getActionId(), quest));
+                    continue;
+                }
+                receipt = settlement;
+            }
+            if (!nodes.containsKey(nodeId)) continue;
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("kind", "routeReceipt"); result.put("receiptId", action.getReceiptId());
+            result.put("outcomeCode", code); result.put("at", action.getCreateTime());
+            if (java.util.Arrays.asList("PASSED", "OUTCOME", "CHECK_SETTLE", "TASK_FACT", "OPERATION_FACT", "QUEST_RESOLVE").contains(code))
+                copyHistoryScalars(result, receipt, json, "passed", "outcome", "success", "total", "kept", "settled", "used", "actions");
+            historyResults(nodes.get(nodeId)).add(result);
+        }
+        List<GameRuntimeSession> games = historyGameMapper.selectPlayerSessionsByTopic(activityId, topicId, memberId);
+        if (games != null) for (GameRuntimeSession game : games) {
+            if (game == null || !Integer.valueOf(GameRuntimeSession.OWNER_PLAYER).equals(game.getOwnerType())
+                    || !memberId.equals(game.getOwnerId()) || !activityId.equals(game.getActivityId())
+                    || !topicId.equals(game.getTopicId()) || !nodes.containsKey(game.getNodeId())
+                    || !historyGameLinked(session, game, taskInstances, json)
+                    || !Integer.valueOf(GameRuntimeSession.STATUS_COMPLETED).equals(game.getStatus())) continue;
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("kind", "completedGame");
+            result.put("gameSessionId", game.getId() == null ? null : game.getId().toString());
+            result.put("score", game.getScore()); result.put("completedUnits", game.getCompletedUnits());
+            result.put("completedAt", game.getCompletedAt());
+            historyGameOutcomes(result, game, json);
+            historyResults(nodes.get(game.getNodeId())).add(result);
+        }
+        data.put("chapters", chapters); data.put("nodes", new ArrayList<>(nodes.values()));
+        return AjaxResult.success(data);
+    }
+
+    private static Long historyTaskNode(JsonNode snapshot, String key, boolean quest)
+    {
+        if (key.isEmpty()) return null;
+        Long found = null;
+        for (JsonNode task : snapshot.path("themeConfig").path("gameplayRuntime").path(quest ? "quests" : "facilities")) {
+            if (!key.equals(task.path(quest ? "questKey" : "facilityKey").asText())) continue;
+            JsonNode id = task.path(quest ? "nodeId" : "operationNodeId");
+            if (found != null || !id.isIntegralNumber() || !id.canConvertToLong() || id.asLong() <= 0) return null;
+            found = id.asLong();
+        }
+        return found;
+    }
+
+    private static String historyTaskInstance(Long sessionId, String actionId, boolean quest)
+    {
+        try {
+            // Same exact saved session/action identity as TopicRouteRuntimeServiceImpl.gameplayInstance.
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest((sessionId + ":" + actionId).getBytes(StandardCharsets.UTF_8));
+            return (quest ? "quest:" : "operation:") + java.util.HexFormat.of().formatHex(hash, 0, 16);
+        } catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException("任务摘要算法不可用", impossible); }
+    }
+
+    private static boolean historyGameLinked(TopicRouteSession session, GameRuntimeSession game,
+            Map<Long, Set<String>> tasks, ObjectMapper json)
+    {
+        if (game.getPlayInstanceId() == null) return false;
+        if (session.getPlayInstanceId() != null && session.getPlayInstanceId().equals(game.getPlayInstanceId())) return true;
+        if (tasks.getOrDefault(game.getNodeId(), java.util.Collections.emptySet()).contains(game.getPlayInstanceId())) return true;
+        try {
+            JsonNode saved = json.readTree(game.getStateJson());
+            return saved != null && saved.path("originalRouteSessionId").isIntegralNumber()
+                    && saved.path("originalRouteSessionId").asLong() == session.getId()
+                    && saved.path("zeroChallengeInstance").isTextual()
+                    && !saved.path("zeroChallengeInstance").asText().isEmpty()
+                    && game.getPlayInstanceId().equals("challenge:" + saved.path("zeroChallengeInstance").asText());
+        } catch (Exception invalid) { return false; }
+    }
+
+    private static void copyHistoryScalars(Map<String, Object> out, JsonNode source, ObjectMapper json, String... keys)
+    {
+        for (String key : keys) {
+            JsonNode value = source.path(key);
+            if (value.isBoolean() || value.isNumber()) out.put(key, json.convertValue(value, Object.class));
+        }
+    }
+
+    private static void historyGameOutcomes(Map<String, Object> out, GameRuntimeSession game, ObjectMapper json)
+    {
+        try {
+            JsonNode saved = json.readTree(game.getStateJson());
+            if (saved == null) return;
+            Map<String, Object> outcomes = new LinkedHashMap<>();
+            String outcome = saved.path("gameplayDecision").path("outcome").asText();
+            if ("PASS".equals(outcome) || "FAIL".equals(outcome)) outcomes.put("outcome", outcome);
+            JsonNode coin = saved.path("coinFlip");
+            if (coin.path("flipped").asBoolean() && java.util.Arrays.asList("HEADS", "TAILS").contains(coin.path("side").asText()))
+                outcomes.put("coinSide", coin.path("side").asText());
+            JsonNode dice = saved.path("diceRoll");
+            if (dice.path("rolled").asBoolean()) {
+                Map<String, Object> roll = new LinkedHashMap<>();
+                copyHistoryScalars(roll, dice, json, "sum", "kept", "total", "success");
+                List<Integer> pips = new ArrayList<>();
+                if (dice.path("pips").isArray() && dice.path("pips").size() <= 2)
+                    for (JsonNode pip : dice.path("pips")) {
+                        if (!pip.isIntegralNumber() || pip.asInt() < 1 || pip.asInt() > 20) { pips.clear(); break; }
+                        pips.add(pip.asInt());
+                    }
+                if (!pips.isEmpty()) roll.put("pips", pips);
+                outcomes.put("diceRoll", roll);
+            }
+            if (saved.path("draws").isArray()) {
+                List<Map<String, Object>> draws = new ArrayList<>();
+                for (JsonNode draw : saved.path("draws")) {
+                    Map<String, Object> row = new LinkedHashMap<>(); copyHistoryText(row, draw, "id", "label", "content");
+                    if (!row.isEmpty()) draws.add(row);
+                }
+                outcomes.put("draws", draws);
+            }
+            if (!outcomes.isEmpty()) out.put("outcomes", outcomes);
+        } catch (Exception invalid) { /* Corrupt optional outcome data cannot authorize or reveal a different run. */ }
+    }
+
+    private static boolean historyPathCompleted(JsonNode snapshot, JsonNode chapter, TopicRouteEngine.State state,
+            Set<Long> readable, ObjectMapper json)
+    {
+        Set<Long> ids = new HashSet<>();
+        if (!chapter.path("nodeIds").isArray()) return false;
+        for (JsonNode id : chapter.path("nodeIds")) {
+            if (!id.isIntegralNumber() || !id.canConvertToLong() || id.asLong() <= 0) return false;
+            ids.add(id.asLong());
+        }
+        if (java.util.Collections.disjoint(ids, readable)) return false;
+        for (JsonNode binding : snapshot.path("themeConfig").path("chapters")) {
+            JsonNode frozen = binding.path("binding");
+            JsonNode index = binding.path("index");
+            if (frozen.path("chapterId").asLong() == chapter.path("chapterId").asLong()
+                    && frozen.path("nodeIds").equals(chapter.path("nodeIds")) && index.isIntegralNumber()
+                    && state.getThemeRuntime().path("chapters").path(index.asText()).path("ended").asBoolean()) return true;
+        }
+        if (!"BRANCH_GRAPH".equals(snapshot.path("routeMode").asText())) return false;
+        // The persisted production decision log proves departure/terminal, never the whole-run allDone flag.
+        if (state.getDecisionLog() == null) return false;
+        for (Map<String, Object> decision : state.getDecisionLog()) {
+            JsonNode saved = json.valueToTree(decision);
+            JsonNode from = saved.path("fromNodeId"), to = saved.path("toNodeId");
+            if (!from.isIntegralNumber() || !ids.contains(from.asLong()) || !readable.contains(from.asLong())) continue;
+            if ("TERMINAL".equals(saved.path("reason").asText())) {
+                for (JsonNode terminal : snapshot.path("terminalNodeIds")) if (terminal.isIntegralNumber() && terminal.asLong() == from.asLong()) return true;
+            } else if (to.isIntegralNumber() && !ids.contains(to.asLong())) {
+                for (String field : new String[]{"edges", "fallbacks"}) for (JsonNode edge : snapshot.path(field))
+                    if (edge.path("fromNodeId").asLong() == from.asLong() && edge.path("toNodeId").asLong() == to.asLong()
+                            && ("fallbacks".equals(field) || edge.path("id").asText().equals(saved.path("edgeId").asText()))) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean historyIdsCompleted(JsonNode ids, Set<Long> completed)
+    {
+        if (!ids.isArray()) return false;
+        for (JsonNode id : ids) if (!id.isIntegralNumber() || !id.canConvertToLong()
+                || id.asLong() <= 0 || !completed.contains(id.asLong())) return false;
+        return true;
+    }
+
+    private static List<Map<String, Object>> historyBlocks(JsonNode blocks, TopicRouteEngine.State state, Set<Long> completed, boolean pathCompleted)
+    {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (JsonNode block : blocks) {
+            String type = block.path("type").asText();
+            if ("node".equals(type)) {
+                JsonNode id = block.path("nodeId");
+                if (!id.isIntegralNumber() || !id.canConvertToLong()) return null;
+                if (!completed.contains(id.asLong())) {
+                    if (pathCompleted) break;
+                    return null;
+                }
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("type", "node"); row.put("nodeId", id.asText()); out.add(row);
+                continue;
+            }
+            // Beat text can be a secret answer, unselected outcome or undelivered item; no replay proof is stored here.
+            if (block.hasNonNull("beat")) continue;
+            if (block.hasNonNull("when") && (!"HAS_TAG".equals(block.path("when").path("op").asText())
+                    || !state.getTags().contains(block.path("when").path("value").asText()))) continue;
+            if ("thought".equals(type) && !state.getVariables().containsKey("thought." + block.path("thoughtKey").asText())
+                    && !state.getTags().contains("thought." + block.path("thoughtKey").asText() + ".done")) continue;
+            if (!java.util.Arrays.asList("text", "image", "audio", "voice", "thought", "dream", "divider").contains(type)) continue;
+            Map<String, Object> row = new LinkedHashMap<>(); row.put("type", type);
+            copyHistoryText(row, block, "key", "content", "url", "altText", "who", "thoughtKey", "title");
+            // 可选阅读(延伸阅读卡)在回看里同样折叠
+            if ("text".equals(type) && block.path("optional").asBoolean(false)) row.put("optional", true);
+            if ("dream".equals(type) && block.path("images").isArray()) {
+                List<Map<String, Object>> images = new ArrayList<>();
+                for (JsonNode image : block.path("images")) {
+                    Map<String, Object> item = new LinkedHashMap<>(); copyHistoryText(item, image, "url", "line"); images.add(item);
+                }
+                row.put("images", images);
+            }
+            out.add(row);
+        }
+        return out;
+    }
+
+    private static void copyHistoryText(Map<String, Object> target, JsonNode source, String... keys)
+    {
+        for (String key : keys) if (source.path(key).isTextual()) target.put(key, source.path(key).asText());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> historyResults(Map<String, Object> node)
+    {
+        return (List<Map<String, Object>>) node.get("results");
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.chengyinhub.business.mapper.PlayerNodeProgressMapper visitProgressMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.chengyinhub.business.service.ICmsTopicChapterService visitChapterService;
+
+    /**
+     * FE-STORY 7.4 / T-B8:自由探索票过期(或场次结束)后,过期前到访过的章节永远可读。
+     * 只读:不看通行证/场次时效,只看本人参与事实;只下发本人或队友到访过的地点与章节,未到访的一律不给。
+     * 新增到访仍由 /api/play/arrive、/checkin 的会话校验拒绝(过期后不能再解锁)。
+     */
+    public AjaxResult freeExploreVisitedHistory(Long memberId, Long activityId, Long topicId)
+    {
+        if (memberId == null || memberId <= 0) return error("请先登录");
+        if (activityId == null || activityId < 0 || topicId == null || topicId <= 0) return error("必须提供原游玩会话");
+        com.chengyinhub.business.domain.CmsTopic topic = cmsTopicService.selectCmsTopicById(topicId);
+        if (topic == null || playCompletionFacts.topicHistoryBlocked(topic)) return error("历史内容不可用");
+        if (!Integer.valueOf(com.chengyinhub.common.constant.PlayMode.FREE_COLLECT).equals(topic.getProductType())) {
+            return error("必须提供原游玩会话");
+        }
+        if (activityId > 0) {
+            CmsActivity activity = cmsActivityService.selectCmsActivityById(activityId);
+            if (activity == null || !topicId.equals(activity.getTopicId())) return error("活动或主题不存在");
+        }
+        List<PlayerNodeProgress> own = visitProgressMapper == null ? java.util.Collections.<PlayerNodeProgress>emptyList()
+                : visitProgressMapper.selectOwnVisits(memberId, activityId, topicId);
+        if (own == null) own = java.util.Collections.emptyList();
+        boolean participated = !own.isEmpty() || (activityId == 0L
+                ? playCompletionFacts.hasSelfPlayRegistration(memberId, topicId)
+                : playCompletionFacts.isRegistered(memberId, activityId));
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("readOnly", true);
+        data.put("mode", com.chengyinhub.common.constant.PlayMode.FREE_COLLECT);
+        data.put("activityId", activityId.toString());
+        data.put("topicId", topicId.toString());
+        List<Map<String, Object>> chapters = new ArrayList<>();
+        List<Map<String, Object>> nodes = new ArrayList<>();
+        CmsTopicNode probe = new CmsTopicNode();
+        probe.setTopicId(topicId);
+        probe.setStatus(1L);
+        List<CmsTopicNode> nodeList = cmsTopicNodeService.selectCmsTopicNodeList(probe);
+        if (nodeList == null) nodeList = new ArrayList<>();
+        Set<Long> placeChapters = new HashSet<>();
+        for (CmsTopicNode n : nodeList) if (n.getChapterId() != null) placeChapters.add(n.getChapterId());
+        if (!participated) {
+            data.put("storyUnlocked", 0);
+            data.put("storyTotal", placeChapters.size());
+            data.put("chapters", chapters);
+            data.put("nodes", nodes);
+            return AjaxResult.success(data);
+        }
+        Map<Long, CmsTopicNode> byId = new LinkedHashMap<>();
+        for (CmsTopicNode n : nodeList) byId.put(n.getId(), n);
+        Map<Long, Date> ownVisitTime = new LinkedHashMap<>();
+        for (PlayerNodeProgress p : own) {
+            if (p.getNodeId() != null && !ownVisitTime.containsKey(p.getNodeId())) ownVisitTime.put(p.getNodeId(), p.getCheckinTime());
+        }
+        Set<Long> teamNodes = new HashSet<>();
+        if (visitProgressMapper != null) {
+            List<Long> team = visitProgressMapper.selectTeamVisitedNodeIds(memberId, activityId, topicId);
+            if (team != null) teamNodes.addAll(team);
+        }
+        Set<Long> visitedChapters = new HashSet<>();
+        Set<Long> ownChapters = new HashSet<>();
+        for (Long nodeId : ownVisitTime.keySet()) {
+            CmsTopicNode n = byId.containsKey(nodeId) ? byId.get(nodeId) : playCompletionFacts.historyReadableNode(nodeId, topic);
+            if (n != null && n.getChapterId() != null) { visitedChapters.add(n.getChapterId()); ownChapters.add(n.getChapterId()); byId.putIfAbsent(nodeId, n); }
+        }
+        for (Long nodeId : teamNodes) {
+            CmsTopicNode n = byId.get(nodeId);
+            if (n != null && n.getChapterId() != null) visitedChapters.add(n.getChapterId());
+        }
+        Set<Long> readableNodeIds = new HashSet<>();
+        for (CmsTopicNode n : byId.values()) {
+            if (n.getChapterId() == null || !visitedChapters.contains(n.getChapterId())) continue;
+            readableNodeIds.add(n.getId());
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("nodeId", n.getId().toString());
+            m.put("name", n.getName());
+            m.put("chapterId", n.getChapterId().toString());
+            m.put("address", n.getAddress());
+            m.put("description", n.getDescription());
+            m.put("hookText", n.getHookText());
+            m.put("cardHookLong", n.getCardHookLong());
+            m.put("fragmentText", n.getFragmentText());
+            m.put("visitTime", ownVisitTime.get(n.getId()));
+            m.put("visitedByTeam", !ownChapters.contains(n.getChapterId()));
+            m.put("history", true);
+            nodes.add(m);
+        }
+        if (visitChapterService != null && !visitedChapters.isEmpty()) {
+            com.chengyinhub.business.domain.CmsTopicChapter chapterProbe = new com.chengyinhub.business.domain.CmsTopicChapter();
+            chapterProbe.setTopicId(topicId);
+            List<com.chengyinhub.business.domain.CmsTopicChapter> list = visitChapterService.selectCmsTopicChapterList(chapterProbe);
+            if (list != null) for (com.chengyinhub.business.domain.CmsTopicChapter c : list) {
+                if (c == null || c.getId() == null || !visitedChapters.contains(c.getId())) continue;
+                Map<String, Object> cm = new LinkedHashMap<>();
+                cm.put("chapterId", c.getId().toString());
+                cm.put("name", c.getName());
+                cm.put("sortId", c.getSortId());
+                cm.put("description", c.getDescription());
+                List<Object> blocks = java.util.Collections.emptyList();
+                if (com.chengyinhub.business.util.ChapterBlockReadSupport.isRequiredChapter(c)) {
+                    blocks = com.chengyinhub.business.util.ChapterBlockReadSupport.projectForPlayer(
+                            com.chengyinhub.business.util.ChapterBlockReadSupport.resolveFromTopicNodes(c, new ArrayList<>(byId.values())),
+                            readableNodeIds);
+                }
+                cm.put("blocks", blocks);
+                chapters.add(cm);
+            }
+        }
+        data.put("storyUnlocked", visitedChapters.size());
+        data.put("storyTotal", placeChapters.size());
+        data.put("chapters", chapters);
+        data.put("nodes", nodes);
+        return AjaxResult.success(data);
+    }
+
+    public AjaxResult ending(Long actorMemberId, Long activityId, Long topicId)
+    {
+        Long memberId = actorMemberId;
+        if (memberId <= 0) return error("请先登录");
+        // 会话解析(镜像 /nodes:活动会话 or 自玩会话)
+        boolean selfPlay = (activityId == null || activityId == 0L) && topicId != null;
+        Long tId;
+        Long progActId;
+        if (!selfPlay) {
+            if (activityId == null) return error("参数有误");
+            CmsActivity activity = cmsActivityService.selectCmsActivityById(activityId);
+            if (activity == null || activity.getTopicId() == null) return error("活动或主题不存在");
+            tId = activity.getTopicId();
+            progActId = activityId;
+        } else {
+            tId = topicId;
+            progActId = 0L;
+        }
+        // R10-09 收尾:主题探针(与其它读侧一致)。历史履约:不按公开状态/报名时效/下架字段挡
+        // 已有参与者——碎片唯一真源是本人完成行;只有主题行取不到(参数/数据损坏)才清晰失败。
+        com.chengyinhub.business.domain.CmsTopic historyTopic = cmsTopicService.selectCmsTopicById(tId);
+        if (historyTopic == null) return error("主题不存在");
+        // 节点表(sort_id asc)→ 建 id 索引
+        CmsTopicNode nodeProbe = new CmsTopicNode();
+        nodeProbe.setTopicId(tId);
+        nodeProbe.setStatus(1L);
+        List<CmsTopicNode> nodeList = cmsTopicNodeService.selectCmsTopicNodeList(nodeProbe);
+        Map<Long, CmsTopicNode> byId = new HashMap<>();
+        for (CmsTopicNode n : nodeList) byId.put(n.getId(), n);
+        // 完成进度:只认 status==1。到店/凭证 status=0 是独立事实(在 /nodes 有 arrived 展示位),
+        // 不得拼进「按完成顺序」的碎片;自玩(activity_id=0)按 topicId 收窄,避免多主题共享探针。
+        PlayerNodeProgress progProbe = new PlayerNodeProgress();
+        progProbe.setMemberId(memberId);
+        progProbe.setActivityId(progActId);
+        if (selfPlay) progProbe.setTopicId(tId);
+        List<PlayerNodeProgress> doneList = playerNodeProgressService.selectPlayerNodeProgressList(progProbe);
+        // 访问判断:只看本人事实。无参与事实(无事前通行证/报名、也无本人进度行)→ 空信,
+        // 不泄露任何未获得碎片;有过通行证(哪怕已过期)或报名即历史参与者,不被公开资格挡。
+        // 治理处置/违规下架的主题:历史读取不得把处置内容重新开放(与普通下架区分)。
+        boolean historyBlocked = playCompletionFacts.topicHistoryBlocked(historyTopic);
+        boolean participated = !historyBlocked && (!doneList.isEmpty() || (selfPlay
+                ? playCompletionFacts.hasSelfPlayRegistration(memberId, tId) : playCompletionFacts.isRegistered(memberId, progActId)));
+        if (Integer.valueOf(com.chengyinhub.common.constant.PlayMode.FREE_COLLECT).equals(historyTopic.getProductType())) {
+            // FE-STORY 5.4:自由探索结局按到访(到店行 checkin_time 不为空)驱动,按到访先后排,不看核销。
+            List<CmsTopicNode> visitedInOrder = new ArrayList<>();
+            if (participated) {
+                List<PlayerNodeProgress> visits = new ArrayList<>(doneList);
+                visits.sort(Comparator.comparing(PlayerNodeProgress::getCheckinTime,
+                        Comparator.nullsLast(Comparator.naturalOrder())));
+                Set<Long> seenVisits = new HashSet<>();
+                for (PlayerNodeProgress p : visits) {
+                    if (p.getCheckinTime() == null || p.getNodeId() == null || !seenVisits.add(p.getNodeId())) continue;
+                    CmsTopicNode n = byId.get(p.getNodeId());
+                    if (n == null) n = playCompletionFacts.historyReadableNode(p.getNodeId(), historyTopic);
+                    if (n != null) visitedInOrder.add(n);
+                }
+            }
+            if (participated && visitProgressMapper != null) {
+                // FE-STORY 5.5:队友到访的地点也算本队已集,排在本人到访之后。
+                List<Long> team = visitProgressMapper.selectTeamVisitedNodeIds(memberId, progActId, tId);
+                if (team != null) for (Long nodeId : team) {
+                    if (nodeId == null || visitedInOrder.stream().anyMatch(v -> nodeId.equals(v.getId()))) continue;
+                    CmsTopicNode n = byId.get(nodeId);
+                    if (n != null) visitedInOrder.add(n);
+                }
+            }
+            return AjaxResult.success(PlayNarrativeSupport.buildVisitEnding(visitedInOrder, nodeList.size()));
+        }
+        List<CmsTopicNode> completedInOrder = new ArrayList<>();
+        if (participated) {
+            doneList.sort(Comparator.comparing(PlayerNodeProgress::getCheckinTime,
+                    Comparator.nullsLast(Comparator.naturalOrder())));
+            Set<Long> seenNodes = new HashSet<>();
+            for (PlayerNodeProgress p : doneList) {
+                if (p.getStatus() == null || p.getStatus() != 1) continue;
+                if (p.getNodeId() == null || !seenNodes.add(p.getNodeId())) continue;
+                CmsTopicNode n = byId.get(p.getNodeId());
+                if (n == null) {
+                    // 规则16:普通下架(节点 status=0,行仍在)不挡历史参与者读自己的履约内容;
+                    // 只对本人已完成节点按 id 复用已存内容,陌生人/未完成玩家仍不可达。
+                    n = playCompletionFacts.historyReadableNode(p.getNodeId(), historyTopic);
+                }
+                if (n != null) completedInOrder.add(n);
+            }
+        }
+        return AjaxResult.success(PlayNarrativeSupport.buildEnding(completedInOrder));
+    }
+
+    /**
+     * 我已通关的活动列表(广场发布「选择活动」用)：
+     * 取当前用户全部节点打卡进度,按 activityId 聚合 done,与主题节点总数比对,
+     * 仅返回按主题节点规则已通关的活动,带活动名/封面/主题ID/节点进度。
+     */
+    public AjaxResult myCompleted(Long actorMemberId, boolean forPublicReference)
+    {
+        AjaxResult result = myCompleted(actorMemberId);
+        if (!forPublicReference || !result.isSuccess()) return result;
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> completed = (List<Map<String, Object>>) result.get(AjaxResult.DATA_TAG);
+        result.put(AjaxResult.DATA_TAG, communityPostService.filterPublicCompletedReferences(actorMemberId, completed));
+        return result;
+    }
+
+    public AjaxResult myCompleted(Long actorMemberId)
+    {
+        Long memberId = actorMemberId;
+        if (memberId <= 0) return error("请先登录");
+
+        // 当前用户全部打卡进度
+        PlayerNodeProgress probe = new PlayerNodeProgress();
+        probe.setMemberId(memberId);
+        List<PlayerNodeProgress> all = playerNodeProgressService.selectPlayerNodeProgressList(probe);
+
+        // 完成节点按本人 activity/topic 双维归属并去重，不能把另一主题的旧行计入当前活动。
+        Map<String, java.util.LinkedHashSet<Long>> doneByScope = new LinkedHashMap<>();
+        java.util.Set<Long> progressActivities = new java.util.LinkedHashSet<>();
+        Map<Long, java.util.LinkedHashSet<Long>> selfPlayNodesByTopic = new LinkedHashMap<>();
+        for (PlayerNodeProgress p : all) {
+            if (p == null || !memberId.equals(p.getMemberId()) || p.getActivityId() == null
+                    || p.getActivityId() < 0 || p.getTopicId() == null || p.getTopicId() <= 0
+                    || p.getNodeId() == null || p.getNodeId() <= 0) continue;
+            // F1:完成事实只认 status==1。mode2 自由收集的到店/凭证行 status=0(markGameDone 0→1),
+            // 按全部行数聚合会让「只到店没玩」的主题被列成已完成(与 advanceProgress/nodes/route 同口径)。
+            if (p.getStatus() == null || p.getStatus() != 1) continue;
+            doneByScope.computeIfAbsent(ITopicRouteRuntimeService.sessionKey(memberId, p.getTopicId(), p.getActivityId()),
+                    k -> new java.util.LinkedHashSet<>()).add(p.getNodeId());
+            if (p.getActivityId() == 0L) {
+                // R10-09:自玩会话 activity_id 恒 0,必须按 topicId 收窄聚合(与 /nodes、advanceProgress 同口径),
+                // 否则多主题互相污染;同节点重复行只算一次。
+                if (p.getTopicId() != null && p.getNodeId() != null) {
+                    selfPlayNodesByTopic.computeIfAbsent(p.getTopicId(), k -> new java.util.LinkedHashSet<>())
+                            .add(p.getNodeId());
+                }
+                continue;
+            }
+            progressActivities.add(p.getActivityId());
+        }
+
+        // 一次批量读取原已付探索票。不能先压成一场一张：首张无效/未完成不应吞掉另一张合法完成票。
+        CmsRegistration exploreProbe = new CmsRegistration();
+        exploreProbe.setMemberId(memberId); exploreProbe.setOwnerType(2L);
+        exploreProbe.setRegistrationStatus(2); exploreProbe.setPaymentStatus(2);
+        exploreProbe.setPurchaseKind(PurchaseKind.EXPLORE_PASS);
+        Map<Long, List<CmsRegistration>> exploreByActivity = new LinkedHashMap<>();
+        for (CmsRegistration registration : cmsRegistrationService.selectCmsRegistrationList(exploreProbe)) {
+            if (registration != null && registration.getOwnerId() != null && registration.getOwnerId() > 0
+                    && playCompletionFacts.completedExplorePassOwnedBy(memberId, registration.getOwnerId(), registration)) {
+                exploreByActivity.computeIfAbsent(registration.getOwnerId(), k -> new ArrayList<>()).add(registration);
+            }
+        }
+
+        // G 的只读窄投影仅补发现来源，不补写 progress、权益或奖励，也不自动启动/切换 runtime。
+        List<TopicRouteSession> completedRoutes = completedRouteFactReader.findCurrentCompletedRoutes(memberId);
+        Map<String, Integer> completedRouteStatuses = new LinkedHashMap<>();
+        java.util.Set<Long> routeActivities = new java.util.LinkedHashSet<>();
+        for (TopicRouteSession route : completedRoutes) {
+            if (route == null || !memberId.equals(route.getMemberId()) || route.getId() == null
+                    || route.getId() <= 0 || route.getActivityId() == null || route.getActivityId() < 0
+                    || route.getTopicId() == null || route.getTopicId() <= 0
+                    || !Integer.valueOf(TopicRouteSession.STATUS_COMPLETED).equals(route.getStatus())) continue;
+            completedRouteStatuses.put(ITopicRouteRuntimeService.sessionKey(memberId, route.getTopicId(), route.getActivityId()),
+                    route.getStatus());
+            if (route.getActivityId() == 0L) {
+                selfPlayNodesByTopic.computeIfAbsent(route.getTopicId(), k -> new java.util.LinkedHashSet<>());
+            } else {
+                routeActivities.add(route.getActivityId());
+            }
+        }
+
+        // ★ 驱动集合为「完成节点 ∪ 有效探索票 ∪ 当前已完成个人路线」。
+        // ③ 认核销不认打卡，只核销没打卡的玩家也必须进入候选。
+        // 连循环都进不去 ⇒ 他永远看不到自己已通关的路线。这是切口径时最容易漏的一处。
+        java.util.Set<Long> candidates = new java.util.LinkedHashSet<>(progressActivities);
+        candidates.addAll(exploreByActivity.keySet());
+        candidates.addAll(routeActivities);
+
+        Map<Long, CmsActivity> candidateActivities = new LinkedHashMap<>();
+        List<TopicRouteSession> routeScopes = new ArrayList<>();
+        for (Long activityId : candidates) {
+            CmsActivity activity = cmsActivityService.selectCmsActivityById(activityId);
+            if (activity == null || activity.getTopicId() == null) continue;
+            String actualScope = ITopicRouteRuntimeService.sessionKey(memberId, activity.getTopicId(), activityId);
+            if (!doneByScope.containsKey(actualScope) && !completedRouteStatuses.containsKey(actualScope)
+                    && !exploreByActivity.containsKey(activityId)) continue;
+            candidateActivities.put(activityId, activity);
+            TopicRouteSession scope = new TopicRouteSession();
+            scope.setMemberId(memberId);
+            scope.setTopicId(activity.getTopicId());
+            scope.setActivityId(activityId);
+            routeScopes.add(scope);
+        }
+        // 自玩(activity_id=0)路线状态与活动共用同一次 sessionStatuses 批量读回(不新增 N+1)
+        for (Long topicId : selfPlayNodesByTopic.keySet()) {
+            TopicRouteSession scope = new TopicRouteSession();
+            scope.setMemberId(memberId);
+            scope.setTopicId(topicId);
+            scope.setActivityId(0L);
+            routeScopes.add(scope);
+        }
+        Map<String, Integer> routeStatuses = new LinkedHashMap<>(completedRouteStatuses);
+        if (topicRouteRuntimeService != null) {
+            // 后续批量读到更新的 RUNNING/ENDED 时覆盖早先候选，不能复活旧局成功。
+            routeStatuses.putAll(topicRouteRuntimeService.sessionStatuses(routeScopes));
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Long activityId : candidates) {
+            CmsActivity activity = candidateActivities.get(activityId);
+            // 活动候选必须能回到原 topic；自玩在下面的独立 topic 循环投影。
+            if (activity == null || activity.getTopicId() == null) continue;
+            java.util.Set<Long> completedNodes = doneByScope.get(ITopicRouteRuntimeService.sessionKey(
+                    memberId, activity.getTopicId(), activityId));
+            int done = completedNodes == null ? 0 : completedNodes.size();
+
+            CmsTopicNode nodeProbe = new CmsTopicNode();
+            nodeProbe.setTopicId(activity.getTopicId());
+            nodeProbe.setStatus(1L);
+            int total = cmsTopicNodeService.selectCmsTopicNodeList(nodeProbe).size();
+
+            com.chengyinhub.business.domain.CmsTopic completionTopic =
+                    cmsTopicService.selectCmsTopicById(activity.getTopicId());
+            Integer routeStatus = routeStatuses.get(ITopicRouteRuntimeService.sessionKey(
+                    memberId, activity.getTopicId(), activityId));
+            boolean routeCompleted = playCompletionFacts.isCompletedCompletionFact(completionTopic, routeStatus,
+                    exploreByActivity.get(activityId), activity.getTopicId(), total, done);
+            if (!routeCompleted) {
+                continue; // 仅已通关
+            }
+
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("activityId", activityId);
+            m.put("topicId", activity.getTopicId());
+            m.put("dataType", 1);          // 1=活动场次
+            m.put("dataId", activityId);   // 统一关联 ID:dataType=1 时指向活动
+            m.put("name", activity.getName());
+            m.put("cover", activity.getImgUrl());
+            m.put("total", total);
+            m.put("doneCount", done);
+            m.put("completed", true);
+            result.add(m);
+        }
+
+        // R10-09:自玩(activity_id=0)已完成主题,与活动完成对象并列返回,类型/ID 明确。
+        // 完成判定与 /nodes、/route-state、advanceProgress 同口径:分支图看会话状态,线性看主题通关规则。
+        // 未完成、主题不可读(含已删/已下架取不到)一律不返回;不伪造名称/封面/activityId。
+        for (Map.Entry<Long, java.util.LinkedHashSet<Long>> entry : selfPlayNodesByTopic.entrySet()) {
+            Long topicId = entry.getKey();
+            int done = entry.getValue().size();
+            com.chengyinhub.business.domain.CmsTopic selfTopic = cmsTopicService.selectCmsTopicById(topicId);
+            if (selfTopic == null) {
+                continue;
+            }
+            CmsTopicNode selfNodeProbe = new CmsTopicNode();
+            selfNodeProbe.setTopicId(topicId);
+            selfNodeProbe.setStatus(1L);
+            int total = cmsTopicNodeService.selectCmsTopicNodeList(selfNodeProbe).size();
+
+            Integer selfRouteStatus = routeStatuses.get(ITopicRouteRuntimeService.sessionKey(
+                    memberId, topicId, 0L));
+            boolean selfCompleted = playCompletionFacts.isCompletedCompletionFact(selfTopic, selfRouteStatus, null,
+                    topicId, total, done);
+            if (!selfCompleted) {
+                continue; // 仅已通关
+            }
+
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("activityId", null);     // 自玩没有活动场次:明确 null,不伪造
+            m.put("topicId", topicId);
+            m.put("dataType", 2);          // 2=主题(自玩)
+            m.put("dataId", topicId);      // 统一关联 ID:dataType=2 时指向主题
+            m.put("name", selfTopic.getName());
+            m.put("cover", selfTopic.getImgUrl());
+            m.put("total", total);
+            m.put("doneCount", done);
+            m.put("completed", true);
+            result.add(m);
+        }
+        return AjaxResult.success(result);
+    }
+}

@@ -1,0 +1,33 @@
+@import '../../../style/fade-in.wxss';
+@import '../../../style/threads-menu.wxss';
+
+:host { display: flex; flex-direction: column; min-height: 100%; }
+/* 2026-10-28 G-9 业主「参考 Revolut,间距加大一点、上下空间高一点、四个按钮」 */
+.ae { flex: 1; min-height: 100%; box-sizing: border-box; display: flex; flex-direction: column; padding-bottom: calc(var(--cy-space-8) + env(safe-area-inset-bottom)); }
+.ae-fill { display: flex; flex: 1; flex-direction: column; justify-content: center; }
+.ae-hero { display: flex; flex-direction: column; padding: var(--cy-space-8) var(--cy-page-x) var(--cy-space-8); }
+
+/* 余额不再装进实底卡:Revolut 式居中大字,卡只是排版容器 */
+.ae-card { display: flex; flex-direction: column; align-items: center; gap: var(--cy-space-2); padding: var(--cy-space-4) 0; border: 0; background: transparent; }
+.ae-card__label { color: var(--cy-color-text-tertiary); font-size: var(--cy-font-label); font-weight: 500; }
+.ae-card__amount { color: var(--cy-color-text-primary); font-size: 96rpx; font-weight: 700; letter-spacing: -2rpx; line-height: 1.1; font-variant-numeric: tabular-nums; } /* ds-ok: 余额主数字,Revolut 式超大字号 */
+.ae-actions { display: flex; justify-content: center; gap: 60rpx; margin-top: var(--cy-space-6); } /* ds-ok: 四个圆形动作的间距 */
+.ae-action { min-height: var(--cy-btn-h); display: flex; flex-direction: column; align-items: center; gap: var(--cy-space-2); color: var(--cy-color-text-primary); font-size: var(--cy-font-caption); }
+.ae-action__ic { width: 112rpx; height: 112rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--cy-color-action-secondary-bg); color: var(--cy-color-text-primary); }
+.ae-action__ic--primary { background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg); transform: rotate(-45deg); }
+.ae-section { margin: 0 var(--cy-page-x); }
+/* U5(2026-11-19):空态整屏不滚——余额区收掉底部留白,插画用默认档(余额区下方不是整屏),
+   底部只留安全区 + space-4,「去发布路线」整颗落在 Home 指示条上方;宿主页把高度撑到一屏,fill 在余下空间居中。 */
+.ae--empty { padding-bottom: calc(var(--cy-space-4) + env(safe-area-inset-bottom)); }
+.ae--empty .ae-hero { padding-bottom: 0; }
+
+/* isolated 组件内全局 .cy-pressed 进不来,必须本地定义一份。
+   只减淡不位移:位移要配 .cy-motion-reduced 兜底,而那个类挂在组件外的祖先上,
+   isolated 下同样够不着 —— 与其留个撤不掉的位移,不如按仓库既有组件按压类的做法只减淡。 */
+.cy-pressed { opacity: .88; }
+
+/* 走查 v2 R10:「更多」行直接落在白底上,发丝线分隔(定稿原型),不再套一块灰底 */
+.tm-group { background: transparent; border-radius: 0; }
+
+/* 细节打磨二期 L1/L5/L7 */
+.ae-action { transition: var(--cy-tr-press); }

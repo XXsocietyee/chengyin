@@ -1,0 +1,62 @@
+<block wx:for="{{stageKeys}}" wx:key="*this" wx:for-item="stageKey">
+<cy-play-stage id="cy-play-stage" data-stage-key="{{stageKey}}" show="{{show}}" back-label="退出"
+               bind:back="onClose" bind:run="onRun" bind:verdict="onVerdict">
+  <view class="cp {{aligned || (done && !skipped) ? 'cp--on' : ''}} {{reducedMotion ? 'cp--rm' : ''}}">
+    <view class="g-kicker pe pe--blur">{{kicker}}</view>
+
+    <!-- 盘面 = 手机当前朝向(屏幕顶上永远是「你正对着的方向」),箭头指目标方位。
+         针角由 JS 走连续轨道,过正北不会倒着绕圈。
+         刻度盘跟着朝向反转(roseDeg),顶上那根白线是对准线,两侧绿弧是容差区。 -->
+    <view class="cp__dial pe pe--up">
+      <!-- 渲染层不认 conic-gradient,进度环与容差区都用分段小棒(同 cy-ring-meter) -->
+      <cy-ring-meter wx:if="{{phase === 'run' && aligned}}" class="cp__ring" percent="{{holdPct}}" segments="{{60}}" size="{{640}}" tone="success" />
+      <view wx:for="{{zoneBars}}" wx:key="*this" class="cp__zone" style="transform: rotate({{item}}deg)"></view>
+      <view class="cp__rose" style="transform: rotate({{roseDeg}}deg)">
+        <view wx:for="{{ticks}}" wx:key="deg" class="cp__tick {{item.major ? 'cp__tick--major' : ''}}"
+              style="transform: rotate({{item.deg}}deg)"></view>
+        <block wx:if="{{hasHeading}}">
+          <view wx:for="{{labels}}" wx:key="deg" class="cp__lbl" style="transform: rotate({{item.deg}}deg)">
+            <text class="cp__lbl-t {{item.cardinal ? 'cp__lbl-t--card' : ''}} {{item.north ? 'cp__lbl-t--n' : ''}}">{{item.text}}</text>
+          </view>
+        </block>
+      </view>
+      <view class="cp__lubber"></view>
+      <view class="cp__arrow" style="transform: rotate({{needleDeg}}deg)">
+        <view class="cp__head"></view>
+        <view class="cp__spoke"></view>
+      </view>
+      <view class="cp__hub"></view>
+    </view>
+
+    <!-- 读数是这一屏的大数字。没开跑前它还是 0 —— 那就别看表,看那句要人站定的话 -->
+    <view wx:if="{{phase === 'run' && hasHeading && !noData}}" class="g-figure cp__n">{{heading}}°</view>
+    <view wx:if="{{phase === 'run' && aligned}}" class="cp__hold">对准了，再保持 {{holdLeft}} 秒</view>
+    <view wx:elif="{{noData}}" class="g-sub cp__s">这台设备还没报出方向，再试一次或先退出</view>
+    <view wx:elif="{{phase === 'done' && !done}}" class="g-sub cp__s">这次的方向交上去了</view>
+    <view wx:elif="{{done && skipped}}" class="g-sub cp__s">这一站已跳过</view>
+    <view wx:elif="{{done}}" class="g-sub cp__s">你已经对准过这个方向了</view>
+    <block wx:else>
+      <view class="cp__how pe pe--up">{{phase === 'run' && turnHint ? turnHint : '把红箭头转到顶上的白线'}}</view>
+      <view wx:if="{{hint}}" class="cp__hint"><text class="cp__hint-k">提示</text>{{hint}}</view>
+    </block>
+    <view wx:if="{{phase === 'run' && lowAccuracy && !noData}}" class="cp__acc">方向有点飘，离金属远一点，拿手机画个「8」</view>
+
+    <view wx:if="{{done && !skipped}}" class="cp__done" aria-label="已经对准过">
+      <cy-icon name="check" size="40" />已对准
+    </view>
+    <!-- P-23:读取失败两次后,作者允许或队长放行时才出现;0 分走完这一站 -->
+    <view wx:if="{{phase === 'idle' && !done && canSkip}}" class="cp__skip" bindtap="onSkip"
+          aria-role="button" aria-label="跳过这一站"
+          hover-class="cp__skip--press" hover-stay-time="80">跳过这一站</view>
+
+    <!-- 安全提示钉在首屏:这玩法要人举着手机原地转,别让人边走边玩 -->
+    <view wx:if="{{phase === 'idle' && !done}}" class="cp__safe">找个能站稳的地方再开始</view>
+    <view wx:if="{{rewardNote}}" class="cp__safe">{{rewardNote}}</view>
+  </view>
+  <!-- 主按钮与其它玩法同一颗 .g-btn(2026-11-21 统一) -->
+  <view wx:if="{{phase === 'idle' && !done}}" class="g-btn" bindtap="onStart"
+        aria-role="button" aria-label="开始罗盘指向"
+        hover-class="g-btn--press" hover-stay-time="80">开始</view>
+</cy-play-stage>
+
+</block>

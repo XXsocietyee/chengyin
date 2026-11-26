@@ -1,0 +1,173 @@
+/* 裁剪页 · 纯黑取景台(参考 Threads:框固定、图动、框外全黑) */
+
+.crop {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--cy-comp-crop-stage-bg);
+}
+
+/* 顶部标题栏 —— 与底栏同色,把黑色取景区夹在中间 */
+.crop__nav {
+  flex: none;
+  background: var(--cy-comp-crop-bar-bg);
+}
+.crop__nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.crop__title {
+  font-size: var(--cy-type-card-title);
+  font-weight: 600;
+  color: var(--cy-color-text-primary);
+}
+
+/* 取景区:占满剩余高度,框在其中居中(flex 居中 = 以真实布局高度为准) */
+.crop__stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--cy-comp-crop-stage-bg);
+}
+.crop__stage--empty {
+  background: var(--cy-color-bg-elevated);
+  padding: var(--cy-space-6) var(--cy-page-x);
+  box-sizing: border-box;
+}
+.crop__missing {
+  width: 100%;
+  height: 100%;
+}
+/* 等图态:中性说明,不用无源态的图标/文案,免得把"在等"画成"没有" */
+.crop__waiting {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.crop__export-error { position: absolute; left: var(--cy-page-x); right: var(--cy-page-x); bottom: var(--cy-space-4); z-index: 2; }
+
+.crop__frame {
+  position: relative;
+  overflow: visible;             /* M-09:框外不再裁掉,整张图都在,框外由 .crop__mask 压暗 */
+  box-sizing: border-box;
+}
+
+/* M-09:框外整圈压暗 —— 框本身是个洞,外面一圈超大 box-shadow;圆形取景就是圆洞 */
+.crop__mask {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--cy-comp-crop-frame-line);
+  box-shadow: 0 0 0 2000px rgba(0, 0, 0, 0.6); /* ds-ok: 取景遮罩,照片语境固定半透明黑 */
+  pointer-events: none;
+  z-index: 1;
+}
+.crop__mask--round { border-radius: 50%; }
+.theme-merchant .crop__mask { box-shadow: 0 0 0 2000px rgba(255, 255, 255, 0.72); } /* ds-ok: 浅色版框外提亮 */
+/* 封面等方框里的三分线 */
+.crop__grid { position: absolute; left: 0; top: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+.crop__grid-v, .crop__grid-h { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.crop__grid-v { background: linear-gradient(90deg, transparent calc(33.33% - 1px), rgba(255, 255, 255, .5) 33.33%, transparent calc(33.33% + 1px), transparent calc(66.66% - 1px), rgba(255, 255, 255, .5) 66.66%, transparent calc(66.66% + 1px)); } /* ds-ok: 三分线 */
+.crop__grid-h { background: linear-gradient(180deg, transparent calc(33.33% - 1px), rgba(255, 255, 255, .5) 33.33%, transparent calc(33.33% + 1px), transparent calc(66.66% - 1px), rgba(255, 255, 255, .5) 66.66%, transparent calc(66.66% + 1px)); } /* ds-ok: 三分线 */
+
+/* 定位在框心,translate(-50%,-50%) 让 transform-origin 与几何模型的「相对框心位移」对齐 */
+.crop__img {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform-origin: center center;
+  will-change: transform;
+}
+/* 「还原」回位带一段过渡,看得见撤回了什么;手势拖动/缩放时不挂这个类,跟手不拖影 */
+.crop__img--settling { transition: transform var(--cy-motion-standard) var(--cy-ease-out); }
+@media (prefers-reduced-motion: reduce) { .crop__img--settling { transition: none; } }
+
+/* 底栏:取消 / 选取。底色取页面纯黑:原 --cy-comp-crop-bar-bg 映射到 bg-elevated,
+   是抬高一层的深灰,压在纯黑取景台上会浮出一条灰底;顶部一条细线承担与取景区的分隔。 */
+.crop__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--cy-space-4);
+  padding-bottom: env(safe-area-inset-bottom);
+  box-sizing: content-box;       /* 安全区加在 56px 之外,不吃掉按钮高度 */
+  background: var(--cy-color-bg-page);
+  border-top: 1rpx solid var(--cy-border-line);
+}
+
+/* 命中区 ≥88rpx(=44pt,规范 §3.8 / §10-5)。
+   2026-10-30 P-5(M-09):底栏是三个 32pt 高的小胶囊 —— 外层 .crop__action 只管命中区、透明无底,
+   可见的胶囊画在内层 text 上(见下方「底栏胶囊」段)。
+   L10-196:原先这里还有一套「实心大按钮」规则,被文件尾 P-5 段整组覆盖(底色/内距全被改回透明 0),
+   两段互相打架;按层叠后的生效值合并成一套,渲染不变。 */
+.crop__action {
+  min-width: var(--cy-btn-pad-x);
+  min-height: 88rpx;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  font-size: var(--cy-type-button);
+  color: var(--cy-color-text-primary);
+  border-radius: var(--cy-comp-btn-radius);
+  background: transparent;
+}
+/* 「选取」= 白色实心主胶囊(与全站 --cy-btn-solid-* 主 CTA 一致),实心底在内层 text 上。 */
+.crop__action--confirm {
+  font-weight: 600;
+  justify-content: center;
+  text-align: center;
+  color: var(--cy-btn-solid-fg);
+}
+.crop__bar--missing {
+  justify-content: center;
+}
+/* missing 态下「返回上一页」是这一屏唯一动作(wx:if 让「选取」不渲染,本按钮 flex:1 独占整条底栏),
+   按全站标准(cy-empty/cy-error 的 CTA 同款 --cy-btn-solid-*)改实心;ready 态的「取消」仍走通用次级样式。 */
+.crop__bar--missing .crop__action--return {
+  flex: 1;
+  justify-content: center;
+  text-align: center;
+  font-weight: 600;
+  color: var(--cy-btn-solid-fg);
+  background: transparent;
+  border: none;
+}
+.crop__action--press {
+  background: transparent;
+  opacity: .78;
+}
+.crop__action--busy {
+  color: var(--cy-color-text-disabled);
+}
+
+/* 离屏画布:只为 canvasToTempFilePath 提供节点。不能用 display:none / visibility:hidden,
+   否则 selectorQuery 拿不到节点或画不出内容;推到视口外是唯一可靠做法。
+   ⚠️ CSS 尺寸给足、别压成 1px:canvasToTempFilePath 的默认导出范围取的是 canvas 宽高,
+   若某些实现读的是元素渲染尺寸而非 drawing buffer,1px 会被拉伸成 1440 的糊图。 */
+.crop__canvas {
+  position: fixed;
+  left: 0;
+  top: -9999px;
+  width: 750rpx;
+  height: 750rpx;
+}
+
+/* ===== 2026-10-30 P-5(M-09)底栏胶囊:可见胶囊画在 text 上;商家浅色 ===== */
+.crop__bar { gap: var(--cy-space-2); }
+.crop__action text { display: flex; align-items: center; height: 64rpx; padding: 0 var(--cy-space-4); border-radius: var(--cy-radius-pill);
+  font-size: var(--cy-font-label); font-weight: 600; background: var(--cy-color-bg-surface); color: var(--cy-color-text-primary); }
+.crop__action--confirm text { background: var(--cy-btn-solid-bg); color: var(--cy-btn-solid-fg); }
+.crop__bar--missing .crop__action--return text { flex: 1; justify-content: center; background: var(--cy-btn-solid-bg); color: var(--cy-btn-solid-fg); }
+.theme-merchant .crop, .theme-merchant .crop__stage { background: var(--cy-color-bg-page); }
+.theme-merchant .crop__nav { background: var(--cy-color-bg-page); }

@@ -1,0 +1,104 @@
+/* 创建节点玩法 · 第0页(价值主张)。
+   2026-10-22 owner 定稿(原型 KGxHWjCsqbYUKt5m8SYJM2):深底;漂浮圆圈画在整屏 canvas 上、压在文案后面;
+   文案左对齐、在屏幕中间偏左、比旧版小一档;没有「跳过」。
+   深底跟随玩家域默认 token(不再挂 .theme-topic-editor),底色必须与固定顶栏同取
+   --cy-color-bg-page,否则顶栏下缘出色带(custom-nav-page-surface-contract 门禁)。 */
+page { background: var(--cy-color-bg-page); }
+.ti-root { background: var(--cy-color-bg-page); min-height: 100vh; }
+.ti {
+  position: relative;
+  min-height: 100vh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: var(--cy-color-bg-page);
+  color: var(--cy-color-text-primary);
+  padding: 0 var(--cy-page-x) calc(env(safe-area-inset-bottom) + var(--cy-space-4));
+  transition: filter .42s cubic-bezier(.5, 0, .75, 0), transform .42s cubic-bezier(.5, 0, .75, 0);
+}
+/* 换页:整页先虚化放大,再进下一页;返回时收回 */
+.ti--morph { filter: blur(22px); transform: scale(1.08); }
+
+/* ===== 漂浮圆圈:整屏画布,在文案和按钮下面 ===== */
+.ti-field {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  animation: ti-bloom var(--cy-motion-slow) var(--cy-ease-out) both;
+}
+
+/* 拿不到精选时的加载 / 失败 / 空态 */
+.ti-stage {
+  position: relative;
+  height: 560rpx;                 /* ds-ok: 状态区高度,与旧卡堆舞台同体量,避免文案跳位 */
+  margin-top: var(--cy-space-4);
+}
+.ti-stage--state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cy-color-text-secondary);
+  font-size: var(--cy-type-body);
+  text-align: center;
+}
+.ti-stage--state > cy-skeleton,
+.ti-stage--state > cy-inline-error { width: 100%; }
+
+/* ===== 价值主张文案:左对齐、居中偏左,两行粗细混排 ===== */
+.ti-copy {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: left;
+  pointer-events: none;
+  animation: ti-rise var(--cy-motion-slow) var(--cy-ease-out) var(--cy-motion-standard) both;
+}
+.ti-copy-a {
+  font-size: 46rpx;               /* ds-ok: owner 定稿比页面大标题小一档(23px) */
+  font-weight: 800;
+  line-height: 1.3;
+}
+.ti-copy-b {
+  margin-top: var(--cy-space-1);
+  font-size: 46rpx;               /* ds-ok: 同上 */
+  font-weight: 400;
+  line-height: 1.3;
+  color: var(--cy-color-text-secondary);
+}
+
+/* 主 CTA:通栏,严格走黑白系(--cy-btn-solid-*,暗端=白底黑字);圆圈从它后面、屏幕底边外进屏 */
+.ti-cta { position: relative; z-index: 2; padding-top: var(--cy-space-4); animation: ti-rise var(--cy-motion-slow) var(--cy-ease-out) var(--cy-motion-slow) both; }
+.ti-cta > cy-inline-error { display: block; margin-bottom: var(--cy-space-2); }
+
+/* 换页染色 */
+.ti-wash {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(80% 60% at 50% 40%, rgba(120, 90, 200, .7), rgba(0, 0, 0, .55)); /* ds-ok: 换页染色 */
+  transition: opacity .42s;
+}
+.ti-wash--on { opacity: 1; }
+
+.ti--reduced-motion .ti-field,
+.ti--reduced-motion .ti-copy,
+.ti--reduced-motion .ti-cta { animation: none !important; }
+.ti--reduced-motion { transition: none !important; }
+
+@keyframes ti-bloom {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+@keyframes ti-rise {
+  0% { opacity: 0; transform: translateY(20rpx); }
+  100% { opacity: 1; transform: translateY(0); }
+}

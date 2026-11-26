@@ -1,0 +1,91 @@
+name: Isolated pool recovery
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/isolated-pool-recovery.yml'
+      - 'ci/upgrade-startup-smoke.sh'
+      - 'ci/pool_recovery_probe.py'
+      - 'ci/test_pool_recovery_probe.py'
+      - 'ci/upgrade-startup/**'
+      - 'chengyinhub-admin/src/main/resources/application.yml'
+      - 'chengyinhub-admin/src/main/resources/application-druid.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-pool-recovery:
+    # Pinned: the strace runtime check rejects the ubuntu-26.04 loader listing (same as the Redis recovery job).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Verify exact hosted execution scope and pure negative control
+        env:
+          CHENGYIN_CI_POOL_RECOVERY: 'true'
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -I ci/pool_recovery_probe.py --check-execution-only
+          python3 -B ci/test_pool_recovery_probe.py
+      - name: Package the same candidate without repeating tests
+        run: mvn -B -DskipTests package
+      - name: Bounded real SQL pool timeout and same-process recovery
+        id: pool
+        env:
+          CHENGYIN_CI_POOL_RECOVERY: 'true'
+          TMPDIR: ${{ runner.temp }}/isolated-pool-recovery
+        run: |
+          set -o pipefail
+          mkdir -p "$TMPDIR"
+          if ! command -v strace >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y strace
+          fi
+          bash ci/upgrade-startup-smoke.sh 2>&1 | tee "$TMPDIR/entry.log"
+          # Fail closed: a green startup smoke alone is not pool-recovery evidence.
+          receipts=$(find "$TMPDIR" -name pool-recovery.json -type f)
+          test "$(printf '%s\n' "$receipts" | grep -c .)" = 1
+          python3 -I - "$receipts" <<'PY'
+          import json, os, pathlib, subprocess, sys
+          path = pathlib.Path(sys.argv[1])
+          r = json.loads(path.read_text())
+          identity = json.loads(path.with_name('pool-execution.json').read_text())
+          cleanup = json.loads(path.with_name('pool-cleanup.json').read_text())
+          assert r['result'] == 'PASS_BOUNDED_POOL_TIMEOUT_RELEASE_SAME_PROCESS_RECOVERY', r.get('result')
+          assert identity['sourceSha'] == os.environ['GITHUB_SHA']
+          assert identity['sourceTree'] == subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip()
+          assert identity['runId'] == os.environ['GITHUB_RUN_ID'] and identity['runAttempt'] == os.environ['GITHUB_RUN_ATTEMPT']
+          assert identity['result'] == 'PASS_SOURCE_JAR_UNCHANGED'
+          assert identity['jarBefore'] == identity['jarRunning'] == identity['jarAfter'] == identity['jarMountedRunning'] == identity['jarMountedAfter']
+          assert cleanup['taskName'] == identity['taskName']
+          assert cleanup['originalExitCode'] == 0 and cleanup['result'] == 'PASS_OWNED_RESOURCES_ABSENT'
+          assert cleanup['remaining'] == [] and cleanup['errors'] == []
+          assert 'connectTimeoutMs' not in r['profile'] and r['connectTimeoutObservation'] == 'UNKNOWN_NOT_MEASURED'
+          print('PASS pool receipt', r['nativeDruidTimeoutWaitMs'], r['overflowRequest'])
+          print('POOL_EXECUTION_IDENTITY', json.dumps(identity, sort_keys=True))
+          print('POOL_OWNED_CLEANUP', json.dumps(cleanup, sort_keys=True))
+          PY
+      - name: Preserve bounded recovery evidence including failures
+        if: ${{ !cancelled() && steps.pool.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolated-pool-recovery-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/isolated-pool-recovery/entry.log
+            ${{ runner.temp }}/isolated-pool-recovery/**/pool-recovery.json
+            ${{ runner.temp }}/isolated-pool-recovery/**/pool-execution.json
+            ${{ runner.temp }}/isolated-pool-recovery/**/pool-cleanup.json
+            ${{ runner.temp }}/isolated-pool-recovery/**/pool-recovery-health.log
+            ${{ runner.temp }}/isolated-pool-recovery/**/application.log
+            ${{ runner.temp }}/isolated-pool-recovery/**/mysql-version
+            ${{ runner.temp }}/isolated-pool-recovery/**/network.trace
+            ${{ runner.temp }}/isolated-pool-recovery/**/isolation.log

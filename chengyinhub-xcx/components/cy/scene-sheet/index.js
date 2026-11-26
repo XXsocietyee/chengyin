@@ -1,0 +1,122 @@
+const app = getApp();
+const { resolveMenuChrome, cachedWindowInfo } = require('../../../utils/nav-safe-area.js');
+const exitMotion = require('../../../behaviors/exit-motion.js');
+const reducedMotionBehavior = require('../../../behaviors/reduced-motion.js');
+const sheetDepth = require('../../../behaviors/sheet-depth.js');
+const { withNativeBackGuard, onBackGuardLeave } = require('../../../utils/native-back-guard.js');
+
+/* 2026-10-23 业主定:场景弹窗也要退场动画(原来 wx:if 直连 show,关闭瞬间消失),并按档位定速、
+ * 参与 exit-motion 的交接(同一时刻只有一个弹层在动)。half 档 300 / 250,full 档 340 / 280,
+ * 退场计时器是 --cy-motion-sheet-*-out 的 JS 镜像。进出场走 transition(_in 开关),不占 keyframes 棘轮。 */
+const LEVEL_EXIT_MS = { half: 250, full: 280 };
+/* qx-u1(2026-11-10):half / full 头部可拖,跟手在视图层(utils/wxs/gesture.wxs,参数见 pages/playkit/utils/gesture-physics.js)。
+ * 甩出去 = 和 ✕ 同一条关闭出口;宿主没接这次关闭时 DISMISS_FALLBACK_MS 后把面板拉回来。 */
+const DISMISS_FALLBACK_MS = 400;
+
+/* G-2(2026-10-27):物理返回 / 侧滑先落在弹层上 —— 有上一步就退一步,否则走 ✕ 同一条关闭出口。
+ * closable=false 的场景没有给用户退出口,返回键只被吞掉,不替宿主关。 */
+function onNativeBack(vm) {
+  if (vm.data._closing) return;
+  if (vm.data.canBack) { vm.onBack(); return; }
+  if (vm.data.variant === 'page' || vm.data.closable) vm._requestClose('back');
+}
+
+Component(withNativeBackGuard({
+  options: { multipleSlots: true },
+  // L10-178:与 cy-sheet 等弹层同用 reduced-motion behavior(系统/本机偏好 + 页面显式传值),不再只认页面传值。
+  behaviors: [exitMotion(250), sheetDepth, reducedMotionBehavior],
+  properties: {
+    // G-2:页面已有自己的 page-container 覆盖这个弹层时传 false 让位(一页只能有一个容器)
+    backGuard: { type: Boolean, value: true },
+    show: { type: Boolean, value: false },
+    // full(T3) | half(T1) | page(G-1:无遮罩无把手,导航栏 + 大标题,返回 = 原生返回)
+    variant: { type: String, value: 'full' },
+    // page 档专用:页面自己有头图(订单详情 Figma D07)⇒ 导航栏悬浮在图上、不出大标题
+    bare: { type: Boolean, value: false },
+    theme: { type: String, value: 'player' }, // player | merchant
+    title: { type: String, value: '' },
+    canBack: { type: Boolean, value: false },
+    closable: { type: Boolean, value: true },
+    dirty: { type: Boolean, value: false },
+    maskClosable: { type: Boolean, value: false },
+    footer: { type: Boolean, value: false },
+    zIndex: { type: Number, value: 0 }, // 未指定时使用共用 sheet 层级，让确认弹窗显示在其上
+  },
+  data: {
+    closeLabel: '关闭当前场景',
+    panelTopPx: 0,
+    _in: false,
+    _gestureCmd: 0, // 变一次 = 让视图层撤掉面板的行内位移
+  },
+  observers: {
+    // 甩出去之后又被打开:退场途中重开(节点还在)⇒ 发 gcmd 把面板接回来;已卸载后重开 ⇒ gcmd 归零
+    show(v) {
+      if (!v || !this._dragOut) return;
+      this._dragOut = false;
+      this.setData({ _gestureCmd: this.data._render ? this.data._gestureCmd + 1 : 0 });
+    },
+    title(value) {
+      this.setData({ closeLabel: value ? '关闭' + value : '关闭当前场景' });
+    },
+  },
+  lifetimes: {
+    detached() { clearTimeout(this._dragOutTimer); this._dragOutTimer = null; },
+    attached() {
+      const globalData = (app && app.globalData) || {};
+      const menuButtonInfo = globalData.menuButtonInfo;
+      // L10-165
+      const windowInfo = cachedWindowInfo(wx);
+      // L10-166:navTop / navRight 模板与样式都不读,不再计算和下发。
+      const panelTopPx = resolveMenuChrome(windowInfo, menuButtonInfo).sheetTop;
+      this.setData({
+        panelTopPx,
+      });
+    },
+  },
+  methods: {
+    // G-2 返回守卫 page-container 的 afterleave(判定逻辑在 utils/native-back-guard.js)
+    _onBackGuardLeave() { onBackGuardLeave(this); },
+    // exit-motion 钩子:挂载时落在起点态,渲染完成后置 _in 让 transition 起跑
+    _enterData() {
+      // page 档与 full 同速(wxss 里 .ss--page 也换成 full 档时长)
+      this._exitMs = LEVEL_EXIT_MS[this.data.variant === 'half' ? 'half' : 'full'];
+      return { _in: false };
+    },
+    _afterEnter() { this.setData({ _in: true }); },
+    // WXS sheetEnd 回调:dismiss 走 ✕ 同一出口;blocked 时面板已弹回,脏输入照样上报
+    _onGestureRelease(detail) {
+      const action = detail && detail.action;
+      if (action === 'blocked') {
+        if (this.data.dirty) this.triggerEvent('requestclose', { reason: 'drag' });
+        return;
+      }
+      if (action !== 'dismiss' || this.data._closing) return;
+      this._dragOut = true;
+      this._requestClose('drag');
+      clearTimeout(this._dragOutTimer);
+      this._dragOutTimer = setTimeout(() => {
+        this._dragOutTimer = null;
+        if (this.data.show && !this.data._closing) {
+          this._dragOut = false;
+          this.setData({ _gestureCmd: this.data._gestureCmd + 1 });
+        }
+      }, DISMISS_FALLBACK_MS);
+    },
+    noop() {},
+    onBack() { this.triggerEvent('back'); },
+    // page 档左上角是导航栏返回:有上一步退一步,首层等同关闭(深链壳里就是退页)
+    onPageBack() {
+      if (this.data.canBack) this.onBack();
+      else this._requestClose('back');
+    },
+    onMask() {
+      if (!this.data.maskClosable) return;
+      this._requestClose('mask');
+    },
+    onClose() { this._requestClose('close'); },
+    _requestClose(reason) {
+      this.triggerEvent('requestclose', { reason });
+      if (!this.data.dirty) this.triggerEvent('close', { reason });
+    },
+  },
+}, onNativeBack));

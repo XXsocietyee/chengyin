@@ -1,0 +1,45 @@
+<!-- 2026-10-30 业主定稿 P-3:集邮册是「收集册 · 邮票」:整屏浅色流动底、顶上同一行三段;邮票带齿孔白边,点一张飞到屏幕中间 -->
+<view class="theme-dark">
+<!-- x-fix2 L-1(2026-11-11):玩家域一律深色,收集册不再挂 theme-light 逃生口 -->
+<view class="alb-light">
+  <album-aura />
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+<view class="al-root" style="padding-top:{{navTop}}px;">
+  <cy-nav-bar overlay />
+  <view class="al-head"><album-head active="stamp" /></view>
+  <!-- 计数是权威口吻的大字:数据没回来就别先说「0 枚」(截图 057 把「0 枚」和「加载中…」同屏了) -->
+  <view class="al-hd" wx:if="{{loaded}}">
+    <text class="al-n">{{total}}</text>
+    <text class="al-u">枚</text>
+  </view>
+
+  <view class="al-stage" style="{{pmList === 1 ? '--pm-s:1;' : (pmList === 2 ? '--pm-s-d:.32s;--pm-s-s:1;' : '')}}height:{{stageH}}px;">
+    <view class="al-item {{flyIdx === index ? 'is-away' : ''}}" wx:for="{{items}}" wx:key="id" id="al-item-{{index}}" bindtap="openFly" data-idx="{{index}}"
+          style="left:{{item.x}}px;top:{{item.y}}px;width:{{cellImgW}}px;height:{{cellImgH}}px;transform:rotate({{item.rot}}deg);z-index:{{item.z}};"
+          aria-role="button" aria-label="放大第 {{index + 1 || 1}} 枚邮票" hover-class="cy-pressed" hover-stay-time="80">
+      <image class="al-img" src="{{item.picUrl}}" mode="aspectFill" lazy-load></image>
+    </view>
+  </view>
+
+  <!-- 失败 / 首屏加载 / 真空态三条挂同一条 wx:if 链,互斥:失败时空态不得替它背书。
+       整屏失败态只在「一枚都还没渲染出来」时用;已经有邮票时那是**续页**失败,不该整屏报错 -->
+  <cy-empty class="al-state-fill" fill="{{true}}" wx:if="{{readAccess}}" title="{{readAccess === 'login' ? '登录后查看自己的册子' : '当前身份不能查看'}}" sub="" cta="{{readAccess === 'login' ? '去登录' : ''}}" bind:cta="loginToRead" />
+  <cy-error load-failure class="al-state-fill" fill="{{true}}" size="lg" icon="empty-state" wx:elif="{{error && !items.length}}" title="集邮册无法打开" retry="重新载入" bind:retry="retryLoad" auto-back />
+  <cy-skeleton wx:elif="{{loading && !items.length}}" type="card" count="{{2}}" />
+  <cy-empty wx:elif="{{loaded && total === 0}}" title="还没有邮票" cta="打开集邮相机" bind:cta="goCamera" />
+
+  <!-- 续页加载才用这行字:首屏走骨架,同页不叠两个加载反馈(微信官方指南) -->
+  <view class="al-more" wx:if="{{loading && items.length}}">正在读取下一页</view>
+  <!-- 续页失败:已看到的邮票留在原地,只在页尾给这一页的重试(不整屏报错) -->
+  <view class="al-more" wx:elif="{{error && items.length}}" bindtap="retryLoad" aria-role="button" aria-label="重试加载这一页" hover-class="cy-pressed" hover-stay-time="80">这一页没读到 · 点此重试</view>
+  <!-- 点开不是新页面:那一枚自己飞到屏幕中间放大,底下压暗;点空白处飞回去 -->
+  <view class="al-fly {{fly.on ? 'is-on' : ''}}" wx:if="{{fly.show}}" bindtap="closeFly" catchtouchmove="noop" hover-class="cy-pressed" hover-stay-time="80" aria-role="dialog" aria-label="邮票">
+    <view class="al-fly__veil"></view>
+    <view class="al-item al-fly__stamp" style="{{fly.style}}"><image class="al-img" src="{{fly.src}}" mode="aspectFill"></image></view>
+  </view>
+  <view class="al-fab" bindtap="goCamera" wx:if="{{total > 0}}" aria-role="button" aria-label="打开集邮相机" hover-class="cy-pressed" hover-stay-time="80"><cy-icon name="plus" size="40" /></view>
+</view>
+</view>
+</view>

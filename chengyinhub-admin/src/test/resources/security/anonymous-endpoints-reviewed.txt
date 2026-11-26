@@ -1,0 +1,44 @@
+# AUDIT-1122 C3: reviewed anonymous endpoints (format: VERBS PATH  Controller#method | note).
+# Reviewed 2026-11-23 against master 5743751b. A new @Anonymous endpoint fails AnonymousEndpointReviewTest
+# until someone reviews it and adds a line here. Note text after " | " is ignored by the test.
+GET /api/agreement/get  ApiAgreementController#get | public service status / feature flags / user agreement text
+GET /api/agreement/versions  ApiAgreementController#versions | public service status / feature flags / user agreement text
+GET /api/content-sec/callback  ApiContentSecurityController#verify | payment/content-security/IAP callback: caller is WeChat/Apple; handler verifies signature or token before acting
+GET /api/merchant/ops/public-detail  ApiMerchantOpsController#publicDetail | public content read for guests (catalogue, detail, reviews, community feeds)
+GET /api/status  ApiServiceStatusController#get | public service status / feature flags / user agreement text
+GET /api/v1/community/capabilities  ApiCommunityPostController#capabilities | public content read for guests (catalogue, detail, reviews, community feeds)
+GET /api/v1/community/feeds/*  ApiCommunityPostController#feed | public content read for guests (catalogue, detail, reviews, community feeds)
+GET /api/v1/community/guidelines/active  ApiCommunityPostController#guideline | public content read for guests (catalogue, detail, reviews, community feeds)
+GET /api/v1/community/posts/*  ApiCommunityPostController#detail | public content read for guests (catalogue, detail, reviews, community feeds)
+GET /api/v1/community/posts/*/comments  ApiCommunityPostController#comments | public content read for guests (catalogue, detail, reviews, community feeds)
+POST /api/activity/info  ApiActivityController#activityInfo | public content read for guests (catalogue, detail, reviews, community feeds)
+POST /api/betagame/info  ApiBetaGameController#betaGameInfo | public content read for guests (catalogue, detail, reviews, community feeds)
+POST /api/club/detail  ApiClubController#detail | guest browsing of public clubs (owner decision 2026-11-05); guest gate in handler
+POST /api/club/leaderboard  ApiClubController#leaderboard | guest browsing of public clubs (owner decision 2026-11-05); guest gate in handler
+POST /api/club/list  ApiClubController#list | guest browsing of public clubs (owner decision 2026-11-05); guest gate in handler
+POST /api/club/members  ApiClubController#members | guest browsing of public clubs (owner decision 2026-11-05); guest gate in handler
+POST /api/club/post/feed  ApiClubController#postFeed | guest browsing of public clubs (owner decision 2026-11-05); guest gate in handler
+POST /api/club/post/list  ApiClubController#postList | guest browsing of public clubs (owner decision 2026-11-05); guest gate in handler
+POST /api/club/topics  ApiClubController#topics | guest browsing of public clubs (owner decision 2026-11-05); guest gate in handler
+POST /api/config/features  ApiConfigController#features | public service status / feature flags / user agreement text
+POST /api/content-sec/callback  ApiContentSecurityController#onResult | payment/content-security/IAP callback: caller is WeChat/Apple; handler verifies signature or token before acting
+POST /api/creativesquare/info  ApiCreativeSquareController#retiredPostReads | retired; returns a fixed retirement response
+POST /api/creativesquare/list  ApiCreativeSquareController#retiredPostReads | retired; returns a fixed retirement response
+POST /api/merchant/reviews/public  ApiMerchantReviewController#publicList | public content read for guests (catalogue, detail, reviews, community feeds)
+POST /api/public-catalog/city/list  ApiPublicContentCatalogController#cityList | public content read for guests (catalogue, detail, reviews, community feeds)
+POST /api/public-catalog/filters  ApiPublicContentCatalogController#filters | public content read for guests (catalogue, detail, reviews, community feeds)
+POST /api/public-catalog/ids  ApiPublicContentCatalogController#byIds | public content read for guests (catalogue, detail, reviews, community feeds)
+POST /api/public-catalog/info  ApiPublicContentCatalogController#info | public content read for guests (catalogue, detail, reviews, community feeds)
+POST /api/public-catalog/list  ApiPublicContentCatalogController#list | public content read for guests (catalogue, detail, reviews, community feeds)
+POST /api/public-catalog/map  ApiPublicContentCatalogController#map | public content read for guests (catalogue, detail, reviews, community feeds)
+POST /api/referral/landing/gift  ApiReferralLandingController#gift | share landing read; no personal data
+POST /api/referral/landing/referral  ApiReferralLandingController#referral | share landing read; no personal data
+POST /api/registration/callback  ApiRegistrationController#payCallback | payment/content-security/IAP callback: caller is WeChat/Apple; handler verifies signature or token before acting
+POST /api/registration/ecommerce-callback  ApiRegistrationController#ecommercePayCallback | payment/content-security/IAP callback: caller is WeChat/Apple; handler verifies signature or token before acting
+POST /api/registration/ecommerce-combine-callback  ApiRegistrationController#ecommerceCombinePayCallback | payment/content-security/IAP callback: caller is WeChat/Apple; handler verifies signature or token before acting
+POST /api/registration/ecommerce-refund-callback  ApiRegistrationController#ecommerceRefundCallback | payment/content-security/IAP callback: caller is WeChat/Apple; handler verifies signature or token before acting
+POST /api/registration/refund-callback  ApiRegistrationController#refundCallback | payment/content-security/IAP callback: caller is WeChat/Apple; handler verifies signature or token before acting
+POST /api/team/info  ApiPlayTeamController#info | invite-code landing; service refuses teams the viewer may not see
+POST /api/topic/info-to-user  ApiTopicController#topicInfo | public content read for guests (catalogue, detail, reviews, community feeds)
+POST /api/userInfo  ApiLoginController#userInfo | returns only the caller's own session user (whitelisted fields); no token -> refused
+POST /api/workshop/v2/apple-iap/notifications  ApiWorkshopAppleIapController#notification | payment/content-security/IAP callback: caller is WeChat/Apple; handler verifies signature or token before acting

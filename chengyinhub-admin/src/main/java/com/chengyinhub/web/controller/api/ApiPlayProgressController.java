@@ -1,0 +1,469 @@
+package com.chengyinhub.web.controller.api;
+
+import com.chengyinhub.common.core.controller.BaseController;
+import com.chengyinhub.common.core.domain.AjaxResult;
+import com.chengyinhub.common.annotation.DeadlockRetry;
+import com.chengyinhub.common.annotation.RateLimiter;
+import com.chengyinhub.common.enums.LimitType;
+import com.chengyinhub.business.domain.dto.SensorResultRequest;
+import com.chengyinhub.business.domain.dto.PreferenceSubmitRequest;
+import com.chengyinhub.business.domain.dto.PreferenceTagCorrectionRequest;
+import com.chengyinhub.web.service.play.*;
+import com.chengyinhub.web.metrics.GameSloMetrics;
+import com.chengyinhub.web.metrics.GameSloResult;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+import io.swagger.v3.oas.annotations.Operation;
+
+/** HTTP adapter for player progress. Actor authentication stays at this boundary. */
+@RestController
+@RequestMapping("/api/play")
+public class ApiPlayProgressController extends BaseController {
+    @Autowired
+    private PlayBasicCommandApplication playBasicCommandApplication;
+    @Autowired
+    private PlayBasicIntentApplication playBasicIntentApplication;
+    @Autowired
+    private PlayHistoryQueryApplication playHistoryQueryApplication;
+    @Autowired
+    private PlayEntryApplication playEntryApplication;
+    @Autowired
+    private PlayPhotoCommandApplication playPhotoCommandApplication;
+    @Autowired
+    private PlayPlayerQueryApplication playPlayerQueryApplication;
+    @Autowired
+    private PlayPreferenceApplication playPreferenceApplication;
+    @Autowired
+    private PlayPuzzleCommandApplication playPuzzleCommandApplication;
+    @Autowired
+    private PlayContentManifestApplication playContentManifestApplication;
+
+    /** 角色(Cast)v1:本局玩家档案与剧情分支选择,本局状态归路线运行时(topic_route_session.state_json)。 */
+    @Autowired
+    private com.chengyinhub.business.service.ITopicRouteRuntimeService topicRouteRuntimeService;
+
+    /** OPS-01：只观测映射到 POST /api/play/arrive 的这条路径；测试直接 new 时为 null。 */
+    @Autowired(required = false)
+    private GameSloMetrics gameSlo;
+
+    @Operation(summary = "游玩节点列表+进度")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @GetMapping("/nodes")
+    public AjaxResult nodes(Long activityId, Long topicId,
+            @RequestParam(name = "clientPlatform", required = false) String clientPlatform,
+            @RequestParam(name = "clientVersion", required = false) String clientVersion,
+            @RequestParam(name = "capabilities", required = false) String capabilities)
+    {
+        // 三个可选参数只用于能力兼容提示;缺省即老客户端,准入与权限一律不变。
+        return playEntryApplication.nodes(currentMemberId(), activityId, topicId,
+                clientPlatform, clientVersion, capabilities);
+    }
+
+    @Operation(summary = "内容清单(按已发布修订预取,只读不建局)")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @GetMapping("/content-manifest")
+    public AjaxResult contentManifest(Long activityId, Long topicId, Long revisionId)
+    {
+        // 准入、不建局与不凭 revisionId 越权取内容都在 application 层;这里只做 HTTP 适配。
+        return playContentManifestApplication.manifest(currentMemberId(), activityId, topicId, revisionId);
+    }
+
+    /**
+     * 旧调用形状(两参)保留:客户端不需要改,既有调用者与测试也不必被迫改签名。
+     * 不声明新参数即「老客户端」,与上面三参缺省完全等价。
+     */
+    public AjaxResult nodes(Long activityId, Long topicId)
+    {
+        // 无映射注解:Spring 只把上面那个 5 参方法映射到 GET /nodes,这里纯属源码兼容入口。
+        return nodes(activityId, topicId, null, null, null);
+    }
+
+    @Operation(summary = "读取主题地点路线状态")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @GetMapping("/route-state")
+    public AjaxResult routeState(@RequestParam(name = "topicId", required = false) Long topicId,
+            @RequestParam(name = "activityId", required = false) Long activityId,
+            @RequestParam(name = "actId", required = false) Long actId)
+    {
+        return playEntryApplication.routeState(currentMemberId(), topicId, activityId, actId);
+    }
+
+    public AjaxResult routeState(Long topicId, Long actId) {
+        return playEntryApplication.routeState(currentMemberId(), topicId, actId);
+    }
+
+    @Operation(summary = "自由定向:终章结局信(按完成顺序拼合碎片)")
+    @GetMapping("/ending")
+    public AjaxResult ending(Long activityId, Long topicId)
+    {
+        return playHistoryQueryApplication.ending(currentMemberId(), activityId, topicId);
+    }
+
+    @Operation(summary = "只读原游玩会话的已完成剧情与结果")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @GetMapping("/history")
+    public AjaxResult history(@RequestParam Long activityId, @RequestParam Long topicId,
+            @RequestParam(required = false) Long routeSessionId)
+    {
+        // FE-STORY 7.4:自由探索票过期后不带 routeSessionId,按到访事实读已解锁章节(只读)。
+        if (routeSessionId == null) return playHistoryQueryApplication.freeExploreVisitedHistory(currentMemberId(), activityId, topicId);
+        return playHistoryQueryApplication.history(currentMemberId(), activityId, topicId, routeSessionId);
+    }
+
+    @Operation(summary = "自由定向途中台词(NPC气泡)")
+    @GetMapping("/companionLine")
+    public AjaxResult companionLine(Long activityId, Long topicId)
+    {
+        return playPlayerQueryApplication.companionLine(currentMemberId(), activityId, topicId);
+    }
+
+    @GetMapping("/action-context")
+    public AjaxResult basicActionContext(String activityId, String topicId, String nodeId) {
+        return playBasicIntentApplication.basicActionContext(currentMemberId(), activityId, topicId, nodeId);
+    }
+
+    @GetMapping("/action-receipt")
+    public AjaxResult basicActionReceipt(String activityId, String topicId, String nodeId, String routeActionId) {
+        return playBasicIntentApplication.basicActionReceipt(currentMemberId(), activityId, topicId, nodeId, routeActionId);
+    }
+
+    @Operation(summary = "扫码打卡")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @PostMapping("/checkin")
+    @DeadlockRetry
+    public AjaxResult checkin(String activityId, String code, String topicId,
+            String routeActionId, Integer expectedRouteVersion, Long registrationId,
+            String nodeId, Long routeSessionId, String runtimeInstance, Integer authorityEpoch)
+    {
+        return playBasicCommandApplication.checkin(currentMemberId(), activityId, code, topicId, routeActionId, expectedRouteVersion, registrationId, nodeId, routeSessionId, runtimeInstance, authorityEpoch);
+    }
+
+    public AjaxResult checkin(String activityId, String code, String topicId,
+            String routeActionId, Integer expectedRouteVersion, Long registrationId) {
+        return playBasicCommandApplication.checkin(activityId, code, topicId, routeActionId, expectedRouteVersion, registrationId);
+    }
+
+    public AjaxResult checkin(String activityId, String code, String topicId,
+            String routeActionId, Integer expectedRouteVersion) {
+        return playBasicCommandApplication.checkin(activityId, code, topicId, routeActionId, expectedRouteVersion);
+    }
+
+    public AjaxResult checkin(String activityId, String code, String topicId) {
+        return playBasicCommandApplication.checkin(activityId, code, topicId);
+    }
+
+    @Operation(summary = "门口游戏码落地")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @PostMapping("/scan-entry")
+    public AjaxResult scanEntry(String code)
+    {
+        return playBasicCommandApplication.scanEntry(currentMemberId(), code);
+    }
+
+    @Operation(summary = "答题完成(文字/选项)")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @PostMapping("/answer")
+    @DeadlockRetry
+    public AjaxResult answer(String activityId, String nodeId, String answer, String topicId,
+            String routeActionId, Integer expectedRouteVersion, Long routeSessionId, String runtimeInstance, Integer authorityEpoch,
+            String longitude, String latitude, String accuracy)
+    {
+        return playBasicCommandApplication.answer(currentMemberId(), activityId, nodeId, answer, topicId, routeActionId, expectedRouteVersion, routeSessionId, runtimeInstance, authorityEpoch,
+                longitude, latitude, accuracy);
+    }
+
+    public AjaxResult answer(String activityId, String nodeId, String answer, String topicId,
+            String routeActionId, Integer expectedRouteVersion, Long routeSessionId, String runtimeInstance, Integer authorityEpoch)
+    {
+        return answer(activityId, nodeId, answer, topicId, routeActionId, expectedRouteVersion, routeSessionId, runtimeInstance, authorityEpoch,
+                null, null, null);
+    }
+
+    public AjaxResult answer(String activityId, String nodeId, String answer, String topicId,
+            String routeActionId, Integer expectedRouteVersion) {
+        return playBasicCommandApplication.answer(activityId, nodeId, answer, topicId, routeActionId, expectedRouteVersion);
+    }
+
+    public AjaxResult answer(String activityId, String nodeId, String answer, String topicId) {
+        return playBasicCommandApplication.answer(activityId, nodeId, answer, topicId);
+    }
+
+    @Operation(summary = "城市定向谜题查看答案并辅助完成")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @PostMapping("/puzzle/reveal")
+    @DeadlockRetry
+    public AjaxResult revealPuzzle(String activityId, String nodeId, String topicId,
+            String routeActionId, Integer expectedRouteVersion, Long routeSessionId, String runtimeInstance, Integer authorityEpoch)
+    {
+        return playPuzzleCommandApplication.revealPuzzle(currentMemberId(), activityId, nodeId, topicId, routeActionId, expectedRouteVersion, routeSessionId, runtimeInstance, authorityEpoch);
+    }
+
+    public AjaxResult revealPuzzle(String activityId, String nodeId, String topicId,
+            String routeActionId, Integer expectedRouteVersion)
+    {
+        return error("必须提供原运行时身份");
+    }
+
+    public AjaxResult revealPuzzle(String activityId, String nodeId, String topicId) {
+        return playPuzzleCommandApplication.revealPuzzle(currentMemberId(), activityId, nodeId, topicId);
+    }
+
+    @Operation(summary = "城市定向谜题逐级提示")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @PostMapping("/puzzle/hint")
+    public AjaxResult puzzleHint(String activityId, String nodeId, String topicId, Integer level)
+    {
+        return playPuzzleCommandApplication.puzzleHint(currentMemberId(), activityId, nodeId, topicId, level);
+    }
+
+    @Operation(summary = "下发偏好题组")
+    @GetMapping("/preference/{nodeId}")
+    public AjaxResult preference(@PathVariable Long nodeId, String activityId, String topicId)
+    {
+        return playPreferenceApplication.preference(currentMemberId(), nodeId, activityId, topicId);
+    }
+
+    @Operation(summary = "提交偏好题组")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @PostMapping("/preference/{nodeId}/submit")
+    public AjaxResult submitPreference(@PathVariable Long nodeId, @RequestBody PreferenceSubmitRequest request)
+    {
+        return playPreferenceApplication.submitPreference(currentMemberId(), nodeId, request);
+    }
+
+    @Operation(summary = "确认偏好标签")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @PostMapping("/tag/{tagId}/confirm")
+    public AjaxResult confirmPreferenceTag(@PathVariable Long tagId)
+    {
+        return playPreferenceApplication.confirmPreferenceTag(currentMemberId(), tagId);
+    }
+
+    @Operation(summary = "撤回偏好标签")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @PostMapping("/tag/{tagId}/revoke")
+    public AjaxResult revokePreferenceTag(@PathVariable Long tagId)
+    {
+        return playPreferenceApplication.revokePreferenceTag(currentMemberId(), tagId);
+    }
+
+    @Operation(summary = "确认前修正偏好标签档位")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @PostMapping("/tag/{tagId}/correct")
+    public AjaxResult correctPreferenceTag(@PathVariable Long tagId,
+                                           @RequestBody PreferenceTagCorrectionRequest request)
+    {
+        return playPreferenceApplication.correctPreferenceTag(currentMemberId(), tagId, request);
+    }
+
+    @Operation(summary = "我的新生活操作系统")
+    @GetMapping("/os/{topicId}")
+    public AjaxResult newLifeOperatingSystem(@PathVariable Long topicId)
+    {
+        return playPreferenceApplication.newLifeOperatingSystem(currentMemberId(), topicId);
+    }
+
+    @Operation(summary = "App 传感器挑战完成上报")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @PostMapping("/sensor-result")
+    @DeadlockRetry
+    public AjaxResult sensorResult(@RequestBody SensorResultRequest request)
+    {
+        return playBasicCommandApplication.sensorResult(currentMemberId(), request);
+    }
+
+    @Operation(summary = "GPS到达/到点即完成")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @PostMapping("/arrive")
+    @DeadlockRetry
+    public AjaxResult arrive(String activityId, String nodeId, String longitude, String latitude, String topicId,
+            String routeActionId, Integer expectedRouteVersion, String accuracy, String locationTimestamp,
+            Long routeSessionId, String runtimeInstance, Integer authorityEpoch)
+    {
+        // CG-ALL-11:startMode / altStationId 从请求里按需读取(不改本方法签名，旧调用与旧客户端不受影响)。
+        return arriveWithStartMode(activityId, nodeId, longitude, latitude, topicId, routeActionId, expectedRouteVersion, accuracy, locationTimestamp, routeSessionId, runtimeInstance, authorityEpoch);
+    }
+
+    /** 没带开局方式时走原 13 参入口(逐字不变);带了才走 CG-ALL-11 的新入口。 */
+    private AjaxResult arriveWithStartMode(String activityId, String nodeId, String longitude, String latitude, String topicId,
+            String routeActionId, Integer expectedRouteVersion, String accuracy, String locationTimestamp,
+            Long routeSessionId, String runtimeInstance, Integer authorityEpoch)
+    {
+        String startMode = optionalRequestParam("startMode");
+        String altStationId = optionalRequestParam("altStationId");
+        if (startMode == null && altStationId == null)
+            return playBasicCommandApplication.arrive(currentMemberId(), activityId, nodeId, longitude, latitude, topicId, routeActionId, expectedRouteVersion, accuracy, locationTimestamp, routeSessionId, runtimeInstance, authorityEpoch);
+        return playBasicCommandApplication.arrive(currentMemberId(), activityId, nodeId, longitude, latitude, topicId, routeActionId, expectedRouteVersion, accuracy, locationTimestamp, routeSessionId, runtimeInstance, authorityEpoch,
+                startMode, altStationId);
+    }
+
+    private static String optionalRequestParam(String name)
+    {
+        try {
+            org.springframework.web.context.request.RequestAttributes attributes =
+                    org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+            if (!(attributes instanceof org.springframework.web.context.request.ServletRequestAttributes servlet)) return null;
+            return servlet.getRequest().getParameter(name);
+        } catch (RuntimeException unavailable) {
+            return null;
+        }
+    }
+
+    /** 兼容旧调用（不带定位时间）：原样走既有 50m/80m 与旧请求指纹。 */
+    public AjaxResult arrive(String activityId, String nodeId, String longitude, String latitude, String topicId,
+            String routeActionId, Integer expectedRouteVersion, String accuracy, Long routeSessionId,
+            String runtimeInstance, Integer authorityEpoch)
+    {
+        // OPS01 的 SLO 计时/分类 + BE08 的显式原局空位：两者都在，签名以 BE08 的为准。
+        long startedAt = System.nanoTime();
+        GameSloResult sloResult = GameSloResult.FAULT;
+        try {
+            AjaxResult response = arriveWithStartMode(activityId, nodeId,
+                    longitude, latitude, topicId, routeActionId, expectedRouteVersion, accuracy, null,
+                    routeSessionId, runtimeInstance, authorityEpoch);
+            // HTTP 200 + AjaxResult 业务拒绝不是成功：success 只认 code=200。
+            sloResult = GameSloMetrics.classify(response);
+            return response;
+        } finally {
+            // 每个请求恰好一次；异常外抛时保持原异常，只把结果记成 fault。
+            recordArrive(sloResult, startedAt);
+        }
+    }
+
+    private void recordArrive(GameSloResult result, long startedAt) {
+        if (gameSlo != null) {
+            gameSlo.recordArrive(result, System.nanoTime() - startedAt);
+        }
+    }
+
+    public AjaxResult arrive(String activityId, String nodeId, String longitude, String latitude, String topicId,
+            String routeActionId, Integer expectedRouteVersion, String accuracy) {
+        return playBasicCommandApplication.arrive(activityId, nodeId, longitude, latitude, topicId, routeActionId, expectedRouteVersion, accuracy);
+    }
+
+    public AjaxResult arrive(String activityId, String nodeId, String longitude, String latitude, String topicId,
+            String routeActionId, Integer expectedRouteVersion) {
+        return playBasicCommandApplication.arrive(activityId, nodeId, longitude, latitude, topicId, routeActionId, expectedRouteVersion);
+    }
+
+    public AjaxResult arrive(String activityId, String nodeId, String longitude, String latitude, String topicId) {
+        return playBasicCommandApplication.arrive(activityId, nodeId, longitude, latitude, topicId);
+    }
+
+    @Operation(summary = "拍照打卡(提交即完成,审核后置)")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @PostMapping("/photo")
+    @DeadlockRetry
+    public AjaxResult photo(String activityId, String nodeId, String picUrl, String topicId,
+            String routeActionId, Integer expectedRouteVersion, Long routeSessionId, String runtimeInstance, Integer authorityEpoch)
+    {
+        return playPhotoCommandApplication.photo(currentMemberId(), activityId, nodeId, picUrl, topicId, routeActionId, expectedRouteVersion, routeSessionId, runtimeInstance, authorityEpoch);
+    }
+
+    public AjaxResult photo(String activityId, String nodeId, String picUrl, String topicId,
+            String routeActionId, Integer expectedRouteVersion)
+    {
+        return error("必须提供原运行时身份");
+    }
+
+    public AjaxResult photo(String activityId, String nodeId, String picUrl, String topicId) {
+        return playPhotoCommandApplication.photo(currentMemberId(), activityId, nodeId, picUrl, topicId);
+    }
+
+    @Operation(summary = "我已通关的活动列表(广场发布选择)")
+    @PostMapping("/my-completed")
+    public AjaxResult myCompleted(@RequestParam(value = "for_public_reference", defaultValue = "false")
+            boolean forPublicReference)
+    {
+        return playHistoryQueryApplication.myCompleted(currentMemberId(), forPublicReference);
+    }
+
+    public AjaxResult myCompleted()
+    {
+        return playHistoryQueryApplication.myCompleted(currentMemberId());
+    }
+
+    @Operation(summary = "活动排行榜(线性:完成数降序;分支:到达结局优先、用时短者靠前)")
+    @GetMapping("/leaderboard")
+    public AjaxResult leaderboard(String activityId, String topicId)
+    {
+        return playPlayerQueryApplication.leaderboard(currentMemberId(), activityId, topicId);
+    }
+
+    @Operation(summary = "我的成长+徽章")
+    @PostMapping("/growth")
+    public AjaxResult growth()
+    {
+        return playPlayerQueryApplication.growth(currentMemberId());
+    }
+
+    @PostMapping("/achievements")
+    public AjaxResult achievements()
+    {
+        return playPlayerQueryApplication.achievements(currentMemberId());
+    }
+
+    @Operation(summary = "积分解锁节点提示")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @PostMapping("/hint/unlock")
+    public AjaxResult unlockHint(Long nodeId, String activityId, String topicId)
+    {
+        return playPuzzleCommandApplication.unlockHint(currentMemberId(), nodeId, activityId, topicId);
+    }
+
+    public AjaxResult unlockHint(Long nodeId)
+    {
+        return playPuzzleCommandApplication.unlockHint(currentMemberId(), nodeId);
+    }
+
+    @Operation(summary = "设置本局玩家档案(名字 / 身份)")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @PostMapping("/run/profile")
+    public AjaxResult runProfile(@RequestBody java.util.Map<String, Object> body)
+    {
+        Long memberId = currentMemberId();
+        if (memberId == null || memberId <= 0) return error("请先登录");
+        try
+        {
+            return success(topicRouteRuntimeService.saveRunProfile(memberId,
+                    com.chengyinhub.common.core.text.Convert.toLong(body.get("runId")),
+                    body.get("name") == null ? null : String.valueOf(body.get("name")),
+                    body.get("identityKey") == null ? null : String.valueOf(body.get("identityKey"))));
+        }
+        catch (com.chengyinhub.common.exception.ServiceException e)
+        {
+            return com.chengyinhub.business.service.support.CastRunRules.refusal(e);
+        }
+    }
+
+    @Operation(summary = "记录剧情分支块的选择(服务端结算角色信任)")
+    @RateLimiter(time = 10, count = 120, limitType = LimitType.MEMBER)
+    @PostMapping("/run/branch")
+    public AjaxResult runBranch(@RequestBody java.util.Map<String, Object> body)
+    {
+        Long memberId = currentMemberId();
+        if (memberId == null || memberId <= 0) return error("请先登录");
+        try
+        {
+            return success(topicRouteRuntimeService.recordStoryBranch(memberId,
+                    com.chengyinhub.common.core.text.Convert.toLong(body.get("runId")),
+                    com.chengyinhub.common.core.text.Convert.toLong(body.get("chapterId")),
+                    body.get("blockKey") == null ? null : String.valueOf(body.get("blockKey")),
+                    com.chengyinhub.common.core.text.Convert.toInt(body.get("optionIndex"))));
+        }
+        catch (com.chengyinhub.common.exception.ServiceException e)
+        {
+            return com.chengyinhub.business.service.support.CastRunRules.refusal(e);
+        }
+    }
+
+    private Long currentMemberId()
+    {
+        try {
+            Long id = getAppUserId();
+            return id == null ? 0L : id;
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
+}

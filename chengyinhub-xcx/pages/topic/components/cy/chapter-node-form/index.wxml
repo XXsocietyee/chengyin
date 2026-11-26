@@ -1,0 +1,219 @@
+<wxs src="../../../../../utils/wxs/money.wxs" module="money" />
+<view class="cnf-shell" style="{{sheetStyle}}">
+<cy-sheet show="{{show}}" variant="full" footer="{{true}}" title="{{formMode === 'offer' ? (termsEditing ? '修改权益说明' : '填写实际供给') : (formMode === 'node' ? (editing ? '编辑节点' : '配置节点') : (editing ? '编辑申请 · 修改节点' : '申请承接并配置节点'))}}" closable="{{!submitting}}"
+  maskClosable="{{!submitting}}" bind:close="onClose">
+  <view class="cnf-subtitle">{{chapterName || '当前章节'}}</view>
+  <!-- CU-M-58:同一个章节重复提交不是新增,而是覆盖已有点位并回待审核 —— 先把覆盖范围说出来 -->
+  <view class="cnf-note" wx:if="{{editing && formMode !== 'node'}}">保存将覆盖「{{presetNode.name}}」并重新审核</view>
+  <view class="cnf-note" wx:if="{{editing && formMode === 'node'}}">保存将覆盖「{{presetNode.name}}」</view>
+
+  <block wx:if="{{formMode === 'application'}}">
+    <view class="cnf-field">
+      <view class="cnf-label"><text>申请说明</text><text class="cnf-optional">选填</text></view>
+      <input class="cnf-input" value="{{form.message}}" placeholder="想承接的理由" disabled="{{submitting}}"
+        placeholder-class="cnf-placeholder" data-key="message" bindinput="onInput" />
+    </view>
+  </block>
+
+  <view class="cnf-offer" wx:if="{{formMode === 'offer'}}">
+    <view class="cnf-section-title">实际供给</view>
+    <block wx:if="{{circleMode}}">
+      <view class="cnf-field">
+        <view class="cnf-label"><text>现有商品或服务</text><text class="cnf-required" aria-hidden="true">*</text></view>
+        <input class="cnf-input" value="{{form.supplyName}}" placeholder="不新建套餐，填正在正常售卖的内容" disabled="{{submitting}}" data-key="supplyName" bindinput="onInput" />
+      </view>
+      <view class="cnf-field">
+        <view class="cnf-label">供给类型</view>
+        <cy-dropdown range="{{supplyKinds}}" range-key="label" disabled="{{submitting}}" bind:change="onSupplyKindPick">
+          <view class="cnf-picker cnf-picker--selected"><text>{{form.supplyKindName}}</text><cy-icon class="cnf-arrow" name="arrow-right" size="32" /></view>
+        </cy-dropdown>
+      </view>
+      <view class="cnf-field">
+        <view class="cnf-label"><text>正常价格</text><text class="cnf-required" aria-hidden="true">*</text></view>
+        <input class="cnf-input" type="digit" value="{{form.regularPrice}}" placeholder="0元浏览可填0；不要求打折" disabled="{{submitting}}" data-key="regularPrice" bindinput="onInput" />
+      </view>
+      <view class="cnf-field">
+        <view class="cnf-label"><text>体验时长（分钟）</text><text class="cnf-required" aria-hidden="true">*</text></view>
+        <input class="cnf-input" type="number" value="{{form.durationMinutes}}" placeholder="例如 60" disabled="{{submitting}}" data-key="durationMinutes" bindinput="onInput" />
+      </view>
+      <view class="cnf-field">
+        <view class="cnf-label"><text>可用时间</text><text class="cnf-required" aria-hidden="true">*</text></view>
+        <input class="cnf-input" value="{{form.availableHours}}" placeholder="例如 周二至周日 10:00—20:00" disabled="{{submitting}}" data-key="availableHours" bindinput="onInput" />
+      </view>
+      <view class="cnf-row">
+        <view class="cnf-field cnf-half"><view class="cnf-label">最少人数</view><input class="cnf-input" type="number" value="{{form.minPeople}}" disabled="{{submitting}}" data-key="minPeople" bindinput="onInput" /></view>
+        <view class="cnf-field cnf-half"><view class="cnf-label">最多人数</view><input class="cnf-input" type="number" value="{{form.maxPeople}}" disabled="{{submitting}}" data-key="maxPeople" bindinput="onInput" /></view>
+      </view>
+      <view class="cnf-field">
+        <view class="cnf-label">同行接待方式</view>
+        <cy-dropdown range="{{splitBookingOptions}}" range-key="label" disabled="{{submitting}}" bind:change="onSplitBookingPick">
+          <view class="cnf-picker cnf-picker--selected"><text>{{form.splitBookingName}}</text><cy-icon class="cnf-arrow" name="arrow-right" size="32" /></view>
+        </cy-dropdown>
+      </view>
+      <view class="cnf-field">
+        <view class="cnf-label">玩家动作</view>
+        <cy-dropdown range="{{actionTypes}}" range-key="label" disabled="{{submitting}}" bind:change="onActionTypePick">
+          <view class="cnf-picker cnf-picker--selected"><text>{{form.actionTypeName}}</text><cy-icon class="cnf-arrow" name="arrow-right" size="32" /></view>
+        </cy-dropdown>
+      </view>
+      <view class="cnf-field">
+        <view class="cnf-label"><text>行动入口</text><text class="cnf-required" aria-hidden="true">*</text></view>
+        <input class="cnf-input" value="{{form.actionValue}}" placeholder="地址、预约电话或购买链接" disabled="{{submitting}}" data-key="actionValue" bindinput="onInput" />
+      </view>
+      <view class="cnf-field">
+        <view class="cnf-label"><text>附加权益</text><text class="cnf-optional">选填</text></view>
+        <input class="cnf-input" value="{{form.optionalBenefit}}" placeholder="没有可不填，不要求打折" disabled="{{submitting}}" data-key="optionalBenefit" bindinput="onInput" />
+      </view>
+      <view class="cnf-field" wx:if="{{form.optionalBenefit}}">
+        <view class="cnf-label"><text>权益来源、有效期与核销规则</text><text class="cnf-required" aria-hidden="true">*</text></view>
+        <input class="cnf-input" value="{{form.benefitRules}}" placeholder="例如 商家承担，领取后7天有效，到店报手机号核销" disabled="{{submitting}}" data-key="benefitRules" bindinput="onInput" />
+      </view>
+      <view class="cnf-field">
+        <view class="cnf-label"><text>现场与预约规则</text><text class="cnf-required" aria-hidden="true">*</text></view>
+        <input class="cnf-input" value="{{form.merchantRules}}" placeholder="写明预约、改期及现场规则" disabled="{{submitting}}" data-key="merchantRules" bindinput="onInput" />
+      </view>
+      
+    </block>
+    <!-- 改已生效供给的说明(termsEditing)时不重新选权益 / 额度 / 亲子票,只出下面的玩家可见条款 -->
+    <block wx:if="{{!termsEditing}}">
+    <block wx:if="{{termsMode === 'PERK'}}">
+      <view class="cnf-field">
+        <view class="cnf-label"><text>常备权益</text><text class="cnf-required" aria-hidden="true">*</text></view>
+        <cy-dropdown wx:if="{{perkTemplates.length}}" range="{{perkTemplates}}" range-key="name"
+          disabled="{{perkTemplatesLoading || submitting}}" bind:change="onPerkPick">
+          <view class="cnf-picker {{form.perkTemplateId ? 'cnf-picker--selected' : ''}}">
+            <text>{{perkTemplatesLoading ? '加载中…' : (form.perkName || '选择常备权益')}}</text>
+            <cy-icon class="cnf-arrow" name="arrow-right" size="32" />
+          </view>
+        </cy-dropdown>
+        <view class="cnf-perk-empty" wx:else>
+          <text>{{perkTemplatesLoading ? '正在读取常备权益…' : '还没有常备权益，先创建后再回来选择'}}</text>
+          <cy-btn wx:if="{{!perkTemplatesLoading}}" variant="ghost" size="sm" bindtap="goCreatePerkTemplate">去创建常备权益</cy-btn>
+        </view>
+        <view class="cnf-note cnf-note--field" wx:if="{{perkMinText && !perkBelowMin}}">零售价不少于 {{money.amount(perkMinText)}}</view>
+        <cy-inline-error wx:if="{{perkBelowMin}}" kind="error" title="本章节要求权益零售价不少于 {{money.amount(perkMinText)}}" />
+        <view class="cnf-note cnf-note--field" wx:if="{{roleNeedInfo.minDelivery}}">最低交付要求：{{roleNeedInfo.minDelivery}}</view>
+        <view class="cnf-note cnf-note--field" wx:if="{{roleNeedInfo.shops}}">适合店铺：{{roleNeedInfo.shops}}</view>
+        <view class="cnf-note cnf-note--field" wx:if="{{roleNeedInfo.perkExample}}">权益示例：{{roleNeedInfo.perkExample}}</view>
+        <view class="cnf-note cnf-note--field" wx:if="{{roleNeedInfo.raw}}">{{roleNeedInfo.raw}}</view>
+        <view class="cnf-note cnf-note--field" wx:if="{{settlementNote}}">{{settlementNote}}</view>
+      </view>
+    </block>
+    <view class="cnf-field" wx:if="{{termsMode === 'REVSHARE'}}">
+      <view class="cnf-label"><text>每人次计酬</text><text class="cnf-required" aria-hidden="true">*</text></view>
+      <input class="cnf-input" type="digit" value="{{form.perHeadFee}}" placeholder="俱乐部每核销 1 人次应付的金额"
+        disabled="{{submitting}}" placeholder-class="cnf-placeholder" data-key="perHeadFee" bindinput="onInput" />
+    </view>
+    <view class="cnf-field" wx:if="{{termsMode === 'PERK'}}">
+      <view class="cnf-label"><text>核销额度</text><text class="cnf-required" aria-hidden="true">*</text></view>
+      <input class="cnf-input" type="number" value="{{form.quotaTotal}}" placeholder="至少 1 人次"
+        disabled="{{submitting}}" placeholder-class="cnf-placeholder" data-key="quotaTotal" bindinput="onInput" />
+    </view>
+    <!-- F12 亲子票:一张亲子票 1 大 1 小同享一份权益、只占 1 个名额;主题带亲子票时每个必选位置都要接受才能发布 -->
+    <view class="cnf-field" wx:if="{{termsMode === 'PERK'}}">
+      <view class="cnf-label cnf-label--row"><text>接受亲子票（1 大 1 小同享）</text>
+        <cy-switch checked="{{form.familyAccepted}}" disabled="{{submitting}}" accessibilityLabel="接受亲子票" bind:change="onFamilyAcceptedChange" /></view>
+    </view>
+    <view class="cnf-field" wx:if="{{termsMode === 'PERK' && form.familyAccepted}}">
+      <view class="cnf-label"><text>儿童份说明</text></view>
+      <input class="cnf-input" value="{{form.familyPerkText}}" placeholder="例如：儿童份小杯" maxlength="200"
+        disabled="{{submitting}}" placeholder-class="cnf-placeholder" data-key="familyPerkText" bindinput="onInput" />
+    </view>
+    </block>
+    <!-- P1-2:玩家购票前在权益卡上看到的条款;每日容量与开始日期在核销时生效,其余只做展示;都不参与可售容量与结算 -->
+    <block wx:if="{{shopTermsOn}}">
+      <view class="cnf-row">
+        <view class="cnf-field cnf-half">
+          <view class="cnf-label"><text>每日容量</text><text class="cnf-optional">选填</text></view>
+          <input class="cnf-input" type="number" value="{{form.dailyCapacity}}" placeholder="每天可接待份数" maxlength="5"
+            disabled="{{submitting}}" placeholder-class="cnf-placeholder" data-key="dailyCapacity" bindinput="onInput" />
+        </view>
+        <view class="cnf-field cnf-half">
+          <view class="cnf-label"><text>开始日期</text><text class="cnf-optional">选填</text></view>
+          <cy-date-field mode="date" value="{{form.validStart}}" start="{{today}}" disabled="{{submitting}}" bind:change="onValidStartChange">
+            <view class="cnf-picker {{form.validStart ? 'cnf-picker--selected' : ''}}"><text class="{{form.validStart ? '' : 'cnf-placeholder'}}">{{form.validStart || '即日起'}}</text><cy-icon class="cnf-arrow" name="arrow-right" size="32" /></view>
+          </cy-date-field>
+        </view>
+      </view>
+      <view class="cnf-field">
+        <view class="cnf-label">票内是否已含</view>
+        <cy-dropdown range="{{includedOptions}}" range-key="label" disabled="{{submitting}}" bind:change="onIncludedPick">
+          <view class="cnf-picker cnf-picker--selected"><text>{{form.includedName}}</text><cy-icon class="cnf-arrow" name="arrow-right" size="32" /></view>
+        </cy-dropdown>
+      </view>
+      <view class="cnf-field" wx:if="{{form.includedMode === 'EXTRA'}}">
+        <view class="cnf-label"><text>需另付</text><text class="cnf-required" aria-hidden="true">*</text></view>
+        <input class="cnf-input" value="{{form.extraSpendText}}" placeholder="例如：饮品另付" maxlength="100"
+          disabled="{{submitting}}" placeholder-class="cnf-placeholder" data-key="extraSpendText" bindinput="onInput" />
+      </view>
+      <view class="cnf-field">
+        <view class="cnf-label cnf-label--row"><text>需预约</text>
+          <cy-switch checked="{{form.reserveRequired}}" disabled="{{submitting}}" accessibilityLabel="需预约" bind:change="onReserveRequiredChange" /></view>
+      </view>
+      <view class="cnf-field">
+        <view class="cnf-label"><text>售罄或替代规则</text><text class="cnf-optional">选填</text></view>
+        <input class="cnf-input" value="{{form.soldOutRuleText}}" placeholder="例如：售罄换同价饮品" maxlength="100"
+          disabled="{{submitting}}" placeholder-class="cnf-placeholder" data-key="soldOutRuleText" bindinput="onInput" />
+      </view>
+      <view class="cnf-field">
+        <view class="cnf-label"><text>门店照片</text><text class="cnf-optional">选填</text></view>
+        <cy-upload urls="{{storefrontUrls}}" max="{{1}}" disabled="{{submitting}}" replaceOnTap="{{true}}"
+          bind:add="chooseStorefront" bind:remove="removeStorefront" />
+      </view>
+      <!-- P1-4:玩家看到的权益卡(复用主题详情的逐店卡组件),外框取主题外观配色 -->
+      <view class="cnf-field">
+        <view class="cnf-label">玩家看到的卡片</view>
+        <view class="cnf-preview" style="{{previewStyle}}">
+          <cy-merchant-cards items="{{previewCards}}" />
+        </view>
+      </view>
+      <!-- P1-3:提交前勾选同意(不默认勾选);同意时间由服务端记录 -->
+      <cy-consent-check wx:if="{{!termsEditing}}" checked="{{form.termsAgreed}}" text="{{consentText}}" bind:change="onTermsAgreedChange" />
+    </block>
+  </view>
+
+  <block wx:if="{{formMode !== 'offer'}}">
+    <view class="cnf-field">
+      <view class="cnf-label"><text>节点名称</text><text class="cnf-required" aria-hidden="true">*</text></view>
+      <input class="cnf-input" value="{{form.name}}" placeholder="玩家在路线上看到的名字" disabled="{{submitting}}"
+        placeholder-class="cnf-placeholder" data-key="name" bindinput="onInput" />
+    </view>
+
+    <view class="cnf-field">
+      <view class="cnf-label"><text>到店地址</text><text class="cnf-required" aria-hidden="true">*</text></view>
+      <textarea class="cnf-input cnf-address" value="{{form.address}}" placeholder="默认取商家资料，可修改" disabled="{{submitting}}"
+        auto-height="{{true}}" maxlength="140" placeholder-class="cnf-placeholder" data-key="address" bindinput="onInput" />
+      <cy-btn class="cnf-map-button" variant="secondary" disabled="{{submitting}}" bindtap="chooseNodeLocation">地图选点</cy-btn>
+      <view wx:if="{{locationReady}}" class="cnf-note cy-addr-tap" bindtap="viewNodeLocation" aria-role="button" aria-label="在地图中查看到店位置" hover-class="cy-pressed" hover-stay-time="80">位置已确认</view>
+      <view wx:else class="cnf-note">请在地图上选择门店位置</view>
+    </view>
+
+    <view class="cnf-field">
+      <view class="cnf-label"><text>玩法模板</text><text class="cnf-required" aria-hidden="true">*</text></view>
+      <cy-dropdown wx:if="{{templates.length}}" range="{{templates}}" range-key="title" disabled="{{templatesLoading || submitting}}" bind:change="onTemplatePick">
+        <view class="cnf-picker {{form.templateId ? 'cnf-picker--selected' : ''}}">
+          <text>{{templatesLoading ? '加载中…' : (form.templateName || '选择我已有的玩法')}}</text>
+          <cy-icon class="cnf-arrow" name="arrow-right" size="32" />
+        </view>
+      </cy-dropdown>
+      <cy-inline-error wx:elif="{{templatesError && !templatesLoading}}" kind="data" title="{{templatesError}}" action="重试" bind:action="loadMyTemplates" />
+      <view class="cnf-perk-empty" wx:else>
+        <text>{{templatesLoading ? '正在读取玩法模板…' : '还没有可配置的玩法，先创建后再回来选择'}}</text>
+        <cy-btn wx:if="{{!templatesLoading}}" variant="ghost" size="sm" bindtap="goCreateTemplate">去创建玩法</cy-btn>
+      </view>
+    </view>
+
+    <view class="cnf-field">
+      <view class="cnf-label"><text>探索值</text><text class="cnf-optional">选填</text></view>
+      <input class="cnf-input" type="number" value="{{form.xpValue}}" placeholder="不填=按默认" disabled="{{submitting}}"
+        placeholder-class="cnf-placeholder" data-key="xpValue" bindinput="onInput" />
+    </view>
+  </block>
+
+  <view slot="footer" class="cnf-actions">
+    <cy-btn variant="primary" loading="{{submitting}}" disabled="{{!canSubmit || submitting}}" bindtap="onSubmit">
+      {{formMode === 'offer' ? (termsEditing ? '保存说明' : '确认实际供给') : (editing ? '保存修改' : (formMode === 'node' ? '保存节点' : '提交申请与节点'))}}
+    </cy-btn>
+  </view>
+</cy-sheet>
+</view>

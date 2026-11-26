@@ -1,0 +1,677 @@
+const { seatTarget, seatKey, captureLogin, loginCurrent, seatRecovery } = require('../../../utils/registration-seat.js');
+const modal = require('../../../utils/modal.js');
+const cyLoading = require('../../../utils/loading.js');
+const cyToast = require('../../../utils/toast.js');
+const { toTimestamp, chinaDayStart, formatDayDots } = require('../../../utils/datetime');
+const { resolveVerificationScan } = require('../../../utils/verification-scan');
+const { resolveVerificationResult, classifyVerificationOutcome, createVerificationWorkflow } = require('../../../utils/merchant-verification.js');
+const character = require('../../../utils/user-character.js');
+const app = getApp();
+const merchantTheme = require('../../../utils/merchant-theme.js');
+const { offerVerificationReadback } = require('../../../utils/verification-readback.js');
+const { summarizeOrderState, canRequestOrderRefund } = require('../../../utils/order-status.js');
+const { isFreeOrder } = require('../../../utils/order-actual-pay.js');
+const cancellationFeedback = require('../../../utils/cancellation-feedback.js');
+const { isUnknownHttpStatus } = require('../../../utils/transport/failure-envelope.js');
+const GONE_RECORD_MSG = /无权查看该报名信息|报名记录不存在/;
+
+function nonNegativeNumberOrNull(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+  return value;
+}
+
+function trimmedString(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+// H12 参与详情(方案 §5.2)。三级 = 记录/状态 ⇒ 场景弹窗,宿主是「我的参与」页。
+// 详情与取消报名逻辑的唯一实现;subpackageMember/mycanyuinfo 退化成深链薄壳。
+// 与页面版的差异只有两处(§8.3 禁止 sheet 内继续 navigateTo):
+//   ① 返回 = triggerEvent('back') 回上一层,不猜页面栈;
+//   ② 去票夹/修改报名这些非场景目标,先 close 再 navigateTo,不在弹窗上压页面。
+Component({
+  properties: {
+    recordId: { type: String, value: '' },
+    theme: { type: String, value: 'player' },
+  },
+    data: {
+      id: 0,
+      info: {},
+      displayInfo: {},
+      bundleRegistrationId: '',
+      resultTopicId: '',
+      resultEntryError: '',
+      scoreEntry: false,
+      characterEntry: false,
+      // R1-C04:本页此前没有加载/失败态,接口失败只弹 toast,页面照样把空值渲染成完整骨架。
+      // loadState: loading | missing-param | error | ready —— 四态互斥由 WXML 承接。
+      loadState: 'loading',
+      loadErrorText: '',
+      missingTitle: '链接已失效',
+      // R2-C04:错误态动作槽的**标签**。cy-error 只有一个动作位,所以标签必须跟着这一档
+      // 真正能做的事变:有 id ⇒ 「重试」,缺 id ⇒ 「返回」(与其它缺参页同一个「链接已失效 · 返回」)。
+      // ⚠️ 不许再退回 R1 的 retry="{{id ? '重试' : ''}}" —— 空标签 = 缺参数时整屏无按钮,
+      //   用户被钉在一段死文字上(2026-07-30 受控截图 05 实证)。
+      errorActionText: '重试'
+    },
+  lifetimes: {
+    attached() {
+      this._cancelDisposed = false;
+      this._cancelGeneration = (this._cancelGeneration || 0) + 1;
+      this._syncCancellationAccount();
+      const id = trimmedString(String(this.data.recordId == null ? '' : this.data.recordId))
+      // 属性观察器可能先于 attached 触发并已按这个 id 发出请求(rig 2026-11-04 实测):这时再加代号会把在途回包
+      // 判成过期,页面永远停在「加载中」。同一 id 已在途/已落定就不作废它。
+      const inFlight = !!id && String(this.data.id) === id;
+      this._skipInitialShow = true; this._detailDisposed = false;
+      if (!inFlight) this._detailGeneration = (this._detailGeneration || 0) + 1;
+      if (!id) {
+        // 没有 id 就永远拿不到详情:既不能停在「一直加载中」,也不能把缺参伪装成加载失败
+        this.setData({
+          loadState: 'missing-param',
+          missingTitle: '链接已失效',
+          errorActionText: '返回',
+        })
+        return
+      }
+      this._applyRecordId(id)
+    },
+    detached() {
+      this._invalidateParticipationCancellation();
+      this._cancelDisposed = true;
+      this._detailDisposed = true; this._detailGeneration = (this._detailGeneration || 0) + 1; if (this._verificationWorkflow) { this._verificationWorkflow.destroy(); this._verificationWorkflow = null; if (this._verificationLoadingOwners) { this._verificationLoadingOwners.forEach(() => cyLoading.hide()); this._verificationLoadingOwners.clear(); } }
+    },
+  },
+  // ⚠️ 深链壳(subpackageMember/mycanyuinfo)的 id 是页面 onLoad 里 setData 进去的:组件 attached
+  // 时那一次还看不到它(属性后到,attached 读到的是初始空串),只读 attached 的写法会让深链页
+  // 永远停在「缺少参与记录」并且一个请求都不发(2026-09-16 截图冒烟实证:拦截 sendRequest 为空)。
+  // 观察器与 attached 共用 _applyRecordId,按 id 去重,同一 id 只拉一次。
+  observers: {
+    recordId(value) {
+      this._applyRecordId(value)
+    },
+  },
+  pageLifetimes: {
+    show() {
+      this._detailHidden = false;
+      this._syncCancellationAccount();
+      if (this._skipInitialShow) { this._skipInitialShow = false; return; }
+      if (this.data.id) this.getData(this.data.id);
+    },
+    hide() {
+      this._detailHidden = true;
+      this._detailRequestEpoch = (this._detailRequestEpoch || 0) + 1;
+      this._resultReader = null;
+      this.setData({ resultTopicId: '', bundleRegistrationId: '', resultEntryError: '' });
+    },
+  },
+  methods: {
+    // 记录 id 的唯一入口:attached 与 observers.recordId 都走这里。
+    // 同一 id 只拉一次(两个入口可能都触发),空值只置缺参态不发请求。
+    _applyRecordId(value) {
+      const id = trimmedString(String(value == null ? '' : value))
+      if (!id) return
+      if (String(this.data.id) === id) return
+      this._detailGeneration = (this._detailGeneration || 0) + 1;
+      if (this._verificationWorkflow) { this._verificationWorkflow.destroy(); this._verificationWorkflow = null; }
+      if (this._verificationLoadingOwners) { this._verificationLoadingOwners.forEach(() => cyLoading.hide()); this._verificationLoadingOwners.clear(); }
+      this._invalidateParticipationCancellation();
+      this._cancelRecordPending = true;
+      // 后到的 id 要把「缺参」态翻回加载中,否则界面还停在死文字上而请求已经在路上。
+      this.setData({ id, info: {}, loadState: 'loading', loadErrorText: '', errorActionText: '重试' })
+      this.getData()
+    },
+    _submitVerification(key, loadingTitle, options, callback) {
+      const that = this;
+      const owner = String(app.getUserID && app.getUserID() || '');
+      const generation = this._detailGeneration || 0;
+      if (this._detailDisposed) return false;
+      const target = seatTarget(options);
+      const login = captureLogin(app, wx);
+      key = target ? seatKey(owner, target) : owner + ':' + key;
+      const seatCurrent = () => loginCurrent(app, wx, login) && !that._detailDisposed && generation === (that._detailGeneration || 0);
+      if (target && !seatCurrent()) return false;
+      if (!this._verificationWorkflow) this._verificationWorkflow = createVerificationWorkflow({ deadlineMs: 15000, storage: wx, getOwner: () => app.getUserID && app.getUserID() });
+      if (!target && this._verificationWorkflow.isBusy(key)) {
+        cyToast('核销处理中，请勿重复提交');
+        return false;
+      }
+      const loadingOwner = {};
+      if (!target) {
+        if (!this._verificationLoadingOwners) this._verificationLoadingOwners = new Set();
+        this._verificationLoadingOwners.add(loadingOwner);
+        cyLoading.show(loadingTitle);
+      }
+      const finishLoading = () => {
+        if (that._verificationLoadingOwners && that._verificationLoadingOwners.delete(loadingOwner)) cyLoading.hide();
+      };
+      const submitted = this._verificationWorkflow.run(key, function (done) {
+        return app.sendRequest(Object.assign({}, options, {
+          autoErrorToast: false,
+          hideLoading: !!target || options.hideLoading, silentError: !!target || options.silentError,
+          success(r) { done(classifyVerificationOutcome(r, 'success', undefined, options)); },
+          fail(res, status) { done(classifyVerificationOutcome(res, 'fail', status, options)); },
+          successStatusAbnormal(res, status) {
+            done(classifyVerificationOutcome(res, 'abnormal', status, options));
+          }
+        }));
+      }, function (result) {
+        finishLoading();
+        if (target && !seatCurrent()) return;
+        if (that._detailDisposed || generation !== (that._detailGeneration || 0)
+            || owner !== String(app.getUserID && app.getUserID() || '')) return;
+        if (result.status === 'unknown') {
+          callback({ code: 202, msg: target ? '原席位结果待确认；再次扫描同一席位只查询结果，请勿改选席位重发' : '核销结果待确认，请勿重复核销；请先查看核销记录' });
+          if (!target) offerVerificationReadback(key, that._verificationWorkflow);
+          return;
+        }
+        callback(result.response);
+      }, target ? seatRecovery(app, target, seatCurrent) : undefined);
+      if (!submitted) finishLoading();
+      return submitted;
+    },
+    _leave(url, current) {
+      this.triggerEvent('close')
+      if (!current || current()) wx.navigateTo({ url })
+    },
+    _resultEntry() {
+      const reader = this._resultReader;
+      const info = this.data.info || {};
+      if (this._detailDisposed || this._detailHidden || this.data.loadState !== 'ready'
+          || !reader || !reader.id || !reader.token || reader.token === app.DEV_TOKEN
+          || !character.sameReader(app, reader) || character.exactId(info.memberId) !== reader.id) return null;
+      const topicId = character.registrationTopic(info, this.data.id);
+      if (!topicId) return null;
+      return { topicId, activityId: Number(info.ownerType) === 1 ? '0' : character.exactId(info.cmsActivity.id) };
+    },
+    _openResult(kind) {
+      if (this._detailDisposed || this._detailHidden || this._resultLeaving) return;
+      const entry = this._resultEntry();
+      if (!entry) {
+        this.setData({ resultTopicId: '', resultEntryError: '无法确认当前账号的报名与主题关联，请重新加载参与详情；若仍不可用请联系客服' });
+        return;
+      }
+      const reader = this._resultReader;
+      this._resultLeaving = true;
+      const url = kind === 'character'
+        ? '/subpackageMember/character/index?topicId=' + encodeURIComponent(entry.topicId)
+        : '/subpackageMember/orient-score/index?topicId=' + encodeURIComponent(entry.topicId) + '&activityId=' + encodeURIComponent(entry.activityId);
+      this._leave(url, () => character.sameReader(app, reader));
+    },
+    _bundleEntry() {
+      if (!this._resultEntry()) return '';
+      // R11 p1 F-7:套票关着时不摆「自由探索权益」入口(与 /api/free-explore 套票端点同一个开关)
+      if (!(app.globalData && app.globalData.features && app.globalData.features.freeExploreBundle === true)) return '';
+      const info = this.data.info || {};
+      if (Number(info.ownerType) !== 1 || !info.cmsTopic
+          || !(Number(info.purchaseKind) === 3 || Number(info.cmsTopic.productType) === 2)) return '';
+      return character.exactId(info.id);
+    },
+    goBundle() {
+      if (this._detailDisposed || this._detailHidden || this._resultLeaving) return;
+      const registrationId = this._bundleEntry();
+      if (!registrationId) { this.setData({ bundleRegistrationId: '' }); return; }
+      const reader = this._resultReader;
+      this._resultLeaving = true;
+      this._leave('/subpackageMember/free-explore/index?registrationId=' + encodeURIComponent(registrationId),
+        () => character.sameReader(app, reader));
+    },
+    _probeCharacter(topicId, reader) {
+      const seq = this._characterProbe = (this._characterProbe || 0) + 1;
+      const settle = (res) => {
+        if (this._detailDisposed || seq !== this._characterProbe || !character.sameReader(app, reader)) return;
+        const card = res && character.responseCode(res.code) === 200 ? character.projectCard(res.data, topicId) : null;
+        this.setData({ characterEntry: !!card && (card.created || card.attributes.length > 0) });
+      };
+      app.sendRequest({ url: '/api/play/character', method: 'GET', data: { topicId }, hideLoading: true, autoErrorToast: false,
+        success: settle, fail: () => settle(null), successStatusAbnormal: () => settle(null) });
+    },
+    goCharacter() { this._openResult('character'); },
+    goScore() { this._openResult('score'); },
+    goPlay() {
+      const info = this.data.info || {};
+      const registrationId = info.id || this.data.id;
+      const ownerId = info.ownerId
+        || (info.cmsTopic && info.cmsTopic.id)
+        || (info.cmsActivity && info.cmsActivity.id);
+      if (!registrationId || !ownerId) {
+        this._leave('/subpackageMember/signup/index');
+        return;
+      }
+      const isTopic = Number(info.ownerType) === 1 || !!info.cmsTopic;
+      this._leave(isTopic
+        ? '/pages/play/index?topicId=' + ownerId + '&registrationId=' + registrationId
+        : '/pages/play/index?activityId=' + ownerId + '&registrationId=' + registrationId);
+    },
+    // 错误态唯一动作位:标签与行为一一对应,不出现「叫重试却在跳转」
+    onErrorAction() {
+      if (!this.data.id || this.data.loadState === 'missing-param') {
+        this.backToList();
+        return;
+      }
+      this.setData({ loadState: 'loading', loadErrorText: '' });
+      this.getData(this.data.id);
+    },
+
+    // 弹窗里「返回参与列表」= 关掉这一层回到宿主页(我的参与),不再猜页面栈。
+    backToList() {
+      this.triggerEvent('back');
+    },
+
+    goBack() {
+      this.triggerEvent('back');
+    },
+
+    // 跳转到模板详情
+    goInfo() {
+      var that = this
+      this._leave('/pages/templatedetail/templatedetail?id=' + that.data.info.templateId + '&scope=my');
+    },
+
+    // 核验扫码:与 merchant/index、member/index 复用同一套扫码路由(utils/verification-scan),
+    // 不在本页重新实现一套核销逻辑
+    goScanQR() {
+      const login = captureLogin(app, wx), scanEpoch = this._detailGeneration || 0;
+      const scanCurrent = () => !this._detailDisposed && loginCurrent(app, wx, login) && scanEpoch === (this._detailGeneration || 0);
+      wx.scanCode({
+        success: (res) => {
+          if (!scanCurrent()) return;
+          const scan = resolveVerificationScan(res.result);
+          if (scan.kind === 'invalid') {
+            cyToast(scan.message);
+            return;
+          }
+          if (!['/api/verify/groupcode/redeem', '/api/registration/scan_dynamic_code',
+            '/api/registration/scan_qr_code', '/api/coupon/verification'].includes(scan.url)) {
+            cyToast('二维码格式错误');
+            return;
+          }
+          // 路由仍来自原扫码解析；四个原端点显式展开，不接收任意 URL。
+          const url = scan.url === '/api/verify/groupcode/redeem' ? '/api/verify/groupcode/redeem'
+            : scan.url === '/api/registration/scan_dynamic_code' ? '/api/registration/scan_dynamic_code'
+              : scan.url === '/api/registration/scan_qr_code' ? '/api/registration/scan_qr_code'
+                : '/api/coupon/verification';
+          this._submitVerification(url + ':' + scan.code, scan.loadingTitle, {
+            url,
+            data: scan.data,
+            method: 'POST',
+          }, (r) => {
+              const d = r.data || {};
+              // ponytail: 本页是快捷入口,不复刻 merchant/index 的选章面板 UI;一码对应多章节这种
+              // 需要选章的场景引导去商家后台完整核销流程处理,而不是静默按失败提示。
+              if (d.needChapterChoice || d.needStationChoice) {
+                cyToast('该码含多个章节，请到商家后台核销');
+                return;
+              }
+              const verdict = resolveVerificationResult(r, scan.successTitle || '核销');
+              if (verdict.state === 'duplicate') { cyToast(verdict.title + '：' + verdict.message, { icon: 'none' }); return; }
+              if (r.code == '200') {
+                cyToast.success(r.msg || scan.successTitle);
+              } else {
+                cyToast(r.msg || '核销失败');
+              }
+          });
+        }
+      });
+    },
+
+    // 获取数据
+    getData: function () {
+      const that = this;
+      if (that._detailDisposed) return;
+      const generation = that._detailGeneration;
+      const member = app.getUserID && app.getUserID();
+      const reader = character.reader(app);
+      this._resultReader = null;
+      this._resultLeaving = false;
+      this.setData({ resultTopicId: '', bundleRegistrationId: '', resultEntryError: '' });
+      const id = that.data.id;
+      const requestEpoch = (this._detailRequestEpoch || 0) + 1;
+      this._detailRequestEpoch = requestEpoch;
+      let settled = false;
+      const isCurrent = () => !settled && !that._detailDisposed && !that._detailHidden
+        && character.sameReader(app, reader) && generation === that._detailGeneration
+        && requestEpoch === that._detailRequestEpoch
+        && member === (app.getUserID && app.getUserID()) && String(id) === String(that.data.id);
+      const readFailure = (res, statusCode) => {
+        if (!isCurrent()) return;
+        settled = true;
+        that.setData({ info: {}, displayInfo: {} });
+        const code = Number(statusCode || (res && res.code));
+        if (code === 403 || code === 404 || (res && res.code != '200' && GONE_RECORD_MSG.test(String(res.msg || '')))) {
+          that.setData({ loadState: 'missing-param', missingTitle: '链接已失效', errorActionText: '返回' });
+          return;
+        }
+        const msg = app.getRequestErrorMessage
+          ? app.getRequestErrorMessage(res, '参与详情没能打开')
+          : ((res && (res.msg || res.errMsg)) || '参与详情没能打开');
+        that.setData({ loadState: 'error', loadErrorText: msg, errorActionText: '重试' });
+      };
+      app.sendRequest({
+        hideLoading: true,
+        silentError: true,
+        url: '/api/registration/info',
+        data: { id },
+        method: "POST",
+        success: function (res) {
+          if (!isCurrent()) return;
+          if (res && res.code == "200" && res.data && typeof res.data === 'object' && !Array.isArray(res.data)) {
+            settled = true;
+            const info = res.data;
+            that._cancelRecordPending = false;
+
+            // 准备显示数据
+            const displayInfo = that.prepareDisplayData(info);
+
+            that.setData({
+              info: info,
+              displayInfo: displayInfo,
+              loadState: 'ready',
+              loadErrorText: ''
+            });
+            that._resultReader = reader;
+            const entry = that._resultEntry();
+            // R11 p1 F-7:定向成绩只给城市定向;角色卡只在主题真有角色属性时给
+            const source = info.cmsActivity || info.cmsTopic || {};
+            that.setData({ bundleRegistrationId: that._bundleEntry(), resultTopicId: entry ? entry.topicId : '',
+              scoreEntry: !!entry && Number(source.productType) === 1, characterEntry: false,
+              resultEntryError: entry || !character.hasTopicRelation(info) ? '' : '无法确认当前账号的报名与主题关联，请重新加载参与详情；若仍不可用请联系客服。' });
+            if (entry) that._probeCharacter(entry.topicId, reader);
+          } else {
+            readFailure(res);
+          }
+        },
+        fail(res, statusCode) { readFailure(res, statusCode); },
+        successStatusAbnormal(res, statusCode) { readFailure(res, statusCode); }
+      });
+    },
+
+    // 准备显示数据：字段真源 = /api/registration/info 回包(CmsRegistration + cmsTopic/cmsActivity)。
+    // 此前这里按已退役的商家视图(view_registration_merchant)字段读(topicName/topicStartDate/
+    // displayStatus…),8241de6e8 换接口后没换映射 —— 详情页整页空壳(未知主题/状态待确认)。
+    // 现在名称/日期/封面取 cmsTopic|cmsActivity,状态与列表页、订单页同口径(summarizeOrderState)。
+    prepareDisplayData(info) {
+      const displayInfo = {};
+      const source = info.cmsTopic || info.cmsActivity || {};
+      const isTopic = Number(info.ownerType) === 1 || !!info.cmsTopic;
+
+      // 1. 路线/活动名称
+      displayInfo.topicName = info.activityTitle || trimmedString(source.name) || trimmedString(source.title) || '未知主题';
+
+      // 2. 日期范围格式化
+      displayInfo.formatDateRange = this.formatDateRange(source.startDate, source.endDate);
+
+      // 3. 计算时间状态
+      const timeStatus = this.calculateTimeStatus(source.startDate, source.endDate, isTopic ? '路线' : '活动');
+      displayInfo.isActivityEnded = timeStatus.isEnded;
+      displayInfo.isActivityStarted = timeStatus.isStarted;
+      displayInfo.isInThreeDaysRange = timeStatus.isInThreeDaysRange;
+      displayInfo.remainingDays = timeStatus.remainingDaysText;
+      displayInfo.isBeforeThreeDays = timeStatus.isBeforeThreeDays;
+      displayInfo.daysToStart = timeStatus.daysToStart;
+
+      // 4. 封面
+      displayInfo.picUrl = trimmedString(source.imgUrl) || trimmedString(source.imgArr);
+
+      // 5. 状态处理 —— 与「我的参与」列表、订单详情同一读模型
+      const summary = summarizeOrderState(info);
+      const statusVariantByKey = {
+        not_started: 'info',
+        in_progress: 'success',
+        pending_payment: 'warning',
+        refunding: 'warning',
+      };
+      displayInfo.statusText = summary.text;
+      displayInfo.statusVariant = statusVariantByKey[summary.key] || 'neutral';
+      displayInfo.refundText = summary.refundText;
+      displayInfo.modeText = isTopic
+        ? ((Number(info.purchaseKind) === 3 || Number(source.productType) === 2) ? '自由探索' : '城市定向')
+        : '线下活动';
+      displayInfo.modeVariant = displayInfo.modeText === '自由探索' ? 'success' : 'info';
+
+      // 6. 活动说明
+      displayInfo.activityDesc = trimmedString(info.activityDesc) || trimmedString(source.description);
+      displayInfo.cooperateDateText = trimmedString(info.cooperateDate) || '—';
+      displayInfo.hasCooperateDate = !!trimmedString(info.cooperateDate);
+      displayInfo.hasNodeName = !!trimmedString(info.nodeName);
+
+      const totalOrderNum = nonNegativeNumberOrNull(info.totalOrderNum);
+      const verifiedNum = nonNegativeNumberOrNull(info.verifiedNum);
+      const orderStatsKnown = totalOrderNum !== null && verifiedNum !== null && verifiedNum <= totalOrderNum;
+      displayInfo.showOrderStats = info.status === 1;
+      displayInfo.orderStatsKnown = orderStatsKnown;
+      // UI-04(2026-09-18):订单数是数字统计,没取到显示 0,不再显示横杠
+      displayInfo.pendingOrderText = orderStatsKnown ? String(totalOrderNum - verifiedNum) : '0';
+      displayInfo.verifiedOrderText = orderStatsKnown ? String(verifiedNum) : '0';
+      displayInfo.totalOrderText = orderStatsKnown ? String(totalOrderNum) : '0';
+
+      // 7. 模板名称显示 - 使用视图中的templateName
+      displayInfo.templateName = info.templateName || '';
+
+      // 8. 主题图片 - 使用视图中的topicImgArr
+      displayInfo.topicImage = info.topicImgArr || null;
+
+      // 9. 规则说明
+      displayInfo.hasRuleInstructions = info.ruleInstructions ? true : false;
+      if (info.ruleInstructions) {
+        displayInfo.ruleInstructions = info.ruleInstructions.length > 150
+          ? info.ruleInstructions.substring(0, 150) + '...'
+          : info.ruleInstructions;
+      }
+
+      // 10. 底部按钮状态
+      // 需修改状态单独处理 - 使用视图中的displayStatus
+      displayInfo.needModify = info.displayStatus === '需修改';
+
+      // 待支付单可取消；已付单只读真实退款资格，首次扫码完成不阻断未核销零元单退出。
+      displayInfo.canCancel = !displayInfo.needModify &&
+        (summary.key === 'pending_payment' || canRequestOrderRefund(info));
+
+      // 联系客服按钮：不能自助取消时兜底(除需修改外)
+      displayInfo.showContactService = !displayInfo.canCancel && !displayInfo.needModify;
+
+      // 已结束状态
+      displayInfo.isEnded = displayInfo.isActivityEnded;
+
+      return displayInfo;
+    },
+
+    // 格式化日期范围
+    formatDateRange(startDateStr, endDateStr) {
+      if (!startDateStr || !endDateStr) return '';
+
+      try {
+        // L09-091:与 calculateTimeStatus 同一中国时区口径;ISO 带 T 的串不再出 NaN.NaN.NaN
+        const formatDate = (dateStr) => formatDayDots(dateStr);
+
+        const startFormatted = formatDate(startDateStr);
+        const endFormatted = formatDate(endDateStr);
+        if (!startFormatted || !endFormatted) return '';
+
+        return `${startFormatted} - ${endFormatted}`;
+      } catch (error) {
+        return '';
+      }
+    },
+
+    // 计算时间状态
+    calculateTimeStatus(startDateStr, endDateStr, noun) {
+      const result = {
+        isEnded: false,
+        isStarted: false,
+        isBeforeStart: false,
+        isBeforeThreeDays: false,
+        isInThreeDaysRange: false,
+        daysToStart: 0,
+        remainingDaysText: ''
+      };
+
+      if (!startDateStr || !endDateStr) return result;
+
+      try {
+        const now = new Date();
+        const startDate = new Date(toTimestamp(startDateStr));
+        const endDate = new Date(toTimestamp(endDateStr));
+
+        // 设置时间为当天的开始和结束
+        // ★"今天零点"必须按中国自然日取,不能用 setHours(0,0,0,0)——那取的是运行环境本地零点,
+        //   手机在 UTC 时会把中国的 7-26 02:00 归到 7-25,导致"还有几天开始"整整差一天。
+        const todayStart = new Date(chinaDayStart(now));
+        const todayEnd = new Date(chinaDayStart(now) + 24 * 60 * 60 * 1000 - 1);
+
+        // 判断活动状态
+        result.isEnded = now > endDate;
+        result.isStarted = now >= startDate;
+        result.isBeforeStart = now < startDate;
+
+        if (result.isBeforeStart) {
+          // 计算距离开始还有多少天
+          const startDayStart = chinaDayStart(startDate.getTime());
+          const diffTime = startDayStart - todayStart.getTime();
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          result.daysToStart = diffDays;
+
+          if (diffDays > 0) {
+            // 第十轮 f4(f1 遗留):12 小时后开始的活动按自然日差会写成「还剩1天」;不足 24 小时按小时说。
+            const hoursLeft = (startDate.getTime() - now.getTime()) / (60 * 60 * 1000);
+            const subject = noun || '路线';
+            result.remainingDaysText = hoursLeft < 24
+              ? `距离${subject}开始还剩${Math.max(1, Math.ceil(hoursLeft))}小时`
+              : `距离${subject}开始还剩${diffDays}天`;
+
+            // 检查是否在开始前3天内
+            result.isInThreeDaysRange = diffDays <= 3;
+
+            // 检查是否在开始前3天以上
+            result.isBeforeThreeDays = diffDays > 3;
+          }
+        } else if (result.isStarted && !result.isEnded) {
+          // 活动进行中
+          result.remainingDaysText = '';
+          result.isInThreeDaysRange = false;
+          result.isBeforeThreeDays = false;
+        } else if (result.isEnded) {
+          // 活动已结束
+          result.remainingDaysText = '';
+          result.isInThreeDaysRange = false;
+          result.isBeforeThreeDays = false;
+        }
+
+      } catch (error) {
+        console.error('计算时间状态错误:', error);
+      }
+
+      return result;
+    },
+
+    // 取消参与：已支付单必须走 cancel-refund(/api/registration/cancel 对已支付单必拒),
+    // 文案与订单详情同源(utils/danger-actions.js),退款进度以接口回执为准。
+    _invalidateParticipationCancellation() {
+      if (this._finishCancelPrompt) this._finishCancelPrompt();
+      if (this._finishCancellation) this._finishCancellation();
+      this._cancelGeneration = (this._cancelGeneration || 0) + 1;
+    },
+    _syncCancellationAccount() {
+      const member = app.getUserID && app.getUserID();
+      if (this._cancelMemberId !== undefined && this._cancelMemberId !== member) {
+        this._invalidateParticipationCancellation();
+      }
+      this._cancelMemberId = member;
+    },
+    cancelParticipation() {
+      this._syncCancellationAccount();
+      if (this._cancelDisposed || this._cancelRecordPending || !this.data.id
+          || this._cancelPromptOpen || this._finishCancellation) return;
+      const id = this.data.id;
+      const paid = Number((this.data.info || {}).paymentStatus) === 2;
+      const member = this._cancelMemberId;
+      const generation = this._cancelGeneration;
+      const isCurrent = () => !this._cancelDisposed && generation === this._cancelGeneration
+        && member === (app.getUserID && app.getUserID()) && String(id) === String(this.data.id);
+      this._cancelPromptOpen = true;
+      const finishCancelPrompt = () => {
+        if (this._finishCancelPrompt !== finishCancelPrompt) return false;
+        this._finishCancelPrompt = null;
+        this._cancelPromptOpen = false;
+        return true;
+      };
+      this._finishCancelPrompt = finishCancelPrompt;
+      modal.show({
+        // F-W5-07:零元单没有钱可退,确认框与订单详情/列表同用「取消报名」文案。
+        dangerKey: paid ? (isFreeOrder(this.data.info) ? 'order.cancel-free' : 'order.cancel-refund') : 'order.cancel',
+        dangerParams: {
+          // j1 F7:/api/registration/info 下发 cancelRefundAmount,确认框写明这次退回多少
+          deadline: require('../../utils/order-refund-amount.js').cancelConfirmDeadline(this.data.info),
+        },
+        success: (res) => {
+          if (!finishCancelPrompt() || !isCurrent() || !res.confirm) return;
+          // B9:退款结果(到账/被拒)订阅只在用户确认退款这一下申请;零元单没有钱可退,不弹
+          if (paid && !isFreeOrder(this.data.info)) require('../../../utils/subscribe.js').request(['refund']);
+          this.cancelRequest(paid, id);
+        },
+        fail: finishCancelPrompt,
+        complete: finishCancelPrompt
+      });
+    },
+
+    // 发送取消请求（添加列表刷新）
+    cancelRequest(paid, recordId) {
+      const that = this;
+      that._syncCancellationAccount();
+      const id = recordId == null ? that.data.id : recordId;
+      if (that._cancelDisposed || that._cancelRecordPending || !id || that._finishCancellation
+          || String(id) !== String(that.data.id)) return;
+      const member = that._cancelMemberId;
+      const generation = that._cancelGeneration;
+      const isCurrent = () => !that._cancelDisposed && generation === that._cancelGeneration
+        && member === (app.getUserID && app.getUserID()) && String(id) === String(that.data.id)
+        && that._finishCancellation === finishCancellation;
+      cyLoading.show('取消中...');
+      const finishCancellation = () => {
+        if (that._finishCancellation !== finishCancellation) return;
+        that._finishCancellation = null;
+        cyLoading.hide();
+      };
+      that._finishCancellation = finishCancellation;
+      app.sendRequest({
+        url: paid ? '/api/registration/cancel-refund' : '/api/registration/cancel',
+        method: "POST",
+        data: { id },
+        success: function (res) {
+          if (!isCurrent()) return;
+          if (res.code == "200") {
+            cyToast.success(paid ? cancellationFeedback(res) : '取消成功', { duration: 2000 });
+            // 取消成功 ⇒ 关掉详情回到列表,并通知宿主重拉(原来是 navigateBack 猜页面栈)
+            that.triggerEvent('refresh');
+            that.triggerEvent('back');
+          } else {
+            cyToast(res.msg || '取消失败', { duration: 2000 });
+          }
+        },
+        fail: function (res, statusCode) {
+          if (!isCurrent()) return;
+          if (isUnknownHttpStatus(statusCode)) {
+            cyToast('取消结果暂未确认，正在刷新订单');
+            that.triggerEvent('refresh');
+            that.getData();
+            return;
+          }
+          cyToast('网络错误，请重试', { duration: 2000 });
+        },
+        complete: finishCancellation
+      });
+    },
+
+    // 客服回调处理
+    handleContact(e) {
+      // 可以在这里处理客服会话的回调
+    },
+
+    // 去修改按钮点击:复用已上线的商家报名编辑器,避免把真实入口伪装成 toast。
+    goModify() {
+      if (!this.data.id) return;
+      this._leave('/pages/topic/merchantapply/index?mode=1&id=' + encodeURIComponent(String(this.data.id)));
+    }
+
+  },
+})

@@ -1,0 +1,260 @@
+// §17.1 / §17.2 / §17.3 / §17.4 / P6 通行证详情与购买。
+// 金额、期限、可买与否只读服务端:先读详情,再按当前「给谁用」向服务端要报价;
+// 购买按钮只来自报价 availablePayModes。下单只回传 quoteSign/quoteExpiresAt,不提交金额。
+// 同一次购买意图复用 requestId(网络未知可原样重发);报价变了才换新号。
+const app = getApp()
+const cyToast = require('../../../utils/toast.js')
+const modal = require('../../../utils/modal.js')
+const login = require('../../../utils/auth/require-login.js')
+const session = require('../../../utils/session/login-reload.js')
+const { isBizOk } = require('../../../utils/response-shape.js')
+const mv = require('../../utils/market-view.js')
+const { WORDS } = require('../../utils/platform-pass.js')
+const pu = require('../../../utils/commerce/pass-unlock-view.js')
+const { readReducedMotion } = require('../../../utils/motion-preference.js')
+
+function newRequestId() {
+  return 'mkp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10)
+}
+
+Page({
+  data: {
+    statusBarHeight: app.globalData.statusBarHeight,
+    navBarHeight: app.globalData.navBarHeight,
+    state: 'loading', // loading | ready | error
+    errorTitle: '加载失败',
+    errorCta: '重试',
+    card: { name: '', topics: [] },
+    forTabs: [{ key: 'self', label: '自己用' }, { key: 'gift', label: '送给好友' }],
+    forGift: false,
+    buy: { state: 'unavailable', reason: '', payModes: [] },
+    checkout: [],
+    buying: false,
+    buyingMode: 0,
+    buyError: '',
+    giftSheet: false,
+    giftShared: false,
+    // r3-pass:票面拼合动效与到账分步(只来自服务端商品详情与已付订单)
+    heroState: 'scattered',
+    heroFace: '',
+    reducedMotion: false,
+    unlock: { show: false, steps: [] }
+  },
+  onLoad(options) {
+    this._id = options && options.id
+    this._wantGift = !!(options && options.forGift === '1') // R4:主题详情「送礼」进来默认选赠送(商品可赠送时才生效)
+    this.setData({ reducedMotion: readReducedMotion() })
+    this.load()
+  },
+  load() {
+    if (!this._id) { this.setData({ state: 'error', errorTitle: '商品不存在或已下架', errorCta: '返回' }); return }
+    const seq = (this._seq = (this._seq || 0) + 1)
+    this.setData({ state: 'loading' })
+    app.sendRequest({
+      url: '/api/marketing/product/' + encodeURIComponent(this._id), method: 'GET', hideLoading: true, autoErrorToast: false,
+      success: (res) => {
+        if (seq !== this._seq) return
+        const card = isBizOk(res) ? mv.productCard(res.data) : null
+        if (!card) {
+          // 买家走查 1122:服务端明确拒绝(下架/不存在)再点「重试」只会原样再错 —— 给「返回」;无码才是可重试的失败
+          const code = res && res.reasonCode
+          this.setData({ state: 'error', errorTitle: code ? mv.reasonText(code) : '加载失败', errorCta: code ? '返回' : '重试' })
+          return
+        }
+        this._product = res.data
+        this.setData({ state: 'ready', card, forGift: card.giftOnly ? true : (this.data.forGift || (this._wantGift && card.giftAllowed)), heroFace: pu.faceText(res.data), heroState: 'scattered' })
+        // 下一帧再挂拼好的类,碎片才会飞回来
+        clearTimeout(this._heroT)
+        this._heroT = setTimeout(() => this.setData({ heroState: 'assembled' }), this.data.reducedMotion ? 0 : 80)
+        if (card.isExtraSeat) {
+          this.setData({ buy: mv.purchaseView({ purchaseRoute: mv.ROUTE.EXTRA_SEAT }) })
+          return
+        }
+        this.quote()
+      },
+      fail: () => { if (seq === this._seq) this.setData({ state: 'error', errorTitle: '加载失败', errorCta: '重试' }) }
+    })
+  },
+  onHide() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1 },
+  onShow() { if (this._product && this._quoteOwner !== session.identity(app)) this.quote() },
+  quote() {
+    const owner = this._quoteOwner = session.identity(app)
+    const seq = (this._quoteSeq = (this._quoteSeq || 0) + 1)
+    const fulfillmentKind = this.data.forGift ? mv.FULFILLMENT.GIFT : mv.FULFILLMENT.SELF
+    this._quote = null
+    if (!login.hasSession(app)) { this.setData({ buy: { state: 'login', payModes: [] }, buyError: '', checkout: [] }); return }
+    this.setData({ buy: { state: 'loading', reason: '', payModes: [] }, buyError: '', checkout: mv.checkoutRows(null, this.data.card) })
+    app.sendRequest({
+      url: '/api/marketing/product/quote', method: 'POST', header: { 'Content-Type': 'application/json' },
+      data: JSON.stringify({ productId: Number(this._id), quantity: 1, fulfillmentKind }),
+      hideLoading: true, autoErrorToast: false,
+      success: (res) => {
+        if (seq !== this._quoteSeq || this._unloaded || owner !== session.identity(app)) return
+        if (isBizOk(res) && res.data) {
+          if (!this._quote || this._quote.quoteSign !== res.data.quoteSign) this._reqId = null
+          this._quote = res.data
+          this.setData({ buy: mv.purchaseView(res.data), checkout: mv.checkoutRows(res.data, this.data.card) })
+        } else {
+          // 报价被拒:只说原因,不出购买按钮(加座/渠道关闭等走这里)
+          const checkout = res && res.checkout
+          this.setData({ buy: checkout
+            ? mv.purchaseView({ purchaseRoute: mv.ROUTE.TICKET, checkout })
+            : { state: 'unavailable', reason: mv.reasonText(res && res.reasonCode), payModes: [] } })
+        }
+      },
+      fail: () => {
+        if (seq !== this._quoteSeq || this._unloaded || owner !== session.identity(app)) return
+        // 买家走查 1122:报价没取到是网络问题,给一个「重试」,不让底栏只剩一句话
+        this.setData({ buy: { state: 'requote', reason: '报价暂不可用', payModes: [] } })
+      }
+    })
+  },
+  onErrorCta() {
+    if (this.data.errorCta === '返回') this.goBack()
+    else this.load()
+  },
+  retryQuote() { this.quote() },
+  onFor(e) {
+    const key = e && e.detail && e.detail.key
+    const forGift = key === 'gift'
+    if (forGift === this.data.forGift) return
+    this.setData({ forGift })
+    this.quote()
+  },
+  loginToBuy() {
+    if (app.ensureLoginFor && !app.ensureLoginFor('checkout', () => this.loginToBuy(), { owner: this, target: () => [this._id, this.data.forGift] })) return
+    this.quote()
+  },
+  onBuy(e) {
+    if (app.ensureLoginFor && !app.ensureLoginFor('checkout', () => this.onBuy(e), { owner: this, target: () => [this._id, this.data.forGift] })) return
+    if (this._quoteOwner !== session.identity(app)) { this.quote(); return }
+    const mode = Number(e && e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.mode)
+    if (!mode || this.data.buying || !this._quote) return
+    const label = (this.data.buy.payModes.find((m) => m.mode === mode) || {}).label || ''
+    modal.show({
+      title: '确认购买', content: this.data.card.name + ' · ' + label, confirmText: '确认',
+      success: (r) => { if (r && r.confirm) this._submit(mode) }
+    })
+  },
+  _submit(mode) {
+    if (!this._reqId || this._reqMode !== mode) { this._reqId = newRequestId(); this._reqMode = mode }
+    const body = mv.orderRequest(Number(this._id), this._quote, mode,
+      this.data.forGift ? mv.FULFILLMENT.GIFT : mv.FULFILLMENT.SELF, this._reqId)
+    this.setData({ buying: true, buyingMode: mode, buyError: '' })
+    app.sendRequest({
+      url: '/api/marketing/product/order', method: 'POST', header: { 'Content-Type': 'application/json' },
+      data: JSON.stringify(body), hideLoading: true, autoErrorToast: false,
+      success: (res) => {
+        if (isBizOk(res) && res.data) { this._afterOrder(res.data); return }
+        const code = res && res.reasonCode
+        // 有 reasonCode 按码说;没有码时原样显示后端提示,不改写
+        // r2-join:去掉给开发看的内部编号(topicId=…),其余原文不改
+        this.setData({ buying: false, buyError: code ? mv.reasonText(code) : (mv.playerText(res && res.msg) || mv.reasonText(null)) })
+        if (code === 'QUOTE_EXPIRED' || code === 'QUOTE_STALE') this.quote()
+      },
+      // 结果未知:保留同一 requestId,再点即原样重发,由服务端重放原单
+      fail: () => this.setData({ buying: false, buyError: '结果待确认，请再点一次查询原订单' })
+    })
+  },
+  _afterOrder(order) {
+    this._reqId = null
+    const token = order.gift && order.gift.claimToken
+    if (order.statusLabel === 'PAID') {
+      this.setData({ buying: false })
+      if (token) { this._giftToken = token; this.setData({ giftSheet: true }); return }
+      // r3-pass:服务端回 PAID 才放到账分步;步数全由真实字段决定,没有的事实没有那一步
+      const steps = pu.unlockSteps(this._product, order)
+      if (steps.length) { this.setData({ unlock: { show: true, steps } }); return }
+      this._toOrders()
+      return
+    }
+    if (order.statusLabel === 'PENDING_CASH') { this._payCash(order); return }
+    this.setData({ buying: false, buyError: mv.orderStateText(order) })
+  },
+  // 现金:预下单拿支付参数 → 微信支付 → 只以服务端订单状态为准(SDK 成功 ≠ 已付)
+  _payCash(order) {
+    const blocked = order.payment && order.payment.blockedReason
+    if (blocked) { this.setData({ buying: false, buyError: mv.reasonText(blocked) }); return }
+    app.sendRequest({
+      url: '/api/marketing/product/orders/' + encodeURIComponent(order.orderNo) + '/pay', method: 'POST',
+      hideLoading: true, autoErrorToast: false,
+      success: (res) => {
+        const p = isBizOk(res) && res.data && res.data.payParams
+        if (!p) { this.setData({ buying: false, buyError: mv.reasonText(res && res.reasonCode) }); return }
+        // OR-009:区分结果 —— 取消直接说已取消本次付款;成功按单号回查;其他失败只回查一次(SDK 失败不等于没扣款)
+        if (this._unloaded) return
+        wx.requestPayment(Object.assign({}, p, {
+          success: () => this._verify(order.orderNo, 0),
+          fail: (e) => {
+            if (this._unloaded) return
+            if (/cancel/.test(String((e && e.errMsg) || ''))) { this.setData({ buying: false }); cyToast(WORDS.PAY_CANCELLED); return }
+            this._verify(order.orderNo, 2)
+          }
+        }))
+      },
+      fail: () => { if (!this._unloaded) this.setData({ buying: false, buyError: '结果待确认，请到我的订单查看' }) }
+    })
+  },
+  // L09-034:离页后迟到的回包 / 重试计时器不再触发跳转(redirectTo 会顶掉用户当前页)
+  _verify(orderNo, attempt) {
+    if (this._unloaded) return
+    app.sendRequest({
+      // OR-009:按单号查本人这一单(服务端只回本人的单),不再在近 20 单里扫,单多也不会误报「确认中」。
+      url: '/api/marketing/product/orders/' + encodeURIComponent(orderNo), method: 'GET', hideLoading: true, autoErrorToast: false,
+      success: (res) => {
+        if (this._unloaded) return
+        const row = isBizOk(res) && res.data && res.data.orderNo === orderNo ? res.data : null
+        if (row && row.statusLabel === 'PAID') { this._afterOrder(row); return }
+        if (attempt < 2) { this._verifyT = setTimeout(() => this._verify(orderNo, attempt + 1), 1500); return }
+        this.setData({ buying: false, buyError: row ? mv.orderStateText(row) : WORDS.CONFIRMING + '，请到我的订单查看' })
+      },
+      fail: () => { if (!this._unloaded) this.setData({ buying: false, buyError: WORDS.CONFIRMING + '，请到我的订单查看' }) }
+    })
+  },
+  onUnlockDone() {
+    this.setData({ 'unlock.show': false })
+    this._toOrders()
+  },
+  // 双人票 / 小队票到账:从到账动效直接去票内席位页邀请同伴(席位只来自服务端已付原单)
+  onUnlockInvite(e) {
+    const id = Number(e && e.detail && e.detail.registrationId)
+    if (!Number.isInteger(id) || id <= 0) return
+    this.setData({ 'unlock.show': false })
+    wx.redirectTo({ url: '/subpackageJourney/pages/seats/index?registrationId=' + id })
+  },
+  _toOrders() {
+    cyToast('已购买')
+    wx.redirectTo({ url: '/subpackageMember/market/passes/index?tab=orders' })
+  },
+  onUnload() { this._unloaded = true; this._seq = (this._seq || 0) + 1; this._quoteSeq = (this._quoteSeq || 0) + 1; clearTimeout(this._heroT); clearTimeout(this._verifyT) },
+  goCheckout() {
+    if (app.ensureLoginFor && !app.ensureLoginFor('signup', () => this.goCheckout(), { owner: this, target: () => [this._id] })) return
+    const c = this.data.buy && this._quote ? this._quote.checkout : null
+    const checkout = c || (this.data.buy && this.data.buy.checkout)
+    if (!checkout || !checkout.activityId) { cyToast('该商品需在活动报名中购买'); return }
+    wx.navigateTo({ url: '/pages/activity/baoming/baoming?activityId=' + encodeURIComponent(checkout.activityId)
+      + (checkout.ticketId ? '&ticketId=' + encodeURIComponent(checkout.ticketId) : '') })
+  },
+  // 买家走查 1122:领取链接只在这次回包里出现一次;还没发给好友就关掉,先确认,别让付了钱的礼品发不出去
+  closeGiftSheet() {
+    if (this.data.giftShared) { this._leaveGiftSheet(); return }
+    modal.show({
+      title: '礼品还没发给好友', content: '离开后无法再次发送领取链接', confirmText: '仍要离开', cancelText: '去发送',
+      success: (r) => { if (r && r.confirm) this._leaveGiftSheet() }
+    })
+  },
+  _leaveGiftSheet() {
+    this.setData({ giftSheet: false })
+    wx.redirectTo({ url: '/subpackageMember/market/passes/index?tab=gifts' })
+  },
+  onShareAppMessage() {
+    const token = this._giftToken
+    if (!token) return { title: this.data.card.name, path: '/subpackageMember/market/pass/index?id=' + encodeURIComponent(this._id) }
+    this.setData({ giftShared: true })
+    return { title: '送你一份「' + this.data.card.name + '」', path: '/subpackageMember/market/gift/index?token=' + encodeURIComponent(token) }
+  },
+  goBack() {
+    if (getCurrentPages().length > 1) wx.navigateBack()
+    else wx.redirectTo({ url: '/subpackageMember/market/passes/index' })
+  }
+})

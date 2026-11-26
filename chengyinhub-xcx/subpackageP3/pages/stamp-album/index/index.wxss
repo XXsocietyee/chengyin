@@ -1,0 +1,89 @@
+/* 集邮册刻意走浅色纸感(根节点挂 .theme-light 逃生口):
+   集邮册要像一张真的贴纸册,邮票是【贴在纸上】而不是浮在暗底上 —— 这是 STAMPA 那面墙好看的根由。
+
+   ⚠️ 本页随主题变的颜色一律用真值层 --cy-color-*,禁用 --cy-bg-page / --cy-text-title 这类旧名别名:
+   别名在 tokens.wxss 的 page{} 里声明(--cy-bg-page: var(--cy-color-bg-page)),在 page 上就已就地
+   解析成暗值,并以计算值继承下来。子节点挂 .theme-light 只覆盖 --cy-color-*,追不回已解析的别名
+   —— 用别名这页会照样是黑的(实测:ach_album.png 全黑)。
+   注:--cy-space-* / --cy-font-* / --cy-radius-* 不随主题变,别名无害,保留。 */
+.al-root { min-height: 100vh; display: flex; flex-direction: column; background: var(--cy-color-bg-page); padding: 0 var(--cy-space-4) var(--cy-space-4); box-sizing: border-box;
+  /* 上面那段注释的坑还有下半场:别名不只影响自绘元素,也顺着继承进了组件。
+     --cy-btn-solid-bg/fg 在 page 根规则里就地解析成【暗色主题】的值(星白底 + 深墨字),
+     子节点挂 .theme-light 只覆盖 --cy-color-*,追不回已解析的别名 ⇒ cy-error 的
+     「重新载入」在浅纸底上变成淡底深字,视觉近似禁用(2026-07-30 真机复采坐实)。
+     组件内选择器被样式隔离挡死、且 components/cy 是禁区 ⇒ 在此重新声明别名,
+     让它对着 .theme-light 的真值层重新解析:实心深墨底 + 白字 = 明确可点。
+     ⚠️ CSS 变量能穿透样式隔离,这是页面侧唯一不 hack 的修法。 */
+  --cy-btn-solid-bg: var(--cy-color-action-primary-bg);
+  --cy-btn-solid-fg: var(--cy-color-action-primary-fg);
+}
+.al-hd { display: flex; align-items: baseline; gap: 8rpx; padding: 16rpx 8rpx 32rpx; }
+.al-n { font-size: var(--cy-type-data-xl); font-weight: 300; color: var(--cy-color-text-primary); }
+.al-u { font-size: var(--cy-font-label); color: var(--cy-color-text-tertiary); }
+.al-stage { position: relative; }
+/* 纸感:邮票贴在纸上要有轻微落影(暗底才不用投影,浅底必须有,否则邮票和纸糊成一片) */
+.al-item { position: absolute; background: var(--cy-color-bg-surface);
+  box-shadow: 0 2rpx 10rpx rgba(0,0,0,.12); /* ds-ok: 浅底纸感落影,tokens 的阴影档是暗底(注明不用投影),无对应日值 token */ }
+.al-img { width: 100%; height: 100%; display: block; } /* ds-ok: 空态整屏居中前的顶部留白，把空态往屏幕中段压 */
+/* R1:去紫色化——空态 CTA 与悬浮「+」原用 --cy-color-brand(亮紫),
+   全站按钮统一黑白基调,不借品牌紫做强调,改用与 .al-root 顶部同一套主操作色 token */
+.al-more { text-align: center; padding: 32rpx; color: var(--cy-color-text-tertiary); font-size: var(--cy-font-label); }
+.al-fab { position: fixed; right: 40rpx; bottom: calc(var(--cy-space-7) + env(safe-area-inset-bottom)); /* PG-050 */ width: 104rpx; height: 104rpx;
+  border-radius: 50%; background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg);
+  font-size: 48rpx; /* ds-ok: FAB "+"字形尺寸,非文本层级,无对应 token */
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 8rpx 24rpx rgba(0,0,0,.25); /* ds-ok: 浮钮落影装饰,无对应 token */ }
+
+/* aaa 标准:整屏失败态在"标题下方到屏幕底部"的剩余空间里居中(2026-07-31 组件层已支持,
+   cy-error 的 fill 属性内部走 flex:1)。.al-root 已是 flex column,这里让 cy-error 的
+   host 本身也吃 flex:1,配合组件内部的 fill 才能真正撑满剩余空间(而不是只给个 min-height)。
+   ⚠️ 四件套要写全:原来只有 flex:1 + display:flex,缺 flex-direction/justify-content 时
+   host 是「行方向」容器,垂直居中完全依赖组件内部实现;补齐后居中由本层自己兜底,
+   与 income-detail 的 .id-state-fill、earnings 的 .er-fill 同一写法。
+   只调布局,不动本页浅色纸感配色。 */
+.al-state-fill {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  justify-content: center;
+}
+
+/* pm20 */
+/* 2026-10-23 页面动效(utils/page-motion.js):容器 --pm-* 置 1 时先隐着,再依次浮上来;静止时无过渡,按压反馈不受影响;减少动态效果时从不触发 */
+.al-item { filter: opacity(calc(1 - var(--pm-s, 0))); scale: calc(1 + var(--pm-s, 0) * .18); transition: filter var(--pm-s-d, 0s) ease, scale var(--pm-s-d, 0s) cubic-bezier(.2,.82,.2,1); }
+.al-item:nth-child(2) { transition-delay: calc(var(--pm-s-s, 0) * 40ms), calc(var(--pm-s-s, 0) * 40ms); }
+.al-item:nth-child(3) { transition-delay: calc(var(--pm-s-s, 0) * 80ms), calc(var(--pm-s-s, 0) * 80ms); }
+.al-item:nth-child(4) { transition-delay: calc(var(--pm-s-s, 0) * 120ms), calc(var(--pm-s-s, 0) * 120ms); }
+.al-item:nth-child(5) { transition-delay: calc(var(--pm-s-s, 0) * 160ms), calc(var(--pm-s-s, 0) * 160ms); }
+.al-item:nth-child(6) { transition-delay: calc(var(--pm-s-s, 0) * 200ms), calc(var(--pm-s-s, 0) * 200ms); }
+.al-item:nth-child(7) { transition-delay: calc(var(--pm-s-s, 0) * 240ms), calc(var(--pm-s-s, 0) * 240ms); }
+.al-item:nth-child(8) { transition-delay: calc(var(--pm-s-s, 0) * 280ms), calc(var(--pm-s-s, 0) * 280ms); }
+.al-item:nth-child(9) { transition-delay: calc(var(--pm-s-s, 0) * 320ms), calc(var(--pm-s-s, 0) * 320ms); }
+.al-item:nth-child(10) { transition-delay: calc(var(--pm-s-s, 0) * 360ms), calc(var(--pm-s-s, 0) * 360ms); }
+.al-item:nth-child(11) { transition-delay: calc(var(--pm-s-s, 0) * 400ms), calc(var(--pm-s-s, 0) * 400ms); }
+.al-item:nth-child(12) { transition-delay: calc(var(--pm-s-s, 0) * 440ms), calc(var(--pm-s-s, 0) * 440ms); }
+.al-item:nth-child(n+13) { transition-delay: calc(var(--pm-s-s, 0) * 480ms), calc(var(--pm-s-s, 0) * 480ms); }
+
+/* ===== 2026-10-30 收集册 · 邮票(业主定稿 P-3)===== */
+.alb-light .al-root { background: transparent; position: relative; z-index: 1; }
+.al-head { margin: 0 calc(-1 * var(--cy-space-4)); }
+/* 邮票:白边 + 齿孔(白边上一圈半圆缺口,透出底色);投影跟着齿孔走用 drop-shadow */
+.al-item { padding: 12rpx; box-sizing: border-box; box-shadow: none;
+  background: radial-gradient(circle at 50% 50%, transparent 6rpx, #ffffff 6.5rpx) -10rpx -10rpx / 20rpx 20rpx; /* ds-ok: 邮票齿孔白边 */
+  filter: drop-shadow(0 6rpx 10rpx rgba(40, 52, 90, .18)); /* ds-ok: 浅底上的落影 */ transition: opacity .2s ease; }
+.al-item.is-away { opacity: 0; }
+/* 齿孔只该在白边上:照片没到之前中间先是白底,不露出一格格孔 */
+.alb-light .al-img { background: #ffffff; /* ds-ok: 邮票纸面 */ }
+.al-fly { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 60; background: transparent; } /* 整屏浮层:底色由里面的 veil 渐显压暗 */
+.al-fly__veil { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: rgba(12, 12, 14, .5); /* ds-ok: 压暗底 */ opacity: 0; transition: opacity .4s ease; }
+.al-fly.is-on .al-fly__veil { opacity: 1; }
+.al-fly__stamp { position: absolute; padding: 22rpx; background-size: 34rpx 34rpx; background-position: -17rpx -17rpx;
+  background-image: radial-gradient(circle at 50% 50%, transparent 10rpx, #ffffff 10.5rpx); /* ds-ok: 放大后齿孔同比放大 */
+  filter: drop-shadow(0 30rpx 50rpx rgba(0, 0, 0, .45)); /* ds-ok: 放大后的投影 */ }
+@media (prefers-reduced-motion: reduce) { .al-fly__veil { transition: none; } }
+
+/* 收集册浅色逃生口:撑满整屏 */
+.alb-light { min-height: 100vh; }
+
+/* 细节打磨二期 L1/L5/L7 */
+.al-more { transition: var(--cy-tr-press); }

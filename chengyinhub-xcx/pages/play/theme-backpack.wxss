@@ -1,0 +1,132 @@
+/* L02-112(业主 2026-11-24 默认 A):减少动效改挂在页面根的 .play--reduced-motion 上 —— 小程序里 prefers-reduced-motion 媒体查询不生效 */
+.theme-story-hud{display:flex;gap:30rpx;flex:1;align-items:center;align-self:flex-start;padding-top:18rpx;color:var(--cy-comp-sheet-role-text-secondary);font-size:var(--cy-type-body)}
+.theme-hp,.theme-bag-entry{display:flex;align-items:center;gap:14rpx;min-height:72rpx}
+.theme-challenge-entry{display:flex;align-items:center;min-height:72rpx;color:var(--cy-color-status-danger);font-size:var(--cy-type-label)}
+.theme-bag-entry{min-width:88rpx}
+.theme-heart{color:var(--cy-color-status-danger);font-size:var(--cy-type-section-title);line-height:1}
+.theme-bag-icon{width:25rpx;height:30rpx;border:3rpx solid var(--cy-color-text-secondary);border-radius:7rpx;position:relative;margin:10rpx} /* ds-ok: 图标轮廓的小圆角 */
+.theme-bag-icon:before{content:"";width:9rpx;height:8rpx;border:3rpx solid var(--cy-color-text-secondary);border-bottom:0;border-radius:5rpx 5rpx 0 0;position:absolute;top:-11rpx;left:5rpx} /* ds-ok: 图标轮廓的小圆角 */
+.theme-bag-icon:after{content:"";left:4rpx;right:4rpx;bottom:4rpx;height:9rpx;position:absolute;border:2rpx solid var(--cy-color-text-secondary);border-radius:3rpx} /* ds-ok: 图标轮廓的小圆角 */
+.chfull .fx-story__t.theme-chapter-nav{position:absolute;left:210rpx;text-align:center;right:210rpx;font-size:var(--cy-type-body);line-height:40px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} /* 主题名 · 章节名过长时单行省略,折行会压到下方指南针 */
+/* a1-v3-13-14 标题居中:左右对称各让 210rpx(右侧是胶囊,左侧是返回 / 雷达),试玩与正式同一条中线 */
+.tb-sheet{min-height:50vh;padding:var(--cy-space-4) 0 var(--cy-space-5);color:var(--cy-comp-sheet-player-text)}
+.tb-title{display:block;font-size:var(--cy-type-page-title);font-weight:700;line-height:1.2;margin:var(--cy-space-4) 0 var(--cy-space-5);overflow-wrap:anywhere}
+.tb-close{display:flex;align-items:center;justify-content:center;margin-left:auto;width:var(--cy-btn-h);height:var(--cy-btn-h);border-radius:var(--cy-radius-pill);font-size:var(--cy-type-section-title);color:var(--cy-comp-sheet-player-text);background:var(--cy-comp-sheet-player-surface)}
+/* r2 规则 2:关闭钮在右上角;紧跟的标题上提到同一行,右侧让出关闭钮 */
+.tb-close + .tb-title{display:flex;align-items:center;min-height:var(--cy-btn-h);margin-top:calc(-1 * var(--cy-btn-h));padding-right:calc(var(--cy-btn-h) + var(--cy-space-3))}
+.tb-group{background:var(--cy-comp-sheet-player-surface);border-radius:var(--cy-radius-xl);margin-bottom:var(--cy-space-4);overflow:hidden}
+.tb-summary,.tb-details,.tb-owner,.tb-challenge,.tb-clue{padding:var(--cy-space-4)}
+.tb-total{display:block;font-size:var(--cy-type-page-title);font-weight:700;margin:var(--cy-space-2) 0;overflow-wrap:anywhere}
+.tb-total-unit{font-size:var(--cy-type-section-title);font-weight:400;color:var(--cy-comp-sheet-player-muted)}
+.tb-meter{height:var(--cy-space-1);border-radius:var(--cy-radius-pill);background:var(--cy-comp-sheet-player-divider);overflow:hidden;margin:var(--cy-space-3) 0}
+.tb-meter-fill{height:100%;max-width:100%;background:var(--cy-comp-sheet-player-text);border-radius:var(--cy-radius-pill)}
+.tb-meter-fill--warning{background:var(--cy-color-status-warning)}
+.tb-row{display:flex;align-items:center;gap:var(--cy-space-3);padding:var(--cy-space-4);min-width:0}
+.tb-summary .tb-row{padding:var(--cy-space-2) 0}
+.tb-row + .tb-row{border-top:1rpx solid var(--cy-comp-sheet-player-divider)}
+.tb-avatar{display:flex;flex:none;align-items:center;justify-content:center;width:var(--cy-space-8);height:var(--cy-space-8);border-radius:var(--cy-radius-pill);background:var(--cy-comp-sheet-player-elevated);color:var(--cy-comp-sheet-player-text);font-size:var(--cy-type-section-title)}
+.tb-avatar--stat{width:var(--cy-space-5);height:var(--cy-space-5);background:var(--cy-color-play-accent-soft);color:var(--cy-color-text-primary);font-size:var(--cy-type-body)}
+.tb-copy{flex:1;min-width:0;overflow-wrap:anywhere}
+.tb-name{display:block;font-size:var(--cy-type-body);font-weight:600;line-height:1.4;overflow-wrap:anywhere}
+.tb-purpose{display:block;font-size:var(--cy-type-label);line-height:1.6;color:var(--cy-comp-sheet-player-muted);margin-top:var(--cy-space-1);overflow-wrap:anywhere}
+.tb-value{flex:none;max-width:35%;text-align:right;font-size:var(--cy-type-body);overflow-wrap:anywhere}
+.tb-value-max{display:inline}
+.tb-chevron{color:var(--cy-comp-sheet-player-muted);font-size:var(--cy-type-section-title)}
+.tb-section{display:block;font-size:var(--cy-type-body);font-weight:600;margin:var(--cy-space-5) 0 var(--cy-space-3)}
+/* 第十三轮 m1 P4:本局结束的说明与「通过」结果卡之间留出间距,结果卡自带内边距,不再压在说明那一行上 */
+.tb-ended{margin-bottom:var(--cy-space-3)}
+.tb-outcome{padding:var(--cy-space-4)}
+.tb-outcome .tb-heading{margin-bottom:0}
+.tb-heading{display:block;font-size:var(--cy-type-section-title);font-weight:600;margin-bottom:var(--cy-space-2);overflow-wrap:anywhere}
+.tb-pills{display:flex;flex-wrap:wrap;gap:var(--cy-space-2);margin:var(--cy-space-5) 0 var(--cy-space-4)}
+.tb-pill,.tb-button{display:flex;align-items:center;justify-content:center;border-radius:var(--cy-radius-pill);min-height:var(--cy-btn-h);padding:0 var(--cy-space-4);font-size:var(--cy-type-label);box-sizing:border-box;overflow-wrap:anywhere;text-align:center}
+.tb-pill{background:var(--cy-comp-sheet-player-surface);color:var(--cy-comp-sheet-player-text)}
+.tb-pill.is-selected,.tb-button{background:var(--cy-comp-sheet-player-text);color:var(--cy-comp-sheet-player-page)}
+.tb-button--small{min-height:var(--cy-space-6);padding:var(--cy-space-1) var(--cy-space-3);flex:none;max-width:45%}
+.tb-button--muted{background:var(--cy-comp-sheet-player-elevated);color:var(--cy-comp-sheet-player-text-secondary)}
+.tb-button--flex{flex:1;min-width:0}
+.tb-button--primary{width:100%;min-height:var(--cy-btn-h)}
+.tb-button.is-busy{opacity:.4;pointer-events:none}
+.is-disabled{opacity:.45}
+.tb-actions{display:flex;flex-wrap:wrap;gap:var(--cy-space-2);margin-top:var(--cy-space-3)}
+.tb-empty{padding:var(--cy-space-8) 0;color:var(--cy-comp-sheet-player-muted);text-align:center;font-size:var(--cy-type-body)}
+.tb-item-hero{display:flex;flex-direction:column;align-items:center;text-align:center;margin-top:var(--cy-space-5)}
+.tb-avatar--hero{width:calc(var(--cy-space-8) * 2);height:calc(var(--cy-space-8) * 2);font-size:var(--cy-type-page-title)}
+.tb-round-actions{justify-content:space-around;margin-bottom:var(--cy-space-5)}
+.tb-round-action{display:flex;flex-direction:column;align-items:center;gap:var(--cy-space-2);font-size:var(--cy-type-label);max-width:30%}
+.tb-detail-row{display:flex;justify-content:space-between;align-items:center;gap:var(--cy-space-4);padding:var(--cy-space-3) 0;font-size:var(--cy-type-body);min-width:0;overflow-wrap:anywhere}
+.tb-detail-row>text:first-child{color:var(--cy-comp-sheet-player-muted);flex:1;min-width:0}
+.tb-detail-row>text:last-child{max-width:60%;text-align:right;overflow-wrap:anywhere}
+.tb-detail-row + .tb-detail-row{border-top:1rpx solid var(--cy-comp-sheet-player-divider)}
+.tb-footer{padding:var(--cy-space-3) 0}
+.tb-select-icon{position:relative}
+.tb-check{display:flex;align-items:center;justify-content:center;position:absolute;right:0;bottom:0;width:var(--cy-space-4);height:var(--cy-space-4);border-radius:var(--cy-radius-pill);background:var(--cy-comp-sheet-player-text);color:var(--cy-comp-sheet-player-page);font-size:var(--cy-type-label);text-align:center}
+.tb-number{width:var(--cy-space-8);flex:none;min-height:var(--cy-btn-h);border-radius:var(--cy-radius-sm);background:var(--cy-comp-sheet-player-elevated);text-align:center;color:var(--cy-comp-sheet-player-text);font-size:var(--cy-type-body)}
+.tb-warning{color:var(--cy-color-status-warning)}
+.tb-clue image{display:block;width:calc(100% + var(--cy-space-4) * 2);margin:var(--cy-space-3) calc(var(--cy-space-4) * -1) 0}
+.tb-clue image:last-child{margin-bottom:calc(var(--cy-space-4) * -1)}
+/* V3-21:物品图直接放,不再垫一块灰底(透明底的物品图会露出灰方块) */
+image.tb-avatar{background:transparent}
+.tb-clue-copy{display:block;margin-top:var(--cy-space-3);font-size:var(--cy-type-body);line-height:1.8;color:var(--cy-comp-sheet-player-text-secondary)}
+
+.tb-plan-lines{padding:0 var(--cy-space-4) var(--cy-space-4);overflow-wrap:anywhere}
+.tb-status{display:flex;flex-wrap:wrap;align-items:center;gap:var(--cy-space-2);margin-top:var(--cy-space-2);color:var(--cy-comp-sheet-player-muted);font-size:var(--cy-type-label)}
+.tb-pass{display:flex;align-items:center;gap:var(--cy-space-1);padding:var(--cy-space-1) var(--cy-space-2);border-radius:var(--cy-radius-pill);background:var(--cy-comp-sheet-player-elevated);color:var(--cy-comp-sheet-player-text-secondary)}
+
+/* qx-b4 §26.1 合作局共享帮助:行沿用 tb-row 的字号与按钮;跳过确认的确认键用危险色 */
+.ch-hd { display: flex; align-items: baseline; justify-content: space-between; gap: var(--cy-space-2); padding: var(--cy-space-2) 0 var(--cy-space-3); }
+.ch-title { font-size: var(--cy-font-subtitle); font-weight: 800; color: var(--cy-comp-sheet-role-text); }
+.ch-free { font-size: var(--cy-font-label); color: var(--cy-comp-sheet-role-text-secondary); }
+.ch-row { display: flex; align-items: center; justify-content: space-between; gap: var(--cy-space-2); min-height: 96rpx; border-top: 1rpx solid var(--cy-comp-sheet-role-divider); }
+.ch-name { flex: 1; min-width: 0; font-size: var(--cy-font-body); color: var(--cy-comp-sheet-role-text); }
+.ch-name.is-off { color: var(--cy-comp-sheet-role-muted); }
+.ch-content { display: flex; flex-direction: column; gap: var(--cy-space-1); margin: 0 0 var(--cy-space-3); padding: var(--cy-space-3); border-radius: var(--cy-radius-md); background: var(--cy-comp-sheet-role-surface); font-size: var(--cy-font-body); line-height: var(--cy-leading-normal); color: var(--cy-comp-sheet-role-text); }
+.ch-charge { font-size: var(--cy-font-caption); color: var(--cy-comp-sheet-role-text-secondary); }
+.ch-confirm { display: flex; flex-direction: column; gap: var(--cy-space-2); padding: var(--cy-space-3) 0; border-top: 1rpx solid var(--cy-comp-sheet-role-divider); font-size: var(--cy-font-body); color: var(--cy-comp-sheet-role-text); }
+.ch-actions { display: flex; justify-content: flex-end; gap: var(--cy-space-2); }
+.ch-danger { background: var(--cy-danger); color: var(--cy-text-inverse); }
+.ch-err { display: block; padding-top: var(--cy-space-2); font-size: var(--cy-font-label); color: var(--cy-danger); }
+.ch-empty { padding: var(--cy-space-4) 0; text-align: center; font-size: var(--cy-font-label); color: var(--cy-comp-sheet-role-text-secondary); }
+/* V3-16:装载一格一块(原型 v103-slots,业主「上面有格」);没有物品时下面是同一张底的空态 */
+.tb-slots{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:var(--cy-space-2);margin:var(--cy-space-3) 0 var(--cy-space-1)}
+.tb-slot{height:0;padding-bottom:100%;border-radius:var(--cy-radius-sm);background:var(--cy-comp-sheet-player-surface-strong)} /* a1-v3-16 空格 = 看得见的灰方块 */
+.tb-slot.is-on{background:var(--cy-comp-sheet-player-text);box-shadow:none}
+.tb-slot.is-full{background:var(--cy-color-status-warning)}
+.tb-items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--cy-space-3);margin-bottom:var(--cy-space-4)}
+.tb-item{position:relative;height:0;padding-bottom:100%;border-radius:var(--cy-radius-xl);overflow:hidden;background:var(--cy-comp-sheet-player-surface);box-shadow:0 0 0 1rpx var(--cy-comp-sheet-player-border-strong);transition:transform var(--cy-motion-fast) var(--cy-ease-standard)}
+.tb-item--press{transform:scale(.97)}
+.tb-item--empty{background:var(--cy-comp-sheet-player-surface-strong);box-shadow:none}
+.tb-item__img{position:absolute;left:0;top:0;width:100%;height:100%}
+.tb-item__ft{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:var(--cy-space-2);padding:var(--cy-space-3);background:linear-gradient(180deg,transparent,rgba(0,0,0,.62))} /* ds-ok 图上文字压暗 */
+.tb-item__name{flex:1;min-width:0;font-size:var(--cy-type-label);font-weight:600;color:var(--cy-comp-sheet-player-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tb-item__qty{flex:none;font-size:var(--cy-type-label);color:var(--cy-comp-sheet-player-text-secondary);font-variant-numeric:tabular-nums}
+.play--reduced-motion .tb-item{transition:none} .play--reduced-motion .tb-item--press{transform:none}
+.tb-close + .ch-hd{margin-top:calc(-1 * var(--cy-btn-h));min-height:var(--cy-btn-h);align-items:center;padding-right:calc(var(--cy-btn-h) + var(--cy-space-3))} /* a1-v3-21 关闭在右上角,标题同一行 */
+/* a1-v3-21 背包页:整屏、玩家页面底,左上返回 + 居中标题(与胶囊同一行),内容从胶囊下方开始滚动;从右推入 */
+.tbp{position:fixed;left:0;top:0;right:0;bottom:0;z-index:calc(var(--cy-z-sheet) - 1);background:var(--cy-comp-sheet-player-bg);color:var(--cy-comp-sheet-player-text);animation:bubbleIn var(--cy-motion-sheet-in) var(--cy-ease-standard) both}
+.tbp__nav{position:absolute;left:0;right:0;z-index:2;display:flex;align-items:center;justify-content:center;height:var(--cy-btn-h);padding:0 var(--cy-page-x)}
+.tbp__back{position:absolute;left:var(--cy-page-x);top:0;width:var(--cy-btn-h);height:var(--cy-btn-h);border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--cy-comp-sheet-player-surface)}
+.tbp__title{font-size:var(--cy-type-body);font-weight:700}
+.tbp__scroll{position:absolute;left:0;right:0;bottom:0;top:calc(var(--tbp-top) + var(--cy-space-3));box-sizing:border-box}
+.tbp__body{min-height:0;padding:0 var(--cy-page-x) calc(var(--cy-space-6) + env(safe-area-inset-bottom))}
+.play--reduced-motion .tbp{animation:none}
+
+/* 细节打磨二期 L1/L5/L7 */
+.tbp__back { transition: var(--cy-tr-press); }
+.tb-pill { transition: var(--cy-tr-press); }
+.tb-button--flex { transition: var(--cy-tr-press); }
+.tb-button--muted { transition: var(--cy-tr-press); }
+.tb-button--small { transition: var(--cy-tr-press); }
+.tb-close { transition: var(--cy-tr-press); }
+.tb-round-action { transition: var(--cy-tr-press); }
+.tb-row { transition: var(--cy-tr-press); }
+.tb-button--primary { transition: var(--cy-tr-press); }
+.ch-danger { transition: var(--cy-tr-press); }
+.tb-total,
+.tb-total-unit,
+.tb-avatar--stat,
+.tb-value,
+.tb-number { font-variant-numeric: tabular-nums; }
+
+/* L02-114(业主 2026-11-24 默认 A):背包与玩家操作 9 个半屏共用的玩家配色,原先逐个内联在 style 上;只有 --cy-comp-sheet-max-h 随顶栏变,仍内联 */
+.tb-player-sheet{--cy-comp-sheet-blur:0px;--cy-comp-sheet-role-glass:var(--cy-comp-sheet-player-glass);--cy-comp-sheet-role-text:var(--cy-comp-sheet-player-text);--cy-comp-sheet-role-text-secondary:var(--cy-comp-sheet-player-text-secondary);--cy-comp-sheet-role-muted:var(--cy-comp-sheet-player-muted);--cy-comp-sheet-role-surface:var(--cy-comp-sheet-player-surface);--cy-comp-sheet-role-divider:var(--cy-comp-sheet-player-divider);--cy-comp-sheet-role-btn-bg:var(--cy-comp-sheet-player-text);--cy-comp-sheet-role-btn-fg:var(--cy-comp-sheet-player-page);}

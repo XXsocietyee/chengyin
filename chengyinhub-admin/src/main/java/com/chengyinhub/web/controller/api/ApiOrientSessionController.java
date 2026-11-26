@@ -1,0 +1,136 @@
+package com.chengyinhub.web.controller.api;
+
+import com.chengyinhub.business.service.IOrientSessionService;
+import com.chengyinhub.business.service.support.OrientSessionException;
+import com.chengyinhub.common.core.controller.BaseController;
+import com.chengyinhub.common.core.domain.AjaxResult;
+import com.chengyinhub.web.metrics.GameSloMetrics;
+import com.chengyinhub.web.metrics.GameSloResult;
+import com.chengyinhub.web.metrics.GameSloRoute;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Map;
+
+/**
+ * Doc2 F1a 城市定向(product_type=1)会话生命周期:prepare → start → task/{id}/result → abandon。
+ *
+ * <p>sys_config {@code feature.flag.orientSession} 非 true 时全部返回 err=ORIENT_SESSION_DISABLED,
+ * 既有 /api/play/* 推进入口不受影响。时间、计时与终局只认服务端;客户端不传任何时间。
+ * 每个写请求必须带 idempotencyKey:网络结果未知时用同一个键重发,或 GET /receipt 读回同一份回执。
+ * 失败时 AjaxResult 带机器码 {@code err}。
+ */
+@RestController
+@Tag(name = "城市定向会话")
+@RequestMapping("/api/play/orient/session")
+public class ApiOrientSessionController extends BaseController {
+
+    @Autowired
+    private IOrientSessionService orientSessionService;
+
+    /** OPS-01：只观测开赛这一条路径；不影响原有错误码、回执与计时。测试直接 new 时为 null。 */
+    @Autowired(required = false)
+    private GameSloMetrics gameSlo;
+
+    Long uid() {
+        try { return getAppUserId(); } catch (Exception e) { return 0L; }
+    }
+
+    @Operation(summary = "准备:取得/建立本人本场的路线局,返回需确认的规则版本")
+    @PostMapping("/prepare")
+    public AjaxResult prepare(Long topicId, Long activityId, String idempotencyKey,
+            String clientPlatform, String clientVersion, String supportedCapabilities) {
+        return call(memberId -> supportedCapabilities == null
+                ? orientSessionService.prepare(memberId, topicId, activityId, idempotencyKey)
+                : orientSessionService.prepare(memberId, topicId, activityId, idempotencyKey,
+                        com.chengyinhub.business.service.support.ContentCapabilityRequirements.Declaration
+                                .parse(clientPlatform, clientVersion, supportedCapabilities)));
+    }
+
+    public AjaxResult prepare(Long topicId, Long activityId, String idempotencyKey) {
+        return prepare(topicId, activityId, idempotencyKey, null, null, null);
+    }
+
+    @Operation(summary = "开赛:首次需确认规则版本并由服务端起表;重进续用原计时")
+    @PostMapping("/start")
+    public AjaxResult start(Long sessionId, Long ackConfigVersion, String idempotencyKey,
+            String clientPlatform, String clientVersion, String supportedCapabilities) {
+        long startedAt = System.nanoTime();
+        // 401/409 等业务拒绝不是成功；成功率只认 code=200。抛异常（极少）按 fault 计。
+        GameSloResult sloResult = GameSloResult.FAULT;
+        try {
+            AjaxResult result = call(memberId -> supportedCapabilities == null
+                    ? orientSessionService.start(memberId, sessionId, ackConfigVersion, idempotencyKey)
+                    : orientSessionService.start(memberId, sessionId, ackConfigVersion, idempotencyKey,
+                            com.chengyinhub.business.service.support.ContentCapabilityRequirements.Declaration
+                                    .parse(clientPlatform, clientVersion, supportedCapabilities)));
+            sloResult = GameSloMetrics.classify(result);
+            return result;
+        } finally {
+            // 每个请求恰好一次，成功与异常路径共用同一记录点。
+            recordStart(sloResult, startedAt);
+        }
+    }
+
+    public AjaxResult start(Long sessionId, Long ackConfigVersion, String idempotencyKey) {
+        return start(sessionId, ackConfigVersion, idempotencyKey, null, null, null);
+    }
+
+    private void recordStart(GameSloResult result, long startedAt) {
+        if (gameSlo != null) {
+            gameSlo.recordStart(GameSloRoute.ORIENT_START, result, System.nanoTime() - startedAt);
+        }
+    }
+
+    @Operation(summary = "放弃本局(终态,幂等)")
+    @PostMapping("/abandon")
+    public AjaxResult abandon(Long sessionId, String idempotencyKey) {
+        return call(memberId -> orientSessionService.abandon(memberId, sessionId, idempotencyKey));
+    }
+
+    @Operation(summary = "记录任务结果:同一逻辑任务本局只记一次,alternativeTaskType 可为 SCAN/PHOTO/QUIZ")
+    @PostMapping("/task/{taskId}/result")
+    public AjaxResult taskResult(@PathVariable("taskId") Long taskId, Long sessionId, String alternativeTaskType,
+                                 String idempotencyKey) {
+        return call(memberId -> orientSessionService.taskResult(memberId, sessionId, taskId, alternativeTaskType,
+                idempotencyKey));
+    }
+
+    @Operation(summary = "只读查询本人已有路线局;多局时由玩家明确选择")
+    @GetMapping("/current")
+    public AjaxResult current(Long topicId, Long activityId) {
+        return call(memberId -> orientSessionService.current(memberId, topicId, activityId));
+    }
+
+    @Operation(summary = "读取本局阶段与服务端计时")
+    @GetMapping
+    public AjaxResult view(Long sessionId) {
+        return call(memberId -> orientSessionService.view(memberId, sessionId));
+    }
+
+    @Operation(summary = "按幂等键读回某次写请求的原回执")
+    @GetMapping("/receipt")
+    public AjaxResult receipt(Long sessionId, String idempotencyKey) {
+        return call(memberId -> orientSessionService.receipt(memberId, sessionId, idempotencyKey));
+    }
+
+    private AjaxResult call(java.util.function.Function<Long, Map<String, Object>> action) {
+        Long memberId = uid();
+        if (memberId == null || memberId <= 0) {
+            return AjaxResult.error(401, "请先登录").put("err", "ORIENT_LOGIN_REQUIRED");
+        }
+        try {
+            return success(OrientPlayerWire.response(action.apply(memberId)));
+        } catch (OrientSessionException e) {
+            AjaxResult result = AjaxResult.error(e.getHttpCode(), e.getMessage()).put("err", e.getErr());
+            if (e.getData() != null) result.put(AjaxResult.DATA_TAG, OrientPlayerWire.response(e.getData()));
+            return result;
+        }
+    }
+}

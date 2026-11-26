@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.chengyinhub.business.mapper.MarketingCodeGrantMapper">
+
+    <resultMap id="grantMap" type="com.chengyinhub.business.domain.MarketingCodeGrant">
+        <id property="id" column="id"/>
+        <result property="voucherId" column="voucher_id"/>
+        <result property="memberId" column="member_id"/>
+        <result property="productId" column="product_id"/>
+        <result property="productRevision" column="product_revision"/>
+        <result property="topicId" column="topic_id"/>
+        <result property="contentRevision" column="content_revision"/>
+        <result property="quantity" column="quantity"/>
+        <result property="seatCount" column="seat_count"/>
+        <result property="status" column="status"/>
+        <result property="validFrom" column="valid_from"/>
+        <result property="validTo" column="valid_to"/>
+        <result property="grantedAt" column="granted_at"/>
+        <result property="revokedAt" column="revoked_at"/>
+        <result property="revokeReason" column="revoke_reason"/>
+        <result property="requestId" column="request_id"/>
+        <result property="requestFingerprint" column="request_fingerprint"/>
+        <result property="idempotencyKey" column="idempotency_key"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <sql id="grantColumns">
+        id, voucher_id, member_id, product_id, product_revision, topic_id, content_revision, quantity, seat_count,
+        status, valid_from, valid_to, granted_at, revoked_at, revoke_reason, request_id, request_fingerprint,
+        idempotency_key, create_time, update_time
+    </sql>
+
+    <insert id="insert" parameterType="com.chengyinhub.business.domain.MarketingCodeGrant"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into marketing_code_grant
+            (voucher_id, member_id, product_id, product_revision, topic_id, content_revision, quantity, seat_count,
+             status, valid_from, valid_to, granted_at, request_id, request_fingerprint, idempotency_key,
+             create_time, update_time)
+        values
+            (#{voucherId}, #{memberId}, #{productId}, #{productRevision}, #{topicId}, #{contentRevision}, #{quantity},
+             #{seatCount}, 0, #{validFrom}, #{validTo}, #{grantedAt}, #{requestId}, #{requestFingerprint},
+             #{idempotencyKey}, #{createTime}, #{updateTime})
+    </insert>
+
+    <select id="selectByVoucher" resultMap="grantMap" useCache="false">
+        select <include refid="grantColumns"/> from marketing_code_grant
+        where voucher_id = #{voucherId} order by id
+    </select>
+
+    <select id="selectByVoucherForUpdate" resultMap="grantMap" useCache="false" flushCache="true">
+        select <include refid="grantColumns"/> from marketing_code_grant
+        where voucher_id = #{voucherId} order by id for update
+    </select>
+
+    <select id="selectByMemberRequest" resultMap="grantMap" useCache="false">
+        select <include refid="grantColumns"/> from marketing_code_grant
+        where member_id = #{memberId} and request_id = #{requestId} order by id
+    </select>
+
+    <select id="selectActiveByMemberTopic" resultMap="grantMap" useCache="false">
+        select <include refid="grantColumns"/> from marketing_code_grant
+        where member_id = #{memberId} and topic_id = #{topicId} and status = 0
+        order by id desc
+    </select>
+
+    <update id="revokeByVoucher">
+        update marketing_code_grant
+        set status = 1, revoked_at = #{revokedAt}, revoke_reason = #{reason}, update_time = #{revokedAt}
+        where voucher_id = #{voucherId} and status = 0
+    </update>
+</mapper>

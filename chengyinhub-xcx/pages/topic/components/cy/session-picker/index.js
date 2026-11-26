@@ -1,0 +1,277 @@
+// cy-session-picker · 主题页内选场次 / 选票种(Figma 11 240:401 · 11a 240:446)。
+//
+// 2026-09-06 用户拍板:**主题报名没有废弃,是代码写错了**。
+// 原来 pages/topic/index 的 bmClick 把人踢去 play-activity-detail 再选一遍票 ——
+// 主题页上明明已经把场次和价格都列出来了,点一下却跳走,回来还得重新找。
+// 现在按稿在主题页内选完场次 + 票种,直接进结算。
+//
+// ⚠️ 票仍然绑到具体场次(下一步进 baoming?activityId=X&ticketId=Y,后端 ownerType=2)——
+//    「主题页内能买」说的是交互层,不是绕过场次买一张没人核销的票。那条老注释
+//    (「主题级报名已废弃,避免买了票既玩不了又没人核销」)把这两件事混成了一件。
+//
+// 多日 → 先选日期再选票种(稿 11);只有一个场次 → 跳过选日期,顶部直接写明是哪天(稿 11a)。
+const app = getApp();
+const money = require('../../../../../utils/money-format.js');
+const { ticketWindowText } = require('../../../../../utils/ticket-window.js');
+const { refundRuleText } = require('../../../utils/refund-tiers.js');
+
+const { chinaParts } = require('../../../../../utils/datetime.js');
+
+const WEEKDAY = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+function toDate(value) {
+  const parts = chinaParts(value);
+  if (!parts) return null;
+  return { getDay: () => new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay(),
+    getFullYear: () => parts.year, getMonth: () => parts.month - 1, getDate: () => parts.day,
+    getHours: () => parts.hours, getMinutes: () => parts.minutes };
+}
+
+/** 「周六 / 12.13」两行。拿不到日期就只留场次名,不编一个日期出来。 */
+function dateChip(activity) {
+  const d = toDate(activity.startDate);
+  if (!d) return { week: '', day: String(activity.name || '').slice(0, 8) };
+  return { week: WEEKDAY[d.getDay()], day: (d.getMonth() + 1) + '.' + d.getDate() };
+}
+
+function epochOf(value) {
+  const p = chinaParts(value);
+  return p ? Date.UTC(p.year, p.month - 1, p.day, p.hours, p.minutes) : null;
+}
+
+/**
+ * P-18:发布时按主题档期自动建的那条活动(从 0 点起、跨好几天)不是一场真的场次。
+ * 跨度超过一天的都按「档期」看待:有真场次时不出现在选场次里;只剩它一条时写「随时可玩 · 至 M.D」。
+ */
+function isWindow(activity) {
+  const start = epochOf(activity && activity.startDate);
+  const end = epochOf(activity && activity.endDate);
+  return start != null && end != null && end - start > 24 * 3600 * 1000;
+}
+
+/** P-18/P-30:只给真场次;按开始时间排;没有真场次时才保留档期那一条。 */
+function sessionRows(activities) {
+  const list = (activities || []).filter((a) => a && a.id);
+  const real = list.filter((a) => !isWindow(a));
+  const rows = real.length ? real : list;
+  return rows.slice().sort((a, b) => {
+    const ea = epochOf(a.startDate);
+    const eb = epochOf(b.startDate);
+    if (ea == null || eb == null) return ea == null ? (eb == null ? 0 : 1) : -1;
+    return ea - eb;
+  });
+}
+
+/** 稿 11a 顶部那行「2025年12月13日(周六)· 19:30 集合」——缺哪半截就少写哪半截 */
+function singleDayText(activity) {
+  if (isWindow(activity)) {
+    const end = toDate(activity.endDate);
+    return '随时可玩 · 至 ' + (end.getMonth() + 1) + '.' + end.getDate();
+  }
+  const d = toDate(activity && activity.startDate);
+  if (!d) return String((activity && activity.name) || '');
+  const pad = (n) => (n < 10 ? '0' + n : '' + n);
+  const day = d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日('
+    + WEEKDAY[d.getDay()] + ')';
+  const clock = pad(d.getHours()) + ':' + pad(d.getMinutes());
+  return clock === '00:00' ? day : day + ' · ' + clock + ' 集合';
+}
+
+Component({
+  options: { addGlobalClass: true },
+  properties: {
+    show: { type: Boolean, value: false },
+    // 宿主传 info.activityList(该主题已上架、未结束的场次)
+    activities: { type: Array, value: [] },
+    preferName: { type: String, value: '' }, // 购买半屏里选的票种名称:票读出来后预选同名的那张
+  },
+  data: {
+    days: [],
+    singleDay: false,
+    singleDayText: '',
+    pickedActivityId: 0,
+    tickets: [],
+    ticketsState: 'idle',   // idle | loading | ready | error | empty | gate
+    ticketsError: '',
+    ticketsGateText: '',
+    // M1-3 门卡:后端对非俱乐部成员返回 {gate:true, clubId, message}。
+    // 这一档不是「票种没读出来」,重试再多次也读不出来 —— 唯一出口是去加入俱乐部。
+    gateClubId: 0,
+    pickedTicketId: 0,
+    totalText: '',
+  },
+  observers: {
+    'show, activities': function (show, activities) {
+      const reopening = show && !this._pickerShown;
+      this._pickerShown = !!show;
+      if (!show) {
+        this._ticketRequestId = (this._ticketRequestId || 0) + 1;
+        return;
+      }
+      const sessions = sessionRows(activities);
+      // L06-134:每行的日期块与开始时刻只算一次
+      const rows = sessions.map((a) => {
+        const chip = dateChip(a);
+        const start = chinaParts(a.startDate);
+        return {
+          id: a.id,
+          name: String(a.name || ''),
+          week: chip.week,
+          day: chip.day,
+          whenText: singleDayText(a),
+          detailText: [start ? String(start.hours).padStart(2, '0') + ':' + String(start.minutes).padStart(2, '0') : '', String(a.name || ''), String(a.clubName || '').trim()].filter(Boolean).join(' · '),
+        };
+      });
+      const single = rows.length === 1;
+      this.setData({
+        days: rows,
+        singleDay: single,
+        singleDayText: single ? singleDayText(sessions[0]) : '',
+      });
+      // 单场次不用选日期,直接进第二步
+      const selectedExists = rows.some((row) => row.id === this.data.pickedActivityId);
+      if (single && (reopening || !selectedExists)) {
+        this.pickActivity(rows[0].id);
+      } else if (reopening && selectedExists) {
+        this.pickActivity(this.data.pickedActivityId);
+      } else if (!selectedExists) {
+        this._ticketRequestId = (this._ticketRequestId || 0) + 1;
+        this.setData({ pickedActivityId: 0, pickedTicketId: 0, tickets: [], totalText: '', ticketsState: 'idle', ticketsError: '', gateClubId: 0 });
+      }
+    },
+  },
+  lifetimes: {
+    detached() { this._ticketRequestId = (this._ticketRequestId || 0) + 1; },
+  },
+  methods: {
+    onPickDay(e) {
+      const id = Number(e.currentTarget.dataset.id) || 0;
+      if (!id || id === this.data.pickedActivityId) return;
+      this.pickActivity(id);
+    },
+
+    pickActivity(activityId) {
+      const requestId = (this._ticketRequestId || 0) + 1;
+      this._ticketRequestId = requestId;
+      // 换了日期,上一场的票种与总价一律作废 —— 留着会让人以为选中的还算数
+      this.setData({
+        pickedActivityId: activityId,
+        pickedTicketId: 0,
+        tickets: [],
+        totalText: '',
+        ticketsState: 'loading',
+        ticketsError: '',
+        gateClubId: 0,
+      });
+      const that = this;
+      app.sendRequest({
+        url: '/api/activity/info', method: 'POST', hideLoading: true, silentError: true,
+        data: { id: activityId },
+        success(res) {
+          if (that._ticketRequestId !== requestId || that.data.pickedActivityId !== activityId) return;
+          const d = res && (res.code == 200 || res.code == '200') ? res.data : null;
+          if (d && d.gate === true) {
+            that.setData({
+              tickets: [],
+              ticketsState: 'gate',
+              // 门卡是「只对俱乐部成员开放」的说明,不是读取错误:单独字段,不进错误文案
+              ticketsGateText: d.message || '来自俱乐部的活动，加入后查看',
+              ticketsError: '',
+              gateClubId: Number(d.clubId) || 0,
+              pickedTicketId: 0,
+              totalText: '',
+            });
+            return;
+          }
+          const rows = d && Array.isArray(d.omsTicketList)
+            ? d.omsTicketList.filter((t) => t && t.id && String(t.name || '').trim()) : null;
+          if (!rows && d) {
+            // 后端只在真有票时才下发 omsTicketList(ApiActivityController:995),
+            // 所以成功体里没这个字段 = 这一场还没放票。它不是读取失败:拿成功回执
+            //「操作成功」当错误解释,会和「票种没读出来」同屏矛盾(CU-C-131)。
+            that.setData({ ticketsState: 'empty', ticketsError: '' });
+            return;
+          }
+          if (!rows) {
+            // 只有业务失败体才有可展示的原因
+            that.setData({
+              ticketsState: 'error',
+              ticketsError: app.getRequestErrorMessage(res, '票种没读出来'),
+            });
+            return;
+          }
+          that.setData({
+            tickets: rows.map((t) => ({
+              id: t.id,
+              name: String(t.name).trim(),
+              price: t.price,
+              startTime: t.startTime,
+              endTime: t.endTime,
+              selfGuided: t.selfGuided === true,
+              signupDeadline: t.signupDeadline,
+              windowText: ticketWindowText(t),
+              // 退改显示平台三档,不显示票上存的 refund_rule 原文(业主 2026-11-03);余量「有就写、没有就不写」
+              rule: refundRuleText(t),
+              remaining: t.remainingInventory == null ? null : Number(t.remainingInventory),
+            })),
+            ticketsState: rows.length ? 'ready' : 'empty',
+            ticketsError: '',
+          });
+          const prefer = rows.filter((t) => that.data.preferName && String(t.name).trim() === that.data.preferName)[0];
+          if (prefer) that.onPickTicket({ currentTarget: { dataset: { id: prefer.id } } });
+          else {
+            // x-fix5 N-2:只有一种可买票时直接选中,下一步不再灰着(窗口未开 / 已售罄的不算可买)
+            const sellable = rows.filter((t) => !ticketWindowText(t) && !(t.remainingInventory != null && Number(t.remainingInventory) === 0));
+            if (sellable.length === 1 && rows.length === 1) that.onPickTicket({ currentTarget: { dataset: { id: sellable[0].id } } });
+          }
+        },
+        fail(res) {
+          if (that._ticketRequestId !== requestId || that.data.pickedActivityId !== activityId) return;
+          that.setData({
+            ticketsState: 'error',
+            ticketsError: app.getRequestErrorMessage(res, '票种没读出来，检查网络后重试'),
+          });
+        },
+      });
+    },
+
+    retryTickets() {
+      if (this.data.pickedActivityId) this.pickActivity(this.data.pickedActivityId);
+    },
+
+    // 门卡出口:先关掉选场次弹层,再去俱乐部页 —— 不在半屏弹层上压第二层。
+    goGateClub() {
+      const clubId = Number(this.data.gateClubId) || 0;
+      this.triggerEvent('close', {});
+      if (clubId > 0) wx.navigateTo({ url: '/pages/club/detail/index?id=' + clubId });
+    },
+
+    onPickTicket(e) {
+      const id = Number(e.currentTarget.dataset.id) || 0;
+      const ticket = this.data.tickets.filter((t) => t.id === id)[0];
+      if (!ticket) return;
+      // 售罄票仍需进入原结算页，由服务端读取候补资格。
+      if (ticketWindowText(ticket)) return;
+      this.setData({
+        pickedTicketId: id,
+        totalText: ticket.price == null ? '' : money.yuan(ticket.price),
+      });
+    },
+
+    onClose() { this.triggerEvent('close', {}); },
+
+    onNext() {
+      const { pickedActivityId, pickedTicketId } = this.data;
+      if (!pickedActivityId || !pickedTicketId) return;
+      const ticket = this.data.tickets.find((t) => t.id === pickedTicketId);
+      if (!ticket || ticketWindowText(ticket)) {
+        this.pickActivity(pickedActivityId);
+        return;
+      }
+      this.triggerEvent('confirm', { activityId: pickedActivityId, ticketId: pickedTicketId });
+    },
+  },
+});
+
+// 单测入口(组件运行时不读)
+if (typeof module !== 'undefined') module.exports = { isWindow, sessionRows, singleDayText };

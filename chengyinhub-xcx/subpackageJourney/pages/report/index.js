@@ -1,0 +1,143 @@
+const api = require('../../utils/journey-api.js');
+const view = require('../../utils/journey-view.js');
+const app = getApp();
+
+/* P7 本局战报：真实结束回执后进入，「我的记录」可按 runId 重开同一局。
+ * 只读：读取不补完局、不发奖、不建局。名次(P9/§23.4)与回忆(P8)用同页面板承接。 */
+
+function landingPath(token) {
+  return '/subpackageJourney/pages/landing/index?k=r&t=' + encodeURIComponent(token);
+}
+
+Page({
+  data: {
+    state: 'loading', stateTitle: '加载中', stateCta: '',
+    report: null, eyebrow: '', registrationId: '',
+    stateIcon: '', teamId: '', cityCode: '', countryCode: '', clubId: '',
+    rankOpen: false,
+    memoryOpen: false, memoryState: '', memoryError: '', memory: null
+  },
+
+  onLoad(options) {
+    const o = options || {};
+    this._query = {
+      activityId: view.isId(o.activityId) ? o.activityId : '',
+      topicId: view.isId(o.topicId) ? o.topicId : '',
+      runId: view.isId(o.runId) ? o.runId : ''
+    };
+    this._topicName = o.topicName ? decodeURIComponent(o.topicName) : '';
+    this._clubId = view.isId(o.clubId) ? o.clubId : '';
+    this.setData({ registrationId: view.isId(o.registrationId) ? o.registrationId : '',
+      cityCode: o.cityCode || '', countryCode: o.countryCode || '', clubId: this._clubId });
+    if (!this._query.activityId && !this._query.topicId) {
+      this.setData({ state: 'missing', stateIcon: 'route', stateTitle: '链接已失效', stateCta: '返回' });
+      return;
+    }
+    this.reload();
+  },
+
+  reload() {
+    const epoch = this._epoch = (this._epoch || 0) + 1;
+    if (this.data.state !== 'ready') this.setData({ state: 'loading', stateTitle: '加载中', stateCta: '' });
+    return api.report(app, this._query).then(res => {
+      if (epoch !== this._epoch) return;
+      if (!api.ok(res) || !res.data) { this._fail(res); return; }
+      const report = view.reportView(res.data);
+      // 显式局号读的是这一局；服务端回的局号不同就不展示，避免把别的局当成这一局。
+      if (this._query.runId && report.runId && report.runId !== String(this._query.runId)) { this._fail({ reasonCode: 'RUN_SCOPE_MISMATCH' }); return; }
+      const eyebrow = [report.dateLabel, this._topicName].filter(Boolean).join(' · ');
+      this.setData({ state: 'ready', report, eyebrow });
+      this._loadTeam(report);
+    });
+  },
+
+  _fail(res) {
+    const code = res && (res.httpStatus === 401 || res.code == 401) ? 401 : Number(res && res.code);
+    if (code === 401) { this.setData({ state: 'auth', stateIcon: 'tab-me', stateTitle: '登录后查看战报', stateCta: '登录' }); return; }
+    if (res && (res.reasonCode === 'RUN_NOT_FOUND' || res.reasonCode === 'RUN_SCOPE_MISMATCH')) {
+      this.setData({ state: 'gone', stateIcon: 'route', stateTitle: '这一局不存在或无权查看', stateCta: '' }); return;
+    }
+    if (code === 403) { this.setData({ state: 'denied', stateIcon: 'lock', stateTitle: (res && res.msg) || '暂时不能查看', stateCta: '' }); return; }
+    this.setData({ state: 'error', stateIcon: 'warning', stateTitle: '战报暂未加载', stateCta: '重新加载' });
+  },
+
+  onStateCta() {
+    if (this.data.state === 'missing') { if (getCurrentPages().length > 1) wx.navigateBack({ delta: 1 }); else wx.switchTab({ url: '/pages/index/index' }); return; }
+    if (this.data.state === 'auth') {
+      app.requireLogin({ reason: '登录后查看战报' }).then(ok => { if (ok) this.reload(); });
+      return;
+    }
+    this.reload();
+  },
+
+  // P9 队内：只有服务端说本局是组队共享并给出队伍时才出「队内」页签。
+  _loadTeam(report) {
+    if (report.legacy) return;
+    api.choices(app, { activityId: this._query.activityId, topicId: this._query.activityId ? '' : this._query.topicId }).then(res => {
+      if (!api.ok(res)) return;
+      const choices = view.choicesView(res.data);
+      if (!choices || !choices.teamId) return;
+      this.setData({ teamId: String(choices.teamId) });
+    });
+  },
+
+  // P9 / §23.4:榜单面板由 rank-board 组件承接(本关 队内/全体/队伍,其余在「更多」)。
+  openRank() { this.setData({ rankOpen: true }); },
+  // CG-ALL-12 / CG-01-P2-6:点节点照片看大图,左右滑看本局其它站的照片
+  previewNodePhoto(e) {
+    const url = e && e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.url;
+    const urls = ((this.data.report || {}).photoUrls || []);
+    if (!url || urls.indexOf(url) < 0) return;
+    wx.previewImage({ current: url, urls });
+  },
+  closeRank() { this.setData({ rankOpen: false }); },
+
+  openSettle() {
+    const r = this.data.report || {};
+    const q = [];
+    if (this._query.activityId) q.push('activityId=' + this._query.activityId);
+    if (this._query.topicId) q.push('topicId=' + this._query.topicId);
+    if (r.runId) q.push('runId=' + r.runId);
+    if (this._topicName) q.push('topicName=' + encodeURIComponent(this._topicName));
+    wx.navigateTo({ url: '/subpackageJourney/pages/settle/index?' + q.join('&') });
+  },
+
+  openMemory() { this.setData({ memoryOpen: true }); this.loadMemory(); },
+  closeMemory() { this.setData({ memoryOpen: false }); },
+
+  loadMemory() {
+    const epoch = this._memoryEpoch = (this._memoryEpoch || 0) + 1;
+    this.setData({ memoryState: 'loading', memoryError: '' });
+    api.memory(app, this._query).then(res => {
+      if (epoch !== this._memoryEpoch) return;
+      if (!api.ok(res)) { this.setData({ memoryState: 'error', memoryError: (res && res.msg) || '回忆暂未加载' }); return; }
+      const memory = view.memoryView(res.data);
+      const runId = res.data && res.data.runId != null ? String(res.data.runId) : '';
+      if (this.data.report.runId && runId !== this.data.report.runId) { this.setData({ memoryState: 'error', memoryError: '回忆暂未加载' }); return; }
+      this.setData({ memory, memoryState: memory && (memory.moments.length || memory.participants) ? 'ready' : 'empty' });
+    });
+  },
+
+  openSeats() {
+    wx.navigateTo({ url: '/subpackageJourney/pages/seats/index?registrationId=' + this.data.registrationId });
+  },
+
+  // 分享：点分享才签发推广凭据；不带答案、同行信息或路线。签发失败就分享公开主题详情。
+  onShareAppMessage() {
+    const report = this.data.report || {};
+    const title = (this._topicName ? this._topicName + ' · ' : '') + (report.shareTitle || '一起来玩');
+    const targetType = report.activityId ? 2 : 1;
+    const targetId = report.activityId || report.topicId;
+    // L09-156:战报还没读到(菜单分享先于数据)⇒ 没有有效 id 时只分享首页,不签发推广凭据、不拼 id=undefined
+    if (!view.isId(targetId)) return { title, path: '/pages/index/index' };
+    const fallback = view.isId(report.topicId) ? '/pages/topic/index/index?id=' + report.topicId : '/pages/index/index';
+    return {
+      title,
+      path: fallback,
+      promise: api.issueReferral(app, targetType, targetId).then(res => ({
+        title,
+        path: api.ok(res) && res.data && res.data.token ? landingPath(res.data.token) : fallback
+      }))
+    };
+  }
+});

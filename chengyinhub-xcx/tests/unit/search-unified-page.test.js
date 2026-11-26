@@ -1,0 +1,150 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const search = require('../../utils/discover-search');
+const session = require('../../utils/session/login-reload');
+const source = fs.readFileSync(path.join(__dirname, '../../pages/search2/result/index.js'), 'utf8');
+function harness(owner = '7', community = true) {
+  const requests = [], navigations = [];
+  const app = { globalData: {}, getUserID: () => owner, canUseCommunity: () => community,
+    getImgUrl: v => v || '', sendRequest: r => requests.push(r) };
+  let definition;
+  vm.runInNewContext(source, { getApp: () => app, Page: p => { definition = p; },
+    wx: { navigateTo: v => navigations.push(v.url) }, setTimeout: () => 1, clearTimeout() {},
+    require: p => p.includes('discover-search') ? search : p.includes('login-reload') ? session
+      : p.includes('page-motion') ? { enter() {} } : p.includes('scene-entry') ? { openScene() {} } : p.includes('roleGuard') ? { isMerchantView: () => false } : p.includes('merchant-theme') ? { merchantPageShow() {}, merchantPageRestore() {} } : () => {} });
+  const page = Object.assign({}, definition, { data: JSON.parse(JSON.stringify(definition.data)),
+    setData(v, done) { Object.assign(this.data, v); if (done) done(); } });
+  const unified = () => requests.filter(r => r.url === '/api/search/unified');
+  return { page, requests, unified, navigations, owner: v => { owner = v; },
+    settleOthers() { requests.filter(r => r.url !== '/api/search/unified').forEach(r => r.success({ code: 200, data: { rows: [], total: 0 } })); } };
+}
+function ok(request, rows, total) { request.success({ code: 200, data: { rows, total } }); }
+function row(id, type = 'topic', cityCode = '310100') { return { id: String(id), type, title: type + id, cityCode }; }
+
+test('actual Page uses unified page contract, preserves other endpoints, renders three types and opens canonical post', () => {
+  const h = harness(); h.page.onLoad({ keyword: 'city', city_code: '310100' });
+  const req = h.unified()[0]; assert.equal(req.data.pageNum, 1); assert.equal(req.data.city_code, '310100');
+  assert.equal(req.data.types, 'topic,activity,post');
+  assert.ok(h.requests.some(r => r.url === '/api/merchant/list'));
+  assert.ok(!h.requests.some(r => r.url === '/api/topic/list'));
+  ok(req, [row('9007199254740993'), row(1, 'activity'), row(1, 'post')], 3); h.settleOthers();
+  assert.equal(h.page.data.visibleResults.length, 3); assert.equal(h.page.data.contentHasMore, false);
+  const post = h.page.data.visibleResults.find(r => r.type === 'post');
+  h.page.goResult({ currentTarget: { dataset: { path: post.path } } });
+  assert.equal(h.navigations[0], '/pages/square/detail/index?id=1');
+});
+
+test('append failure retries original page, duplicate callbacks settle once and overlaps update facts', () => {
+  const h = harness(); h.page.onLoad({ keyword: 'city' });
+  ok(h.unified()[0], Array.from({ length: 12 }, (_, i) => row(i + 1)), 25); h.settleOthers();
+  h.page.onReachBottom(); h.page.onReachBottom(); assert.equal(h.unified().length, 2);
+  const second = h.unified()[1]; assert.equal(second.data.pageNum, 2); second.fail({ code: 500 });
+  ok(second, [row(99)], 25); assert.equal(h.page.data.visibleResults.length, 12);
+  h.page.loadMoreContent(); const retry = h.unified()[2]; assert.equal(retry.data.pageNum, 2);
+  ok(retry, [row(12, 'topic', null), row(13, 'post')], 25);
+  assert.equal(h.page.data.visibleResults.length, 13);
+  assert.equal(h.page.data.visibleResults.find(r => r.key === 'topic:12').cityCode, null);
+  h.page.loadMoreContent(); assert.equal(h.unified()[3].data.pageNum, 3);
+  ok(h.unified()[3], [], 13); assert.equal(h.page.data.contentHasMore, false);
+});
+
+test('refresh replaces deleted results and current city rather than retaining old content on errors', () => {
+  const h = harness(); h.page.onLoad({ keyword: 'city' }); ok(h.unified()[0], [row(1), row(2)], 2); h.settleOthers();
+  h.page.runSearch(); assert.ok(!h.page.data.visibleResults.some(r => r.type === 'topic'));
+  ok(h.unified()[1], [row(2, 'topic', '440100')], 1);
+  assert.equal(h.page.data.visibleResults.length, 1); assert.equal(h.page.data.visibleResults[0].cityCode, '440100');
+  h.page.onHide(); h.page.onShow(); h.unified()[2].fail({ code: 500 });
+  assert.equal(h.page.data.visibleResults.length, 0); assert.match(h.page.data.contentError, /未完成/);
+});
+
+// Round5 #3:合并搜索开关默认关(503)时,已登录用户退回与游客相同的主题/活动列表请求,结果照常出现。
+test('unified off (503) falls back to topic/activity list requests for logged-in users, and stays off for later searches', () => {
+  const h = harness(); h.page.onLoad({ keyword: 'city' });
+  assert.ok(!h.requests.some(r => r.url === '/api/topic/list'));
+  h.unified()[0].fail({ code: 503 });
+  assert.equal(h.page.data.contentError, '');
+  assert.equal(h.page.data.contentEnabled, false);
+  assert.equal(h.page.data.contentFilterNotice, undefined, 'PG-064:不再出「清除筛选可搜帖文」说明');
+  const topic = h.requests.filter(r => r.url === '/api/topic/list');
+  const activity = h.requests.filter(r => r.url === '/api/activity/list');
+  assert.equal(topic.length, 1); assert.equal(activity.length, 1);
+  h.requests.filter(r => r.url !== '/api/search/unified').forEach(r => {
+    if (r.url === '/api/topic/list') r.success({ code: 200, data: { rows: [{ id: 1, title: 'city 主题' }], total: 1 } });
+    else if (r.url === '/api/activity/list') r.success({ code: 200, data: { rows: [{ id: 2, title: 'city 活动' }], total: 1 } });
+    else r.success({ code: 200, data: { rows: [], total: 0 } });
+  });
+  const types = h.page.data.visibleResults.map(r => r.type).sort();
+  assert.equal(types.join(','), 'activity,topic');
+  const before = h.unified().length;
+  h.page.runSearch();
+  assert.equal(h.unified().length, before, '短时间内不再先撞一次 503');
+  assert.equal(h.requests.filter(r => r.url === '/api/topic/list').length, 2);
+});
+
+test('input changes, account changes, hidden and unloaded pages reject late responses', () => {
+  const h = harness(); h.page.onLoad({ keyword: 'old' }); const old = h.unified()[0];
+  h.page.onKeywordInput({ detail: { value: 'new' } }); ok(old, [row(1)], 1);
+  assert.equal(h.page.data.visibleResults.length, 0);
+  h.page.onSearchConfirm(); const next = h.unified()[1]; assert.equal(next.data.keyword, 'new');
+  h.owner('8'); ok(next, [row(2)], 1); assert.equal(h.page.data.visibleResults.length, 0);
+  const own = h.unified()[2]; h.page.onHide(); ok(own, [row(3)], 1);
+  assert.equal(h.page.data.visibleResults.length, 0);
+  h.page.onShow(); const shown = h.unified()[3]; h.page.onUnload(); ok(shown, [row(4)], 1);
+  assert.equal(h.page.data.visibleResults.length, 0);
+});
+
+test('guest and unsupported filters retain existing searches; community gate excludes post without changing eligibility', () => {
+  // 2026-11-14：游客同样搜索公开内容与俱乐部，保留公开读功能开关。
+  const guest = harness(''); guest.page.onLoad({ keyword: 'city' }); assert.equal(guest.unified().length, 1);
+  assert.equal(guest.unified()[0].method, 'GET');
+  assert.ok(guest.requests.some(r => r.url === '/api/club/list'));
+  const filtered = harness(); filtered.page.onLoad({ keyword: 'city', categoryId: '8' });
+  assert.equal(filtered.unified().length, 0); assert.equal(filtered.requests[0].data.category_id, '8');
+  const gated = harness('7', false); gated.page.onLoad({ keyword: 'city' });
+  assert.equal(gated.unified()[0].data.types, 'topic,activity');
+});
+
+test('malformed totals and imprecise IDs fail the page without advancing, forbidden clears previous content', () => {
+  const h = harness(); h.page.onLoad({ keyword: 'city' });
+  ok(h.unified()[0], [row(1)], null); assert.ok(h.page.data.contentError);
+  h.page.loadMoreContent(); assert.equal(h.unified()[1].data.pageNum, 1);
+  ok(h.unified()[1], [{ id: 9007199254740992, type: 'post' }], 1); assert.ok(h.page.data.contentError);
+  h.page.loadMoreContent(); ok(h.unified()[2], [row(1)], 20); h.settleOthers();
+  h.page.loadMoreContent(); h.unified()[3].fail({ code: 403 });
+  assert.equal(h.page.data.visibleResults.length, 0); assert.ok(h.page.data.contentError);
+  h.page.loadMoreContent(); assert.equal(h.unified()[4].data.pageNum, 1);
+});
+
+// L05-158(业主默认项 A):回到结果页只在换账号 / 结果超过 60 秒 / 离开时没搜完才重搜;否则只重挂卡片重播入场
+test('L05-158 回到结果页:60 秒内且已搜完不重发请求,只重挂卡片;过期、没搜完或换账号才重搜', () => {
+  const h = harness(); h.page.onLoad({ keyword: 'city' }); ok(h.unified()[0], [row(1)], 1); h.settleOthers();
+  assert.equal(h.page.data.searchLoading, false);
+  const before = h.requests.length;
+  h.page.onHide(); h.page.onShow();
+  assert.equal(h.requests.length, before, '刚搜完回来不重搜');
+  assert.equal(h.page.data.visibleResults.length, 1, '卡片重挂,入场动画照常');
+  h.page._searchDoneAt -= 61000; h.page.onHide(); h.page.onShow();
+  assert.ok(h.requests.length > before, '超过 60 秒重搜');
+  const mid = h.requests.length; h.page.onHide(); h.page.onShow();
+  assert.ok(h.requests.length > mid, '离开时还没搜完,回来重搜');
+  h.settleOthers(); h.unified().forEach(r => { try { ok(r, [row(1)], 1); } catch (_) {} });
+  const settled = h.requests.length; h.owner('8'); h.page.onShow();
+  assert.ok(h.requests.length > settled, '换账号重搜');
+});
+
+// L05-158 复审:回到结果页不重搜时,离开时作废的搜索序号要接回当前内容分页,否则「加载更多」的回包被当成旧包丢掉,按钮一直转圈。
+test('L05-158 回到结果页不重搜后,加载更多的回包照常落地,不卡在加载中', () => {
+  const h = harness(); h.page.onLoad({ keyword: 'city' });
+  ok(h.unified()[0], Array.from({ length: 12 }, (_, i) => row(i + 1)), 25); h.settleOthers();
+  h.page.onHide(); h.page.onShow();
+  assert.equal(h.unified().length, 1, '刚搜完回来不重搜');
+  h.page.onReachBottom();
+  const next = h.unified()[1]; assert.equal(next.data.pageNum, 2);
+  ok(next, [row(13)], 25);
+  assert.equal(h.page.data.contentLoading, false, '回包落地后不再显示加载中');
+  assert.equal(h.page.data.visibleResults.length, 13, '第二页结果并入列表');
+  h.page.loadMoreContent(); assert.equal(h.unified()[2].data.pageNum, 3, '还能继续翻页');
+});

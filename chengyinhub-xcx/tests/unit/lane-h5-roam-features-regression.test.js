@@ -1,0 +1,80 @@
+'use strict';
+// PR #15 已移植到当前消费者、但 master 上缺回归的子项：B8 半径常量、C9 继续漫游条、C5 路线整形、C1 清除对话。
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const root = path.join(__dirname, '..', '..');
+const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
+
+test('B8: /api/roam/pois 与 nearby-runners 共用 ROAM_POI_RADIUS_M', () => {
+  const src = read('pages/roam/index.js');
+  assert.match(src, /const ROAM_POI_RADIUS_M = 3000;/);
+  assert.match(src, /'\/api\/roam\/nearby-runners', 'POST', \{ lat: p\.lat, lng: p\.lng, radius: ROAM_POI_RADIUS_M \}/);
+  // L05-043(业主默认项 A):不再读旧筛选设置,/api/roam/pois 一律用同一常量
+  assert.match(src, /const radiusM = ROAM_POI_RADIUS_M;\n\s*return req\('\/api\/roam\/pois', 'GET', \{ lat: String\(c\.lat\), lng: String\(c\.lng\), radius: String\(radiusM\) \}/);
+  assert.doesNotMatch(src, /'\/api\/roam\/pois', 'GET', \{[^}]*radius: '3000'/);
+});
+
+// 2026-10-27 真机走查 P-08:owner 要求玩家首页不再放「继续上次漫游」,首页撤掉这条的挂载;
+// 组件本身仍归漫游线所有，组件内部约束照旧钉住，挂载断言改为「首页不再挂」。
+test('C9: 继续漫游条已退场:首页不挂载(P-08),无人注册的组件随 L05-095 删除', () => {
+  assert.equal(require('node:fs').existsSync(require('node:path').join(__dirname, '../../subpackageRoam/components/scene-roam-resume-bar/index.js')), false);
+  assert.doesNotMatch(read('pages/index/index.json'), /scene-roam-resume-bar/);
+  assert.doesNotMatch(read('pages/index/index.wxml'), /<cy-roam-resume-bar/);
+});
+
+test('C9: 恢复记录键与 roam-player-memory 一致（按玩家分桶）', () => {
+  const { createPlayerRoamMemory } = require('../../utils/roam-player-memory.js');
+  const store = {};
+  const storage = { getStorageSync: (k) => store[k], setStorageSync: (k, v) => { store[k] = v; } };
+  createPlayerRoamMemory('42', storage).writeRecovery({ clientSessionKey: 'a'.repeat(32), pendingTiles: [], finishRequested: false });
+  assert.deepEqual(Object.keys(store), ['roam_memory_v1:42:recovery']);
+});
+
+test('C5: 官方路线整形——单位、缺字段、坏坐标', () => {
+  const route = require('../../subpackageRoam/utils/official-route.js');
+  assert.equal(route.distanceText(3.5), '3.5 公里'); // PG-074
+  assert.equal(route.distanceText(0), '');
+  assert.equal(route.durationMin(45), '45 分钟');
+  assert.equal(route.durationMin(150), '2 小时 30 分');
+  assert.equal(route.normalizeRoute({ id: 1 }), null);
+  assert.equal(route.normalizeRouteList({}), null);
+  const list = route.normalizeRouteList([{ id: 7, name: '老城', city: '上海', totalDistance: 4, totalTime: 90 }]);
+  assert.equal(list[0].metaText, '上海 · 4 公里 · 1 小时 30 分');
+  const detail = route.normalizeRouteDetail({ id: 7, name: '老城', nodes: [
+    { name: 'A', latitude: '31.2', longitude: '121.4', nodeTime: 20 },
+    { name: 'B', latitude: '', longitude: '' },
+    { name: '', latitude: '1', longitude: '1' },
+    { name: 'C', latitude: '99', longitude: '10' },
+  ] });
+  assert.deepEqual(detail.nodes.map((n) => [n.order, n.name, n.lat]), [[1, 'A', 31.2], [2, 'B', null], [3, 'C', null]]);
+});
+
+test('C1: 清除对话——危险确认、端点、先作废在途提问、成功后才清本地', () => {
+  const src = read('subpackageMember/components/cy/npc-chat/index.js');
+  assert.match(src, /dc\.open\('ai\.npc\.chatData\.delete', \{\}\)/);
+  const start = src.indexOf("url: '/api/ai/npc/chat/data/delete'");
+  assert.ok(start > 0);
+  const before = src.slice(src.indexOf('onConfirmClearData:'), start);
+  assert.match(before, /this\._invalidate\(false\)/);
+  const clear = src.slice(src.indexOf('onConfirmClearData:'), src.indexOf('onSheetClose:'));
+  assert.match(clear, /authorWrites\.run\(/, '清空只可由持久原请求流程确认');
+  assert.match(clear, /validResult:[\s\S]*Number\.isSafeInteger\(data\.deleted\)/);
+  assert.ok(clear.indexOf('onSuccess:') < clear.indexOf('messages: []'), '只有严格核对成功回执后才清空本地');
+  assert.match(clear, /onUnknown: fail/);
+  const actions = require('../../utils/danger-actions.js');
+  const a = actions.getDangerAction('ai.npc.chatData.delete', {});
+  assert.ok(a.consequences.some((c) => c.text.includes('此操作不可撤销')));
+  assert.ok(a.consequences.some((c) => c.text.includes('所有 AI 对话')));
+});
+
+// L05-149:两处时长函数按单位命名;同一个数在两处的含义不同
+test('L05-149 路线时长按单位命名:分钟与秒各一份', () => {
+  const route = require('../../subpackageRoam/utils/official-route.js')
+  assert.equal(route.durationText, undefined)
+  assert.equal(route.durationMin(90), '1 小时 30 分')
+  // L09-097(F09b):subpackageMember/utils/public-catalog.js 整个删除(只剩查询与读回两段并入 pass-library),秒制时长函数随之消失
+  assert.equal(require('node:fs').existsSync(require('node:path').join(__dirname, '../../subpackageMember/utils/public-catalog.js')), false)
+})

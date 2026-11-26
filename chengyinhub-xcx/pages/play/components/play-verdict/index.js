@@ -1,0 +1,80 @@
+// cy-play-verdict · 全局判定屏(原型真源:模板编辑页 v2 · playkit 的 liquidWin / failScreen)
+//
+// 为什么是组件而不是各玩法自己画:十九个玩法各发明一套判定屏,玩家会以为自己在玩不同的产品。
+// 这里只有两张 —— 猜中了(「通过」章),没猜中(两个字 + 一下淡红闪;2026-11-24 起不再整屏铺红、不晃)。
+//
+// 「两个字」是产品拍板:配了限时且走到点是「时间到」,其余(次数用完之类)是「失败」。
+// 不写「这一关限时 N 秒,没在里面做完就算没过」—— 那是写给刚失败的人看的规则说明,
+// 那个时候没人读。
+
+/** 失败措辞只有两种。timedOut 是「有没有限时且走到点」,不是「这局有没有限时」。 */
+function failWord(timedOut) {
+  return timedOut ? '时间到' : '失败';
+}
+
+const { tidyText } = require('../../utils/keep-numerals.js');
+const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
+const { FADE_SWAP_MS } = require('../../../../utils/motion.js');
+
+Component({
+  behaviors: [reducedMotionBehavior],
+  properties: {
+    show: { type: Boolean, value: false },
+    kind: { type: String, value: 'win' },      // win | fail
+    // fail 专用:调用方传 timedOut,措辞由 failWord 统一决定,不让各玩法自己拼字
+    timedOut: { type: Boolean, value: false },
+    // win 专用:一句话。空着就只有对勾 —— 没内容就不要显示提示语
+    text: { type: String, value: '' },
+    // 分支三选一这类不判对错的收尾:同一个对勾落场,但不用成功绿(实走 A35)
+    neutral: { type: Boolean, value: false },
+    // 结果反馈配图(最多 3 张):玩法模板里作者给成功 / 失败配的图
+    images: { type: Array, value: [] },
+    // 独立弹出(编辑页预览、玩家端结果反馈)时给一个「继续」收起;挂在玩法台面里时由台面自己管
+    closable: { type: Boolean, value: false },
+    // 角色信任那一句(「X会记住这件事」);空 = 不出
+    remember: { type: String, value: '' },
+    // 读屏用的收尾说法(2026-11-24 起不画按钮,整屏点一下继续):页面给「继续故事」;空 = 「继续」
+    ctaLabel: { type: String, value: '' },
+  },
+  data: {
+    rising: false,
+    word: '失败',
+    flash: false,
+    shownText: '',
+    leaving: false,
+  },
+  observers: {
+    text(text) { this.setData({ shownText: tidyText(text) }); },
+    'show, kind, timedOut': function (show, kind, timedOut) {
+      this.setData({ word: failWord(timedOut) });
+      if (!show) { this._clear(); this.setData({ rising: false, leaving: false }); return; }
+      if (this.data.leaving) this.setData({ leaving: false });
+      // 先挂上再涨:同一帧里设 true 的话过渡没有起点,会直接就位、看不见涌上来那一下
+      this._clear();
+      this._raf = setTimeout(() => this.setData({ rising: true }), 20);
+      // 判负只闪一下淡红(挂上即亮,下一拍摘掉、靠过渡淡出),不铺整屏红
+      if (kind === 'fail' && !this.data.reducedMotion) {
+        this.setData({ flash: true });
+        this._flashT = setTimeout(() => { this._flashT = null; this.setData({ flash: false }); }, 60);
+      }
+    },
+  },
+  lifetimes: { detached() { this._clear(); } },
+  methods: {
+    _clear() {
+      if (this._raf) { clearTimeout(this._raf); this._raf = null; }
+      if (this._leaveT) { clearTimeout(this._leaveT); this._leaveT = null; }
+      if (this._flashT) { clearTimeout(this._flashT); this._flashT = null; }
+    },
+    /* 一下回到故事:先淡出(FADE_SWAP_MS,与 --cy-motion-fade-swap 同值),淡完才抛 close —— 页面收起时已经看不见它,
+       不会「啪」地一下换屏。减弱动态 / 连点:直接抛,只抛一次。 */
+    /** 整屏点一下:独立弹出 = 收起回故事;挂在台面里由台面接(台面根上的点击判断已通过才往外抛)。 */
+    onTap() { if (this.data.closable) this.onClose(); },
+    onClose() {
+      if (this.data.leaving) return;
+      if (this.data.reducedMotion) { this.triggerEvent('close'); return; }
+      this.setData({ leaving: true });
+      this._leaveT = setTimeout(() => { this._leaveT = null; this.triggerEvent('close'); }, FADE_SWAP_MS);
+    },
+  },
+});

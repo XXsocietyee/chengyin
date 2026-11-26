@@ -1,0 +1,192 @@
+/* 勋章墙:暗场数字装置。canvas 全屏,cover-view 悬浮层;设计参数已在原型 v5 定稿。 */
+page { background: var(--cy-color-bg-page); }
+
+.bw { position: relative; width: 100vw; height: 100vh; overflow: hidden; background: var(--cy-color-bg-page);
+      font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* 请求失败态:canvas 失败时改由 L0 scroll-view 承接,cy-error 是正常 DOM 层的唯一出口。 */
+.bw-error-state { position: fixed; left: 0; right: 0; top: 20%; bottom: 20%; z-index: 31;
+                  display: flex !important; flex-direction: column !important; min-height: 0; }
+
+/* 详情 veil + sheet:外观照玩家场景弹窗 cy-scene-sheet(Figma 量的那套,9-24 用户两轮指正)。
+   这里压在 WebGL 原生层上只能用 cover-view(chrome-spec 登记的例外),套不了组件,所以逐项抄它的令牌:
+   满宽贴底、只有顶部圆角、无白色描边；标题、关闭热区和正文边距复用弹窗令牌。
+   cover-view 做不了毛玻璃 ⇒ 底色取玩家弹层的实色档(--cy-comp-sheet-player-bg),不用半透明玻璃档。
+   缓动:2026-10-23 业主确认弹层不回弹,改走弹层规范的慢快慢(原为 Spring Animation)。 */
+.bw-veil { position: fixed; inset: 0; z-index: 40; background: var(--cy-comp-sheet-player-overlay);
+           opacity: 0; pointer-events: none; transition: opacity var(--cy-motion-sheet-out) var(--cy-ease-standard); }
+.bw-veil.on { opacity: 1; pointer-events: auto; transition-duration: var(--cy-motion-sheet-in); }
+.bw-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 41; box-sizing: border-box;
+            transform: translateY(110%);
+            background: var(--cy-comp-sheet-player-bg);
+            border: none;
+            border-radius: var(--cy-comp-sheet-radius) var(--cy-comp-sheet-radius) 0 0;
+            box-shadow: var(--cy-comp-sheet-player-inset-shadow);
+            /* 页面根 .bw 是等宽字体(墙面字幕用),弹窗照场景弹窗改回系统字体 */
+            font-family: -apple-system, BlinkMacSystemFont, "Inter", "PingFang SC", sans-serif;
+            /* 与 .ss__panel 同:不越过胶囊,正文超长时在 .bw-sh-body 里滚。
+               场景弹窗是 js 量胶囊底再算;这页根上已挂 --sbh/--nbh(状态栏 + 导航栏 = 胶囊底之下),直接用。
+               token 版 --cy-comp-sheet-max-height 靠 env() 反算,模拟器/无刘海机上会顶过胶囊(实拍抓到)。 */
+            max-height: min(var(--cy-comp-sheet-full), var(--cy-comp-sheet-max-h, var(--cy-comp-sheet-max-height))); display: flex; flex-direction: column;
+            /* 2026-10-23 业主定:弹层不回弹、慢快慢,按档位定速(tokens 的 --cy-motion-sheet-*);原 .42s 过冲弹簧(1.28)取消 —— 业主 2026-10-23 确认去掉回弹 */
+            transition: transform var(--cy-motion-sheet-out) var(--cy-ease-standard); }
+.bw-sheet.on { transform: translateY(0); transition-duration: var(--cy-motion-sheet-in); }
+/* 标题行 = .ss__head:只放标题与叉,标题占满剩余宽度 */
+.bw-sh-hd { flex: none; display: flex; align-items: center; gap: var(--cy-space-2);
+            padding: var(--cy-comp-sheet-header-pad-top) var(--cy-comp-sheet-header-pad-x) var(--cy-comp-sheet-header-pad-bottom); }
+.bw-sh-name { flex: 1; min-width: 0; font-size: var(--cy-comp-sheet-title-size); line-height: var(--cy-comp-sheet-title-leading);
+              font-weight: 700; letter-spacing: var(--cy-comp-sheet-title-tracking); color: var(--cy-comp-sheet-player-text);
+              white-space: normal; word-break: break-all; }
+/* 叉号 = .ss__close / .ss__control:88rpx 热区在外层,32px 视觉框不带圆底 */
+.bw-sh-x { position: relative; flex: none; width: 88rpx; height: 88rpx; display: flex;
+           align-items: center; justify-content: center; }
+.bw-sh-x-visual { position: relative; width: var(--cy-comp-sheet-close-size); height: var(--cy-comp-sheet-close-size);
+                  display: flex; align-items: center; justify-content: center; }
+/* 叉号图照 cy-icon close-sm(24 画布两条 2px 圆头线、--cy-comp-sheet-player-close-fg 70% 白)出的 PNG,同 44rpx 显示 */
+.bw-sh-x-icon { width: 44rpx; height: 44rpx; }
+/* 正文 = .ss__body */
+.bw-sh-body { flex: 1; min-height: 0; overflow-y: scroll; display: flex; flex-direction: column;
+               padding: 0 var(--cy-comp-sheet-body-pad-x) calc(48rpx + env(safe-area-inset-bottom)); }
+/* 类别小胶囊:标题下一行,按内容宽 */
+/* 正文是纵向 flex:子项一律不许被压扁(否则长说明把描述挤成半行,实拍抓到),超出的高度交给 .bw-sh-body 滚 */
+.bw-sh-rar, .bw-sh-desc, .bw-sh-meta, .bw-sh-3d { flex: none; }
+.bw-sh-rar { align-self: flex-start; margin-bottom: var(--cy-space-3); font-size: var(--cy-font-caption); padding: 4rpx 14rpx; /* ds-ok: 类别小胶囊,内距随字号 */
+             border: 1rpx solid currentColor; border-radius: var(--cy-radius-pill); }
+.bw-sh-desc { margin: 0 0 var(--cy-space-4); font-size: var(--cy-font-body); line-height: 1.6;
+              color: var(--cy-comp-sheet-player-text-secondary); white-space: normal; word-break: break-all; }
+/* 信息卡 = 场景弹窗里的记录卡(--cy-comp-sheet-player-history-card / 32rpx 圆角):标签在左、值在右,行间一条分隔线。
+   cover-view 不认 grid,原来的双列网格在这里会把标签和值挤成一列。 */
+.bw-sh-meta { background: var(--cy-comp-sheet-player-history-card); border-radius: var(--cy-comp-sheet-history-card-radius);
+              padding: 0 var(--cy-space-4); }
+.bw-sm { display: flex; align-items: center; justify-content: space-between; min-height: 96rpx; gap: var(--cy-space-3); }
+.bw-sm + .bw-sm { border-top: 1rpx solid var(--cy-comp-sheet-player-divider); }
+.bw-sm--wide { flex-direction: column; align-items: flex-start; justify-content: center; padding: var(--cy-space-3-5) 0; gap: var(--cy-space-1); }
+.bw-sm-k { flex: none; font-size: var(--cy-font-body); color: var(--cy-comp-sheet-player-text); }
+.bw-sm-v { font-size: var(--cy-font-body); color: var(--cy-comp-sheet-player-text-secondary); text-align: right;
+           white-space: normal; word-break: break-all; }
+.bw-sm--wide .bw-sm-v { text-align: left; }
+
+
+ 
+
+
+
+
+
+
+
+
+
+/* 2026-10-27 owner P-30:「墙 / 列表」切换已撤,.bw-view-* 样式随之删除 */
+
+.bw-list {
+  position: fixed;
+  overflow-y: auto;
+  inset: 0;
+  /* 9-24 删掉图例后顶部少了约 40rpx,260 → 220;10-27 P-30 撤掉墙/列表切换(约 100rpx),220 → 120,列表首行紧跟标题副标 */
+  padding: calc(var(--sbh) + var(--nbh) + 120rpx) var(--cy-page-x) calc(var(--cy-space-5) + var(--cy-safe-bottom));
+  box-sizing: border-box;
+  background: var(--cy-color-bg-page);
+}
+.bw-list-h {
+  display: block;
+  padding: var(--cy-space-4) 0 var(--cy-space-2);
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-type-caption);
+  font-weight: 650;
+  letter-spacing: .08em;
+}
+.bw-list-h:first-child { padding-top: 0; }
+.bw-grid { display: flex; flex-wrap: wrap; }
+.bw-cell { width: 50%; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; padding: var(--cy-space-2) 0 var(--cy-space-6); }
+.bw-medal { width: 224rpx; height: 224rpx; flex: none; display: flex; align-items: center; justify-content: center; }
+.bw-medal.is-locked .bw-medal__img { filter: grayscale(1) brightness(.6); }
+/* 2026-10-28 业主:珐琅徽章(enamel-pin.js 画);未解锁那张本身就是细线稿,不再压灰 */
+.bw-medal__pin { width: 100%; height: 100%; filter: drop-shadow(0 14rpx 22rpx rgba(0,0,0,.5)); } /* ds-ok: 徽章落在页面上的投影 */
+.bw-medal.is-locked .bw-medal__pin { filter: none; }
+.bw-pin-canvas { position: fixed; left: -4000rpx; top: 0; width: 160px; height: 160px; pointer-events: none; }
+.bw-sh-pin { display: block; width: 280rpx; height: 280rpx; margin: 8rpx auto 28rpx; }
+.bw-medal__img { width: 100%; height: 100%; }
+.bw-cell__name { margin-top: var(--cy-space-3-5); max-width: 100%; color: var(--cy-color-text-primary); font-size: var(--cy-type-card-title); font-weight: 600; text-align: center; }
+.bw-cell__meta { margin-top: var(--cy-space-1); max-width: 100%; color: var(--cy-color-text-tertiary); font-size: var(--cy-type-caption); text-align: center; }
+.bw-empty-state { position: fixed; inset: calc(var(--sbh) + var(--nbh) + 220rpx) 0 0; display: flex !important; flex-direction: column; min-height: 0; }
+
+.bw-sh-3d{ margin-top:23rpx; min-height:88rpx; padding:0 32rpx; border-radius:var(--cy-radius-pill); /* ds-ok Figma 实测(用户裁决字面值) */
+  display:flex; align-items:center; justify-content:center; gap:12rpx;
+  background:#FFFFFF; color:#0A0A0A; font-size:27rpx; font-weight:700; } /* ds-ok Figma 实测(用户裁决字面值) */
+.bw-sh-3d-icon { width: 14rpx; height: 22rpx; }
+
+
+
+/* 2026-10-23 页面动效(utils/page-motion.js):容器 --pm-* 置 1 时先隐着,再依次浮上来;静止时无过渡,按压反馈不受影响;减少动态效果时从不触发 */
+/* 已点亮的徽记在行落定后轻轻弹出(柔和回弹,不旋转不发光) */
+.bw-medal:not(.is-locked) { scale: calc(1 - var(--pm-b, 0) * .45); transition: scale var(--pm-b-d, 0s) cubic-bezier(.34,1.56,.64,1); transition-delay: calc(var(--pm-b-s, 0) * (107ms + min(var(--pmi, 0), 10) * 30ms)); }
+
+.bw-cell { filter: opacity(calc(1 - var(--pm-b, 0))); translate: 0 calc(var(--pm-b, 0) * 31rpx); transition: filter var(--pm-b-d, 0s) ease, translate var(--pm-b-d, 0s) cubic-bezier(.2,.82,.2,1), transform var(--cy-motion-press) var(--cy-ease-out), opacity var(--cy-motion-press) var(--cy-ease-out); transition-delay: calc(var(--pm-b-s, 0) * min(var(--pmi, 0), 10) * 30ms), calc(var(--pm-b-s, 0) * min(var(--pmi, 0), 10) * 30ms), 0s, 0s; }
+
+/* ===== 2026-10-30 收集册 · 勋章(业主定稿 P-3,参考 mymind)===== */
+.alb-light .bw { background: transparent; }
+.alb-light .bw-list {
+  position: fixed; inset: 0; z-index: 1;
+  padding: calc(var(--sbh) + var(--nbh)) 0 calc(var(--cy-space-5) + var(--cy-safe-bottom));
+  background: transparent;
+}
+.alb-light .bw-list-h { padding: var(--cy-space-4) var(--cy-page-x) var(--cy-space-1); color: var(--cy-color-text-tertiary); }
+.alb-light .bw-grid { padding: 0 var(--cy-space-2); }
+.bw-sum { display: flex; align-items: center; gap: var(--cy-space-4); padding: var(--cy-space-1) var(--cy-page-x) var(--cy-space-2); }
+.bw-ring { position: relative; flex: none; width: 168rpx; height: 168rpx; }
+.bw-dot { position: absolute; width: 10rpx; height: 10rpx; margin: -5rpx 0 0 -5rpx; border-radius: 50%;
+  background: rgba(255, 255, 255, .18); /* ds-ok: 计数环未亮的点(深底) */
+  transition: background-color .2s ease, transform .2s ease; }
+.bw-ring.is-on .bw-dot.is-lit { background: #E2412E; /* ds-ok: 计数环亮点,业主参考 mymind 的红 */ transform: scale(1.15); }
+.bw-ring__num { position: absolute; left: 0; top: 0; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.bw-ring__n { font-family: "Songti SC", "STSong", "Noto Serif SC", serif; font-size: 52rpx; /* ds-ok: 计数大字 */ font-weight: 600; line-height: 1; color: var(--cy-color-text-primary); font-variant-numeric: tabular-nums; }
+.bw-ring__t { margin-top: 6rpx; font-size: 20rpx; /* ds-ok: 计数环内的小字 */ color: var(--cy-color-text-tertiary); letter-spacing: .06em; }
+
+/* 两个一排,每枚放在一张浅色小卡上(卡底取勋章类别的浅色),一左一右各歪一点 */
+.alb-light .bw-cell { padding: var(--cy-space-2) var(--cy-space-2) var(--cy-space-5); }
+.bw-card { width: 100%; aspect-ratio: 1 / 1; border-radius: 28rpx; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 20rpx 48rpx rgba(40, 52, 90, .12), 0 2rpx 4rpx rgba(40, 52, 90, .08); /* ds-ok: 卡片浮在浅色底上 */
+  transform: rotate(-1.5deg); transition: opacity .2s ease; }
+.bw-cell:nth-child(even) .bw-card { transform: rotate(1.5deg); }
+/* L09-049 业主默认 A:从玩法奖励带 badgeCode 进来时,滚到那一枚并短暂描一圈亮边 */
+.bw-card.is-focus { box-shadow: 0 0 0 4rpx var(--cy-color-text-primary), 0 20rpx 48rpx rgba(40, 52, 90, .12); transition: box-shadow .3s ease, opacity .2s ease; } /* ds-ok: 落影同 .bw-card */
+.bw-card--0 { background: rgba(120, 160, 255, .16); } /* ds-ok: 探索 蓝(深底淡染,x-fix2 L-1) */
+.bw-card--1 { background: rgba(238, 237, 232, .12); } /* ds-ok: 创造 暖灰 */
+.bw-card--2 { background: rgba(250, 190, 120, .16); } /* ds-ok: 组织 杏 */
+.bw-card--3 { background: rgba(110, 210, 190, .16); } /* ds-ok: 连接 青 */
+.bw-card--4 { background: rgba(250, 150, 150, .16); } /* ds-ok: 共创 粉 */
+.bw-card.is-locked { background: rgba(255, 255, 255, .06); } /* ds-ok: 未点亮 */
+.bw-card.is-away { opacity: 0; } /* 飞出去时格子里那枚先隐掉 */
+.alb-light .bw-medal { width: 76%; height: 76%; }
+.alb-light .bw-medal__pin { filter: drop-shadow(0 12rpx 18rpx rgba(40, 30, 20, .28)); } /* ds-ok: 浅底上的投影 */
+.alb-light .bw-cell__name { font-family: "Songti SC", "STSong", "Noto Serif SC", serif; font-size: 30rpx; /* ds-ok: 宋体名字 */ margin-top: var(--cy-space-3); }
+/* 飞到中间 */
+.bw-fly { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 60; background: transparent; } /* 整屏浮层:底色由里面的 veil 渐显压暗 */
+.bw-fly__veil { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: rgba(12, 12, 14, .5); /* ds-ok: 压暗底 */ opacity: 0; transition: opacity .4s ease; }
+.bw-fly.is-on .bw-fly__veil { opacity: 1; }
+.bw-fly__pin { position: absolute; filter: drop-shadow(0 30rpx 50rpx rgba(0, 0, 0, .45)); /* ds-ok: 放大后的投影 */ }
+.bw-fly__cap { position: absolute; left: 0; right: 0; top: 68%; display: flex; flex-direction: column; align-items: center; gap: 6rpx;
+  opacity: 0; transform: translateY(16rpx); transition: opacity .3s ease .25s, transform .3s ease .25s; }
+.bw-fly.is-on .bw-fly__cap { opacity: 1; transform: none; }
+.bw-fly__name { font-family: "Songti SC", "STSong", "Noto Serif SC", serif; font-size: 40rpx; /* ds-ok: 放大后的名字 */ font-weight: 600; color: #ffffff; /* ds-ok: 暗底上的白字 */ }
+.bw-fly__meta { max-width: 80%; text-align: center; font-size: var(--cy-font-label); color: rgba(255, 255, 255, .7); /* ds-ok: 同上 */ }
+@media (prefers-reduced-motion: reduce) { .bw-dot, .bw-fly__veil, .bw-fly__cap { transition: none; } }
+
+/* 收集册内层:撑满整屏(x-fix2 L-1 起为玩家深色) */
+.alb-light { min-height: 100vh; }
+
+
+.bw-fly__pin { transition: var(--cy-tr-press); }

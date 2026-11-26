@@ -1,0 +1,117 @@
+process.env.TZ = 'UTC';
+
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const read = (p) => fs.readFileSync(path.resolve(__dirname, '../../', p), 'utf8');
+const stripJs = (s) => s.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+const stripWxml = (s) => s.replace(/<!--[\s\S]*?-->/g, '');
+const frozenBoundaryPattern = (field) => new RegExp(
+  String.raw`offer\.set${field}\s*\(\s*original\s*==\s*null\s*\?\s*chapter\.get${field}\(\)\s*:\s*original\.get${field}\(\)\s*\)`
+);
+
+/**
+ * 章节玩法边界:招商时公示 → 承接时冻结 → 点位提交时校验。
+ *
+ * 这条链有三段,**任何一段没通电,整套机制就静默失效且永不报错**:
+ *   ① 主办方在发布器填不了 ⇒ 两列恒 NULL ⇒ 校验分支恒不进
+ *   ② 商家申请前看不到 ⇒ 「公示」名存实亡,变成「做完了才被告知超标」
+ *   ③ 承接时不冻 ⇒ 主办方事后改章节会让已承接商家突然违规
+ *
+ * 2026-08-06 首次实现时 ①③ 双双漏了(DDL/domain/mapper 都有,就是没人写),
+ * 是通盘核查才发现的 —— 所以这里三段各钉一条。
+ */
+
+test('① 发布器:章节边界两项的 UI 入口已随商家承接整体移出编辑器(缺口在案)', () => {
+  // ⚠️ 2026-08-10 状态变更,不是搬家 —— 这两项目前**没有任何编辑入口**。
+  //
+  // 原断言守的是「验证方式与探索值上限在专业发布器里能填」。本轮按设计规格 §7 把
+  // 章节级商家承接整体移出编辑器:招商需要时间,发布前填不准(商家还没看到主题)、
+  // 发布后 WHITELIST 又改不了,所以配置改到「发布之后的项目详情页工作台」。
+  // 那个工作台单独排期(规格 §7.4),在它落地之前这两项是有意的缺口。
+  //
+  // 因此本条改为守两件事,并在工作台落地时**必须**把 wxml 断言加回去:
+  //   1. (L03-043 业主默认 A 起)旧的按下标写回一族已删,不留第二条写入路径
+  //   2. 编辑器里不许重新长出这些入口(否则又是「同一字段两个可写入口」)
+  const editorWxml = read('pages/publish/fabu/step3.wxml')
+    + read('pages/publish/fabu/topic-detail-sheet.wxml')
+    + read('pages/publish/fabu/index.wxml');
+  const js = stripJs(read('pages/publish/fabu/index.js'));
+
+  assert.doesNotMatch(editorWxml, /onChapterValidationMethodToggle/,
+    '章节承接配置已移到发布后工作台，编辑器里不该再有入口');
+  assert.doesNotMatch(editorWxml, /onChapterMaxNodeXpInput/, '同上');
+
+  // L03-043 业主默认 A(2026-11-24):工作台没有调用方,按下标写回的旧 handler 与 _updateChapterRecruitConfig 已删;
+  // 验证方式与探索值上限不在编辑器里编辑(只读回显 / 原样上送),不再留第二条写入路径。
+  assert.doesNotMatch(js, /onChapterValidationMethodToggle\s*\(/, '旧 handler 已按业主决定删除');
+  assert.doesNotMatch(js, /onChapterMaxNodeXpInput\s*\(/);
+  assert.doesNotMatch(js, /_updateChapterRecruitConfig\s*\(/);
+});
+
+test('② 商家申请前看得到 · 数据侧:边界要从服务端读进来并算成一句话', () => {
+  const js = stripJs(read('pages/topic/merchantinfo/merchantinfo.js'));
+  assert.match(js, /allowedValidationMethods/, '要读服务端下发的边界');
+  assert.match(js, /boundaryLabel/);
+});
+
+/* ⚠️ 渲染单独一条。2026-11-03 业主(ROUND4 l5-onboard):申请承接章节弹层**不再**在章节下列灰色事实行
+   (品类 / 必选 / 条款 / 边界 / 名额 / 门槛);权益门槛改挂在报名表「常备权益」字段下。
+   边界仍由服务端 assertWithinTerms 在提交时把关(见 ③)。这条锁住:弹层不再渲染事实清单,
+   报名表把门槛印在权益字段旁。 */
+test('② 渲染侧(2026-11-03 业主):弹层不列事实行,门槛挂在报名表的权益字段', () => {
+  const js = stripJs(read('pages/topic/components/cy/chapter-target-picker/index.js'));
+  assert.doesNotMatch(js, /pickedFacts|function factsOf/, '弹层不再算事实清单');
+  const wxml = stripWxml(read('pages/topic/components/cy/chapter-target-picker/index.wxml'));
+  assert.doesNotMatch(wxml, /pickedFacts|ctp-fact/, '弹层不再印事实清单');
+  const form = stripWxml(read('pages/topic/components/cy/chapter-node-form/index.wxml'));
+  assert.match(form, /常备权益[\s\S]{0,1600}?零售价不少于 \{\{money\.amount\(perkMinText\)\}\}/,
+    '门槛要印在「常备权益」字段下');
+});
+
+test('③ 承接时冻结:新供给取章节边界，补位沿用原退出供给的冻结边界', () => {
+  const svc = stripJs(read('../chengyinhub-system/src/main/java/com/chengyinhub/business/service/impl/MerchantOfferServiceImpl.java'));
+  const start = svc.indexOf('public Long enroll(');
+  const end = svc.indexOf('public void reconfirmCircleSupply(', start);
+  assert.ok(start >= 0 && end > start, '冻结契约必须验证实际 enroll 方法');
+  const enroll = svc.slice(start, end);
+  for (const field of ['AllowedValidationMethods', 'MaxNodeXp']) {
+    assert.match(enroll, frozenBoundaryPattern(field),
+      `${field}:新供给取 chapter，已批准补位取 original，不能被后来修改的章节或客户端值替换`);
+  }
+});
+
+test('④ 复制主题(移交)要带上边界,否则新主题条款静默退化成不限', () => {
+  const facade = stripJs(read('../chengyinhub-system/src/main/java/com/chengyinhub/business/service/impl/CmsTopicServiceImpl.java'));
+  assert.match(facade, /public Long copyCmsTopic\(Long id, Map<String, Object> params\)\s*\{\s*return topicContentCopyService\.copyCmsTopic\(id, params\);\s*\}/);
+  assert.match(facade, /public Long transferToClub\([\s\S]*?Long newTopicId = copyCmsTopic\(id, params\);/);
+  const svc = stripJs(read('../chengyinhub-system/src/main/java/com/chengyinhub/business/service/impl/TopicContentCopyServiceImpl.java'));
+  assert.match(svc, /newChapter\.setAllowedValidationMethods\s*\(\s*originalChapter\.getAllowedValidationMethods\(\)\s*\)/);
+  assert.match(svc, /newChapter\.setMaxNodeXp\s*\(\s*originalChapter\.getMaxNodeXp\(\)\s*\)/);
+});
+
+test('★负控:四条都不是恒真断言', () => {
+  // 「必须存在」型:样本里没有时要判假
+  assert.equal(/bindtap="onChapterValidationMethodToggle"/.test('<view></view>'), false);
+  for (const field of ['AllowedValidationMethods', 'MaxNodeXp']) {
+    const pattern = frozenBoundaryPattern(field);
+    const chapter = `chapter.get${field}()`;
+    const original = `original.get${field}()`;
+    const correct = `offer.set${field}(original == null ? ${chapter} : ${original});`;
+    assert.equal(pattern.test(correct), true, `${field}:正确两分支必须被识别`);
+    for (const value of ['null', chapter, original, `original == null ? ${original} : ${chapter}`,
+      `original == null ? ${chapter} : ${chapter}`, `original == null ? ${original} : ${original}`,
+      `original == null ? ${chapter} : client.get${field}()`]) {
+      assert.equal(pattern.test(`offer.set${field}(${value});`), false,
+        `${field}:少冻结、取错来源或反转新供给/补位分支必须被抓到`);
+    }
+    assert.equal(pattern.test(stripJs(`// ${correct}\n/* ${correct} */`)), false,
+      '注释里有正确冻结语句不能充当可执行代码');
+  }
+  // 注释里提到不算数
+  assert.equal(/chapter\.boundaryLabel/.test(stripWxml('<!-- chapter.boundaryLabel 待做 -->')), false);
+  // 「必须不存在」型:样本里有定义时要判真(删掉的 handler 回来了要能抓到)
+  assert.equal(/onChapterMaxNodeXpInput\s*\(/.test('onChapterMaxNodeXpInput(e) { },'), true);
+});

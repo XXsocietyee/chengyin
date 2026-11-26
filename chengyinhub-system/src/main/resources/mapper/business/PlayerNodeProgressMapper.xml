@@ -1,0 +1,344 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.chengyinhub.business.mapper.PlayerNodeProgressMapper">
+
+    <resultMap type="PlayerNodeProgress" id="PlayerNodeProgressResult">
+        <result property="playInstanceId" column="play_instance_id" />
+        <result property="id"           column="id"           />
+        <result property="memberId"     column="member_id"    />
+        <result property="activityId"   column="activity_id"  />
+        <result property="topicId"      column="topic_id"     />
+        <result property="nodeId"       column="node_id"      />
+        <result property="status"       column="status"       />
+        <result property="checkinTime"  column="checkin_time" />
+        <result property="picUrl"       column="pic_url"      />
+        <result property="reviewStatus" column="review_status"/>
+        <result property="longitude"    column="longitude"    />
+        <result property="latitude"     column="latitude"     />
+        <result property="puzzleScore"  column="puzzle_score" />
+        <result property="completionMode" column="completion_mode" />
+        <result property="delFlag"      column="del_flag"     />
+        <result property="createTime"   column="create_time"  />
+    </resultMap>
+
+    <sql id="selectPlayerNodeProgressVo">
+        select id, play_instance_id, member_id, activity_id, topic_id, node_id, status, checkin_time, pic_url, review_status, longitude, latitude, puzzle_score, completion_mode, del_flag, create_time from player_node_progress
+    </sql>
+
+    <select id="selectPlayerNodeProgressList" parameterType="PlayerNodeProgress" resultMap="PlayerNodeProgressResult">
+        <include refid="selectPlayerNodeProgressVo"/>
+        <where>
+            <if test="memberId != null"> and member_id = #{memberId}</if>
+            <if test="activityId != null"> and activity_id = #{activityId}</if>
+            <if test="topicId != null"> and topic_id = #{topicId}</if>
+            <if test="nodeId != null"> and node_id = #{nodeId}</if>
+            <if test="playInstanceId != null"> and play_instance_id = #{playInstanceId}</if>
+            <if test="playInstanceId == null and memberId != null and activityId != null">
+                and play_instance_id=coalesce((select r.play_instance_id from topic_route_session r where r.member_id=player_node_progress.member_id and r.topic_id=player_node_progress.topic_id and r.activity_id=player_node_progress.activity_id order by r.id desc limit 1),'default')
+            </if>
+            and del_flag = 0
+        </where>
+    </select>
+
+    <!-- 主题详情「已参加」。j2 F-06:场次已付(报名成功)的人也算参加,不只数已开始打卡的人;
+         报名口径同 CmsTopicMapper 的 viewer_reg(主题票 owner_type=1 / 本主题场次票 owner_type=2)。 -->
+    <select id="countPlayersByTopicId" resultType="long">
+        select count(distinct joined.member_id)
+        from (
+            select member_id
+            from player_node_progress
+            where topic_id = #{topicId}
+              and del_flag = 0
+            union
+            select reg.member_id
+            from cms_registration reg
+            left join cms_activity act
+              on reg.owner_type = 2 and act.id = reg.owner_id
+            where reg.member_id &gt; 0
+              and reg.payment_status = 2
+              and reg.registration_status = 2
+              and ((reg.owner_type = 1 and (reg.owner_id = #{topicId} or reg.topic_id = #{topicId}))
+                or (reg.owner_type = 2 and act.topic_id = #{topicId}))
+        ) joined
+    </select>
+
+    <update id="markGameplayQuestDone" parameterType="PlayerNodeProgress">
+        update player_node_progress set status = 1, checkin_time = now()
+        <if test="puzzleScore != null">, puzzle_score = #{puzzleScore}</if>
+        <if test="completionMode != null">, completion_mode = #{completionMode}</if>
+        where member_id = #{memberId} and activity_id = #{activityId} and topic_id = #{topicId}
+          and node_id = #{nodeId} and play_instance_id = #{playInstanceId} and status = 0 and del_flag = 0
+    </update>
+
+    <select id="selectPlayerNodeProgressById" resultMap="PlayerNodeProgressResult">
+        <include refid="selectPlayerNodeProgressVo"/>
+        where id = #{id} limit 1
+    </select>
+
+    <insert id="insertPlayerNodeProgress" parameterType="PlayerNodeProgress" useGeneratedKeys="true" keyProperty="id">
+        insert into player_node_progress
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="playInstanceId != null">play_instance_id,</if>
+            <if test="memberId != null">member_id,</if>
+            <if test="activityId != null">activity_id,</if>
+            <if test="topicId != null">topic_id,</if>
+            <if test="nodeId != null">node_id,</if>
+            <if test="status != null">status,</if>
+            <if test="checkinTime != null">checkin_time,</if>
+            <if test="picUrl != null">pic_url,</if>
+            <if test="reviewStatus != null">review_status,</if>
+            <if test="longitude != null">longitude,</if>
+            <if test="latitude != null">latitude,</if>
+            <if test="puzzleScore != null">puzzle_score,</if>
+            <if test="completionMode != null">completion_mode,</if>
+            <if test="delFlag != null">del_flag,</if>
+            <if test="createTime != null">create_time,</if>
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="playInstanceId != null">#{playInstanceId},</if>
+            <if test="memberId != null">#{memberId},</if>
+            <if test="activityId != null">#{activityId},</if>
+            <if test="topicId != null">#{topicId},</if>
+            <if test="nodeId != null">#{nodeId},</if>
+            <if test="status != null">#{status},</if>
+            <if test="checkinTime != null">#{checkinTime},</if>
+            <if test="picUrl != null">#{picUrl},</if>
+            <if test="reviewStatus != null">#{reviewStatus},</if>
+            <if test="longitude != null">#{longitude},</if>
+            <if test="latitude != null">#{latitude},</if>
+            <if test="puzzleScore != null">#{puzzleScore},</if>
+            <if test="completionMode != null">#{completionMode},</if>
+            <if test="delFlag != null">#{delFlag},</if>
+            <if test="createTime != null">#{createTime},</if>
+        </trim>
+    </insert>
+
+    <!-- ★不可覆盖性由 `pic_url is null` 承重，不由 status 承重 —— 两件事，两道闸。
+         status 在探店日(mode2)上是「游戏答完没有」(见下面 markShopDayGameDone 的 0→1)，
+         不是「节点通关没有」(那是 registration_entitlement)。原来的 `status = 0` 会让
+         「答题 → 下一步·拍现场凭证」在配了游戏的店恒命中 0 行，且 Java 侧同时抛错。
+         其余取值仍不许改写凭证 ⇒ 用 in (0, 1) 白名单，不是把这个谓词整条删掉。
+         ⚠️ 与 ShopDayProofServiceImpl#isPhotoWritableStatus 是同一判据的两层表达，必须一起改。 -->
+    <update id="updateShopDayPhoto">
+        update player_node_progress
+        set pic_url = #{picUrl}, review_status = 0
+        where id = #{id} and status in (0, 1) and del_flag = 0 and pic_url is null
+    </update>
+
+    <!-- ★拍照一律机审(2026-09-17 用户拍板,人工审核开关已下线)。
+         谓词只认 status=0:存量待审行(人工审核时代落下的 0,0 / 0,2)重新提交时在此转正,
+         status 1→1 恒 0 行 = 真重复;「通过」由 DB 条件更新裁判唯一性:并发提交只有一条能拿到
+         rows=1,调用方(advanceProgress)只有拿到 rows=1 才进入发奖链 —— 应用层查状态再写会双发。 -->
+    <update id="markPhotoMachineApproved">
+        update player_node_progress
+        set status = 1, review_status = 1, checkin_time = now()
+        where id = #{id} and status = 0 and del_flag = 0
+    </update>
+
+    <!-- B5 收窄(2026-08-15):mode2 的行由扫码进店先建(status=0),游戏完成走条件更新 0→1。
+         status=0 是唯一合法起点 ⇒ 并发双答只有一边更新到,防 XP 双发;已是 1 恒 0 行 = 真重复。 -->
+    <update id="markShopDayGameDone">
+        update player_node_progress
+        set status = 1
+        where member_id = #{memberId} and activity_id = #{activityId}
+          and topic_id = #{topicId} and node_id = #{nodeId}
+          and play_instance_id=coalesce((select r.play_instance_id from topic_route_session r where r.member_id=#{memberId} and r.topic_id=#{topicId} and r.activity_id=#{activityId} order by r.id desc limit 1),'default')
+          and status = 0 and del_flag = 0
+    </update>
+
+    <!-- activity_id 是现有游玩局真源；只有该局完成全部公开可玩节点且所有谜题均有分数时才进入个人最佳。 -->
+    <select id="selectPuzzlePersonalBest" resultType="Integer">
+        select max(session_score)
+          from (
+                select coalesce(p.activity_id, 0) as session_id,
+                       sum(coalesce(p.puzzle_score, 0)) as session_score,
+                       count(distinct p.node_id) as done_count,
+                       count(distinct case when p.puzzle_score is not null then p.node_id end) as puzzle_count
+                  from player_node_progress p
+                  join cms_topic_node pn on pn.id = p.node_id
+                   and pn.status = 1
+                   and (pn.merchant_member_id is null or pn.node_audit_status = 1)
+                   and not exists (select 1 from merchant_chapter_offer withdrawn
+                                   where withdrawn.chapter_id = pn.chapter_id
+                                     and withdrawn.merchant_id = pn.merchant_member_id
+                                     and withdrawn.status = 0
+                                     and withdrawn.withdraw_reason is not null
+                                     and trim(withdrawn.withdraw_reason) != '')
+                 where p.member_id = #{memberId}
+                   and p.topic_id = #{topicId}
+                   and p.status = 1
+                   and p.del_flag = 0
+                 group by coalesce(p.activity_id, 0),p.play_instance_id
+               ) scored_session
+         where scored_session.done_count = (
+               select count(*)
+                 from cms_topic_node n
+                where n.topic_id = #{topicId}
+                  and n.status = 1
+                  and (n.merchant_member_id is null or n.node_audit_status = 1)
+                  and not exists (select 1 from merchant_chapter_offer withdrawn
+                                  where withdrawn.chapter_id = n.chapter_id
+                                    and withdrawn.merchant_id = n.merchant_member_id
+                                    and withdrawn.status = 0
+                                    and withdrawn.withdraw_reason is not null
+                                    and trim(withdrawn.withdraw_reason) != '')
+         )
+           and scored_session.puzzle_count = (
+               select count(*)
+                 from cms_topic_node n
+                 join cms_member_template t on t.id = n.template_id
+                where n.topic_id = #{topicId}
+                  and n.status = 1
+                  and (n.merchant_member_id is null or n.node_audit_status = 1)
+                  and not exists (select 1 from merchant_chapter_offer withdrawn
+                                  where withdrawn.chapter_id = n.chapter_id
+                                    and withdrawn.merchant_id = n.merchant_member_id
+                                    and withdrawn.status = 0
+                                    and withdrawn.withdraw_reason is not null
+                                    and trim(withdrawn.withdraw_reason) != '')
+                  and t.validation_method in (1, 3)
+         )
+           and scored_session.puzzle_count > 0
+    </select>
+
+    <!-- 活动/主题排行榜(升级3):score=完成节点数(status=1)。
+         同分 tie-break:最后一次完成时间早者靠前(先集齐者赢),再按 member_id 稳定排。
+         昵称/头像是公开展示资料,不含手机号等 PII。 -->
+    <select id="selectActivityLeaderboard" resultType="com.chengyinhub.business.domain.vo.LeaderboardItemVO">
+        select p.member_id as memberId, m.nickname as nickname, m.avatar as avatar,
+               count(*) as score, max(p.checkin_time) as finishedAt
+          from player_node_progress p
+          left join ums_member m on m.id = p.member_id
+         where p.del_flag = 0 and p.status = 1
+           and p.play_instance_id=coalesce((select r.play_instance_id from topic_route_session r where r.member_id=p.member_id and r.topic_id=p.topic_id and r.activity_id=p.activity_id order by r.id desc limit 1),'default')
+           <if test="activityId != null"> and p.activity_id = #{activityId}</if>
+           <if test="topicId != null"> and p.topic_id = #{topicId} and p.activity_id = 0</if>
+         group by p.member_id, m.nickname, m.avatar
+         order by score desc, max(p.checkin_time) asc, p.member_id asc
+         limit #{limit}
+    </select>
+
+    <!-- D-13 分支主题排行榜(N-02):一主题一榜,读每位玩家本场最新一局 topic_route_session
+         (与 /my-completed、play_instance 口径同源:max(id))。
+         排序:到达结局(status=1 COMPLETED)者在前 → 结局用时(completed_at - create_time)短者在前
+         → 未到结局者按本局完成节点数降序 → member_id 稳定排。status=2(ENDED,失败收场)不算到达结局。
+         score 仍是本局 status=1 完成节点数,保持返回结构向后兼容。 -->
+    <sql id="routeLeaderboardColumns">
+        select r.member_id as memberId, m.nickname as nickname, m.avatar as avatar,
+               (select count(*) from player_node_progress p
+                 where p.member_id = r.member_id and p.activity_id = r.activity_id
+                   and p.topic_id = r.topic_id and p.play_instance_id = r.play_instance_id
+                   and p.status = 1 and p.del_flag = 0) as score,
+               case when r.status = 1 then 1 else 0 end as reachedEnding,
+               case when r.status = 1 and r.completed_at is not null
+                    then timestampdiff(SECOND, r.create_time, r.completed_at) end as elapsedSeconds,
+               case when r.status = 1 then r.completed_at end as finishedAt
+          from topic_route_session r
+          left join ums_member m on m.id = r.member_id
+         where r.topic_id = #{topicId} and r.activity_id = #{activityId}
+           and r.id = (select max(x.id) from topic_route_session x
+                        where x.member_id = r.member_id and x.topic_id = r.topic_id
+                          and x.activity_id = r.activity_id)
+    </sql>
+
+    <select id="selectRouteLeaderboard" resultType="com.chengyinhub.business.domain.vo.LeaderboardItemVO">
+        <include refid="routeLeaderboardColumns"/>
+         order by case when r.status = 1 then 0 else 1 end asc,
+                  case when r.status = 1 and r.completed_at is not null
+                       then timestampdiff(SECOND, r.create_time, r.completed_at) else 2147483647 end asc,
+                  score desc, r.member_id asc
+         limit #{limit}
+    </select>
+
+    <!-- 榜外的「我」:同一口径取本人最新一局;没开过局返回 null。 -->
+    <select id="selectRouteLeaderboardRow" resultType="com.chengyinhub.business.domain.vo.LeaderboardItemVO">
+        <include refid="routeLeaderboardColumns"/>
+           and r.member_id = #{memberId}
+         limit 1
+    </select>
+
+    <update id="updateArrivalSource">
+        update player_node_progress set arrival_source = #{arrivalSource}
+         where id = #{id} and arrival_source is null
+    </update>
+
+    <update id="markVisited">
+        update player_node_progress
+           set visit_time = coalesce(visit_time, #{visitTime}),
+               visit_method = coalesce(visit_method, #{visitMethod}),
+               longitude = coalesce(longitude, #{longitude}),
+               latitude = coalesce(latitude, #{latitude})
+         where member_id = #{memberId} and activity_id = #{activityId} and topic_id = #{topicId}
+           and play_instance_id = #{playInstanceId} and del_flag = 0 and checkin_time is not null
+           and node_id in
+           <foreach collection="nodeIds" item="nodeId" open="(" separator="," close=")">#{nodeId}</foreach>
+    </update>
+
+    <select id="selectTeamVisitedNodeIds" resultType="java.lang.Long">
+        select distinct p.node_id
+          from player_node_progress p
+         where p.topic_id = #{topicId} and p.activity_id = #{activityId}
+           and p.del_flag = 0 and p.checkin_time is not null and p.member_id &lt;&gt; #{memberId}
+           and p.member_id in (
+               select r.member_id from cms_registration r
+                where r.id in (
+                      select own.id from cms_registration own
+                       where own.member_id = #{memberId} and own.payment_status = 2
+                         and ((own.owner_type = 2 and own.owner_id = #{activityId})
+                           or (own.owner_type = 1 and own.owner_id = #{topicId}))
+                      union
+                      select seat.registration_id from cms_registration_seat_invitation seat
+                       where seat.invitee_member_id = #{memberId} and seat.status = 1)
+               union
+               select i.invitee_member_id from cms_registration_seat_invitation i
+                where i.status = 1 and i.invitee_member_id is not null
+                  and i.registration_id in (
+                      select own2.id from cms_registration own2
+                       where own2.member_id = #{memberId} and own2.payment_status = 2
+                         and ((own2.owner_type = 2 and own2.owner_id = #{activityId})
+                           or (own2.owner_type = 1 and own2.owner_id = #{topicId}))
+                      union
+                      select seat2.registration_id from cms_registration_seat_invitation seat2
+                       where seat2.invitee_member_id = #{memberId} and seat2.status = 1)
+               union
+               select mate.member_id from play_team_member me
+                 join play_team t on t.id = me.team_id and t.status &lt;&gt; 4
+                      and ((t.owner_type = 2 and t.owner_id = #{activityId}) or (t.owner_type = 1 and t.owner_id = #{topicId}))
+                 join play_team_member mate on mate.team_id = t.id and mate.status = 1
+                where me.member_id = #{memberId} and me.status = 1)
+    </select>
+
+    <select id="selectOwnVisits" resultMap="PlayerNodeProgressResult">
+        <include refid="selectPlayerNodeProgressVo"/>
+         where member_id = #{memberId} and activity_id = #{activityId} and topic_id = #{topicId}
+           and del_flag = 0 and checkin_time is not null
+         order by checkin_time asc, id asc
+    </select>
+
+    <!-- CG-ALL-11 本局开局方式与路线替代起点 -->
+    <select id="selectRunStartMode" resultType="java.lang.String">
+        select run_mode from play_run_start_mode
+        where member_id = #{memberId} and activity_id = #{activityId} and topic_id = #{topicId}
+        limit 1
+    </select>
+
+    <insert id="upsertRunStartMode">
+        insert into play_run_start_mode (member_id, activity_id, topic_id, run_mode, alt_station_id, create_time)
+        values (#{memberId}, #{activityId}, #{topicId}, #{runMode}, #{altStationId}, now())
+        on duplicate key update run_mode = values(run_mode), alt_station_id = values(alt_station_id),
+            create_time = values(create_time)
+    </insert>
+
+    <delete id="deleteRunStartMode">
+        delete from play_run_start_mode
+        where member_id = #{memberId} and activity_id = #{activityId} and topic_id = #{topicId}
+    </delete>
+
+    <select id="selectTopicAltStations" resultType="java.util.LinkedHashMap">
+        select id, name, longitude, latitude from cms_topic_alt_station
+        where topic_id = #{topicId} and status = 1
+        order by id
+        limit 20
+    </select>
+
+</mapper>

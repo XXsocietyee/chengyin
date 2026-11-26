@@ -1,0 +1,29 @@
+<view class="ticket-scene">
+  <cy-empty wx:if="{{state === 'missing'}}" fill="{{true}}" size="lg" kind="missing-param" cta="返回" bind:cta="close" />
+  <cy-error load-failure wx:elif="{{state === 'error'}}" fill="{{true}}" size="lg" title="入场码没生成出来" sub="{{errorText}}" retry="重试" bind:retry="retry" />
+
+  <view wx:elif="{{state === 'choose'}}" class="seat-choice">
+    <text class="seat-choice__title">选择本次出示的席位</text>
+    <text>本单共 {{seatCount}} 席，一次仅核销一席。请与同行人确认席位号。</text>
+    <input class="seat-choice__input" type="number" maxlength="10" value="{{seatInput}}" bindinput="inputSeat" placeholder="输入席位号" aria-label="本次核销席位号" />
+    <text wx:if="{{errorText}}">{{errorText}}</text>
+    <view class="voucher__cta" bindtap="confirmSeat" aria-role="button" aria-label="确认席位并生成码" hover-class="cy-pressed">确认席位并生成码</view>
+    <view bindtap="close" aria-role="button" aria-label="返回" hover-class="cy-pressed">返回</view>
+  </view>
+  <block wx:else>
+    <!-- D1(2026-11-12 设计评审):入场码只在「⋯」工具菜单的入场码行打开,普通半屏里一个适中的码(400rpx ≈ 200px),不再是翻面大票卡。 -->
+    <view class="voucher__card">
+      <text wx:if="{{title}}" class="voucher__title ep1">{{title}}</text>
+      <view class="voucher__qr">
+        <cy-dot-qr wx:if="{{state === 'ready'}}" src="{{qr}}" size="{{360}}" />
+        <text wx:else class="voucher__qr-tip">生成中…</text>
+      </view>
+      <text wx:if="{{seatNo}}" class="voucher__exp">第 {{seatNo}} 席</text>
+      <text wx:if="{{seatVerified}}" class="voucher__exp">此席已核销，请勿重复提供权益</text>
+      <text wx:if="{{expiry}}" class="voucher__exp">{{expiry}}</text>
+    </view>
+    <view wx:if="{{seatCount > 1}}" class="seat-choice__switch" bindtap="changeSeat" aria-role="button" aria-label="重新选择席位" hover-class="cy-pressed">重新选择席位</view>
+    <!-- V3-17(2026-11-06 业主):左下不再有返回钮,关闭走半屏右上角的 × 与下拉 -->
+  </block>
+
+</view>

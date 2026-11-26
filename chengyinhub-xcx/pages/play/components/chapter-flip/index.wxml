@@ -1,0 +1,52 @@
+<view class="cf cf--{{mode}} {{out ? 'is-out' : ''}} {{reducedMotion ? 'cf--reduced' : ''}}" catchtouchmove="noop" bindtap="onTap" hover-class="cf-tap" hover-stay-time="80" aria-role="{{mode === 'gate' ? 'button' : 'dialog'}}" aria-label="{{mode === 'gate' ? (endCard ? endCard.kicker : info.title) + '，轻点继续' : info.title}}">
+  <view class="cf__amb" wx:if="{{ambient.on}}" aria-hidden="true">
+    <view class="cf__rays" wx:if="{{ambient.rays}}" style="{{ambient.haloStyle}}"></view>
+    <view class="cf__halo" style="{{ambient.haloStyle}}"></view>
+    <view wx:for="{{ambient.sparks}}" wx:key="i" class="cf__spl cf__spl-{{item.i}}" style="left:{{item.left}}%;top:{{item.top}}px;"></view>
+  </view>
+  <canvas type="2d" id="cf" class="cf__fx" aria-hidden="true"></canvas>
+  <!-- l-play 章节完成整屏(proto/game gp-chapter-end):本章照片渐入底色 → 星点锁成方块章节号(画布)→ 成功插图 → 第 N 章完成 · 章名 → 三格数据滚上来 → 下一站;
+       点「下一站」照片与文字化成细粉尘吹散(画布),下一章开场浮现。没有卡片。 -->
+  <view class="cf__end {{endIn ? 'is-in' : ''}} {{endOut ? 'is-out' : ''}}" wx:if="{{endCard}}">
+    <image wx:if="{{endCard.cover}}" class="cf__cover" src="{{endCard.cover}}" mode="aspectFill" aria-hidden="true" />
+    <view class="cf__fade" aria-hidden="true"></view>
+    <view class="cf__body">
+      <view class="cf__ok" aria-hidden="true">
+        <cy-illus name="success" size="240" delay="{{120}}" reduced-motion="{{reducedMotion}}" />
+        <view class="cf__spk cf__spk--a"><cy-illus name="sparkles" size="88" delay="{{240}}" bare="{{true}}" reduced-motion="{{reducedMotion}}" /></view>
+        <view class="cf__spk cf__spk--b"><cy-illus name="sparkles" size="64" delay="{{280}}" bare="{{true}}" reduced-motion="{{reducedMotion}}" /></view>
+      </view>
+      <view class="cf__ek">{{endCard.kicker}}</view>
+      <view class="cf__et" wx:if="{{endCard.title}}">{{endCard.title}}</view>
+      <view class="cf__stats2" wx:if="{{endStats.length}}">
+        <view class="cf__st" wx:for="{{endStats}}" wx:key="k"><text class="cf__sv">{{item.v}}</text><text class="cf__sl">{{item.k}}</text></view>
+      </view>
+      <view class="cf__stats2 cf__d" wx:if="{{endCard.reward}}">奖励 · {{endCard.reward}}</view>
+    </view>
+    <!-- 2026-11-24 业主:不留按钮,整屏点一下继续(根节点 onTap);下一站名留成一行字 -->
+    <view class="cf__next cf__d" wx:if="{{endCard.next}}">下一站 · {{endCard.next}}</view>
+  </view>
+  <!-- 章节开始 / 通关的文字:方块章节号(开场)或三棱锥 → 城瘾标志(通关)在画布上,这里只有逐字解码的章眉 / 章名 / 说明 / 数据 -->
+  <!-- 角色 Cast v1 · E2 书页式章首(只在开了角色的主题,info.book = 「第N章」):小字疏排章序 + 大标题 + 28px 发丝线,取代逐字解码那组字 -->
+  <view class="cf__book {{startIn ? 'is-in' : ''}}" wx:if="{{info.book && start && !endCard}}" aria-hidden="true">
+    <view class="cf__book-k">{{info.book}}</view>
+    <view class="cf__book-t">{{info.title}}</view>
+    <view class="cf__book-rule"></view>
+  </view>
+  <view class="cf__copy {{startIn ? 'is-in' : ''}} {{quiet ? 'is-quiet' : ''}}" wx:if="{{copy && !info.book}}" aria-hidden="true">
+    <view class="cf__k"><text wx:for="{{copy.k}}" wx:key="index" class="cf__c {{item.n ? 'is-n' : ''}}">{{item.c}}</text></view>
+    <view class="cf__t"><text wx:for="{{copy.t}}" wx:key="index" class="cf__c {{item.n ? 'is-n' : ''}}">{{item.c}}</text></view>
+    <view class="cf__d" wx:if="{{copy.d.length}}"><text wx:for="{{copy.d}}" wx:key="index" class="cf__c {{item.n ? 'is-n' : ''}}">{{item.c}}</text></view>
+    <view class="cf__stats" wx:if="{{copy.stats.length}}">
+      <view class="cf__stat" wx:for="{{copy.stats}}" wx:key="index" wx:for-item="st">
+        <view class="cf__v"><text wx:for="{{st.v}}" wx:key="index" class="cf__c {{item.n ? 'is-n' : ''}}">{{item.c}}</text></view>
+        <view class="cf__sk"><text wx:for="{{st.k}}" wx:key="index" class="cf__c {{item.n ? 'is-n' : ''}}">{{item.c}}</text></view>
+      </view>
+    </view>
+  </view>
+  <!-- 章节开场:整屏点一下读下去(根节点 onTap),不再画「读下去」钮(2026-11-24 业主) -->
+  <view class="cf__btns {{cta ? 'is-on' : ''}}" wx:if="{{mode === 'finale'}}">
+    <view class="cf__pill cf__pill--s" catchtap="onClose" aria-role="button" aria-label="继续" hover-class="cf-pressed" hover-stay-time="80">继续</view>
+    <view class="cf__pill cf__pill--p" catchtap="onSave" aria-role="button" aria-label="保存通关卡" hover-class="cf-pressed" hover-stay-time="80">保存通关卡</view>
+  </view>
+</view>

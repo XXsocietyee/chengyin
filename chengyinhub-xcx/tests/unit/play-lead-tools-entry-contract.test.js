@@ -1,0 +1,307 @@
+'use strict'
+
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const test = require('node:test')
+
+const ROOT = path.resolve(__dirname, '../..')
+const PAGE_JS = path.join(ROOT, 'pages/play/index.js')
+const PAGE_WXML = path.join(ROOT, 'pages/play/index.wxml')
+const GROUP_CODE_JS = path.join(ROOT, 'subpackageRoam/components/cy/scene-qr-group-code/index.js')
+
+const LEAD_TOOL_HANDLERS = [
+  'leadVerifyMemberTicketFromTools',
+  'leadShowGroupCodeFromTools',
+  'leadUnlockFromTools',
+  'leadSettleFromTools',
+]
+
+function parseAttributes(tag) {
+  return Object.fromEntries(
+    [...tag.matchAll(/([:\w-]+)="([^"]*)"/g)].map((match) => [match[1], match[2]]),
+  )
+}
+
+function leadToolRows(wxml) {
+  // 抽屉 2026-09-09 换成 scroll-view(到屏底内部滚动),锚点跟着走
+  // 2026-09-22 从底栏转移到故事流右上角,容器多了 tools--corner 修饰类 ⇒ 锚点去掉尾引号
+  const toolsStart = wxml.indexOf('<scroll-view class="tools')
+  assert.notEqual(toolsStart, -1, '游玩工具抽屉必须存在')
+  return [...wxml.slice(toolsStart).matchAll(/<view class="drow"[^>]*>/g)]
+    .map((match) => parseAttributes(match[0]))
+    .filter((attrs) => LEAD_TOOL_HANDLERS.includes(attrs.bindtap))
+}
+
+function evaluateVisibility(expression, lead) {
+  const body = expression.replace(/^\{\{/, '').replace(/\}\}$/, '')
+  return Boolean(Function('lead', `return (${body})`)(lead))
+}
+
+function assertLeadToolWiring(wxml) {
+  const rows = leadToolRows(wxml)
+  assert.deepEqual(rows.map((row) => row.bindtap).sort(), LEAD_TOOL_HANDLERS.slice().sort())
+  for (const row of rows) {
+    assert.equal(evaluateVisibility(row['wx:if'], { exists: false, isLeader: true }), false)
+    assert.equal(evaluateVisibility(row['wx:if'], { exists: true, isLeader: false }), false)
+    assert.equal(evaluateVisibility(row['wx:if'], { exists: true, isLeader: true }), true)
+  }
+}
+
+function loadPage() {
+  const original = { getApp: global.getApp, Page: global.Page, wx: global.wx }
+  let definition
+  const requests = []
+  const disk = new Map()
+  const platform = {
+    getStorageSync: key => disk.get(key),
+    setStorageSync: (key, value) => disk.set(key, value),
+    scans: [], modals: [], loadings: [], hiddenLoadings: 0, toasts: [],
+    scanCode(options) { this.scans.push(options) },
+    showModal(options) { this.modals.push(options) },
+    showLoading(options) { this.loadings.push(options) },
+    hideLoading() { this.hiddenLoadings += 1 },
+    showToast(options) { this.toasts.push(options) },
+  }
+  const app = {
+    getUserID: () => '7', getAuthorization: () => 'unit-session',
+    sendRequest(options) { requests.push(options) },
+  }
+  global.getApp = () => app
+  global.Page = (value) => { definition = value }
+  global.wx = platform
+  delete require.cache[require.resolve('../../pages/play/utils/play-route-state')]
+  delete require.cache[require.resolve(PAGE_JS)]
+  require(PAGE_JS)
+  delete require.cache[require.resolve(PAGE_JS)]
+  global.getApp = original.getApp
+  global.Page = original.Page
+  global.wx = platform
+  return { definition, requests, platform, restore: () => { global.wx = original.wx } }
+}
+
+function createPageContext(definition, lead = { exists: true, isLeader: true }) {
+  const context = {
+    ...definition,
+    data: { ...definition.data, activityId: '7', lead: { currentChapterId: 10, nextChapterId: 20, ...lead }, sessionToolsOpen: true },
+    setData(patch, callback) {
+      Object.entries(patch).forEach(([key, value]) => {
+        if (!key.includes('.')) this.data[key] = value
+      })
+      if (callback) callback()
+    },
+  }
+  return context
+}
+
+function loadGroupCodeComponent() {
+  const original = { getApp: global.getApp, Component: global.Component }
+  let definition
+  const requests = []
+  const events = []
+  global.getApp = () => ({ sendRequest(options) { requests.push(options) } })
+  global.Component = (value) => { definition = value }
+  delete require.cache[require.resolve(GROUP_CODE_JS)]
+  require(GROUP_CODE_JS)
+  delete require.cache[require.resolve(GROUP_CODE_JS)]
+  global.getApp = original.getApp
+  global.Component = original.Component
+  const data = { ...definition.data, activityId: '7', topicId: '', name: '本场' }
+  const context = {
+    ...definition.methods,
+    data,
+    setData(patch, callback) { Object.assign(this.data, patch); if (callback) callback() },
+    triggerEvent(name) { events.push(name) },
+  }
+  return { context, requests, events }
+}
+
+function settlePromiseQueue() {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
+test('领队四工具在既有抽屉完成接线，且可见性由真实领队态共同决定', () => {
+  assertLeadToolWiring(fs.readFileSync(PAGE_WXML, 'utf8'))
+})
+
+test('负控：移除任一工具 bindtap 时接线契约必须判红', () => {
+  const source = fs.readFileSync(PAGE_WXML, 'utf8')
+  const mutated = source.replace(` bindtap="${LEAD_TOOL_HANDLERS[0]}"`, '')
+  assert.notEqual(mutated, source, '负控锚点失效')
+  assert.throws(() => assertLeadToolWiring(mutated), assert.AssertionError)
+})
+
+test('负控：入口对非领队或非带队场次可见时权限契约必须判红', () => {
+  const source = fs.readFileSync(PAGE_WXML, 'utf8')
+  const mutated = source.replace(/wx:if="\{\{lead\.exists && lead\.isLeader\}\}"/, 'wx:if="{{true}}"')
+  assert.notEqual(mutated, source, '负控锚点失效')
+  assert.throws(() => assertLeadToolWiring(mutated), assert.AssertionError)
+})
+
+test('非领队直接调用四个核心方法也不会触发扫码、弹窗、场景或请求', () => {
+  const harness = loadPage()
+  try {
+    const context = createPageContext(harness.definition, { exists: true, isLeader: false })
+    context.openScene = () => { throw new Error('非领队不得打开团码场景') }
+    context.leadVerifyMemberTicket()
+    context.leadShowGroupCode()
+    context.leadUnlock()
+    context.leadSettle()
+    assert.equal(harness.platform.scans.length, 0)
+    assert.equal(harness.platform.modals.length, 0)
+    assert.equal(harness.requests.length, 0)
+  } finally {
+    harness.restore()
+  }
+})
+
+test('扫成员票的等待、成功、失败与取消都产生可观察反馈', async () => {
+  const harness = loadPage()
+  try {
+    const context = createPageContext(harness.definition)
+    context.leadVerifyMemberTicket()
+    harness.platform.scans.pop().fail({ errMsg: 'scanCode:fail cancel' })
+    assert.equal(harness.platform.toasts.length, 1)
+
+    context.leadVerifyMemberTicket()
+    harness.platform.scans.pop().success({ result: 'v1.900.topic.1999999999999.7.signature' })
+    assert.equal(harness.platform.loadings.length, 1)
+    harness.requests.pop().success({ code: 200 })
+    await settlePromiseQueue()
+    assert.equal(harness.platform.hiddenLoadings, 1)
+    assert.equal(harness.platform.toasts.length, 2)
+
+    context.leadVerifyMemberTicket()
+    harness.platform.scans.pop().success({ result: 'v1.900.topic.1999999999999.7.signature' })
+    harness.requests.pop().fail()
+    await settlePromiseQueue()
+    assert.equal(harness.platform.hiddenLoadings, 2)
+    assert.equal(harness.platform.toasts.length, 3)
+  } finally {
+    harness.restore()
+  }
+})
+
+test('整团码场景以状态变化覆盖等待、成功、失败与关闭取消', () => {
+  const failed = loadGroupCodeComponent()
+  failed.context.start('7', '')
+  assert.equal(failed.context.data.state, 'loading')
+  failed.requests.pop().fail()
+  assert.equal(failed.context.data.state, 'error')
+
+  // CU-C-01:团码只能扫,回包没有二维码图 = 没出成码,不得把长令牌当文字铺在码区
+  const noImage = loadGroupCodeComponent()
+  noImage.context.start('7', '')
+  noImage.requests.pop().success({ code: 200, data: { code: 'group-code', ttlMs: 300000 } })
+  assert.equal(noImage.context.data.state, 'error')
+  noImage.context.clearTimer()
+
+  const succeeded = loadGroupCodeComponent()
+  succeeded.context.start('7', '')
+  succeeded.requests.pop().success({ code: 200, data: { code: 'group-code', qrcodeUrl: 'https://img/qr.png', ttlMs: 300000 } })
+  assert.equal(succeeded.context.data.state, 'ready')
+  succeeded.context.close()
+  assert.equal(succeeded.events.length, 1)
+  succeeded.context.clearTimer()
+})
+
+test('解锁下一章节的等待、成功、失败、取消与未知查询都有可观察状态', async () => {
+  const harness = loadPage()
+  try {
+    const context = createPageContext(harness.definition)
+    let progressLoads = 0
+    context.loadTeamProgress = () => { progressLoads += 1 }
+    context.leadUnlock()
+    harness.platform.modals.pop().success({ confirm: false })
+    assert.equal(harness.requests.length, 0)
+
+    context.leadUnlock()
+    harness.platform.modals.pop().success({ confirm: true })
+    assert.equal(context._leadUnlockPending, true)
+    const first = harness.requests.pop()
+    assert.equal(first.data.expectedChapterId, 10)
+    assert.equal(first.data.targetChapterId, 20)
+    assert.ok(first.data.commandId)
+    first.success({ code: 200, msg: '已开启', data: first.data })
+    await settlePromiseQueue()
+    assert.equal(context._leadUnlockPending, false)
+    assert.equal(progressLoads, 1)
+
+    context.leadUnlock()
+    harness.platform.modals.pop().success({ confirm: true })
+    harness.requests.pop().success({ code: 500, msg: '未执行' })
+    await settlePromiseQueue()
+    assert.equal(context._leadUnlockPending, false)
+    assert.equal(progressLoads, 2)
+
+    context.leadUnlock()
+    harness.platform.modals.pop().success({ confirm: true })
+    const unknown = harness.requests.pop()
+    unknown.fail()
+    await settlePromiseQueue()
+    assert.equal(context._leadUnlockPending, true)
+    assert.equal(progressLoads, 2)
+    context.leadUnlock()
+    const read = harness.requests.pop()
+    assert.equal(read.method, 'GET')
+    assert.equal(read.url, '/api/club/lead/unlock-chapter-receipt')
+    assert.equal(read.data.commandId, unknown.data.commandId)
+    read.success({ code: 520 })
+    await settlePromiseQueue()
+    assert.equal(context._leadUnlockPending, true)
+    assert.equal(progressLoads, 2)
+  } finally { harness.restore() }
+})
+
+test('整团结算的等待、成功、失败与取消都产生可观察反馈', async () => {
+  const harness = loadPage()
+  try {
+    const context = createPageContext(harness.definition)
+    context.loadTeamProgress = () => {}
+    context.leadSettle()
+    harness.platform.modals.pop().success({ confirm: false })
+    assert.equal(harness.platform.toasts.length, 1)
+
+    context.leadSettle()
+    harness.platform.modals.pop().success({ confirm: true })
+    assert.equal(harness.platform.loadings.length, 1)
+    harness.requests.pop().success({ code: 200 })
+    await settlePromiseQueue()
+    assert.equal(harness.platform.hiddenLoadings, 1)
+    assert.equal(harness.platform.toasts.length, 2)
+
+    context.leadSettle()
+    harness.platform.modals.pop().success({ confirm: true })
+    harness.requests.pop().fail()
+    await settlePromiseQueue()
+    assert.equal(harness.platform.hiddenLoadings, 2)
+    assert.equal(harness.platform.toasts.length, 3)
+  } finally {
+    harness.restore()
+  }
+})
+
+// C-04(2026-11-02 walk-fix):导演运行时接管的路线局,旧带队入口放行恒被拒;播放页不再给出这一项。
+test('导演接管的场次不在播放页显示「解锁下一章节」', () => {
+  const wxml = require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../../pages/play/index.wxml'), 'utf8')
+  const row = /<view class="drow"[^>]*bindtap="leadUnlockFromTools"[^>]*>/.exec(wxml)
+  require('node:assert/strict').ok(row, '播放页缺放行入口')
+  require('node:assert/strict').match(row[0], /!lead\.directorRun/)
+})
+
+// C-03 第三轮(2026-11-02):集合签到的结果提示「已到集合点」原来落在 cy-toast 默认位置(底部 160rpx),
+// 正好压在开场页整宽主键「开始游戏」上。play 页的 toast 声明 lift,抬到底部主键之上;其它页不变。
+test('C-03: play 页轻提示抬到底部主键之上，不压「开始游戏」', () => {
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const root = path.join(__dirname, '..', '..')
+  const read = (p) => fs.readFileSync(path.join(root, p), 'utf8')
+  assert.match(read('pages/play/index.wxml'), /<cy-toast id="cy-toast" lift \/>/)
+  assert.match(read('components/cy/toast/index.wxml'), /\{\{lift \? 'ct--lift' : ''\}\}/)
+  const css = read('components/cy/toast/index.wxss')
+  const lift = Number((css.match(/\.ct\.ct--lift \{ bottom: calc\(env\(safe-area-inset-bottom\) \+ (\d+)rpx\); \}/) || [])[1])
+  // 开场主键:底部留白 48 + 提示行约 53 + 按钮 104 ≈ 205rpx;rig 实测按钮顶距底 284rpx
+  assert.ok(lift >= 300, 'lifted toast clears the 104rpx start button and its tip line')
+  const play = read('pages/play/index.wxml')
+  assert.equal((play.match(/<cy-toast /g) || []).length, 1)
+})

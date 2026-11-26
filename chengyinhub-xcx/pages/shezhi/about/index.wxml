@@ -1,0 +1,53 @@
+<view class="about-page {{isMerchantView ? 'theme-merchant' : 'theme-dark'}}">
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+  <cy-nav-bar plain custom-back bind:back="onBack" />
+  <view class="about-nav-space" style="height:{{statusBarHeight + navBarHeight}}px;"></view>
+  <cy-page-title title="关于" safe-top="{{false}}" />
+
+  <view class="about-content">
+    <view class="about-app">
+      <image class="about-app__logo" src="/images/cy_logo_mark.png" mode="aspectFit" />
+      <view class="about-app__name">城瘾</view>
+      <view class="about-app__version">版本 {{version}}</view>
+      <view wx:if="{{aigcFilingNo}}" class="about-app__version about-app__filing">{{aigcFilingNo}}</view>
+    </view>
+
+    <view class="about-section about-section--menu">
+      <cy-cell tint="{{isMerchantView ? 'ink' : 'mono'}}" icon="/pages/shezhi/images/icon_agreement.svg" title="用户服务协议" description="" bind:tap="openAgreement" />
+      <cy-cell tint="{{isMerchantView ? 'ink' : 'mono'}}" icon="/pages/shezhi/images/icon_agreement.svg" title="隐私保护指引" description="" bind:tap="openPrivacyContract" />
+      <cy-cell tint="{{isMerchantView ? 'ink' : 'mono'}}" icon="/pages/shezhi/images/icon_headset.svg" title="联系我们" open-type="contact" hairline="{{false}}" />
+    </view>
+
+    <!-- 署名是 game-icons.net 的 CC BY 3.0 许可条件，必须离线可见；
+         2026-10-22 owner 裁决:从设置页移到「关于」页底部，小号次要文字。 -->
+    <view class="sz-attribution" aria-label="素材署名">
+      <view class="sz-attribution__title">素材署名</view>
+      <view class="sz-attribution__block">
+        <view class="sz-attribution__name">game-icons.net 游戏图标 · Creative Commons BY 3.0（要求署名）</view>
+        <view class="sz-attribution__body">作者：Delapouite、Lorc、Skoll、Sbed、Quoting、Lord Berandas</view>
+        <view class="sz-attribution__link" data-link="https://game-icons.net/" bindtap="copyAttributionLink" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="复制 game-icons.net 来源地址">复制来源地址 · game-icons.net</view>
+      </view>
+      <view class="sz-attribution__divider"></view>
+      <view class="sz-attribution__block">
+        <view class="sz-attribution__name">像素城市场景 · Luis Zuno（ansimuz）· CC0 1.0</view>
+        <view class="sz-attribution__body">底图：Synth Cities、Warped City、Warped Miami Synth</view>
+        <view class="sz-attribution__link" data-link="https://ansimuz.itch.io/" bindtap="copyAttributionLink" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="复制 ansimuz 来源地址">复制来源地址 · ansimuz.itch.io</view>
+      </view>
+      <view class="sz-attribution__divider"></view>
+      <view class="sz-attribution__block">
+        <view class="sz-attribution__name">Lucide 图标 · ISC License</view>
+        <view class="sz-attribution__body">Lucide Contributors；部分图形源自 Feather · Cole Bemis · MIT License。完整版权与许可声明随图标文件保留。</view>
+        <view class="sz-attribution__body">来源：lucide.dev · 许可：lucide.dev/license</view>
+      </view>
+      <view class="sz-attribution__divider"></view>
+      <view class="sz-attribution__block">
+        <view class="sz-attribution__name">龙藏体 Long Cang · SIL Open Font License 1.1</view>
+        <view class="sz-attribution__body">Copyright 2018 The LongCang Project Authors · 设计：ZhongQi。故事正文所用字体。</view>
+      </view>
+    </view>
+  </view>
+</view>
+
+<cy-agreement-sheet show="{{showAgreementSheet}}" type="service" theme="{{isMerchantView ? 'merchant' : 'player'}}" bind:close="closeAgreement" />

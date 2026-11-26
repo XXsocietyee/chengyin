@@ -1,0 +1,90 @@
+'use strict';
+// 第十一轮 g2(j4 F4):队长打开招募中的队伍会读入队申请;本文件不测这条读取,夹具直接答空列表,不占请求序号。
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const { createRequire } = require('node:module');
+const file = path.resolve(__dirname, '../../pages/team/detail/index.js');
+const { platform, receipt } = require('./helpers/team-event-platform');
+const copy = v => JSON.parse(JSON.stringify(v));
+function boot() {
+  let definition, user = '71', token = 'a';
+  const requests = [], effects = [];
+  const app = { globalData: {}, getUserID: () => user, getAuthorization: () => token,
+    getRequestErrorMessage: (r, f) => r && r.msg || f, sendRequest: r => r.url === '/api/team/applications' ? r.success({ code: 200, data: [] }) : requests.push(r) };
+  vm.runInNewContext(fs.readFileSync(file, 'utf8'), {
+    Page: d => { definition = d; }, getApp: () => app, wx: { ...platform(), navigateBack: () => effects.push('back'), redirectTo() {} },
+    require: id => id.includes('toast') ? m => effects.push(m) : createRequire(file)(id)
+  });
+  const dc = { close() {}, busyOn: () => effects.push('busy'), done: () => effects.push('done'), failed: () => effects.push('failed') };
+  const page = { ...definition, data: copy(definition.data), selectComponent: () => dc,
+    setData(patch) { for (const [key, val] of Object.entries(patch)) {
+      const parts = key.split('.'); if (parts.length === 2) this.data[parts[0]][parts[1]] = val; else this.data[key] = val;
+    } } };
+  page.onLoad({ teamId: '9' }); page.onShow();
+  const info = { team: { id: 9, ownerId: 10, ownerType: 1, joinMode: 2, status: 0, inviteCode: 'PRIVATE', leaderMemberId: 71 },
+    members: [{ memberId: 71, role: 1 }, { memberId: 72, role: 0 }], joined: true, leader: true };
+  requests[0].success({ code: 200, data: copy(info) });
+  return { page, requests, effects, info, account() { user = '72'; token = 'b'; } };
+}
+// 第十一轮 g2(j4 F3):原断言「退队成功后重读队伍」编码的是旧决定 —— 退队后重读一支已看不见的队伍,
+// 页面停在「已满员 2/2」压着空名单。现在退队成功即离开本页,不再重读;在途的旧回包仍不能恢复成员身份。
+test('quit success invalidates in-flight info and leaves the page, old response cannot restore membership', async () => {
+  const h = boot(); h.page.load(); const old = h.requests.at(-1);
+  await h.page.onConfirmQuit(); const quit = h.requests.at(-1);
+  const count = h.requests.length;
+  quit.success(receipt(quit, 'APPLIED'));
+  assert.equal(h.requests.length, count, '不再重读'); assert.ok(h.effects.includes('back'), '离开本页');
+  assert.equal(h.page.data.joined, false); assert.equal(h.page.data.board, null);
+  old.success({ code: 200, data: h.info });
+  assert.equal(h.page.data.joined, false); assert.equal(h.page.data.leader, false);
+});
+test('kick success invalidates old board and starts fresh roster read', async () => {
+  const h = boot(); const board = h.requests.at(-1);
+  await h.page.onConfirmKick({ detail: { params: { id: 72 } } });
+  h.requests.at(-1).success(receipt(h.requests.at(-1), 'APPLIED'));
+  assert.equal(h.requests.at(-1).url, '/api/team/info');
+  board.fail({ code: 500, errorCode: 'ORIENT_TEAM_NOT_MEMBER' });
+  assert.notEqual(h.page.data.boardState, 'not-member');
+});
+test('team writes are single flight across quit and disband', async () => {
+  const h = boot(); await h.page.onConfirmQuit(); h.page.onConfirmDisband();
+  assert.equal(h.requests.filter(r => r.url === '/api/team/command').length, 1);
+});
+test('write response after switch does not show old receipt or refresh another account', async () => {
+  const h = boot(); await h.page.onConfirmQuit(); const req = h.requests.at(-1), count = h.requests.length;
+  h.account(); req.success(receipt(req, 'APPLIED'));
+  assert.equal(h.requests.length, count); assert.ok(!h.effects.includes('done'));
+  h.page.onShow(); assert.equal(h.page.data.joined, false);
+});
+test('membership denial clears member-only controls and roster, no stale invitation', () => {
+  const h = boot(); h.requests.at(-1).success({ code: 500, errorCode: 'ORIENT_TEAM_NOT_MEMBER' });
+  assert.equal(h.page.data.joined, false); assert.equal(h.page.data.leader, false);
+  assert.deepEqual(copy(h.page.data.members), []); assert.ok(!h.page.data.team.inviteCode);
+});
+test('explicit info authorization failure clears cached team', () => {
+  const h = boot(); h.page.load(); h.requests.at(-1).success({ code: 403, msg: 'forbidden' });
+  assert.equal(h.page.data.team, null); assert.equal(h.page.data.joined, false);
+  assert.deepEqual(copy(h.page.data.members), []);
+});
+test('join mode response from old account cannot replace new team mode', async () => {
+  const h = boot(); await h.page.onJoinModeChange({ detail: { value: false } });
+  const req = h.requests.at(-1); h.account(); req.success(receipt(req, 'APPLIED'));
+  assert.ok(!h.effects.includes('已改为仅邀请')); h.page.onShow(); assert.equal(h.page.data.leader, false);
+});
+
+test('board snapshot updates visible roster and role together with progress', () => {
+  const h = boot();
+  h.requests.at(-1).success({ code: 200, data: {
+    team: { teamId: 9, ownerId: 10, ownerType: 1 },
+    threshold: { activeCount: 1, required: 1, ratio: 1 },
+    summary: { teamDoneCount: 0, totalTasks: 0 }, tasks: [],
+    members: [{ memberId: 71, name: 'current', role: 0, doneTaskIds: [] }]
+  } });
+  assert.deepEqual(copy(h.page.data.members.map(m => m.memberId)), ['71']);
+  assert.equal(h.page.data.team.joinedCount, 1); assert.equal(h.page.data.leader, false);
+  // AUDIT-1122 L08-125:board.threshold 只留模板读的 required;activeCount 仍落在 team.joinedCount(上一行)
+  assert.equal(h.page.data.board.threshold.required, 1);
+});

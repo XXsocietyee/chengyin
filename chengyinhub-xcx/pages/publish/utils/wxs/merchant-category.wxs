@@ -1,0 +1,24 @@
+// 章节可接商家品类(allowedCategoryIds CSV,主品类在首位)的两处视图判断:
+// has = 某品类是否已选;names = 主品类名 + 其余已选品类名,以 " / " 连接。
+var idsOf = function (csv) {
+  return (csv === null || csv === undefined || csv === '') ? [] : ('' + csv).split(',');
+};
+
+var has = function (csv, id) {
+  return idsOf(csv).indexOf('' + id) >= 0;
+};
+
+var names = function (csv, list, primaryName) {
+  var out = primaryName ? ['' + primaryName] : [];
+  var ids = idsOf(csv);
+  var rows = list || [];
+  for (var i = 0; i < ids.length; i++) {
+    for (var j = 0; j < rows.length; j++) {
+      var name = rows[j].categoryName;
+      if (('' + rows[j].id) === ids[i] && name && out.indexOf(name) < 0) out.push(name);
+    }
+  }
+  return out.join(' / ');
+};
+
+module.exports = { has: has, names: names };

@@ -1,0 +1,529 @@
+package com.chengyinhub.business.service.support;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.junit.jupiter.api.Test;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * 逐字猜词判定回归。用例只对应原资料写明的行为：
+ * 原 17.6 实跑（{@code E____ S} 只补 {@code NDLES}、{@code NICOLASPERNELLE} 重建为 {@code NICOLAS AND PERNELLE}）、
+ * M.7 的 {@code format} 预填与 L3 逐位揭示、MP-05 的别名/大小写、0.4 的重登恢复与不泄答案。
+ *
+ * <p>刻意不断言传统猜字母「猜中揭示全部相同位置」，也不断言 LETTER/WORD/BOTH 或本类自带次数上限：
+ * 资料没有这些规则，答题次数归共用题级配置。
+ */
+class HangmanGameplayTest {
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    private static ObjectNode config(String answer) {
+        return JSON.createObjectNode().put("enabled", true).put("answer", answer);
+    }
+
+    /** 按实测样式构造 format 槽位数组：给定下标给字符，其余槽留空，分隔符留空。 */
+    private static ArrayNode format(String answer, int... given) {
+        ArrayNode slots = JSON.createArrayNode();
+        int[] cps = answer.codePoints().toArray();
+        for (int i = 0; i < cps.length; i++) {
+            slots.add(Character.isLetterOrDigit(cps[i]) && contains(given, i)
+                    ? new String(Character.toChars(cps[i])) : "");
+        }
+        return slots;
+    }
+
+    private static boolean contains(int[] values, int value) {
+        for (int candidate : values) if (candidate == value) return true;
+        return false;
+    }
+
+    private static ObjectNode input(String value) {
+        return JSON.createObjectNode().put("input", value);
+    }
+
+    private static ObjectNode slots(Object... pairs) {
+        ObjectNode payload = JSON.createObjectNode();
+        ObjectNode map = payload.putObject("slots");
+        for (int i = 0; i < pairs.length; i += 2) map.put((String) pairs[i], (String) pairs[i + 1]);
+        return payload;
+    }
+
+    // ---------- 作者保存 / 发布校验 ----------
+
+    @Test void answerIsRequiredAndMustCarryComparableCharacters() {
+        ObjectNode missing = JSON.createObjectNode().put("enabled", true);
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(missing))
+                .getMessage().contains("答案"));
+        assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(config("")));
+        assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(config("--- ---")));
+    }
+
+    @Test void formatMustBeASlotArrayMatchingTheAnswerLength() {
+        ObjectNode section = config("ENDLESS");
+        section.put("format", "E____ S");
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(section))
+                .getMessage().contains("槽位数组"), "format 必须是槽位数组，不是字符串掩码");
+
+        section.set("format", format("ENDLESS", 0));
+        ((ArrayNode) section.get("format")).remove(1);
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(section))
+                .getMessage().contains("槽数"));
+    }
+
+    @Test void prefilledSlotMustMatchTheFrozenAnswerAtThatPosition() {
+        ObjectNode section = config("ENDLESS");
+        section.set("format", format("ENDLESS", 0));
+        ((ArrayNode) section.get("format")).set(1, JSON.getNodeFactory().textNode("X"));
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(section))
+                .getMessage().contains("不符"));
+    }
+
+    @Test void formatMustLeaveAtLeastOneBlankSlot() {
+        ObjectNode section = config("ORB");
+        section.set("format", format("ORB", 0, 1, 2));
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(section))
+                .getMessage().contains("空白槽"));
+        section.set("format", format("ORB", 0, 1));
+        assertDoesNotThrow(() -> HangmanGameplay.validate(section));
+    }
+
+    @Test void duplicateOrEmptyAliasIsRejected() {
+        ObjectNode section = config("BOUCHERIE");
+        section.putArray("aliases").add("BOUCHERIE");
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(section))
+                .getMessage().contains("重复"));
+        section.putArray("aliases").add("BOUCHERIX").add("boucherix");
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(section))
+                .getMessage().contains("重复"), "大小写不区分时别名同样重复");
+        section.putArray("aliases").add("  ");
+        assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(section));
+    }
+
+    /** 2026-11-13 走查:单字符/数字答案「先错后对」必须能解开(错字留在槽里不能挡住后一次提交),且能让本站过关。 */
+    @Test void singleDigitAnswerWrongThenRightSolves() {
+        ObjectNode section = config("8");
+        ObjectNode kit = HangmanGameplay.initialState(section);
+        ObjectNode wrong = HangmanGameplay.judge(section, kit, JSON.createObjectNode().set("slots", JSON.createObjectNode().put("0", "3")));
+        assertFalse(wrong.path("solved").asBoolean());
+        assertFalse(kit.path("solved").asBoolean());
+        ObjectNode right = HangmanGameplay.judge(section, kit, JSON.createObjectNode().set("slots", JSON.createObjectNode().put("0", "8")));
+        assertTrue(right.path("solved").asBoolean());
+        assertTrue(kit.path("solved").asBoolean());
+        ObjectNode again = HangmanGameplay.judge(section, kit, JSON.createObjectNode().put("input", "8"));
+        assertTrue(again.path("alreadySolved").asBoolean(), "解开之后重复提交原样回放,不报错");
+    }
+
+    @Test void singleCharacterAnswerAcceptsInputShapeAfterWrongGuess() {
+        ObjectNode section = config("U");
+        ObjectNode kit = HangmanGameplay.initialState(section);
+        assertFalse(HangmanGameplay.judge(section, kit, JSON.createObjectNode().put("input", "x")).path("solved").asBoolean());
+        assertTrue(HangmanGameplay.judge(section, kit, JSON.createObjectNode().put("input", "u")).path("solved").asBoolean());
+    }
+
+    @Test void disabledSectionIsInert() {
+        ObjectNode disabled = JSON.createObjectNode().put("enabled", false);
+        assertDoesNotThrow(() -> HangmanGameplay.validate(disabled));
+        assertEquals("{\"enabled\":false}", HangmanGameplay.safeConfig(disabled).toString());
+    }
+
+    // ---------- 不泄答案 ----------
+
+    @Test void safeConfigAndProjectionNeverCarryAnswerAliasesOrPrefilledCharacters() {
+        String answer = "NICOLAS AND PERNELLE";
+        ObjectNode section = config(answer);
+        section.set("format", format(answer, 0, 8));
+        section.putArray("aliases").add("NICOLAS AND PERRELLE");
+        HangmanGameplay.validate(section);
+
+        JsonNode safe = HangmanGameplay.safeConfig(section);
+        assertEquals(20, safe.path("length").asInt(), "答案 20 个码点");
+        assertEquals(16, safe.path("blankCount").asInt(), "20 码点减 2 分隔符减 2 预填");
+        assertFalse(safe.has("answer"));
+        assertFalse(safe.has("aliases"));
+        assertFalse(safe.has("format"));
+
+        JsonNode view = HangmanGameplay.publicProjection(section, HangmanGameplay.initialState(section));
+        assertEquals("N______ A__ ________", view.path("display").asText());
+        assertEquals("PREFILLED", view.path("slots").get(0).path("kind").asText());
+        assertEquals("SEPARATOR", view.path("slots").get(7).path("kind").asText());
+        assertEquals("PREFILLED", view.path("slots").get(8).path("kind").asText());
+        assertEquals("BLANK", view.path("slots").get(1).path("kind").asText());
+        assertFalse(view.path("slots").get(1).has("ch"), "空白槽不带字符");
+        assertFalse(view.toString().contains("PERNELLE"), "投影不得出现未揭示的答案片段");
+    }
+
+    // ---------- 只补空白槽（原 17.6 实测） ----------
+
+    @Test void playerFillsOnlyBlankSlotsAndServerRebuildsTheWord() {
+        ObjectNode section = config("ENDLESS");
+        section.set("format", format("ENDLESS", 0, 6));
+        HangmanGameplay.validate(section);
+        ObjectNode state = HangmanGameplay.initialState(section);
+        assertEquals("E_____S", HangmanGameplay.publicProjection(section, state).path("display").asText());
+
+        JsonNode view = HangmanGameplay.judge(section, state, input("NDLES"));
+        assertEquals(HangmanGameplay.VERDICT_CORRECT, view.path("verdict").asText());
+        assertEquals("ENDLESS", view.path("answerText").asText());
+        assertEquals("ENDLESS", view.path("display").asText());
+        assertTrue(view.path("solved").asBoolean());
+    }
+
+    @Test void explicitSlotSubmissionUsesAnswerIndexesAndRejectsPrefilledSlots() {
+        ObjectNode section = config("ENDLESS");
+        section.set("format", format("ENDLESS", 0, 6));
+        HangmanGameplay.validate(section);
+        ObjectNode state = HangmanGameplay.initialState(section);
+
+        assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.judge(section, state,
+                slots("0", "E", "1", "N", "2", "D", "3", "L", "4", "E", "5", "S")), "预填槽不接受提交");
+        assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.judge(section, state,
+                slots("9", "N")), "越界下标拒收");
+        JsonNode view = HangmanGameplay.judge(section, state,
+                slots("1", "N", "2", "D", "3", "L", "4", "E", "5", "S"));
+        assertEquals(HangmanGameplay.VERDICT_CORRECT, view.path("verdict").asText());
+    }
+
+    @Test void partialExplicitSubmissionIsRejectedInsteadOfFillingFromTheAnswer() {
+        ObjectNode section = config("ENDLESS");
+        section.set("format", format("ENDLESS", 0));
+        HangmanGameplay.validate(section);
+        ObjectNode state = HangmanGameplay.initialState(section);
+        assertTrue(assertThrows(IllegalArgumentException.class,
+                () -> HangmanGameplay.judge(section, state, slots("1", "N"))).getMessage().contains("空白槽"));
+    }
+
+    @Test void shortInputCannotPassAsAPartialReconstruction() {
+        ObjectNode section = config("ENDLESS");
+        section.set("format", format("ENDLESS", 0));
+        HangmanGameplay.validate(section);
+        ObjectNode state = HangmanGameplay.initialState(section);
+        JsonNode view = HangmanGameplay.judge(section, state, input("NDLE"));
+        assertEquals(HangmanGameplay.VERDICT_WRONG, view.path("verdict").asText(), "缺字符不可能判对");
+        assertFalse(view.has("answerText"));
+        assertFalse(view.path("solved").asBoolean());
+    }
+
+    @Test void wholeWordSubmissionWithSpacesOmittedIsAcceptedAndRebuilt() {
+        String answer = "NICOLAS AND PERNELLE";
+        ObjectNode section = config(answer);
+        HangmanGameplay.validate(section);
+        ObjectNode state = HangmanGameplay.initialState(section);
+
+        JsonNode view = HangmanGameplay.judge(section, state, input("NICOLASANDPERNELLE"));
+        assertEquals(HangmanGameplay.VERDICT_CORRECT, view.path("verdict").asText());
+        assertEquals(answer, view.path("answerText").asText(), "服务端重建为带分隔符的原答案");
+        assertEquals(20, view.path("length").asInt());
+    }
+
+    @Test void wholeWordSubmissionContradictingAPrefilledSlotIsRejected() {
+        ObjectNode section = config("ENDLESS");
+        section.set("format", format("ENDLESS", 0));
+        HangmanGameplay.validate(section);
+        ObjectNode state = HangmanGameplay.initialState(section);
+        assertTrue(assertThrows(IllegalArgumentException.class,
+                () -> HangmanGameplay.judge(section, state, input("XNDLESS")))
+                .getMessage().contains("题面已给出"));
+    }
+
+    @Test void wrongReconstructionIsReportedWrongWithoutLeakingTheAnswer() {
+        ObjectNode section = config("LANES");
+        section.set("format", format("LANES", 0));
+        HangmanGameplay.validate(section);
+        ObjectNode state = HangmanGameplay.initialState(section);
+        JsonNode view = HangmanGameplay.judge(section, state, input("ANXS"));
+        assertEquals(HangmanGameplay.VERDICT_WRONG, view.path("verdict").asText());
+        assertFalse(view.has("answerText"));
+        assertFalse(view.path("solved").asBoolean());
+        assertEquals("LANXS", view.path("display").asText(), "只显示玩家自己补进去的字符");
+    }
+
+    @Test void caseInsensitiveByDefaultAndSensitiveWhenAuthorOptsIn() {
+        ObjectNode loose = config("LEGEND");
+        HangmanGameplay.validate(loose);
+        assertEquals(HangmanGameplay.VERDICT_CORRECT,
+                HangmanGameplay.judge(loose, HangmanGameplay.initialState(loose), input("legend"))
+                        .path("verdict").asText());
+
+        ObjectNode strict = config("LEGEND").put("caseSensitive", true);
+        HangmanGameplay.validate(strict);
+        assertEquals(HangmanGameplay.VERDICT_WRONG,
+                HangmanGameplay.judge(strict, HangmanGameplay.initialState(strict), input("legend"))
+                        .path("verdict").asText());
+        assertEquals(HangmanGameplay.VERDICT_CORRECT,
+                HangmanGameplay.judge(strict, HangmanGameplay.initialState(strict), input("LEGEND"))
+                        .path("verdict").asText());
+    }
+
+    /* 2026-11-24:两端都只有格子输入(空白格里填字,预填格改不了,格数不变),整词别名在任何客户端都交不上 ——
+       实玩《津门未寄》第 4 站 5 格预填 T,别名 GRANITE / ROCK 输入后被判错。保存 / 发布时就拒,不让玩家撞上。 */
+    @Test void aliasThatCannotBeTypedIntoTheSlotsIsRejected() {
+        ObjectNode longer = config("BOUCHERIE");
+        longer.putArray("aliases").add("BOUCHERIE PARISIENNE");
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(longer))
+                .getMessage().contains("打不进去"));
+
+        ObjectNode stone = config("STONE");
+        stone.set("format", format("STONE", 1));
+        stone.putArray("aliases").add("ROCK");
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(stone))
+                .getMessage().contains("格子只有 5 格"));
+        stone.putArray("aliases").add("SLATE");
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(stone))
+                .getMessage().contains("已给出的「T」"), "预填格上的字对不上同样交不上");
+        stone.putArray("aliases").add("STALE");
+        assertDoesNotThrow(() -> HangmanGameplay.validate(stone), "同格数、预填位一致的别名照常可用");
+        JsonNode typed = HangmanGameplay.judge(stone, HangmanGameplay.initialState(stone), input("stale"));
+        assertEquals(HangmanGameplay.VERDICT_CORRECT, typed.path("verdict").asText());
+
+        ObjectNode spaced = config("BAI JIA CI");
+        spaced.putArray("aliases").add("BAIJIAZI");
+        assertDoesNotThrow(() -> HangmanGameplay.validate(spaced), "分隔符不占格:别名不带空格、同格数照样能打进去");
+    }
+
+    // ---------- Unicode ----------
+
+    @Test void chineseAndSupplementaryPlaneCharactersCountAsOneSlotEach() {
+        ObjectNode han = config("城门失火");
+        HangmanGameplay.validate(han);
+        ObjectNode hanState = HangmanGameplay.initialState(han);
+        assertEquals(4, HangmanGameplay.publicProjection(han, hanState).path("length").asInt());
+        assertEquals("____", HangmanGameplay.publicProjection(han, hanState).path("display").asText());
+        JsonNode solved = HangmanGameplay.judge(han, hanState, input("城门失火"));
+        assertEquals(HangmanGameplay.VERDICT_CORRECT, solved.path("verdict").asText());
+        assertEquals("城门失火", solved.path("answerText").asText());
+
+        ObjectNode astral = config("\uD835\uDD18NIT");
+        astral.set("format", format("\uD835\uDD18NIT", 0));
+        HangmanGameplay.validate(astral);
+        ObjectNode astralState = HangmanGameplay.initialState(astral);
+        assertEquals(4, HangmanGameplay.publicProjection(astral, astralState).path("length").asInt(),
+                "代理对算一个槽位");
+        assertEquals("𝔘___", HangmanGameplay.publicProjection(astral, astralState).path("display").asText());
+        JsonNode hit = HangmanGameplay.judge(astral, astralState, input("NIT"));
+        assertEquals(HangmanGameplay.VERDICT_CORRECT, hit.path("verdict").asText());
+        assertEquals("𝔘NIT", hit.path("answerText").asText());
+    }
+
+    // ---------- 重登恢复 ----------
+
+    @Test void reloginRestoresPlayerFilledSlotsFromState() throws Exception {
+        ObjectNode section = config("LEGEND");
+        section.set("format", format("LEGEND", 0));
+        HangmanGameplay.validate(section);
+        ObjectNode state = HangmanGameplay.initialState(section);
+        HangmanGameplay.judge(section, state, input("EGEND"));
+
+        ObjectNode restored = (ObjectNode) JSON.readTree(JSON.writeValueAsString(state));
+        JsonNode view = HangmanGameplay.publicProjection(section, restored);
+        assertEquals("LEGEND", view.path("display").asText());
+        assertTrue(view.path("solved").asBoolean());
+
+        JsonNode again = HangmanGameplay.judge(section, restored, input("LEGEND"));
+        assertEquals(HangmanGameplay.VERDICT_CORRECT, again.path("verdict").asText());
+        assertTrue(again.path("alreadySolved").asBoolean(), "已解开后重提不再改状态");
+    }
+
+    @Test void partiallyFilledProgressSurvivesReloginWithoutBecomingSolved() throws Exception {
+        ObjectNode section = config("ENDLESS");
+        section.set("format", format("ENDLESS", 0, 6));
+        HangmanGameplay.validate(section);
+        ObjectNode state = HangmanGameplay.initialState(section);
+        JsonNode wrong = HangmanGameplay.judge(section, state, input("NDLEX"));
+        assertEquals(HangmanGameplay.VERDICT_WRONG, wrong.path("verdict").asText());
+        assertEquals("ENDLEXS", wrong.path("display").asText());
+
+        ObjectNode restored = (ObjectNode) JSON.readTree(JSON.writeValueAsString(state));
+        JsonNode view = HangmanGameplay.publicProjection(section, restored);
+        assertEquals("ENDLEXS", view.path("display").asText());
+        assertFalse(view.path("solved").asBoolean());
+
+        JsonNode fixed = HangmanGameplay.judge(section, restored, slots("5", "S"));
+        assertEquals(HangmanGameplay.VERDICT_CORRECT, fixed.path("verdict").asText());
+        assertEquals("ENDLESS", fixed.path("answerText").asText());
+    }
+
+    @Test void stateNodeKeepsOneAnswerFreeShape() throws Exception {
+        ObjectNode section = config("ORB");
+        HangmanGameplay.validate(section);
+        ObjectNode state = HangmanGameplay.initialState(section);
+        List<?> keys = new ArrayList<>(JSON.convertValue(state, Map.class).keySet());
+        assertEquals(Arrays.asList("version", "filled", "solved", "lastVerdict"), keys);
+        String encoded = JSON.writeValueAsString(state);
+        assertFalse(encoded.contains("O"), "状态里不得带答案字符");
+        assertEquals(encoded, JSON.writeValueAsString(JSON.readTree(encoded)));
+    }
+
+    // ---------- L3 提示揭示（与预填共用状态） ----------
+
+    @Test void hintRevealSharesStateAndDoesNotSolveOrRevealOtherSlots() {
+        ObjectNode section = config("ORB");
+        section.set("format", format("ORB", 0));
+        HangmanGameplay.validate(section);
+        ObjectNode state = HangmanGameplay.initialState(section);
+
+        JsonNode first = HangmanGameplay.revealAt(section, state, 1);
+        assertFalse(first.path("alreadyRevealed").asBoolean());
+        assertEquals("OR_", first.path("display").asText());
+        assertFalse(first.path("solved").asBoolean(), "揭示一个槽不等于解开");
+
+        JsonNode again = HangmanGameplay.revealAt(section, state, 1);
+        assertTrue(again.path("alreadyRevealed").asBoolean());
+        assertEquals("OR_", again.path("display").asText());
+
+        assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.revealAt(section, state, 0),
+                "预填槽不需要揭示");
+        assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.revealAt(section, state, 3));
+        assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.revealAt(section, null, 1));
+
+        JsonNode solved = HangmanGameplay.judge(section, state, slots("2", "B"));
+        assertEquals(HangmanGameplay.VERDICT_CORRECT, solved.path("verdict").asText());
+        assertEquals("ORB", solved.path("answerText").asText());
+    }
+
+    @Test void missingStateIsRejectedSoCallersCannotJudgeWithoutPerRunState() {
+        ObjectNode section = config("ORB");
+        HangmanGameplay.validate(section);
+        assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.judge(section, null, input("ORB")));
+    }
+
+    @Test void blankSubmissionIsRejectedAndChangesNothing() {
+        ObjectNode section = config("ORB");
+        HangmanGameplay.validate(section);
+        ObjectNode state = HangmanGameplay.initialState(section);
+        assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.judge(section, state, input("   ")));
+        assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.judge(section, state, JSON.createObjectNode()));
+        assertEquals(0, state.path("filled").size());
+        assertFalse(state.path("solved").asBoolean());
+    }
+
+    // ---------- F03 字母池(inputMode=pool) ----------
+
+    private static ObjectNode pool(String answer, String... chars) {
+        ObjectNode section = config(answer);
+        section.put("inputMode", "pool");
+        ArrayNode pool = section.putArray("pool");
+        for (String ch : chars) pool.add(ch);
+        return section;
+    }
+
+    @Test void poolModeAcceptsCorrectAndWrongSubmissionsMadeFromThePool() {
+        ObjectNode section = pool("ABC", "A", "B", "C", "X", "Y", "Z");
+        HangmanGameplay.validate(section);
+        ObjectNode state = HangmanGameplay.initialState(section);
+
+        ObjectNode wrong = HangmanGameplay.judge(section, state, slots("0", "X", "1", "B", "2", "C"));
+        assertEquals(HangmanGameplay.VERDICT_WRONG, wrong.path("verdict").asText());
+        assertEquals("pool", wrong.path("inputMode").asText());
+        assertEquals(6, wrong.path("pool").size());
+
+        ObjectNode right = HangmanGameplay.judge(section, state, slots("0", "A", "1", "B", "2", "C"));
+        assertEquals(HangmanGameplay.VERDICT_CORRECT, right.path("verdict").asText());
+        assertTrue(state.path("solved").asBoolean());
+    }
+
+    @Test void charOutsidePoolOrOverusedIsRejectedWithoutTouchingState() {
+        ObjectNode section = pool("ABC", "A", "B", "C", "X");
+        ObjectNode state = HangmanGameplay.initialState(section);
+
+        IllegalArgumentException outside = assertThrows(IllegalArgumentException.class,
+                () -> HangmanGameplay.judge(section, state, slots("0", "Q", "1", "B", "2", "C")));
+        assertEquals(LetterPoolSupport.REJECT_MESSAGE, outside.getMessage());
+        IllegalArgumentException overused = assertThrows(IllegalArgumentException.class,
+                () -> HangmanGameplay.judge(section, state, slots("0", "X", "1", "X", "2", "C")));
+        assertEquals(LetterPoolSupport.REJECT_MESSAGE, overused.getMessage());
+        // 拒收 = 不计次数也不落状态:玩家补入字符与判定结论都没变
+        assertEquals(0, state.path("filled").size());
+        assertEquals("", state.path("lastVerdict").asText());
+    }
+
+    @Test void keyboardModeKeepsLegacyProjectionShape() {
+        ObjectNode view = HangmanGameplay.publicProjection(config("ABC"), null);
+        assertFalse(view.has("inputMode"));
+        assertFalse(view.has("pool"));
+        assertFalse(HangmanGameplay.safeConfig(config("ABC")).has("inputMode"));
+        assertEquals("pool", HangmanGameplay.safeConfig(pool("ABC", "A", "B", "C")).path("inputMode").asText());
+    }
+
+    @Test void prefilledAndSeparatorSlotsDoNotConsumePoolChars() {
+        ObjectNode section = pool("AB C", "B", "C", "Z");
+        section.set("format", format("AB C", 0));
+        HangmanGameplay.validate(section); // A 是预填、空格是分隔符:池里只要有 B、C
+        ObjectNode state = HangmanGameplay.initialState(section);
+        ObjectNode view = HangmanGameplay.judge(section, state, slots("1", "B", "3", "C"));
+        assertEquals(HangmanGameplay.VERDICT_CORRECT, view.path("verdict").asText());
+    }
+
+    @Test void poolMustSpellAnswerAndAliasesCountingRepeats() {
+        assertTrue(assertThrows(IllegalArgumentException.class,
+                () -> HangmanGameplay.validate(pool("BOOK", "B", "O", "K", "X"))).getMessage().contains("拼不出答案"));
+        HangmanGameplay.validate(pool("BOOK", "B", "O", "O", "K", "X"));
+
+        ObjectNode alias = pool("BOOK", "B", "O", "O", "K");
+        alias.putArray("aliases").add("BOOKS");
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(alias))
+                .getMessage().contains("别名"));
+        assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(pool("ABC")));
+        ObjectNode multi = pool("ABC", "A", "BC", "C");
+        assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(multi));
+        ObjectNode badMode = config("ABC");
+        badMode.put("inputMode", "wheel");
+        assertThrows(IllegalArgumentException.class, () -> HangmanGameplay.validate(badMode));
+    }
+
+    @Test void poolShuffleIsStablePerRunAndDiffersAcrossSeeds() {
+        ObjectNode section = pool("ABC", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J");
+        ObjectNode state = HangmanGameplay.initialState(section);
+        state.put(HangmanGameplay.POOL_SEED, 7L);
+        JsonNode first = HangmanGameplay.publicProjection(section, state).path("pool");
+        assertEquals(first, HangmanGameplay.publicProjection(section, state).path("pool"), "同一局刷新顺序不变");
+        ObjectNode other = HangmanGameplay.initialState(section);
+        other.put(HangmanGameplay.POOL_SEED, 8L);
+        assertNotEquals(first, HangmanGameplay.publicProjection(section, other).path("pool"));
+
+        section.put("poolShuffle", false);
+        assertEquals("[\"A\",\"B\",\"C\",\"D\",\"E\",\"F\",\"G\",\"H\",\"I\",\"J\"]",
+                HangmanGameplay.publicProjection(section, state).path("pool").toString());
+    }
+
+    @Test void poolTrimRemovesOnlyDecoysOncePerLevelAndBlocksTheirUse() {
+        ObjectNode section = pool("ABC", "A", "B", "C", "X", "Y", "Z", "W");
+        ObjectNode state = HangmanGameplay.initialState(section);
+
+        ObjectNode trimmed = HangmanGameplay.trimPool(section, state, 2, 3);
+        assertEquals(3, trimmed.path("poolRemoved").asInt());
+        List<String> visible = new ArrayList<>();
+        trimmed.path("pool").forEach(ch -> visible.add(ch.asText()));
+        assertEquals(4, visible.size());
+        assertTrue(visible.containsAll(Arrays.asList("A", "B", "C")), "答案字永远不会被去掉:" + visible);
+
+        // 同一级重看不再多去
+        assertEquals(4, HangmanGameplay.trimPool(section, state, 2, 3).path("pool").size());
+        // 被去掉的干扰字不能再用
+        String gone = null;
+        for (String decoy : Arrays.asList("X", "Y", "Z", "W")) if (!visible.contains(decoy)) gone = decoy;
+        final String removed = gone;
+        assertEquals(LetterPoolSupport.REJECT_MESSAGE, assertThrows(IllegalArgumentException.class,
+                () -> HangmanGameplay.judge(section, state, slots("0", removed, "1", "B", "2", "C"))).getMessage());
+        // 下一级再去,干扰字不够时只去到 0 为止
+        assertEquals(3, HangmanGameplay.trimPool(section, state, 3, 3).path("pool").size());
+    }
+
+    @Test void chineseCharacterSetPoolWorksWithFullwidthNormalisation() {
+        ObjectNode section = pool("示例站点", "示", "例", "站", "点", "车", "路");
+        HangmanGameplay.validate(section);
+        ObjectNode state = HangmanGameplay.initialState(section);
+        ObjectNode view = HangmanGameplay.judge(section, state, input("示例站点"));
+        assertEquals(HangmanGameplay.VERDICT_CORRECT, view.path("verdict").asText());
+
+        ObjectNode latin = pool("ABC", "A", "B", "C");
+        HangmanGameplay.validate(latin);
+        ObjectNode latinState = HangmanGameplay.initialState(latin);
+        assertEquals(HangmanGameplay.VERDICT_CORRECT,
+                HangmanGameplay.judge(latin, latinState, input("ＡＢＣ")).path("verdict").asText());
+    }
+}

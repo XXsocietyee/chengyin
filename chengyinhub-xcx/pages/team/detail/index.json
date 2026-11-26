@@ -1,0 +1,28 @@
+{
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "队伍详情",
+  "enablePullDownRefresh": true,
+  "usingComponents": {
+    "cy-privacy-gate": "/components/cy/privacy-gate/index",
+    "cy-danger-confirm": "/components/cy/danger-confirm/index",
+    "cy-empty": "/components/cy/empty/index",
+    "cy-inline-error": "/components/cy/inline-error/index",
+    "cy-nav-bar": "/components/cy/nav-bar/index",
+    "cy-page-title": "/components/cy/page-title/index",
+    "cy-skeleton": "/components/cy/skeleton/index",
+    "cy-state-shell": "/components/cy/state-shell/index",
+    "cy-switch": "/components/cy/switch/index",
+    "cy-toast": "/components/cy/toast/index",
+    "team-report-sheet": "/subpackageMember/components/cy/team-report-sheet/index",
+    "cy-loading-mask": "/components/cy/loading-mask/index",
+    "cy-modal-host": "/components/cy/modal-host/index",
+    "cy-btn": "/components/cy/btn/index",
+    "cy-icon": "/components/cy/icon/index",
+    "cy-share-card": "/subpackageRoam/components/cy/share-card/index",
+    "cy-sheet": "/components/cy/sheet/index"
+  },
+  "componentPlaceholder": {
+    "cy-share-card": "view",
+    "team-report-sheet": "view"
+  }
+}

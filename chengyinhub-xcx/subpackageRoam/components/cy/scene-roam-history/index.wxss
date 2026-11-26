@@ -1,0 +1,41 @@
+:host { display: block; height: 100%; }
+.hs { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; box-sizing: border-box; color: var(--cy-color-text-primary); }
+/* 2026-10-31 P-7:全屏深色;总成绩照 NRC 粗斜体大数字 */
+.hs-total { flex: none; padding: 8rpx 32rpx 32rpx; }
+.hs-total__big { display: flex; align-items: baseline; gap: 12rpx; }
+.hs-total__n { font-size: var(--cy-type-data-2xl); line-height: 1; font-weight: 900; font-style: italic; letter-spacing: -.02em; color: var(--cy-color-text-primary); font-variant-numeric: tabular-nums; }
+.hs-total__u { font-size: var(--cy-type-body); font-weight: 600; color: var(--cy-color-text-tertiary); }
+.hs-total__row { display: flex; gap: 56rpx; margin-top: 20rpx; }
+.hs-total__i { display: flex; flex-direction: column; gap: 4rpx; }
+.hs-total__v { font-size: var(--cy-type-section-title); font-weight: 800; font-style: italic; color: var(--cy-color-text-primary); font-variant-numeric: tabular-nums; }
+.hs-total__l { font-size: var(--cy-type-label); color: var(--cy-color-text-tertiary); }
+.hs-tools { display: flex; gap: 16rpx; padding: 0 32rpx 24rpx; flex: none; }
+.hs-tool { flex: 1; min-height: 88rpx; display: flex; align-items: center; justify-content: center; gap: 10rpx; border-radius: var(--cy-radius-pill); background: var(--cy-color-bg-surface-subtle); color: var(--cy-color-text-primary); font-size: var(--cy-type-label); font-weight: 600; }
+.hs-scroll { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.hs-month { flex: none; padding: 16rpx 32rpx 16rpx; font-size: var(--cy-type-label); font-weight: 700; color: var(--cy-color-text-tertiary); }
+/* 卡片不随容器压缩:否则 overflow:hidden 会把底部邮票行裁掉 */
+.hs-scroll > .rc { flex: none; }
+.rc { margin: 0 32rpx 24rpx; overflow: hidden; border-radius: var(--cy-radius-lg); background: var(--cy-color-bg-surface-subtle); }
+.rc__body { padding: 24rpx 28rpx 28rpx; }
+.rc__row { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; }
+.rc__t { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10rpx; color: var(--cy-color-text-primary); }
+.rc__title { overflow: hidden; font-size: var(--cy-type-card-title); font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.rc__date { flex: none; color: var(--cy-color-text-tertiary); font-size: var(--cy-type-label); }
+.rc__stats { display: flex; gap: 56rpx; padding-top: 20rpx; }
+.rc__st { display: flex; flex-direction: column; gap: 4rpx; }
+.rc__v { color: var(--cy-color-text-primary); font-size: var(--cy-type-section-title); font-weight: 800; font-style: italic; font-variant-numeric: tabular-nums; }
+.rc__l { color: var(--cy-color-text-tertiary); font-size: var(--cy-type-label); }
+.rc__badges { display: flex; align-items: center; flex-wrap: wrap; gap: 16rpx; margin-top: 20rpx; padding-top: 20rpx; border-top: 1rpx solid var(--cy-color-border-subtle); }
+.rc__hex { width: 52rpx; height: 52rpx; display: flex; align-items: center; justify-content: center; border-radius: var(--cy-radius-sm); background: var(--cy-color-bg-elevated); color: var(--cy-color-status-warning); }
+.rc__stamps { display: flex; align-items: center; color: var(--cy-color-text-tertiary); font-size: var(--cy-type-label); }
+.fill-slot { display: flex !important; flex: 1 !important; flex-direction: column !important; min-height: 0 !important; }
+.history-loading { display: flex; align-items: center; justify-content: center; min-height: 240rpx; color: var(--cy-color-text-tertiary); font-size: var(--cy-type-body); }
+
+/* isolated 组件内全局 .cy-pressed 进不来,必须本地定义一份。
+   只减淡不位移:位移要配 .cy-motion-reduced 兜底,而那个类挂在组件外的祖先上,
+   isolated 下同样够不着 —— 与其留个撤不掉的位移,不如按仓库既有组件按压类的做法只减淡。 */
+.cy-pressed { opacity: .88; }
+
+/* pm20 */
+/* 2026-10-23 页面动效(utils/page-motion.js):容器 --pm-* 置 1 时先隐着,再依次浮上来;静止时无过渡,按压反馈不受影响;减少动态效果时从不触发 */
+.rc { filter: opacity(calc(1 - var(--pm-l, 0))); translate: 0 calc(var(--pm-l, 0) * 31rpx); transition: filter var(--pm-l-d, 0s) ease, translate var(--pm-l-d, 0s) var(--cy-ease-page-rise), transform var(--cy-motion-press) var(--cy-ease-out), opacity var(--cy-motion-press) var(--cy-ease-out); transition-delay: calc(var(--pm-l-s, 0) * (0ms + min(var(--pmi, 0), 8) * 30ms)), calc(var(--pm-l-s, 0) * (0ms + min(var(--pmi, 0), 8) * 30ms)), 0s, 0s; }

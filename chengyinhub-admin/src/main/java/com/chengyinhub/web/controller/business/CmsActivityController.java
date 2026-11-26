@@ -1,0 +1,327 @@
+package com.chengyinhub.web.controller.business;
+
+import java.util.List;
+import jakarta.servlet.http.HttpServletResponse;
+
+import com.chengyinhub.business.domain.*;
+import com.chengyinhub.business.domain.dto.CmsActivityPublishRequest;
+import com.chengyinhub.business.domain.dto.PublishSafetyRequest;
+import com.chengyinhub.business.domain.dto.SafetyDecision;
+import com.chengyinhub.business.service.*;
+import com.chengyinhub.business.service.support.ActivityReviewPolicy;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import com.chengyinhub.common.annotation.Log;
+import com.chengyinhub.common.core.controller.BaseController;
+import com.chengyinhub.common.core.domain.AjaxResult;
+import com.chengyinhub.common.enums.BusinessType;
+import com.chengyinhub.common.utils.CoordinateUtils;
+import com.chengyinhub.common.utils.poi.ExcelUtil;
+import com.chengyinhub.common.core.page.TableDataInfo;
+
+/**
+ * 活动Controller
+ * 
+ * @author webxh
+ * @date 2025-08-31
+ */
+@RestController
+@RequestMapping("/business/activity")
+public class CmsActivityController extends BaseController
+{
+    @Autowired
+    private ICmsActivityService cmsActivityService;
+
+    @Autowired
+    private IViewCollaboratorsService viewCollaboratorsService;
+
+
+    @Autowired
+    private ICmsMemberTemplateService cmsMemberTemplateService;
+
+    @Autowired
+    private IOmsTicketService omsTicketService;
+
+    /** Gap 12·03 P0-5:后台建/改活动与小程序发布同一套分级审核 + 统一门禁,审核态不认请求体。 */
+    @Autowired
+    private ActivityReviewPolicy activityReviewPolicy;
+
+    @Autowired
+    private IContentSafetyGate contentSafetyGate;
+
+    /**
+     * 查询活动列表
+     */
+    @PreAuthorize("@ss.hasPermi('business:activity:list')")
+    @GetMapping("/stranded-free-explore")
+    public AjaxResult strandedFreeExplore()
+    {
+        // D-19:结算待处理的自由探索场次(只读;分钱规则待业主拍板,不动钱)
+        return success(cmsActivityService.listStrandedFreeExploreSettlements(null));
+    }
+
+    @PreAuthorize("@ss.hasPermi('business:activity:list')")
+    @GetMapping("/list")
+    public TableDataInfo list(CmsActivity cmsActivity)
+    {
+        startPage();
+        cmsActivity.setDelFlag(0);
+        cmsActivity.setSortType(1);
+        List<CmsActivity> list = cmsActivityService.selectCmsActivityList(cmsActivity);
+        return getDataTable(list);
+    }
+
+    /**
+     * 导出活动列表
+     */
+    @PreAuthorize("@ss.hasPermi('business:activity:export')")
+    @Log(title = "活动", businessType = BusinessType.EXPORT)
+    @PostMapping("/export")
+    public void export(HttpServletResponse response, CmsActivity cmsActivity)
+    {
+        List<CmsActivity> list = cmsActivityService.selectCmsActivityList(cmsActivity);
+        ExcelUtil<CmsActivity> util = new ExcelUtil<CmsActivity>(CmsActivity.class);
+        util.exportExcel(response, list, "活动数据");
+    }
+
+    /**
+     * 获取活动详细信息
+     */
+    @PreAuthorize("@ss.hasPermi('business:activity:query')")
+    @GetMapping(value = "/{id}")
+    public AjaxResult getInfo(@PathVariable("id") Long id)
+    {
+        CmsActivity cmsActivity = cmsActivityService.selectCmsActivityById(id);
+        if (cmsActivity!=null){
+            ViewCollaborators cmsCollaborators = new ViewCollaborators();
+            cmsCollaborators.setDataType(2L);
+            cmsCollaborators.setDataId(id);
+            List<ViewCollaborators> cmsCollaboratorsList = viewCollaboratorsService.selectViewCollaboratorsList(cmsCollaborators);
+            cmsActivity.setCmsCollaboratorsList(cmsCollaboratorsList);
+
+            CmsMemberTemplate cmsMemberTemplate = new CmsMemberTemplate();
+            cmsMemberTemplate.setId(cmsActivity.getTemplateId());
+            List<CmsMemberTemplate> cmsMemberTemplateList = cmsMemberTemplateService.selectCmsMemberTemplateList(cmsMemberTemplate);
+            cmsActivity.setCmsMemberTemplateList(cmsMemberTemplateList);
+
+            OmsTicket omsTicket = new OmsTicket();
+            omsTicket.setOwnerType(2L);
+            omsTicket.setOwnerId(id);
+            List<OmsTicket> omsTicketList = omsTicketService.selectOmsTicketList(omsTicket);
+            cmsActivity.setOmsTicketList(omsTicketList);
+        }
+        return success(cmsActivity);
+    }
+
+    /**
+     * 新增活动
+     */
+    @PreAuthorize("@ss.hasPermi('business:activity:add')")
+    @Log(title = "活动", businessType = BusinessType.INSERT)
+    @PostMapping
+    public AjaxResult add(@RequestBody CmsActivity cmsActivity)
+    {
+        // Gap 12·03 P0-5:后台新建与小程序 /api/activity/publish 同口径 —— 模式由 ActivityReviewPolicy 定,
+        // 门禁 decide() 裁决;明确违规拒,HOLD 落库待审并建 BIZ_ACTIVITY 审核单。status/publish_status 不认请求体。
+        PublishSafetyRequest.ReviewMode mode = activityReviewPolicy.modeOf(policyView(cmsActivity, null), STAFF);
+        SafetyDecision decision = decide(cmsActivity, cmsActivity.getMemberId(), mode);
+        if (decision == null || decision.isBlock()) {
+            return error("活动内容包含违规信息，请修改后重试");
+        }
+        boolean preReview = decision.isHold();
+        return toAjax(cmsActivityService.insertCmsActivityByAdmin(cmsActivity, getUsername(), preReview,
+                decision.isFlagged() ? decision.getFlagReason() : null));
+    }
+
+    /**
+     * 修改活动
+     */
+    @PreAuthorize("@ss.hasPermi('business:activity:edit')")
+    @Log(title = "活动", businessType = BusinessType.UPDATE)
+    @PutMapping
+    public AjaxResult edit(@RequestBody CmsActivity cmsActivity)
+    {
+        CmsActivity editable = toEditableActivity(cmsActivity);
+        if (!hasEditableActivityFields(editable)) {
+            return error("未提供可编辑的活动字段；审核决定请在统一审核台处理");
+        }
+        // CR-63(2026-09-15 裁决 15):已售出(有已支付报名)的活动,后台也不许改时间与地点 ——
+        // 退款钟按集合时间−24h 算,改期会把已售订单的退款窗口一起追溯挪走。
+        // P1-2(审查D):「已售出」含待支付/支付中 —— 钱随时可能进来,等回调的窗口不是免锁区。
+        // 文字/图片/音频仍可改;判据与 App 侧同一套(只比传了的字段,按秒比时间)。
+        if (cmsActivityService.countOpenSaleRegistrations(editable.getId()) > 0) {
+            String lockedChange = soldTimeLocationChange(
+                    cmsActivityService.selectCmsActivityById(editable.getId()), editable);
+            if (lockedChange != null) {
+                return error("活动已售出，" + lockedChange + "不能修改；文字、图片、音频仍可改");
+            }
+        }
+        // Gap 12·03 P0-5:改文案与小程序 /api/activity/update 同一道门禁 + 同一套分级;
+        // 编辑只能把活动留在原状态或退回待审,公开只能由审核台通过。
+        CmsActivity current = cmsActivityService.selectCmsActivityById(editable.getId());
+        if (current == null) {
+            return error("活动不存在");
+        }
+        PublishSafetyRequest.ReviewMode mode = activityReviewPolicy.modeOf(policyView(editable, current), STAFF);
+        SafetyDecision decision = decide(editable, current.getMemberId(), mode, current.getTemplateId());
+        if (decision == null || decision.isBlock()) {
+            return error("活动内容包含违规信息，请修改后重试");
+        }
+        boolean preReview = mode == PublishSafetyRequest.ReviewMode.PRE_REVIEW || decision.isHold();
+        return toAjax(cmsActivityService.updateCmsActivityByAdmin(editable, getUsername(), preReview,
+                decision.isFlagged() ? decision.getFlagReason() : null));
+    }
+
+    /**
+     * 后台操作人是平台员工,不是商家主体:不走「未审核商家」那一条,类目高风险与总闸照常生效。
+     * 没有给运营的免审通道 —— 若确需官方直发,应另设独立权限,不能借 business:activity:add 绕过。
+     */
+    private static final ActivityReviewPolicy.Publisher STAFF = new ActivityReviewPolicy.Publisher(false, false);
+
+    /** 分级只看类目:编辑没回带类目时按库里的类目判,不能因为没传就降成先发后审。 */
+    private CmsActivityPublishRequest policyView(CmsActivity activity, CmsActivity current)
+    {
+        CmsActivityPublishRequest view = new CmsActivityPublishRequest();
+        view.setName(activity.getName());
+        view.setDescription(activity.getDescription());
+        view.setCategoryIds(activity.getCategoryIds() != null || current == null
+                ? activity.getCategoryIds() : current.getCategoryIds());
+        return view;
+    }
+
+    /**
+     * 员工没有小程序 openid,门禁按「身份待复核」处理:先审 → HOLD,先发后审 → 打标抽检,与 App 缺 openid 同口径。
+     */
+    private SafetyDecision decide(CmsActivity activity, Long ownerMemberId, PublishSafetyRequest.ReviewMode mode)
+    {
+        return decide(activity, ownerMemberId, mode, null);
+    }
+
+    private SafetyDecision decide(CmsActivity activity, Long ownerMemberId, PublishSafetyRequest.ReviewMode mode,
+                                  Long storedTemplateId)
+    {
+        PublishSafetyRequest safety = new PublishSafetyRequest();
+        safety.setContentType(AuditTask.BIZ_ACTIVITY);
+        safety.setMemberId(ownerMemberId);
+        safety.setOpenid("");
+        java.util.List<String> texts = new java.util.ArrayList<>();
+        texts.add(IWxContentSecurityService.joinText(activity.getName(), activity.getDescription()));
+        Long templateId = activity.getTemplateId() == null ? storedTemplateId : activity.getTemplateId();
+        if (templateId != null && templateId > 0) {
+            CmsMemberTemplate template = cmsMemberTemplateService.selectCmsMemberTemplateById(templateId);
+            if (template == null || Integer.valueOf(2).equals(template.getDelFlag())) {
+                throw new com.chengyinhub.common.exception.ServiceException("绑定玩法不存在，请重新选择");
+            }
+            for (com.chengyinhub.business.util.JourneyReviewTexts.Entry entry
+                    : com.chengyinhub.business.util.JourneyReviewTexts.collectBoundTemplate(template)) texts.add(entry.getText());
+        }
+        safety.setText(IWxContentSecurityService.joinText(texts.toArray(new String[0])));
+        safety.setHasSignup(true);
+        safety.setReviewMode(mode.name());
+        return contentSafetyGate.decide(safety);
+    }
+
+    /**
+     * CR-63:已售活动被锁的字段 —— 时间(开始/结束)与地点(名称/详细地址/坐标)。
+     * 未传(null)按「没改」处理;时间按秒比较,客户端毫秒误差不算改;
+     * 经纬度按数值比较(审查 §12.3):121.47 与 121.470000 是同一个点。
+     */
+    private String soldTimeLocationChange(CmsActivity current, CmsActivity patch)
+    {
+        if (current == null) {
+            return null;
+        }
+        if (patch.getStartDate() != null && !sameSecond(current.getStartDate(), patch.getStartDate())
+                || patch.getEndDate() != null && !sameSecond(current.getEndDate(), patch.getEndDate())) {
+            return "时间";
+        }
+        if (patch.getAddressName() != null && !java.util.Objects.equals(current.getAddressName(), patch.getAddressName())
+                || patch.getAddress() != null && !java.util.Objects.equals(current.getAddress(), patch.getAddress())
+                || patch.getLongitude() != null
+                        && !CoordinateUtils.sameCoordinate(current.getLongitude(), patch.getLongitude())
+                || patch.getLatitude() != null
+                        && !CoordinateUtils.sameCoordinate(current.getLatitude(), patch.getLatitude())) {
+            return "地点";
+        }
+        return null;
+    }
+
+    private boolean sameSecond(java.util.Date left, java.util.Date right)
+    {
+        if (left == null || right == null) {
+            return left == right;
+        }
+        return left.getTime() / 1000L == right.getTime() / 1000L;
+    }
+
+    /**
+     * 普通编辑只接收活动内容字段。审核态、发布态、归属、结算、取消与删除事实
+     * 均由各自专用流程写入，不能借通用 PUT 夹带。
+     */
+    private CmsActivity toEditableActivity(CmsActivity request)
+    {
+        CmsActivity editable = new CmsActivity();
+        editable.setId(request.getId());
+        editable.setName(request.getName());
+        editable.setDescription(request.getDescription());
+        editable.setImgUrl(request.getImgUrl());
+        editable.setImgArr(request.getImgArr());
+        editable.setCategoryIds(request.getCategoryIds());
+        editable.setAddressName(request.getAddressName());
+        editable.setLongitude(request.getLongitude());
+        editable.setLatitude(request.getLatitude());
+        editable.setAddress(request.getAddress());
+        editable.setDayNote(request.getDayNote());
+        editable.setStartDate(request.getStartDate());
+        editable.setEndDate(request.getEndDate());
+        editable.setTemplateId(request.getTemplateId());
+        return editable;
+    }
+
+    private boolean hasEditableActivityFields(CmsActivity activity)
+    {
+        return activity.getName() != null || activity.getDescription() != null
+                || activity.getImgUrl() != null || activity.getImgArr() != null
+                || activity.getCategoryIds() != null || activity.getAddressName() != null
+                || activity.getLongitude() != null || activity.getLatitude() != null
+                || activity.getAddress() != null || activity.getDayNote() != null
+                || activity.getStartDate() != null || activity.getEndDate() != null
+                || activity.getTemplateId() != null;
+    }
+
+    /**
+     * 删除活动
+     */
+    @PreAuthorize("@ss.hasPermi('business:activity:remove')")
+    @Log(title = "活动", businessType = BusinessType.DELETE)
+	@DeleteMapping("/{ids}")
+    public AjaxResult remove(@PathVariable Long[] ids)
+    {
+        // [资损闸] 与 App 删除同口径:软删 del_flag=2,不碰 registration、不退款。
+        // 有已付款或待支付报名即整批拒绝,避免「活动没了、钱还在」。先检后改,不能先删干净的再撞上脏的。
+        for (int i = 0; i < ids.length; i++) {
+            Long cid = ids[i];
+            if (cmsActivityService.countPaidRegistrations(cid) > 0) {
+                return error("该活动已有用户付费报名，不能直接删除。请先「取消活动」(将全额退款给所有未核销报名)，再删除。");
+            }
+            if (cmsActivityService.countPendingRegistrations(cid) > 0) {
+                return error("该活动有用户的报名待支付，此刻删除会导致「钱收了、活动没了」。未支付的单会在支付窗口过期后由系统自动关单(约 30 分钟)，届时即可删除。");
+            }
+        }
+        for (int i = 0; i < ids.length; i++) {
+            CmsActivity cmsActivity = new CmsActivity();
+            cmsActivity.setDelFlag(2);
+            cmsActivity.setId(ids[i]);
+            cmsActivityService.updateCmsActivity(cmsActivity);
+        }
+        return toAjax(1);
+    }
+}

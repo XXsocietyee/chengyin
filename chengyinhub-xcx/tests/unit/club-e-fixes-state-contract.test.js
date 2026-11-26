@@ -1,0 +1,271 @@
+// E-07/E-08/E-09(2026-09-16 整体检查 E 组 P2):俱乐部的「聚焦、刷新、失败态」三处状态契约。
+//
+// 病:① 从主题进名册/场次管理时 topicId 被目的地页丢掉 ⇒ 打开的是全俱乐部列表;
+//     ② 核销详情清退退款后返回名册不刷新 ⇒ 可退款人数停在退款前;
+//     ③ 帖子/榜单/商家/入会申请加载失败被渲染成「空」或完全静默。
+// 负控:任一条改回旧行为,对应断言必须红。
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+
+const ROOT = path.resolve(__dirname, '../..');
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+
+function loadPage(rel, appOverrides) {
+  let definition;
+  const requests = [];
+  const navigations = [];
+  const app = Object.assign({
+    globalData: { statusBarHeight: 20, navBarHeight: 44 },
+    sendRequest(options) { requests.push(options); },
+    getUserID: () => 1001,
+    getUserRole: () => 'club',
+    getUserType: () => 'club',
+    getAvatar: () => '',
+    tips: () => {},
+    getRequestErrorMessage: (res, fallback) => (res && (res.msg || res.message)) || fallback,
+  }, appOverrides);
+  const file = path.join(ROOT, rel);
+  // 被 Node 真 require 的 utils(owner-action-guard 等)用调用时的全局 getApp/wx,先挂好
+  global.getApp = () => app;
+  global.wx = global.wx || { showToast() {} };
+  vm.runInNewContext(read(rel), {
+    getApp: () => app,
+    Page(p) { definition = p; },
+    getCurrentPages: () => [{}, {}],
+    setTimeout(fn) { return fn ? 1 : 0; },
+    clearTimeout() {},
+    console,
+    wx: {
+      showToast() {}, navigateTo(o) { navigations.push(o.url); }, navigateBack() { navigations.push('__back__'); },
+      redirectTo(o) { navigations.push(o.url); }, switchTab(o) { navigations.push(o.url); },
+      stopPullDownRefresh() {}, getStorageSync: () => '', setStorageSync() {}, removeStorageSync() {},
+    },
+    require(id) {
+      if (/utils\/toast\.js$/.test(id)) return Object.assign(() => {}, { success() {} });
+      if (/utils\/(loading|modal)\.js$/.test(id)) return { show() {}, hide() {} };
+      return require(path.resolve(path.dirname(file), id));
+    },
+  }, { filename: rel });
+  const page = Object.assign({}, definition, {
+    data: JSON.parse(JSON.stringify(definition.data)),
+    setData(patch, callback) {
+      // 支持 'a[0].b' 路径键(与真 setData 一致;AUDIT-1122 L08-091 改成按路径更新单个团)
+      Object.keys(patch || {}).forEach((key) => {
+        const parts = key.replace(/\[(\d+)\]/g, '.$1').split('.');
+        let o = this.data;
+        for (let i = 0; i < parts.length - 1; i += 1) o = o[parts[i]];
+        o[parts[parts.length - 1]] = patch[key];
+      });
+      if (callback) callback.call(this);
+    },
+  });
+  return { page, requests, navigations };
+}
+
+// ───────── E-07 名册聚焦 ─────────
+test('E-07 名册:带 topicId 进来时到达即展开那一团并拉名单(不再落到全俱乐部列表)', () => {
+  const { page, requests } = loadPage('pages/club/enroll/index.js');
+  page.onLoad({ clubId: '9', topicId: '31' });
+  assert.equal(page._focusTopicId, 31);
+  requests.find((r) => r.url === '/api/club/detail').success({ code: 200, data: { isOwner: true } });
+  const topics = requests.find((r) => r.url === '/api/club/topics');
+  topics.success({ code: 200, data: [{ id: 30, name: '别的团' }, { id: 31, name: '目标团' }] });
+  assert.equal(page.data.teams.length, 2, '不隐藏其他团');
+  assert.equal(page.data.teams[1]._open, true, '目标团必须到达即展开');
+  assert.ok(requests.some((r) => r.url === '/api/club/topic-registrations' && /"topicId":31/.test(r.data)),
+    '展开的必须是目标团的名册请求');
+
+  // 负控:不带 topicId 的老入口行为不变(不擅自展开)
+  const plain = loadPage('pages/club/enroll/index.js');
+  plain.page.onLoad({ clubId: '9' });
+  assert.equal(plain.page._focusTopicId, null);
+});
+
+test('E-07 场次运营:带 topicId 进来时下拉预选到该主题', () => {
+  const { page, requests } = loadPage('pages/club/event-ops/index.js');
+  page.onLoad({ clubId: '9', topicId: '31' });
+  const access = requests.find((r) => r.url === '/api/club/access/me');
+  access.success({ code: 200, data: { active: true, club: { id: 9 }, permissions: ['club:activity:manage'] } });
+  const topics = requests.find((r) => r.url === '/api/club/event-ops/topics');
+  topics.success({ code: 200, data: [{ id: 30, name: '别的团' }, { id: 31, name: '目标团' }] });
+  assert.equal(page.data.topicIndex, 1, '下拉必须预选到目标主题');
+});
+
+// ───────── E-08 退款后名册刷新 ─────────
+test('E-08 进核销详情后返回名册必须重拉(可退款人数不落后于退款)', () => {
+  const { page, requests } = loadPage('pages/club/enroll/index.js');
+  page.onLoad({ clubId: '9' });
+  requests.find((r) => r.url === '/api/club/detail').success({ code: 200, data: { isOwner: true } });
+  requests.find((r) => r.url === '/api/club/topics').success({ code: 200, data: [{ id: 31, name: '目标团' }] });
+  const before = requests.length;
+
+  page.goCheckinDetail({ currentTarget: { dataset: { regid: 77 } } });
+  assert.equal(page._refreshOnShow, true, '跳转前必须记下「回来要刷新」');
+  page.onShow();
+  const refetched = requests.slice(before).filter((r) => r.url === '/api/club/topics');
+  assert.equal(refetched.length, 1, '返回必须重拉名册');
+
+  // 负控:第二次 onShow 不该重复刷(一次性标记)
+  const mark = requests.length;
+  page.onShow();
+  assert.equal(requests.slice(mark).filter((r) => r.url === '/api/club/topics').length, 0);
+});
+
+// ───────── E-09 失败 ≠ 空 ─────────
+// 2026-09-17 用户拍板「要改的改好」:入会申请那一半(E-09 的第四处)已按「失败显示内联错误+重试」
+// 补上,作为 2026-08-26「有旧内容时刷新失败一律静默降级」的唯一例外 —— 断言在
+// club-roster-recovery-contract.test.js(本页旧的「不许出现 cy-inline-error+staleError」已随拍板改写)。
+// 这里只测 club/detail 三处(club-e-fixes-gate-contract.test.js)。
+
+// ───────── C-13(2026-11-02 walk-fix)报名名册每场票款 ─────────
+test('C-13 名册展开后按场次列出实收/已退/净额(¥,服务端分值原样格式化)', () => {
+  const { page, requests } = loadPage('pages/club/enroll/index.js');
+  page.onLoad({ clubId: '9', topicId: '31' });
+  requests.find((r) => r.url === '/api/club/detail').success({ code: 200, data: { isOwner: true } });
+  requests.find((r) => r.url === '/api/club/topics').success({ code: 200, data: [{ id: 31, name: '目标团' }] });
+  const roster = requests.find((r) => r.url === '/api/club/topic-registrations');
+  roster.success({ code: 200, data: { omsTicketList: [], sessionMoney: [
+    { activityId: 16, label: '11月2日 13:50', cancelled: false, paidFen: 41400, refundedFen: 6900, netFen: 34500 },
+    { activityId: 13, label: '11月13日 09:00', cancelled: true, paidFen: 13800, refundedFen: 13800, netFen: 0 },
+  ] } });
+  const money = page.data.teams[0].sessionMoney;
+  assert.deepEqual(JSON.parse(JSON.stringify(money)), [
+    { activityId: 16, label: '11月2日 13:50', cancelled: false, paidText: '¥414.0', refundedText: '¥69.0', netText: '¥345.0' },
+    { activityId: 13, label: '11月13日 09:00', cancelled: true, paidText: '¥138.0', refundedText: '¥138.0', netText: '¥0.0' },
+  ]);
+  const wxml = read('pages/club/enroll/index.wxml');
+  assert.match(wxml, /wx:for="\{\{team\.sessionMoney\}\}"/);
+  assert.match(wxml, /实收减退款 \{\{m\.netText\}\}/);
+});
+
+// ───────── C-17 / C-02(2026-11-02 walk-fix)开一场只读票价、集合点与收款提示 ─────────
+test('C-17/C-02 开一场:选中主题下显示票价与集合点;非平台付费主题提示不能在线收款', () => {
+  const { page, requests } = loadPage('pages/club/event-ops/index.js');
+  page.onLoad({ clubId: '9' });
+  requests.find((r) => r.url === '/api/club/access/me')
+    .success({ code: 200, data: { active: true, club: { id: 9 }, permissions: ['club:activity:manage'] } });
+  requests.find((r) => r.url === '/api/club/event-ops/topics').success({ code: 200, data: [
+    { id: 31, name: '武康路', sessionPrice: 69, sessionMeetingPoint: '武康大楼 · 淮海中路1842号', onlinePaymentAvailable: false },
+    { id: 32, name: '外滩源', sessionPrice: 0, onlinePaymentAvailable: false },
+  ] });
+  assert.equal(page.data.topics[0].factsText, '票价 ¥69.0 · 集合点 武康大楼 · 淮海中路1842号');
+  assert.equal(page.data.topics[0].paymentNotice, '这个主题暂不能在线收款，玩家无法在线报名付费场次');
+  assert.equal(page.data.topics[1].factsText, '免费');
+  assert.equal(page.data.topics[1].paymentNotice, '', '免费主题不提示收款');
+  const wxml = read('pages/club/event-ops/index.wxml');
+  assert.match(wxml, /\{\{topics\[topicIndex\]\.factsText\}\}/);
+  assert.match(wxml, /\{\{topics\[topicIndex\]\.paymentNotice\}\}/);
+  assert.match(wxml, /\{\{seriesWindowWarning\}\}/);
+});
+
+test('C-21 创建非首项主题后保留主题与真实窗外警告', () => {
+  const { page, requests } = loadPage('pages/club/event-ops/index.js');
+  const tomorrow = require('../../utils/datetime.js').chinaDateKey(new Date(Date.now() + 86400000));
+  page.setData({ clubId: 9, canManage: true, topics: [{ id: 30 }, { id: 31 }], topicIndex: 1,
+    startDate: tomorrow, startTime: '18:00' });
+  page.submitSeries();
+  const create = requests.find(r => r.url === '/api/club/event-ops/series/create');
+  assert.equal(JSON.parse(create.data).topicId, 31);
+  create.success({ code: 200, data: { id: 3, windowWarning: '这一场不在主题日期内，请确认' } });
+  assert.equal(page.data.topics[page.data.topicIndex].id, 31);
+  assert.equal(page.data.seriesWindowWarning, '这一场不在主题日期内，请确认');
+});
+
+test('C-21 刷新主题按回包时真实选择ID保留，不被原聚焦或列表顺序覆盖', () => {
+  const { page, requests } = loadPage('pages/club/event-ops/index.js');
+  page._focusTopicId = 30;
+  page.setData({ clubId: 9, topics: [{ id: 30 }, { id: 31 }], topicIndex: 1,
+    seriesWindowWarning: '目标主题警告' });
+  page.loadTopics();
+  requests.at(-1).success({ code: 200, data: [{ id: 31 }, { id: 30 }] });
+  assert.equal(page.data.topicIndex, 0);
+  assert.equal(page.data.seriesWindowWarning, '目标主题警告');
+  page.loadTopics();
+  page.onTopicChange({ detail: { value: 1 } });
+  requests.at(-1).success({ code: 200, data: [{ id: 30 }, { id: 31 }] });
+  assert.equal(page.data.topics[page.data.topicIndex].id, 30);
+  assert.equal(page.data.seriesWindowWarning, '');
+});
+
+test('C-21 已选主题不再可开场时沿用首项/空列表回退并清旧警告', () => {
+  for (const rows of [[{ id: 30 }], []]) {
+    const { page, requests } = loadPage('pages/club/event-ops/index.js');
+    page.setData({ clubId: 9, topics: [{ id: 30 }, { id: 31 }], topicIndex: 1,
+      seriesWindowWarning: '已移除主题警告' });
+    page.loadTopics();
+    requests.at(-1).success({ code: 200, data: rows });
+    assert.equal(page.data.topicIndex, 0);
+    assert.equal(page.data.seriesWindowWarning, '');
+    assert.equal(page.data.topics.length, rows.length);
+  }
+});
+
+test('C-21 切换主题后旧创建回执不把警告贴到新主题', () => {
+  const { page, requests } = loadPage('pages/club/event-ops/index.js');
+  const tomorrow = require('../../utils/datetime.js').chinaDateKey(new Date(Date.now() + 86400000));
+  page.setData({ clubId: 9, canManage: true, topics: [{ id: 30 }, { id: 31 }], topicIndex: 1,
+    startDate: tomorrow, startTime: '18:00', seriesWindowWarning: '旧警告' });
+  page.submitSeries();
+  const create = requests.find(r => r.url === '/api/club/event-ops/series/create');
+  page.onTopicChange({ detail: { value: 0 } });
+  assert.equal(page.data.seriesWindowWarning, '');
+  create.success({ code: 200, data: { id: 3, windowWarning: '主题31的警告' } });
+  assert.equal(page.data.topics[page.data.topicIndex].id, 30);
+  assert.equal(page.data.seriesWindowWarning, '');
+});
+
+test('C-21 退出系列编辑后保留实际编辑主题，清旧回执并重置版本', () => {
+  const { page } = loadPage('pages/club/event-ops/index.js');
+  page.setData({ topics: [{ id: 30 }, { id: 31 }], topicIndex: 0, editingSeriesId: 3,
+    seriesWindowWarning: '旧警告' });
+  page._editingTopicId = 31;   // 编辑中的主题是实例状态(不走 setData,U4)
+  page._expectedVersion = 2;
+  page.cancelSeriesEdit();
+  assert.equal(page.data.topics[page.data.topicIndex].id, 31);
+  assert.equal(page.data.seriesWindowWarning, '');
+  assert.equal(page._expectedVersion, null);
+  assert.equal(page.data.editingSeriesId, null);
+});
+
+test('C-21 打开另一系列编辑时清除先前创建回执的警告', () => {
+  const { page, requests } = loadPage('pages/club/event-ops/index.js');
+  page.setData({ clubId: 9, canManage: true, topics: [{ id: 30 }, { id: 31 }], topicIndex: 0,
+    seriesWindowWarning: '主题30的旧回执' });
+  page.loadSeriesDetail(3);
+  requests.at(-1).success({ code: 200, data: { id: 3, clubId: 9, topicId: 31,
+    recurrenceType: 'ONCE', defaultLeadMemberId: 9008, defaultCapacity: null,
+    waitlistEnabled: true, offerMinutes: 1440, version: 0, futureDates: [] } });
+  assert.equal(page._editingTopicId, 31);
+  assert.equal(page.data.seriesWindowWarning, '');
+});
+
+// ───────── AUDIT-1122 L08-089 / L08-090:从核销详情(退款)回来,已展开团的名册与金额重拉 ─────────
+test('L08-089 退款回来:已展开团重拉名册,金额块不消失,已支付只数已付', () => {
+  const { page, requests } = loadPage('pages/club/enroll/index.js');
+  page.onLoad({ clubId: '9', topicId: '31' });
+  page.onShow();
+  requests.find((r) => r.url === '/api/club/detail').success({ code: 200, data: { isOwner: true } });
+  requests.find((r) => r.url === '/api/club/topics').success({ code: 200, data: [{ id: 31, name: '目标团' }] });
+  const money = [{ activityId: 16, label: '11月2日', cancelled: false, paidFen: 6900, refundedFen: 0, netFen: 6900 }];
+  const regs = (status) => ({ code: 200, data: { omsTicketList: [{ name: '票', cmsRegistrationList: [
+    { id: 1, nickname: 'A', paymentStatus: status, verificationStatus: 0 },
+    { id: 2, nickname: 'B', paymentStatus: 1, verificationStatus: 0 },
+  ] }], sessionMoney: money } });
+  requests.filter((r) => r.url === '/api/club/topic-registrations').pop().success(regs(2));
+  assert.equal(page.data.teams[0].summary.paidCount, 1, '未支付那行不算已支付');
+  assert.equal(page.data.teams[0].summary.refundableCount, 1);
+  page.goCheckinDetail({ currentTarget: { dataset: { regid: 1 } } });
+  requests.length = 0;
+  page.onShow();
+  requests.find((r) => r.url === '/api/club/topics').success({ code: 200, data: [{ id: 31, name: '目标团', signupCount: 1 }] });
+  assert.equal(page.data.teams[0].sessionMoney.length, 1, '刷新期间金额块不许消失');
+  assert.equal(page.data.teams[0]._detailState, 'ready', '后台刷新不回骨架');
+  const detail = requests.filter((r) => r.url === '/api/club/topic-registrations');
+  assert.equal(detail.length, 1, '已展开的团必须重拉名册');
+  detail[0].success(regs(4));   // A 已退款
+  assert.equal(page.data.teams[0].summary.refundableCount, 0);
+  assert.equal(page.data.teams[0].summary.paidCount, 0);
+});

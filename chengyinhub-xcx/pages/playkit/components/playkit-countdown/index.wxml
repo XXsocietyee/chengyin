@@ -1,0 +1,27 @@
+<!-- 白底,一钟油。倒计时只有一条信息:还剩多少。所以屏幕上只有这一件东西 ——
+     一圈黑油,时间走油就往下退;数字压在上面,被油盖住的那半自己翻成白的。
+     它不附加玩法:限时冲刺、醒酒、等一杯手冲。 -->
+<cy-play-stage id="cy-play-stage" show="{{show}}" back-label="退出" bind:back="onClose">
+  <view class="oc {{reducedMotion ? 'oc--reduced' : ''}}">
+    <view class="oc__oil" style="transform:translateY({{oilY}}%)">
+      <!-- 油面那道波:两层横向平移,速度不同 —— 同速的话整块像一个刚体在晃,不像液体 -->
+      <view class="oc__wv oc__wv--a"></view>
+      <view class="oc__wv oc__wv--b"></view>
+    </view>
+
+    <!-- 眉标和数字都压在油面上,所以都走差值混合:
+         露在白底上算出来是黑的,泡在油里自动翻白。这样只需要一层文字。 -->
+    <view class="oc__k pe pe--blur">{{kicker}}</view>
+    <!-- L02-033 -->
+    <view class="oc__n"><view class="pe pe--blur">{{clock}}</view></view>
+    <view class="oc__done" wx:if="{{finished && doneText}}">{{doneText}}</view>
+
+  </view>
+
+  <!-- 主按钮与其它玩法同一颗 .g-btn,排在台面后面:整屏贴底,内嵌跟在油面那块下面 -->
+  <view class="g-btn {{running ? 'g-btn--disabled' : ''}}" bindtap="onStart"
+        aria-role="button" aria-label="{{running ? '倒计时进行中' : '开始倒计时'}}" aria-disabled="{{running}}"
+        hover-class="g-btn--press" hover-stay-time="80">
+    {{running ? '计时中' : (finished ? '再来一次' : '开始')}}
+  </view>
+</cy-play-stage>

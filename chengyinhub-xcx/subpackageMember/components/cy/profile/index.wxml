@@ -1,0 +1,709 @@
+<wxs src="./pile-tilt.wxs" module="tilt" />
+<wxs src="../../../../utils/wxs/num.wxs" module="num" /><wxs src="../../../../utils/wxs/money.wxs" module="money" />
+<wxs src="../../../../utils/wxs/img.wxs" module="img" />
+<!-- 商家视角挂 theme-merchant:日间 token 真源在 style/tokens.wxss(.theme-light/.theme-merchant),
+     本页不再手抄一份;.pc-merchant 只留本页自有语义(去品牌化 + 隐藏 hero 底图) -->
+<view class="pc-page {{(isMerchantView || viewerLight) ? 'pc-merchant theme-merchant' : 'pc-player'}} {{isSelf ? 'pc-self' : 'pc-public'}} {{reducedMotion ? 'pc-reduced-motion' : ''}}">
+  <view class="pc-hero-bg">
+    <image class="pc-hero-bg-img" src="{{img.one(heroImg)}}" mode="aspectFill" />
+  </view>
+  <view class="pc-page-fade"></view>
+
+  <view class="pc-statusbar" style="height:{{statusBarHeight}}px;"></view>
+
+  <!-- 设置钮放左上:右上是微信原生胶囊(···|⊙)的固定占位,放右边必被压住(2026-08-04 实拍) -->
+  <view class="pc-nav" style="height:{{navBarHeight}}px;">
+    <view wx:if="{{hostSelf}}" class="pc-nav-btn" bindtap="goSetting" aria-role="button" aria-label="打开设置" hover-class="cy-pressed" hover-stay-time="80">
+      <image class="pc-nav-ico" src="/subpackageMember/images/icon_set.png" mode="aspectFit" />
+    </view>
+    <view wx:else class="pc-nav-btn" bindtap="goBack" aria-role="button" aria-label="返回上一页" hover-class="cy-pressed" hover-stay-time="80">
+      <cy-icon name="back" size="40" />
+    </view>
+    <view class="pc-nav-center">
+      <text class="pc-nav-title cy-h2">主页</text>
+    </view>
+    <view class="pc-nav-side"></view>
+  </view>
+
+  <scroll-view class="pc-scroll" scroll-y enhanced show-scrollbar="{{false}}"
+               style="height:calc(100vh - {{statusBarHeight + navBarHeight}}px);"
+               bindscrolltolower="onFeedReachBottom" lower-threshold="120">
+    <view class="pc-body" style="{{pmTab === 1 ? '--pm-m:1;' : (pmTab === 2 ? '--pm-m-d:.32s;--pm-m-s:1;' : '')}}">
+      <cy-empty wx:if="{{isSelf && selfReadAccess}}" kind="no-permission" fill size="lg" title="{{selfReadAccess === 'login' ? '登录后查看我的主页' : '当前身份不能查看主页'}}" cta="{{selfReadAccess === 'login' ? '登录' : '重试'}}" bind:cta="loginToReadProfile" />
+      <block wx:else>
+
+      <!-- 首屏身份卡(ADA §二G):头像 + 玩家名 + 所在城市 + 三项统计合成一张卡,
+           层级只靠表面明度(elevated)+ 顶缘高光,不加边框。
+           ⚠️ 等级进度环没做:进度环需要「距下一级还差多少经验」,而 /api/growth/center 只给
+           levelNo/expValue,没有任何等级阈值字段 —— 画环就得自己编阈值 = 造假数据,故只做卡。 -->
+      <view class="pc-idcard">
+      <!-- 身份头 -->
+      <view class="pc-gamer">
+        <!-- 被看者是商家时,身份头整组换成商家公开身份(品牌名/头像/封面/城市角色/口号)——
+             否则会出现「关于已经是商家资料、首屏还挂着个人昵称和玩家角色」。 -->
+        <view class="pc-avatar-wrap" bindtap="onAvatarTap" aria-role="{{isSelf ? 'button' : ''}}" aria-label="{{isSelf ? '编辑个人资料' : (subjectIsMerchant ? subjectMerchant.name : userInfo.nickname)}}" hover-class="{{isSelf ? 'cy-pressed' : 'none'}}" hover-stay-time="80">
+          <view class="pc-avatar-ring">
+            <!-- 商家主体没上传 logo 时落店名首字(lettermark),不借玩家默认头像那张人脸;
+                 玩家档不变,仍兜底 /images/d_profile.png。 -->
+            <image wx:if="{{_avatarSrc}}" class="pc-avatar" src="{{img.one(_avatarSrc)}}" mode="aspectFill" />
+            <view wx:else class="pc-avatar pc-avatar--initial">{{_avatarInitial}}</view>
+          </view>
+          <view class="pc-avatar-edit" wx:if="{{isSelf}}"><image class="pc-avatar-edit-ico" src="/subpackageMember/images/icon_pen.svg" mode="aspectFit" /></view>
+          <view class="pc-avatar-dot"></view>
+        </view>
+        <view class="pc-gamer-main">
+          <!-- G-5(2026-10-27):名称只有一个来源 —— 商家主体/商家视角用商家名,玩家用昵称;取值在 js 的 _displayName -->
+          <view class="pc-gamer-name">{{_displayName}}</view>
+          <view class="pc-gamer-lv" wx:if="{{subjectIsMerchant}}">
+            <text wx:if="{{subjectMerchant.cityRole}}">{{subjectMerchant.cityRole}}</text>
+          </view>
+          <view class="pc-gamer-lv" wx:else>
+            <!-- 未登录时 userInfo.role 为 null,直传会触发 roleBadge 属性类型告警(2026-07-30 复拍采到);
+                 兜底放在调用方,不动 components/roleBadge -->
+            <!-- P-50(2026-10-27):玩家视角不出 BIZ(商家)徽章 —— 视角是玩家,就只按玩家身份展示 -->
+            <view class="pc-role-badge"><roleBadge role="{{!isMerchantView && userInfo.role === 'merchant' ? '' : (userInfo.role || '')}}" /></view>
+            <image class="pc-lv-badge" wx:if="{{userInfo.levelId==2}}" src="/subpackageMember/images/group2.png" mode="widthFix" />
+            <image class="pc-lv-badge" wx:if="{{userInfo.levelId==3}}" src="/subpackageMember/images/group3.png" mode="widthFix" />
+            <image class="pc-lv-badge" wx:if="{{userInfo.levelId==4}}" src="/subpackageMember/images/group4.png" mode="widthFix" />
+            <image class="pc-lv-badge" wx:if="{{userInfo.levelId==5}}" src="/subpackageMember/images/group5.png" mode="widthFix" />
+            <text wx:if="{{growthLevel > 0}}">Lv.{{growthLevel}} 城市探索者</text>
+          </view>
+          <view class="pc-gamer-meta">
+            <text class="pc-gamer-slogan" wx:if="{{subjectIsMerchant && subjectMerchant.slogan}}">{{subjectMerchant.slogan}}</text>
+            <block wx:if="{{!subjectIsMerchant}}">
+              <view class="pc-gamer-loc" wx:if="{{cityName && cityName !== '—'}}"><cy-icon name="gps" size="24" />{{cityName}}</view>
+              <text class="pc-gamer-streak" wx:if="{{isSelf && profileMetricState === 'ready'}}">连续探索：{{streakDays || 0}}天</text>
+            </block>
+          </view>
+        </view>
+      </view>
+
+      <!-- 好友 / 关注 / 粉丝。1121 N5:自己的主页三项全 0 时整行不出,任一非 0 再出 -->
+      <view class="pc-stats" wx:if="{{!isSelf || friendNum || followNum || fansNum}}">
+        <view class="pc-statcol"><text class="pc-stat-n">{{friendNum}}</text><text class="pc-stat-l">好友</text></view>
+        <view class="pc-stat-div"></view>
+        <view class="pc-statcol"><text class="pc-stat-n">{{followNum}}</text><text class="pc-stat-l">关注</text></view>
+        <view class="pc-stat-div"></view>
+        <view class="pc-statcol"><text class="pc-stat-n">{{fansNum}}</text><text class="pc-stat-l">粉丝</text></view>
+      </view>
+      </view>
+
+      <!-- 主 CTA + 更多。未收编 cy-btn:cy-btn 读 ①'' 组件层(--cy-comp-btn-*),该层在 page{} 上
+           就已完成 var() 替换,后代 class 覆盖 --cy-color-* 不跟随(实测,见 PR 说明)⇒ 商家视角会拿到
+           夜间 CTA(星白底)。组件层归 style/(禁区)改不了,故本页两个按钮维持自造件,只把「···」换 cy-icon。 -->
+      <!-- 2026-07-31:原"开始探索"旁的"游玩"三卡分组(继续/自由漫游/漫游足迹)与主按钮功能重复,
+           已删除;主按钮直接进漫游,旁边新增"票夹"入口承接原"从票夹开始"诉求。 -->
+      <view class="pc-actions" wx:if="{{isSelf || !viewingOwn}}">
+        <!-- UI-12:公开视角(他人看)主按钮 = 关注,不再区分被看者是玩家还是商家;
+             本人视角保持原样(商家本人=核销)。 -->
+        <view class="pc-primary {{!isSelf ? 'pc-primary--follow' : ''}} {{!isSelf && userInfo.isFollow == 1 ? 'pc-primary--followed' : ''}} {{followSubmitting ? 'pc-primary--pending' : ''}} {{followReceipt ? 'pc-primary--settled' : ''}}"
+          wx:if="{{(!isSelf && !viewingOwn) || (isSelf && isMerchantView)}}" bindtap="onPrimaryCta" hover-class="pc-btn-press"
+          aria-role="button" aria-label="{{followSubmitting ? '关注处理中' : primaryCta}}" aria-busy="{{followSubmitting}}" aria-disabled="{{followSubmitting}}">
+          <text wx:if="{{followSubmitting}}">处理中…</text>
+          <view wx:else class="pc-follow-result">
+            <view wx:if="{{userInfo.isFollow == 1}}" class="pc-follow-check" aria-hidden="true"><cy-icon name="check" size="32" /></view>
+            <text>{{primaryCta}}</text>
+          </view>
+        </view>
+        <!-- 2026-08-04 用户定:票夹与主按钮等大同色(都是 pc-primary),不再做次级玻璃钮 -->
+        <view class="pc-primary pc-ticket" wx:if="{{isSelf && !isMerchantView}}" bindtap="goSignup" hover-class="pc-btn-press" aria-role="button" aria-label="票夹">
+          <view class="pc-ticket-icon"><cy-icon name="coupon" size="32" /></view>
+          <text>票夹</text>
+        </view>
+        <view class="pc-primary pc-ticket" wx:if="{{!isSelf && !viewingOwn && !subjectIsMerchant}}" bindtap="onStartChat" hover-class="pc-btn-press" aria-role="button" aria-label="发消息">
+          <cy-icon name="tab-feed" size="32" />
+          <text>发消息</text>
+        </view>
+        <!-- BL-69:商家在架据点的收藏入口,照「发消息」同款按钮;无在架节点不展示 -->
+        <view class="pc-primary pc-ticket" wx:if="{{!isSelf && !viewingOwn && subjectIsMerchant && merchantNode}}" bindtap="toggleMerchantNodeFavorite" hover-class="{{merchantNodeBusy ? 'none' : 'pc-btn-press'}}" aria-role="button" aria-label="{{merchantNodeBusy ? '正在更新节点收藏' : (merchantNode.favorited ? '取消收藏节点' : '收藏节点')}}" aria-pressed="{{merchantNode.favorited}}" aria-busy="{{merchantNodeBusy}}" aria-disabled="{{merchantNodeBusy}}">
+          <cy-icon name="{{merchantNode.favorited ? 'star-filled' : 'star'}}" size="32" />
+          <text>{{merchantNodeBusy ? '处理中…' : (merchantNode.favorited ? '已收藏节点' : '收藏节点')}}</text>
+        </view>
+        <!-- UI-12:公开视角也要有「···」更多(分享主页/屏蔽)。
+             M-16(2026-10-27):本人商家视角「核销」右边的「···」删除 —— 店铺资料/分享/设置在别处都有,重复。 -->
+        <view class="pc-more" wx:if="{{!isSelf && !viewingOwn && subjectIsMerchant && subjectMerchant}}" bindtap="openShopShare" hover-class="pc-btn-press" aria-role="button" aria-label="分享店铺"><cy-icon name="share" size="32" /></view>
+        <view class="pc-more" wx:if="{{!isSelf && !viewingOwn}}" bindtap="openMoreMenu" hover-class="pc-btn-press" aria-role="button" aria-label="打开更多操作"><cy-icon name="more" size="32" /></view>
+      </view>
+
+      <!-- ⓪ 门店 AI 形象(npc_profile 里 scope 2「门店分身」,后台配):像素分身静态出场,不接对话。
+           ★ 刻意放在 tab 之上而不是「关于」里:他人视角默认落在 posts(见 index.js 的 activeTab 兜底),
+             挂进「关于」等于只有点过那个 tab 的人才看得见,形象就白配了。
+           没配 / 未审 / 已停用时后端回的 npc 为 null,整块不渲染 —— 不留空头像框冒充「还没配好」。
+           头像是必填项,故只判 npc 存在即可;greeting 可空,空了只出名字。 -->
+      <block wx:if="{{subjectIsMerchant}}">
+          <view class="pc-npc" wx:if="{{subjectMerchant.npc}}">
+            <view class="pc-npc-avatar"><cy-npc-avatar src="{{subjectMerchant.npc.avatar}}"/></view>
+            <view class="pc-npc-main">
+              <text class="pc-npc-name">{{subjectMerchant.npc.name}}</text>
+              <text class="pc-npc-greet" wx:if="{{subjectMerchant.npc.greeting}}">{{subjectMerchant.npc.greeting}}</text>
+            </view>
+            <!-- 对话入口。★ 开关关时**只去掉这个按钮**,形象照常出场 ——
+                 它本来就是 PR #820 的静态展示,不该因为对话没开就整块消失。
+                 判在这里而不是让人点了才 403:给一个点了必失败的入口比没有入口更坏。 -->
+            <view wx:if="{{merchantNpcChatOn}}" class="pc-npc-chat-entry" bindtap="openMerchantNpcChat"
+                  hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="和店铺形象聊聊">聊聊</view>
+          </view>
+      </block>
+
+      <!-- Tab：紧挨主按钮（对标 Xbox Rewards/Posts/Achievements/About） -->
+      <!-- 2026-07-31 用户定:这排是「切换不同内容区」,用文字+下划线(fill);白胶囊(chip)只给
+           「同一页面内切换内容」的筛选器。上一轮统一成 chip 是改错了,已撤回。 -->
+      <cy-tabs class="pc-tabs {{isMerchantView ? '' : 'pc-tabs--photo'}}" variant="fill" hairline="{{false}}" tabs="{{memberTabs}}" active="{{activeTab}}" bind:change="onTabChange" />
+
+      <!-- ===== TAB · 项目 ===== -->
+      <block wx:if="{{isSelf && activeTab === 'projects'}}">
+        <!-- M-25(2026-10-27):商家不报名游玩,没有订单也没有票夹 —— 商家视角整段不出,改看下面的项目段(承接进度)。
+             P-47 / M-14:右侧只留箭头,不写「查看详情」。 -->
+        <block wx:if="{{!isMerchantView && (orderPreviewList.length || orderErr)}}">
+        <view class="pc-sec-head" aria-label="{{orderAuthError ? '订单登录状态失效，请重新进入' : ''}}">
+          <text class="pc-sec-tit pc-sec-tit--flush pc-sec-tit--sm">我的订单</text>
+          <view class="pc-sec-link" bindtap="goOrder" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="查看全部订单"><cy-icon name="arrow-right" size="26" /></view>
+        </view>
+        <scroll-view wx:if="{{orderPreviewList.length}}" class="pc-hscroll" scroll-x enhanced show-scrollbar="{{false}}">
+          <view class="pc-hscroll-inner">
+            <view class="pc-ord-card {{ordFly}}" style="animation-delay: {{index < 5 ? index * 40 : 200}}ms" wx:for="{{orderPreviewList}}" wx:key="id" bindtap="onOrderPreviewTap" data-id="{{item.id}}" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="{{item.statusText}}：{{item.title}}">
+              <!-- 2026-10-22 owner 参考图:整卡封面铺满,下半段黑色渐变压暗,文字与按钮叠在渐变上 -->
+              <image wx:if="{{item.cover}}" class="pc-ord-cover__img" src="{{item.cover}}" mode="aspectFill" lazy-load="true" />
+              <view class="pc-ord-shade"></view>
+              <view class="pc-ord-tag pc-ord-tag--{{item.statusTone}}">{{item.statusText}}</view>
+              <view class="pc-ord-body">
+                <view class="pc-ord-title">{{item.title}}</view>
+                <!-- P-48(2026-10-27):不写票数、不放「出示核销码」;只说是什么主题 —— 「城市定向/自由探索 · 类别」 -->
+                <view class="pc-ord-meta" wx:if="{{item.kindText || item.timeText}}">{{item.kindText || item.timeText}}</view>
+              </view>
+            </view>
+          </view>
+        </scroll-view>
+        <cy-error load-failure wx:elif="{{orderErr}}"
+          title="{{orderAuthError ? '登录未成功' : '订单加载失败'}}"
+          sub="{{orderAuthError ? '请重新进入小程序' : ''}}"
+          retry="重试" bind:retry="reloadOrders" />
+        </block>
+
+        <!-- C7:唯一管理入口(原「我的模板」section 并入我的项目页的模板 tab);角标=未通过+审核中 -->
+        <view class="pc-sec-head" aria-label="{{projectErr ? (projectAuthError ? '项目登录状态失效，请重新进入' : '项目加载失败，请下拉刷新重试') : ''}}">
+          <view class="pc-sec-left">
+            <text class="pc-sec-tit {{isMerchantView ? 'pc-sec-tit--flush' : ''}} pc-sec-tit--sm">我的项目</text>
+            <view class="pc-sec-badge" wx:if="{{projectPendingCount > 0}}" aria-role="text" aria-label="待处理项目 {{projectPendingCount || 0}} 个">待处理 {{projectPendingCount || 0}}</view>
+          </view>
+          <view class="pc-sec-link" bindtap="goProject" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="管理全部项目"><text>管理全部</text><cy-icon name="arrow-right" size="26" /></view>
+        </view>
+        <block wx:if="{{projectPreviewList.length || projectErr}}">
+        <cy-error load-failure wx:if="{{projectErr}}"
+          title="{{projectAuthError ? '登录未成功' : '项目加载失败'}}"
+          sub="{{projectAuthError ? '请重新进入小程序' : ''}}"
+          retry="重试" bind:retry="reloadProjects" />
+        <scroll-view wx:elif="{{projectPreviewList.length}}" class="pc-hscroll pc-project-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+          <view class="pc-hscroll-inner">
+          <view class="pc-xbox-proj" wx:for="{{projectPreviewList}}" wx:key="id" bindtap="onProjectPreviewTap" data-id="{{item.id}}" hover-class="cy-pressed" hover-stay-time="80">
+            <view class="pc-xbox-cover-wrap">
+              <image class="pc-xbox-cover" src="{{item.cover}}" mode="aspectFill" lazy-load="true" />
+            </view>
+            <view class="pc-xbox-main">
+              <view class="pc-xbox-name">{{item.name}}</view>
+              <view class="pc-xbox-time">{{item.timeLabel}}</view>
+            </view>
+            <!-- 档期未知时 statusLabelOf 回空串:不渲染空的章壳,也不编一个状态 -->
+            <view wx:if="{{item.statusText}}" class="pc-xbox-status {{item.statusDone ? 'pc-xbox-status--done' : ''}}">{{item.statusText}}</view>
+          </view>
+          </view>
+        </scroll-view>
+        </block>
+
+        <!-- qx-b5 §18 A/B:视频悬赏是创作者作品的推广投稿,跟在「我的项目」之后 -->
+        <!-- 1121 N5:确认一条投稿都没有(videoBountyCount === 0)才收起;没拉到照常出 -->
+        <view class="pc-team-entry" wx:if="{{!isMerchantView && videoBountyCount !== 0}}">
+          <cy-cell title="视频悬赏" description="" hairline="{{false}}" bind:tap="goVideoBounty" />
+        </view>
+        <!-- 我的资产(2026-08-08 用户定):与「我的订单」「我的项目」并列的第三段。
+             资金相关全部收进这里,详情走账户收益页(余额/收益明细/分润/提现/提现记录都在那)。
+             余额直接读 userInfo.balance,零新增请求;整段在 isSelf 分支内,别人主页看不到。 -->
+        <!-- 1121 N5:余额确认为 0 且没有任何流水才收起余额卡;通行证与礼品仍挂在本段下 -->
+        <view class="pc-sec-head" wx:if="{{!isMerchantView || !(balanceText === '0.00' && balanceFlowCount === 0)}}">
+          <text class="pc-sec-tit pc-sec-tit--sm">我的资产</text>
+          <!-- 2026-10-30 业主:「我的资产」标题旁不要箭头,卡片本身可点 -->
+        </view>
+        <!-- P-49(2026-10-27,0.3 新口径):没有就是 0,不再用「—」代替 —— 取不到余额也显示 ¥0 -->
+        <view class="pc-asset" wx:if="{{!(balanceText === '0.00' && balanceFlowCount === 0)}}" bindtap="goEarnings" hover-class="pc-tap" hover-stay-time="80"
+              aria-role="button" aria-label="我的资产，账户余额{{balanceText || 0}}元">
+          <view class="pc-asset__main">
+            <text class="pc-asset__label">账户余额</text>
+            <text class="pc-asset__value">{{money.amount2(balanceText == null ? 0 : balanceText)}}</text>
+          </view>
+          <cy-icon class="pc-asset__arrow" name="arrow-right" size="32" />
+        </view>
+
+        <!-- 商家 Owner 与员工共用的经营身份入口。放在资产之后：资产回答“钱在哪里”，
+             团队回答“谁能经营”；权限与主题只认 access/me，不拿全局 role/userType 猜。 -->
+        <!-- qx-b5 §17.1/§17.2/P6:通行证与礼品是本人购买记录,归在我的资产之下(P-53 不进「探索与更多」) -->
+        <view class="pc-team-entry" wx:if="{{!isMerchantView}}">
+          <cy-cell title="通行证与礼品" description="" hairline="{{false}}" bind:tap="goPasses" />
+        </view>
+        <view class="pc-team-entry" wx:if="{{isClubLeader}}">
+          <cy-cell icon="/images/icon_tab_workbench.svg"
+                   title="俱乐部工作台"
+                   description=""
+                   hairline="{{false}}"
+                   bind:tap="goClubWorkbench" />
+        </view>
+        <view class="pc-team-entry" wx:if="{{merchantAccess.active}}">
+          <cy-cell icon="/subpackageMember/images/icon_qa_person.svg"
+                   title="经营团队"
+                   description=""
+                   value="{{merchantTeamEntryValue}}"
+                   hairline="{{false}}"
+                   bind:tap="goMerchantTeam" />
+        </view>
+      </block>
+
+      <!-- ===== TAB · 推文 ===== -->
+      <block wx:if="{{activeTab === 'posts'}}">
+        <view class="pc-feed">
+          <!-- f-pages P-20/M-33:本人主页(玩家和商家)帖文 tab 的发帖入口,与商家「发现」、俱乐部详情同一形态;
+               放在状态块之前,空态上方也有。只在 canCompose(服务端 communityPostWrite)时出现。 -->
+          <view class="post-composer-collapsed" wx:if="{{isSelf && canCompose}}" bindtap="openComposer"
+                aria-role="button" aria-label="发帖文" hover-class="cy-pressed" hover-stay-time="80">
+            <cy-avatar class="post-composer-me" size="72" src="{{img.one(_avatarSrc) || myAvatar || '/images/d_profile.png'}}" name="我" />
+            <view class="post-composer-col">
+              <text class="post-composer-who">{{_displayName || myNickname || (isMerchantView ? '我的店' : '城瘾玩家')}}</text>
+              <text class="post-composer-ph">有什么新鲜好玩的分享吗？</text>
+              <view class="post-composer-tools">
+                <cy-icon class="post-composer-ico" name="image" size="44" />
+                <cy-icon class="post-composer-ico" name="pin-solid" size="44" />
+              </view>
+            </view>
+          </view>
+          <cy-error class="pc-feed-state" load-failure wx:if="{{feedErr}}" title="{{feedAuthError ? '登录未成功' : '帖文加载失败'}}" sub="{{feedAuthError ? '请重新进入小程序' : ''}}" retry="重试" bind:retry="reloadFeed" />
+          <cy-empty class="pc-feed-state" wx:elif="{{nodata && !clubPostList.length}}" title="还没有帖文" />
+          <!-- 帖文第三轮(业主定稿 P-1,V-16):我的帖文和发现、俱乐部详情用同一张帖文卡,不再是自己那套 pc-post -->
+          <cy-post-card wx:for="{{list}}" wx:key="id" post="{{item}}" index="{{index}}" light="{{isMerchantView}}"
+            interactive-actions show-share accessibility-label="查看帖文"
+            bind:detail="onPostCardDetail" bind:comment="onPostCardDetail" bind:like="onPostCardLike" />
+          <cy-post-card wx:if="{{!feedErr}}" wx:for="{{clubPostList}}" wx:key="id" post="{{item}}" index="{{index}}" light="{{isMerchantView}}"
+            accessibility-label="查看帖文" bind:detail="onClubPostCardDetail" bind:comment="onClubPostCardDetail" />
+        </view>
+      </block>
+
+      <!-- ===== TAB · 成就 ===== -->
+      <block wx:if="{{activeTab === 'achievements'}}">
+        <block wx:if="{{isSelf}}">
+        <view class="pc-achievement-metrics" wx:if="{{profileMetricState === 'ready'}}">
+        <view class="pc-gs-row">
+          <view class="pc-gs-main" bindtap="goPointsHistory" hover-class="pc-tap-text" hover-stay-time="80"
+                aria-role="button" aria-label="城瘾积分 {{profilePoint}}">
+            <text class="pc-gs-icon" aria-hidden="true">G</text>
+            <text class="pc-gs-num">{{profilePoint}}</text>
+          </view>
+          <!-- 用 view 而非 text:微信 hover-class 只在 view/button/navigator/cover-view 上生效,
+               text 组件没有这个属性,写了也是死的(全仓 14 处 hover-class 无一在 text 上)。 -->
+          <view class="pc-gs-link" bindtap="onPointsHelp" hover-class="pc-tap-text" hover-stay-time="80"
+                aria-role="button" aria-label="如何获取积分">如何获取积分</view>
+        </view>
+
+        <view class="pc-rank" bindtap="goGrowthCenter" hover-class="pc-tap" hover-stay-time="80"
+              aria-role="button" aria-label="总积分排名 {{rankDisplay.no}}，查看成长中心详情">
+          <!-- 后端 /api/user/points/statistics 按总积分排序,没有月份或城市筛选,
+               展示口径必须与接口一致。 -->
+          <text class="pc-rank-title">总积分排名</text>
+          <view class="pc-rank-body">
+            <view class="pc-rank-left">
+              <text class="pc-rank-no">{{rankDisplay.no}}</text>
+              <text class="pc-rank-delta" wx:if="{{rankDisplay.delta}}">{{rankDisplay.delta}}</text>
+            </view>
+            <view class="pc-rank-sep"></view>
+            <view class="pc-rank-right">
+              <text class="pc-rank-k">累计打卡</text>
+              <!-- P-22(2026-11-02 业主):里程还没有真实来源,先不出 km -->
+              <text class="pc-rank-v">{{exploreStat.places || 0}} 处</text>
+              <text class="pc-rank-exp">本周 +{{exploreStat.weekExp}} EXP</text>
+            </view>
+          </view>
+          <view class="pc-compare"><text>查看详情</text><cy-icon name="arrow-right" size="28" /></view>
+        </view>
+
+        <!-- 2026-10-30 业主定稿 P-3:「勋章墙 / 集邮册 / 藏品册」三行合成一本「收集册」;这块原来是黄色纸页,按业主给的 mymind 视频改成
+             浅色底 + 三叠小卡片(勋章 / 邮票 / 藏品),点哪一叠进收集册的哪一段。原来下面那张「城市勋章」列表删掉 ——
+             城市勋章就是收集册「勋章」段里的勋章。 -->
+        <view class="pc-album">
+          <view class="pc-album-head" bindtap="goWall" hover-class="pc-tap" hover-stay-time="80" aria-role="button" aria-label="打开收集册">
+            <text class="pc-album-t">收集册</text>
+            <cy-icon class="pc-album-arrow" name="arrow-right" size="32" />
+          </view>
+          <view class="pc-album-row">
+            <!-- 2026-11-09 V3-34:三叠小卡做成真 3D(透视 + 叠层 Z 深度 + 高光),不再垫灰色卡底;按下时卡堆转正并浮起,松手回到静止角度 -->
+            <view class="pc-pile" data-reduced="{{reducedMotion}}" bindtouchstart="{{tilt.start}}" bindtouchmove="{{tilt.move}}" bindtouchend="{{tilt.end}}" bindtouchcancel="{{tilt.end}}" bindtap="goWall" hover-class="pc-pile--press" hover-stay-time="80" aria-role="button" aria-label="收集册 · 勋章{{medalCount ? '，已点亮 ' + medalCount + ' 枚' : ''}}">
+              <view class="pc-pile-3d">
+                <view class="pc-pile-c pc-pile-c--0"><image class="pc-pile-img" src="{{medals[2].medalImg || '/subpackageMember/images/album/medal-3d.png'}}" mode="aspectFit" /></view>
+                <view class="pc-pile-c pc-pile-c--1"><image class="pc-pile-img" src="{{medals[1].medalImg || '/subpackageMember/images/album/medal-3d.png'}}" mode="aspectFit" /></view>
+                <view class="pc-pile-c pc-pile-c--2"><image class="pc-pile-img" src="{{medals[0].medalImg || '/subpackageMember/images/album/medal-3d.png'}}" mode="aspectFit" /><image class="pc-pile-img pc-pile-sheen" src="{{medals[0].medalImg || '/subpackageMember/images/album/medal-3d.png'}}" mode="aspectFit" aria-hidden="true" /></view>
+              </view>
+              <view class="pc-pile-t"><text>勋章</text><text class="pc-pile-n" wx:if="{{medalCount}}">{{medalCount}}</text></view>
+            </view>
+            <view class="pc-pile" data-reduced="{{reducedMotion}}" bindtouchstart="{{tilt.start}}" bindtouchmove="{{tilt.move}}" bindtouchend="{{tilt.end}}" bindtouchcancel="{{tilt.end}}" bindtap="goAlbum" hover-class="pc-pile--press" hover-stay-time="80" aria-role="button" aria-label="收集册 · 邮票">
+              <view class="pc-pile-3d">
+                <view class="pc-pile-c pc-pile-c--0"><image class="pc-pile-img" src="/subpackageMember/images/album/stamp-3d.png" mode="aspectFit" /></view>
+                <view class="pc-pile-c pc-pile-c--1"><image class="pc-pile-img" src="/subpackageMember/images/album/stamp-3d.png" mode="aspectFit" /></view>
+                <view class="pc-pile-c pc-pile-c--2"><image class="pc-pile-img" src="/subpackageMember/images/album/stamp-3d.png" mode="aspectFit" /><image class="pc-pile-img pc-pile-sheen" src="/subpackageMember/images/album/stamp-3d.png" mode="aspectFit" aria-hidden="true" /></view>
+              </view>
+              <view class="pc-pile-t"><text>邮票</text></view>
+            </view>
+            <view class="pc-pile" data-reduced="{{reducedMotion}}" bindtouchstart="{{tilt.start}}" bindtouchmove="{{tilt.move}}" bindtouchend="{{tilt.end}}" bindtouchcancel="{{tilt.end}}" bindtap="goObjectCards" hover-class="pc-pile--press" hover-stay-time="80" aria-role="button" aria-label="收集册 · 藏品">
+              <view class="pc-pile-3d">
+                <view class="pc-pile-c pc-pile-c--0"><image class="pc-pile-img" src="/subpackageMember/images/album/object-3d.png" mode="aspectFit" /></view>
+                <view class="pc-pile-c pc-pile-c--1"><image class="pc-pile-img" src="/subpackageMember/images/album/object-3d.png" mode="aspectFit" /></view>
+                <view class="pc-pile-c pc-pile-c--2"><image class="pc-pile-img" src="/subpackageMember/images/album/object-3d.png" mode="aspectFit" /><image class="pc-pile-img pc-pile-sheen" src="/subpackageMember/images/album/object-3d.png" mode="aspectFit" aria-hidden="true" /></view>
+              </view>
+              <view class="pc-pile-t"><text>藏品</text></view>
+            </view>
+          </view>
+        </view>
+        </view>
+        <cy-empty wx:elif="{{profileMetricState === 'empty'}}" kind="empty" title="成长记录从第一次探索开始"
+          />
+        <view wx:elif="{{profileMetricState === 'error'}}" class="pc-metric-error">
+          <cy-error load-failure title="{{profileMetricAuthError ? '登录未成功' : '成长记录加载失败'}}" sub="{{profileMetricAuthError ? '请重新进入小程序' : ''}}"
+            retry="重新加载" bind:retry="reloadProfileMetrics" />
+        </view>
+        <cy-skeleton wx:else type="list" count="{{2}}" />
+        </block>
+        <view wx:else class="pc-public-achievements">
+          <view class="pc-public-stat">
+            <text class="pc-public-stat-n">{{(userInfo.topicNum || 0) + (userInfo.activityNum || 0)}}</text>
+            <text class="pc-public-stat-l">发布内容</text>
+          </view>
+          <view class="pc-public-stat">
+            <text class="pc-public-stat-n">{{userInfo.likeNum || 0}}</text>
+            <text class="pc-public-stat-l">获赞</text>
+          </view>
+          <view class="pc-public-stat">
+            <text class="pc-public-stat-n">{{userInfo.fansNum || 0}}</text>
+            <text class="pc-public-stat-l">粉丝</text>
+          </view>
+        </view>
+      </block>
+
+      <!-- ===== TAB · 关于 ===== -->
+      <block wx:if="{{activeTab === 'about'}}">
+        <!-- ===== 关于 · 商家被看者 ===== -->
+        <block wx:if="{{subjectIsMerchant}}">
+          <!-- ⓪ 招牌主推(4-12/R9-33):商家在装修里置顶的活动或券,后端已核验归属与公开态;
+               没选/已下架/已易主时 featured 为 null,整块不渲染,不给空壳卡。 -->
+          <block wx:if="{{featured}}">
+            <view class="pc-sec-tit pc-sec-tit--flush">招牌主推</view>
+            <view class="pc-card pc-featured" bindtap="goFeatured"
+                  aria-role="{{featured.actionable ? 'button' : ''}}"
+                  aria-label="{{featured.actionable ? '查看主推 ' + featured.titleText : '招牌主推'}}"
+                  hover-class="{{featured.actionable ? 'cy-pressed' : 'none'}}" hover-stay-time="80">
+              <image wx:if="{{featured.imageUrl}}" class="pc-featured-img" src="{{featured.imageUrl}}" mode="aspectFill" lazy-load="true" />
+              <view wx:else class="pc-featured-img pc-featured-img--fallback"><cy-icon name="star" size="40" /></view>
+              <text class="pc-featured-title">{{featured.titleText}}</text>
+              <cy-icon wx:if="{{featured.actionable}}" class="pc-featured-arrow" name="arrow-right" size="24" />
+            </view>
+          </block>
+
+          <!-- ① 品牌故事:两者都空只给一次克制空态,不替商家编文案 -->
+          <block wx:if="{{subjectMerchant.storyTitle || subjectMerchant.description}}">
+            <view class="pc-sec-tit {{featured ? '' : 'pc-sec-tit--flush'}}">{{subjectMerchant.storyTitle || '品牌故事'}}</view>
+            <view class="pc-card pc-about" wx:if="{{subjectMerchant.description}}">{{subjectMerchant.description}}</view>
+          </block>
+          <cy-empty wx:else title="还没有品牌故事" />
+
+          <!-- ② 门店相册:空则整块不渲染 -->
+          <block wx:if="{{merchantGallery.length}}">
+            <view class="pc-sec-tit">门店相册</view>
+            <scroll-view class="pc-hscroll" scroll-x enhanced show-scrollbar="{{false}}">
+              <view class="pc-hscroll-inner">
+                <image wx:for="{{merchantGallery}}" wx:key="index" class="pc-mgimg" src="{{item}}" mode="aspectFill" lazy-load="true"
+                       data-src="{{item}}" bindtap="previewMerchantGallery"  aria-role="button" aria-label="查看大图" hover-class="cy-pressed" hover-stay-time="80"/>
+              </view>
+            </scroll-view>
+          </block>
+
+          <!-- ③ 品类 -->
+          <block wx:if="{{merchantCategories.length}}">
+            <view class="pc-sec-tit">品类</view>
+            <!-- G-8 / M-12(2026-10-27):商家标签库 —— 每个标签带图标,实底、无灰描边、小一号 -->
+            <view class="pc-tags">
+              <view class="pc-tag pc-tag--lib" wx:for="{{merchantCategoryTags}}" wx:key="label"><image wx:if="{{item.iconSrc}}" class="pc-tag-ico" src="{{item.iconSrc}}" mode="aspectFit" /><text>{{item.label}}</text></view>
+            </view>
+          </block>
+
+          <!-- ④ 特色标签 -->
+          <block wx:if="{{merchantTags.length}}">
+            <view class="pc-sec-tit">特色标签</view>
+            <view class="pc-tags">
+              <view class="pc-tag pc-tag--lib" wx:for="{{merchantTagItems}}" wx:key="label"><image wx:if="{{item.iconSrc}}" class="pc-tag-ico" src="{{item.iconSrc}}" mode="aspectFit" /><text>{{item.label}}</text></view>
+            </view>
+          </block>
+
+          <!-- ⑤ 营业信息:有有效经纬度时地址才可点,没有坐标就是纯文本,不给点不动的假链接 -->
+          <view class="pc-sec-tit">营业信息</view>
+          <view class="pc-card pc-mrows">
+            <view class="pc-mrow">
+              <text class="pc-mrow-k">营业状态</text>
+              <text class="pc-mrow-v">{{subjectMerchant.businessStatusText}}</text>
+            </view>
+            <view class="pc-mrow" wx:if="{{subjectMerchant.businessTime}}">
+              <text class="pc-mrow-k">营业时间</text>
+              <text class="pc-mrow-v">{{subjectMerchant.businessTime}}</text>
+            </view>
+            <view class="pc-mrow" wx:if="{{subjectMerchant.address}}" bindtap="goMerchantLocation"
+                  aria-role="{{merchantHasGeo ? 'button' : ''}}" aria-label="{{merchantHasGeo ? '在地图上查看门店地址' : ''}}" hover-class="{{merchantHasGeo ? 'cy-pressed' : 'none'}}" hover-stay-time="80">
+              <text class="pc-mrow-k">门店地址</text>
+              <text class="pc-mrow-v {{merchantHasGeo ? 'pc-mrow-v--link' : ''}}">{{subjectMerchant.address}}</text>
+            </view>
+            <view class="pc-mrow" bindtap="goMerchantReviews" aria-role="button" aria-label="查看真实评价" hover-class="cy-pressed" hover-stay-time="80">
+              <text class="pc-mrow-k">真实评价</text>
+              <view class="pc-mrow-v pc-mrow-v--link"><text>核销用户评价与商家回复</text><cy-icon name="arrow-right" size="24" /></view>
+            </view>
+            <view class="pc-mrow" wx:if="{{merchantSafety}}" aria-label="{{'安全感受：' + merchantSafety.text + '，' + merchantSafety.note}}">
+              <text class="pc-mrow-k">安全感受</text>
+              <text class="pc-mrow-v">{{merchantSafety.text}}（{{merchantSafety.note}}）</text>
+            </view>
+          </view>
+
+          <!-- ⑥ 承接能力:四项全空则整块不渲染,不留一个空标题配空框 -->
+          <block wx:if="{{subjectMerchant.capacityText || subjectMerchant.suitActivityTypes || subjectMerchant.availableTime || subjectMerchant.demand}}">
+            <view class="pc-sec-tit">承接能力</view>
+            <view class="pc-card pc-mrows">
+              <view class="pc-mrow" wx:if="{{subjectMerchant.capacityText}}">
+                <text class="pc-mrow-k">可容纳</text>
+                <text class="pc-mrow-v">{{subjectMerchant.capacityText}}</text>
+              </view>
+              <view class="pc-mrow" wx:if="{{subjectMerchant.suitActivityTypes}}">
+                <text class="pc-mrow-k">适合路线</text>
+                <text class="pc-mrow-v">{{subjectMerchant.suitActivityTypes}}</text>
+              </view>
+              <view class="pc-mrow" wx:if="{{subjectMerchant.availableTime}}">
+                <text class="pc-mrow-k">可承接时段</text>
+                <text class="pc-mrow-v">{{subjectMerchant.availableTime}}</text>
+              </view>
+              <view class="pc-mrow" wx:if="{{subjectMerchant.demand}}">
+                <text class="pc-mrow-k">合作诉求</text>
+                <text class="pc-mrow-v">{{subjectMerchant.demand}}</text>
+              </view>
+            </view>
+          </block>
+        </block>
+
+        <!-- 探测中:不知道是谁就先别渲染任何一套 About -->
+        <cy-skeleton wx:elif="{{merchantState === 'loading'}}" type="list" count="{{2}}" />
+
+        <!-- 网络失败:绝不回退成玩家 About 或「商家未完善」——那是拿「没查到」冒充业务事实 -->
+        <view wx:elif="{{merchantState === 'network-error'}}" class="pc-metric-error">
+          <cy-error load-failure title="资料加载失败"
+            retry="重新加载" bind:retry="retryMerchantProbe" />
+        </view>
+
+        <!-- ===== 关于 · 玩家 / 俱乐部被看者(原样不动) ===== -->
+        <block wx:else>
+        <view class="pc-about-head">
+          <view class="pc-sec-tit pc-sec-tit--flush">个人介绍</view>
+          <view class="pc-about-edit" wx:if="{{isSelf}}" bindtap="goEditIntro" aria-role="button" aria-label="编辑个人介绍" hover-class="cy-pressed" hover-stay-time="80">
+            <cy-icon name="edit" size="28" />
+            <text>编辑</text>
+          </view>
+        </view>
+        <view class="pc-card pc-about">{{userInfo.introduction || '还没有个人介绍'}}</view>
+
+        <!-- 2026-10-30 走查:没有兴趣时不再写「完善资料后可展示兴趣」这类说明 —— 本人给一枚「添加兴趣」直达路线偏好,别人的主页整段不出 -->
+        <block wx:if="{{categoryList.length || isSelf}}">
+          <view class="pc-sec-tit">兴趣标签</view>
+          <view class="pc-tags">
+            <text class="pc-tag" wx:for="{{categoryList}}" wx:key="id">{{item.categoryName}}</text>
+            <view class="pc-tag pc-tag--add" wx:if="{{categoryList.length === 0}}" bindtap="goEditInterests" aria-role="button" aria-label="添加兴趣" hover-class="cy-pressed" hover-stay-time="80"><cy-icon name="plus" size="24" /><text>添加兴趣</text></view>
+          </view>
+        </block>
+
+        <view class="pc-sec-tit" wx:if="{{casePicsList.length}}">探索作品</view>
+        <view class="pc-works" wx:if="{{casePicsList.length}}">
+          <image wx:for="{{casePicsList}}" wx:key="index" src="{{item}}" mode="aspectFill" lazy-load="true" class="pc-work-pic"
+                 data-url="{{item}}" bindtap="previewWork"  aria-role="button" aria-label="查看大图" hover-class="cy-pressed" hover-stay-time="80"/>
+        </view>
+
+        <cy-cell wx:if="{{isSelf}}" class="pc-solo-cell" title="加入时间" value="{{joinDate}}" arrow="{{false}}" hairline="{{false}}" />
+
+        <block wx:if="{{isSelf}}">
+        <!-- 入口收纳(ADA §二G):原「探索与成长 / 更多 / 会员续费」三段共 6 行整宽 cell,
+             压成一块 4 列图标网格(角色互斥 ⇒ 常态正好 2 行)。入口本身一个不增不减、
+             跳转全部沿用原方法;去掉的只是每行那句说明文案 —— 标签已自明。
+             ⚠️ 角标数字不做:钱包/票券余量在现有接口里没有字段,补一次请求去凑 = 新增接口调用(禁)。 -->
+        <!-- 2026-08-20 用户定:商家视角不出现「探索与更多」(收益入口在我的资产,其余为玩家向)。
+             P-53(2026-10-27):设置里已有的(成为主理人/我的收益/投诉建议)不再重复;只留「我的优惠券」「邀请好友」,
+             展示方式与下面「当前权益」同一套列表行,不用黑色卡片网格。 -->
+        <view class="pc-sec-tit" wx:if="{{!isMerchantView}}">探索与更多</view>
+        <view class="pc-benefits" wx:if="{{!isMerchantView}}">
+          <view class="pc-benefit" bindtap="goCoupon" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="我的优惠券">
+            <cy-icon class="pc-benefit-ic" name="coupon" size="48" />
+            <text class="pc-benefit-text">我的优惠券</text>
+            <cy-icon class="pc-benefit-arrow" name="arrow-right" size="32" />
+          </view>
+          <view class="pc-benefit" bindtap="goInvite" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="邀请好友，分享城瘾给好友">
+            <cy-icon class="pc-benefit-ic" name="gift" size="48" />
+            <text class="pc-benefit-text">邀请好友</text>
+            <cy-icon class="pc-benefit-arrow" name="arrow-right" size="32" />
+          </view>
+        </view>
+
+        <view class="pc-sec-tit">当前权益</view>
+        <view class="pc-benefits">
+          <view class="pc-benefit {{item.unlocked ? '' : 'pc-benefit--lock'}}" wx:for="{{benefits}}" wx:key="text"
+                bindtap="onBenefitTap" data-route="{{item.route}}" data-unlocked="{{item.unlocked}}" hover-class="cy-pressed" hover-stay-time="80">
+            <!-- 2026-10-30 V-19 业主定 B:线条图标放大到 24pt、去掉圆底、与文字同一中线;没解锁的图标和字变灰,行尾一把锁 -->
+            <cy-icon class="pc-benefit-ic" name="{{item.icon || 'check'}}" size="48" />
+            <text class="pc-benefit-text">{{item.text}}</text>
+            <cy-icon class="pc-benefit-lock" wx:if="{{!item.unlocked}}" name="lock" size="30" />
+            <cy-icon class="pc-benefit-arrow" wx:elif="{{item.route}}" name="arrow-right" size="32" />
+          </view>
+        </view>
+        </block>
+        </block>
+      </block>
+
+      </block>
+      <view style="height:180rpx;"></view>
+    </view>
+  </scroll-view>
+
+  <!-- ★ tabBar 必须待在 .pc-page 里面:它读 --cy-color-bg-surface / -text-secondary,挂在容器外
+       就取不到 theme-merchant 的日间值,商家态底栏会解析成夜间深色(2026-08-04 实拍:白页配黑底栏)。
+       变量继承不受自定义组件样式隔离影响(隔离挡的是类选择器),position:fixed 也不受影响
+       —— .pc-page 上没有 transform/filter,fixed 仍相对视口。 -->
+  <!-- 只有 tabBar 宿主(pages/member/index)挂底栏:本人从 canonical 进 userinfo 时
+       effectiveIsSelf 也为真,但那不是 tabBar 页,挂上去就是一条点不通的假底栏。 -->
+  <tabBar wx:if="{{hostSelf}}" mode="{{isMerchantView ? 'merchant' : 'consumer'}}" activeKey="{{isMerchantView ? 'mine' : ''}}" dark="{{!isMerchantView}}" />
+
+  <!-- 发起合作 CTA:访客看商家主页(coop/invite type=0,达人→商家)。同 tabBar 理由必须留在
+       .pc-page 内,商家态才取得到 theme-merchant 日间 token(黑白按钮,不带金色)。
+       滚动区尾部既有 180rpx 空垫,底栏不会盖住正文。
+       当前账号有本人发布主题，或带入的主题通过发布者章节校验后才显示。 -->
+  <!-- M-19(2026-10-27):自己看自己的主页(预览)不出「发起合作」 -->
+  <view wx:if="{{isMerchantView && !isSelf && !viewingOwn && canInviteCoop}}" class="pc-coop-bar">
+    <view class="pc-coop-btn" bindtap="onCoopInvite" aria-role="button" aria-label="向该商家发起合作" hover-class="cy-pressed" hover-stay-time="80">发起合作</view>
+  </view>
+</view>
+
+<!-- 页内弹层统一交给 sceneStack；公开主页不挂自有场景宿主。 -->
+<view class="scene-host" wx:if="{{sceneCurrent && sceneCurrent.id === 'member-more-menu'}}" catchtouchmove="blockSceneTouch">
+<cy-scene-sheet show="{{true}}" variant="{{sceneCurrent.variant}}" theme="{{isMerchantView ? 'merchant' : 'player'}}" title="{{sceneCurrent.title}}" mask-closable="{{sceneCurrent.maskClosable}}" bind:requestclose="closeMoreMenu">
+  <!-- UI-12:公开视角的「···」只给「分享主页 / 屏蔽」;改资料/背景/设置是本人的操作,不在公开视角出现。 -->
+  <cy-cell wx:if="{{isSelf && isMerchantView}}" title="店铺资料" arrow="{{false}}" bind:tap="goShop" />
+  <cy-cell title="分享主页" arrow="{{false}}" bind:tap="onShareProfile" />
+  <cy-cell wx:if="{{isSelf}}" title="更换背景图 · 16:9 横图" arrow="{{false}}" bind:tap="onChangeHeroBg" />
+  <cy-cell wx:if="{{isSelf}}" title="设置" arrow="{{false}}" bind:tap="onMoreSetting" />
+  <!-- BL-32:他人(非商家)主页可举报该用户,走共用举报半屏(targetType=MEMBER)。 -->
+  <cy-cell wx:if="{{!isSelf && !subjectIsMerchant}}" title="举报" arrow="{{false}}" bind:tap="onReportMember" />
+  <!-- BL-33:商家公开主页举报该商家(targetType=MERCHANT,targetId=商家档案主键 subjectMerchant.id)。 -->
+  <cy-cell wx:if="{{!isSelf && subjectIsMerchant && subjectMerchant.id}}" title="举报" arrow="{{false}}" bind:tap="onReportMerchant" />
+  <!-- BL-67:商家公开主页信息纠错(问题上报,merchantId=商家档案主键 subjectMerchant.id)。 -->
+  <cy-cell wx:if="{{!isSelf && subjectIsMerchant && subjectMerchant.id}}" title="信息纠错" arrow="{{false}}" bind:tap="onMerchantCorrection" />
+  <!-- CU-M-43(2026-09-23 用户裁决 B):「屏蔽」暂不开放。原入口只弹一句「已屏蔽」,
+       既不写关系数据也不落本地态,重进页面一切照旧 —— 是句假成功。写口接通前这里不放
+       这条 cell,也不用「暂未开放」的理由行占位(不可点的行读起来仍像一个能用的功能)。 -->
+</cy-scene-sheet>
+</view>
+
+<cy-report-sheet wx:if="{{!isSelf}}" show="{{reportShow}}" target-type="{{reportTargetType}}" target-id="{{reportTargetId}}" title="{{reportTitle}}" bind:close="onReportClose" />
+<!-- 挂在 .pc-page 外,照 cy-coop-invite-sheet 包一层主题,商家日间页才取得到 theme-merchant token。 -->
+<cy-share-card wx:if="{{subjectIsMerchant}}" show="{{shopShareShow}}" card="{{shopShareCard}}" bind:close="closeShopShare" />
+<!-- l-after:我的 → 邀请好友 = 统一的 Spotify 式邀请页(个人码) -->
+<cy-share-card wx:if="{{isSelf}}" show="{{inviteShow}}" card="{{inviteCard}}" bind:close="closeInvite" />
+<!-- f-pages P-20/M-33:全站统一的全屏发帖弹窗(社区模式),商家日间页包一层 theme-merchant 才取得到日间 token -->
+<view class="{{(isMerchantView || viewerLight) ? 'theme-merchant' : ''}}"><cy-post-compose wx:if="{{isSelf}}" show="{{composerOpen}}" bind:close="closeComposer" bind:published="onComposePublished" /></view>
+<view class="{{(isMerchantView || viewerLight) ? 'theme-merchant' : ''}}"><cy-merchant-correction-sheet wx:if="{{!isSelf}}" show="{{correctionShow}}" merchant-id="{{correctionMerchantId}}" bind:close="onCorrectionClose" /></view>
+
+<!-- [P0-2] ③ 选章核销:一商家在同一路线承接多章是常态 ⇒ 交集≥2 时由他自己选,
+     选完调 scan_qr_code_chapter。不用 wx.showActionSheet —— 它的 itemList 上限 6 项,
+     超了就得截断 = 静默丢选项。 -->
+<view class="scene-host" wx:if="{{sceneCurrent && sceneCurrent.id === 'member-chapter-picker'}}" catchtouchmove="blockSceneTouch">
+<cy-scene-sheet show="{{true}}" variant="{{sceneCurrent.variant}}" theme="{{isMerchantView ? 'merchant' : 'player'}}" title="{{sceneCurrent.title}}" mask-closable="{{sceneCurrent.maskClosable}}" bind:requestclose="onChapterSheetClose">
+  <view class="chpick">
+    <view class="chpick__hint">选择本次核销的章节</view>
+    <view class="chpick__item" wx:for="{{chapterSheet.items}}" wx:key="id"
+          data-id="{{item.id}}" bindtap="onChapterPick" hover-class="cy-pressed" hover-stay-time="80">
+      <text class="chpick__name">{{item.name}}{{item.replayed ? '（已核销，请勿重复提供权益）' : ''}}</text>
+      <cy-icon class="chpick__chev" name="arrow-right" size="32" />
+    </view>
+  </view>
+</cy-scene-sheet>
+</view>
+
+<view class="scene-host" wx:if="{{sceneCurrent && sceneCurrent.id === 'member-station-picker'}}" catchtouchmove="blockSceneTouch">
+<cy-scene-sheet show="{{true}}" variant="{{sceneCurrent.variant}}" theme="{{isMerchantView ? 'merchant' : 'player'}}" title="{{sceneCurrent.title}}" mask-closable="{{sceneCurrent.maskClosable}}" bind:requestclose="onStationSheetClose">
+  <view class="chpick">
+    <view class="chpick__hint">选择本次核销的节点</view>
+    <view class="chpick__item" wx:for="{{stationSheet.items}}" wx:key="registrationMerchantId"
+          data-registration-merchant-id="{{item.registrationMerchantId}}" bindtap="onStationPick" hover-class="cy-pressed" hover-stay-time="80">
+      <text class="chpick__name">{{item.name}}</text>
+      <cy-icon class="chpick__chev" name="arrow-right" size="32" />
+    </view>
+  </view>
+</cy-scene-sheet>
+</view>
+
+<!-- 积分任务:双列统计头(我的积分/本周获得)+ 票券式虚线分隔 + 任务行(名称/说明 · +分值/完成态) -->
+<view class="scene-host" wx:if="{{sceneCurrent && sceneCurrent.id === 'points-tasks'}}" catchtouchmove="blockSceneTouch">
+<cy-scene-sheet show="{{true}}" variant="{{sceneCurrent.variant}}" theme="{{sceneCurrent.theme}}" title="{{sceneCurrent.title}}" mask-closable="{{sceneCurrent.maskClosable}}" bind:requestclose="onPointsSheetClose">
+  <view class="pts-hero">
+    <view class="pts-hero__col">
+      <view class="pts-hero__label">我的积分</view>
+      <!-- L09-066 业主默认 A:与成就页同一来源(成长中心 points);还没读到写「—」,不写假 0 -->
+      <view class="pts-hero__num">{{profilePoint !== null ? profilePoint : '—'}}</view>
+    </view>
+    <view class="pts-hero__div"></view>
+    <view class="pts-hero__col">
+      <view class="pts-hero__label">本周获得</view>
+      <view class="pts-hero__num">+{{pointsStat.weekPoints}}</view>
+    </view>
+  </view>
+  <cy-skeleton wx:if="{{pointsSheet.loading}}" type="list" count="{{3}}" />
+  <view wx:elif="{{pointsSheet.failed}}" class="pts-loading cy-fade-in" bindtap="loadPointsTasks" hover-class="cy-pressed" hover-stay-time="80">加载失败，点此重试</view>
+  <cy-empty wx:elif="{{pointsSheet.loaded && !pointsSheet.tasks.length && !pointsSheet.spendRules.length}}" title="暂无积分任务" class="cy-fade-in" />
+  <block wx:else>
+  <view class="pts-list cy-fade-in" wx:if="{{pointsSheet.tasks.length}}">
+    <view class="pts-row" wx:for="{{pointsSheet.tasks}}" wx:key="id">
+      <view class="pts-row__main">
+        <view class="pts-row__name">{{item.title}}</view>
+        <view class="pts-row__desc" wx:if="{{item.description}}">{{item.description}}</view>
+      </view>
+      <view class="pts-row__side">
+        <view class="pts-row__gain">{{item.pointsText || '+' + item.points}}</view>
+        <view class="pts-row__done {{item.doneCount ? '' : 'is-zero'}}">{{item.doneCount ? '已获 ' + item.doneCount + ' 次' : '待完成'}}</view>
+      </view>
+    </view>
+  </view>
+  <!-- 花分规则(后台 eventType=14 解锁提示):数值同样来自后台积分规则配置,客户端不写死分值 -->
+  <view class="pts-list cy-fade-in" wx:if="{{pointsSheet.spendRules.length}}">
+    <view class="pts-hero__label">积分消耗</view>
+    <view class="pts-row" wx:for="{{pointsSheet.spendRules}}" wx:key="id">
+      <view class="pts-row__main">
+        <view class="pts-row__name">{{item.title}}</view>
+        <view class="pts-row__desc" wx:if="{{item.description}}">{{item.description}}</view>
+      </view>
+      <view class="pts-row__side">
+        <view class="pts-row__gain">{{item.pointsText || '-' + item.points + ' / 次'}}</view>
+        <view class="pts-row__done is-zero">{{item.doneCount ? '已用 ' + item.doneCount + ' 次' : '未使用'}}</view>
+      </view>
+    </view>
+  </view>
+  </block>
+</cy-scene-sheet>
+</view>
+
+<!-- 注册表 share-invite 的 route 落在「我的」页,本页是它的宿主(L09-011 只删了不可达的通用宿主 / 券码宿主 / 放弃修改弹窗)。 -->
+<view class="member-scene-host" wx:if="{{sceneCurrent && sceneCurrent.id === 'share-invite'}}" catchtouchmove="blockSceneTouch">
+  <cy-scene-sheet show="{{true}}" variant="{{sceneCurrent.variant}}" theme="{{sceneCurrent.theme}}" title="{{sceneCurrent.title}}" can-back="{{sceneCurrent.canBack}}" dirty="{{sceneCurrent.dirty}}" mask-closable="{{sceneCurrent.maskClosable}}" bind:requestclose="closeScene" bind:back="closeScene">
+    <cy-scene-share-invite theme="{{sceneCurrent.theme}}" player-code="{{isSelf}}" />
+  </cy-scene-sheet>
+</view>
+
+<!-- 门店 NPC 对话。bizId = 商家 id;与漫游轨共用 cy-npc-chat 壳,靠 scope 选端点。 -->
+<cy-npc-chat wx:if="{{subjectIsMerchant && subjectMerchant.npc}}"
+  show="{{merchantNpcChatShow}}"
+  scope="merchant"
+  session-id="{{subjectMerchant.id}}"
+  npc-name="{{subjectMerchant.npc.name}}"
+  greeting="{{subjectMerchant.npc.greeting}}"
+  bind:close="closeMerchantNpcChat" />
+
+<view class="{{(isMerchantView || viewerLight) ? 'theme-merchant' : ''}}"><cy-coop-invite-sheet id="coop-invite" show="{{coopInviteShow}}" target-id="{{userId}}" target-name="{{(subjectMerchant && subjectMerchant.name) || (userInfo && userInfo.nickname) || ''}}" invite-type="{{0}}" topic-id="{{topicId}}" chapter-id="{{chapterId}}" topic-name="{{topicName || ''}}" operation-scope="{{operationScope || ''}}" bind:close="closeCoopInvite" bind:sent="onCoopInviteSent" /></view>

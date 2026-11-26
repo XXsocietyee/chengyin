@@ -1,0 +1,21 @@
+<!-- 真弹窗:页内组件 + wx:if,不压页面栈。待决策态强制闸 ⇒ mask 不可关、无关闭叉。 -->
+<cy-scene-sheet
+  wx:if="{{show}}"
+  show="{{true}}"
+  variant="half"
+  theme="player"
+  title="隐私保护"
+  closable="{{false}}"
+  mask-closable="{{false}}"
+>
+  <view class="pg">
+    <text class="pg__lead">我们只在你使用相关功能时处理必要信息。<text wx:if="{{location}}">同意后将使用你的精确位置确定首页城市，不用于附近排序。</text></text>
+    <view class="pg-terms"><text>继续即表示同意</text><view class="pg-doc" catchtap="openService" aria-role="button" aria-label="阅读用户服务协议" hover-class="cy-pressed" hover-stay-time="80">《用户服务协议》</view><view class="pg-doc" catchtap="openPrivacyContract" aria-role="button" aria-label="查看用户隐私保护指引" hover-class="cy-pressed" hover-stay-time="80">《隐私保护指引》</view></view>
+    <!-- 微信强制:同意必须是原生 button open-type,不能收编 cy-btn。
+         2026-11-13 业主:只要一个白色确认按钮,同意两份文件与授权合在这一颗里;「暂不同意」留作文字链(微信审核要求可拒绝)。 -->
+    <button class="pg__agree" open-type="agreePrivacyAuthorization" bindagreeprivacyauthorization="agreePrivacy" loading="{{submitting}}" disabled="{{submitting}}" aria-disabled="{{submitting}}">同意并继续</button>
+    <view class="pg__decline" bindtap="disagreePrivacy" aria-role="button" aria-label="暂不同意" hover-class="cy-pressed" hover-stay-time="80">暂不同意</view>
+  </view>
+</cy-scene-sheet>
+
+<cy-agreement-sheet show="{{showServiceSheet}}" type="service" theme="player" bind:close="closeService" />

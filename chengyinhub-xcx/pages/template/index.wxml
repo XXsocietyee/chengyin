@@ -1,0 +1,44 @@
+<page-meta page-style="{{ pageMetaStyle }}"></page-meta>
+<view class="tpl-page {{ isMerchant ? 'theme-merchant' : 'theme-dark' }}" style="--template-safe-top: {{ safeTop }}px;">
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+
+  <!-- ====== PAGE HEADER(画板05 2026-08-20:头像+铃铛;玩家态无标题,商家态 2026-08-25 补居中标题;胶囊避让沿用 safeTop) ====== -->
+  <view class="topbar {{ topbarSolid ? 'topbar--solid' : '' }}" style="height: {{ safeTop }}px;">
+    <view style="height: {{ statusBarHeight }}px;"></view>
+    <view class="titBar" style="height: {{ titBarHeight }}px; padding-right: {{ headerRightInset }}px;">
+      <!-- 2026-09-19 用户拍板:模板页左上角头像商家态与玩家态都撤掉(入口各有他路:商家底栏「我的」/玩家 member tab) -->
+      <view class="tpl-hd-space"></view>
+      <!-- 2026-08-25:商家「模板」tab 补居中标题,与商家其余页 / 「我的」同一形态。
+           玩家「发布」tab 维持画板05 的无标题顶栏,不受影响。 -->
+      <text wx:if="{{ isMerchant }}" class="tpl-hd-title">模板</text>
+      <image class="tpl-bell" src="/images/icon_bell.svg" mode="aspectFit" bindtap="goInbox" aria-role="button" aria-label="消息"  hover-class="cy-pressed" hover-stay-time="80"/>
+    </view>
+  </view>
+  <view style="height: {{ safeTop }}px;"></view>
+  <view class="merchant-readonly-note" wx:if="{{isMerchant && merchantAccessError}}" bindtap="retryMerchantAccess" aria-role="button" aria-label="重新加载岗位权限" hover-class="cy-pressed" hover-stay-time="80">
+    岗位权限没加载出来，点此重试
+  </view>
+  <view class="merchant-readonly-note"
+    wx:elif="{{operationScope && merchantAccessLoaded && !canManageMerchantProjects}}">
+    仅店主、店长可发布和复制
+  </view>
+
+  <!-- ====== 货架(2026-10-28 业主定稿原型 v21)======
+       主题 / 玩法两个立体图标 tab、顶部横滑精选、标签、横滑货架与分类页都在 tpl-shelf 里。
+       组件和它的包内图放在 templatedetail 分包(分包异步化):主包已超棘轮，图不能进主包。 -->
+  <tpl-shelf light="{{ isMerchant }}" scope="{{ operationScope }}" readonly="{{ !!operationScope && !canManageMerchantProjects }}"
+    reduced-motion="{{ reducedMotion }}" bind:search="goSearch" bind:toast="onShelfToast" />
+
+  <!-- P2-16:底部留出 tabBar + 悬浮发布钮的安全间距,末条内容不再被压住。
+       ⚠️ 这段留白是必需的，不是多余 —— 画板 11 第 4 条。 -->
+  <view class="tpl-bottom-safe"></view>
+
+  <!-- 发布展开时渐隐，返回时上浮回落。 -->
+  <view class="fab {{publishSheetShow ? 'fab--open' : ''}} {{reducedMotion ? 'fab--reduced' : ''}}" id="publish-fab" wx:if="{{isMerchant && canManageMerchantProjects}}" bindtap="openPublishSheet" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="发布">
+    <cy-icon name="plus" size="48" />
+  </view>
+  <cy-publish-sheet wx:if="{{isMerchant}}" id="template-publish-menu" merchant="{{isMerchant}}" show="{{ publishSheetShow }}" pub="{{ pub }}" scope="{{operationScope}}" bind:close="closePublishSheet" />
+  <tabBar mode="{{ isMerchant ? 'merchant' : 'consumer' }}" activeKey="{{ isMerchant ? 'template' : '' }}" raised="{{ tabBarRaised }}" dark="{{ !isMerchant }}" monochrome="{{ !isMerchant }}" />
+</view>

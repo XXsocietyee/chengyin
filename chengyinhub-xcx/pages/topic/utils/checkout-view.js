@@ -1,0 +1,197 @@
+// r2-store 主题结账(自玩通行证)。结构参照 refs3/STRUCTURE.md §1,数字只读服务端:
+// - 价格:/api/registration/quote(ownerType=1)的 payAmount;报价没回来时只用主题详情的 selfPlayPrice,
+//   不自算折扣。划线价只在服务端给了 memberDiscountYuan > 0 时出现(原价 = 应付 + 减免)。
+// - 同行席位:自玩通行证建单 orderNum 恒为 1,服务端没有席位上限/加座单价 ⇒ 不出步进器。
+// - 积分:自玩通行证建单 pointUsed 恒为 0,报价 pointsUsable 未给 ⇒ 不出抵扣开关。
+// - 城市通票:只列 /api/marketing/product/list 里 items 覆盖本主题的在售商品,点进原通行证详情页购买。
+// - 信任行:退款只读报价 refundableNow / refundPercentNow;席位数是建单事实(自玩恒 1 人)。
+//   有效期写在单次购买卡上,沿用 topic-motion.passWindow(与建单同口径),信任行不重复。
+
+const { chapterCountText } = require('./chapter-count.js');
+const { yuan, yuanTrim } = require('../../../utils/money-format.js');
+const { refundRuleText } = require('./refund-tiers.js');
+const { cashQuote } = require('../../../utils/commerce/product-order.js');
+
+// 2026-11-22 业主定稿一位小数(取代 OR-046 不补零):结算页价格 ¥29.9 / ¥30.0,与票种半屏同一入口 money-format.
+const price = yuanTrim;
+
+function pad2(n) { return n < 10 ? '0' + n : String(n); }
+
+/** OR-028:可玩期以服务端报价 validTo 为准(validToText 优先);报价没给才回落本地算的 win。 */
+function quoteUntilText(quote) {
+  if (!quote) return '';
+  if (typeof quote.validToText === 'string' && quote.validToText.trim()) return quote.validToText.trim();
+  const raw = quote.validTo;
+  if (raw === null || raw === undefined || raw === '') return '';
+  const d = new Date(typeof raw === 'string' && /^\d{4}-\d{2}-\d{2} /.test(raw) ? raw.replace(' ', 'T') + '+08:00' : raw);
+  return isNaN(d.getTime()) ? '' : pad2(d.getMonth() + 1) + '/' + pad2(d.getDate());
+}
+
+/** OR-028/OR-046:购买须知与退款规则 —— 服务端须知(quote.terms 文本或数组)优先,缺省列平台退款三档。 */
+function noticeLines(quote, pay) {
+  const terms = quote && quote.terms;
+  const list = Array.isArray(terms) ? terms : (typeof terms === 'string' ? [terms] : []);
+  const lines = list.map((t) => String(t || '').trim()).filter(Boolean);
+  if (lines.length) return lines;
+  const rule = refundRuleText({ price: pay, mode: 2 });
+  return rule ? [rule] : [];
+}
+
+function isNum(v) {
+  return v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
+}
+
+function headPills(info) {
+  const d = info || {};
+  const out = [];
+  const type = Number(d.productType) === 2 ? '自由探索' : (Number(d.productType) === 1 ? '城市定向' : '');
+  if (type) out.push(type);
+  const chapters = Array.isArray(d.chaptersList) ? d.chaptersList.filter(Boolean) : [];
+  const total = Number(d.totalChapterCount) > 0 ? Number(d.totalChapterCount) : chapters.length;
+  const count = chapterCountText(d);
+  if (count && total > 1) out.push(count);
+  const nodes = chapters.reduce((n, c) => n + (Array.isArray(c.nodes) ? c.nodes.length : 0), 0);
+  if (nodes > 0) out.push(nodes + ' 站');
+  return out;
+}
+
+/** 覆盖本主题的在售通票:只认服务端 items[].topicId,不按城市名猜。 */
+function coveringPasses(products, topicId) {
+  const id = String(topicId || '');
+  if (!id || !Array.isArray(products)) return [];
+  return products.filter((p) => p && p.productId && Array.isArray(p.items)
+    && p.items.some((it) => it && String(it.topicId) === id)
+    && Number(p.productKind) !== 8 && Number(p.productKind) !== 7
+    // 本主题的双人票 / 四人小队票已经在购买层里选过,确认订单页不再在「其他通票」里重复列出
+    && !(Number(p.seatCount) >= 2 && p.items.length === 1))
+    .map((p) => {
+      const meta = [];
+      if (p.saleCity) meta.push(p.saleCity);
+      meta.push(p.items.length + ' 个主题');
+      // 期限只写天数(固定期/首用起算的完整文案在通行证详情页,出自 market-view.validityText)
+      if ((Number(p.validityKind) === 1 || Number(p.validityKind) === 3) && isNum(p.validDays)) meta.push(Number(p.validDays) + ' 天有效');
+      const price = isNum(p.cashPrice) ? yuan(p.cashPrice) : (isNum(p.pointsPrice) ? Number(p.pointsPrice) + ' 积分' : '');
+      return { id: String(p.productId), name: p.productName || '', meta: meta.join(' · '), price };
+    })
+    .filter((p) => p.name)
+    .slice(0, 3);
+}
+
+/** 服务端拒绝原话里带字段名/编号(如 sellingStartedAt)时不给玩家看,只写「暂不可购买」。 */
+function playerText(msg) {
+  const t = String(msg || '').trim();
+  return t && !/[A-Za-z0-9_]{3,}/.test(t) ? t : '暂不可购买';
+}
+
+function refundTrust(quote) {
+  if (!quote) return null;
+  if (quote.refundableNow === true && isNum(quote.refundPercentNow) && Number(quote.refundPercentNow) > 0) {
+    return { key: 'refund', icon: 'finance', label: Number(quote.refundPercentNow) >= 100 ? '现在可全额退' : '现在可退 ' + Number(quote.refundPercentNow) + '%' };
+  }
+  if (quote.refundableNow === false) return { key: 'refund', icon: 'finance', label: '购买后不可退' };
+  return null;
+}
+
+/**
+ * DEC-F12 A:双人票 / 小队票与单人同一个结算层,只换选中项(名称、人数、合计、人均)。
+ * 价格只读 /api/marketing/product/quote 的 totalCashAmount;报价没回来时用目录价占位,付款按钮不可点。
+ */
+function productView(o) {
+  const opt = o || {};
+  const option = opt.option;
+  const info = opt.info || {};
+  const quote = opt.quoteState === 'ready' ? (opt.quote || null) : null;
+  const cash = quote ? cashQuote(quote) : null;
+  const refused = opt.quoteState === 'refused' || !!(cash && !cash.buyable);
+  const failed = opt.quoteState === 'failed';
+  const pay = cash && cash.total !== null ? cash.total : (refused || failed ? null : (isNum(option.price) ? Number(option.price) : null));
+  const people = Number(option.people) || 1;
+  const lines = noticeLines(quote, pay);
+  const trust = [];
+  const refund = refundTrust(quote);
+  if (refund) trust.push(refund);
+  if (pay !== null) trust.push({ key: 'seat', icon: 'walk', label: people + ' 人自玩' });
+  return {
+    pills: headPills(info),
+    single: { title: option.name || '', price: pay === null ? '—' : price(pay), strike: '', line: option.perPersonText || '' },
+    purchased: false,
+    notice: lines.length ? { label: '购买须知与退款规则', lines } : null,
+    member: false,
+    passes: coveringPasses(opt.products, info.id),
+    bill: pay === null ? [] : [{ key: 'pass', k: (option.name || '') + ' × 1', v: price(pay) }],
+    totalText: pay === null ? '—' : price(pay),
+    peopleText: people + ' 人',
+    trust,
+    loading: opt.quoteState === 'loading',
+    refused,
+    failed,
+    refusal: refused ? (opt.quoteState === 'refused' ? (opt.refusal || '暂不可购买') : cash.reason) : '',
+    free: false,
+    productId: Number(option.productId) || 0,
+    payLabel: refused ? '暂不可购买' : (failed ? '重新获取价格' : (pay === null ? '支付' : '支付 ' + price(pay)))
+  };
+}
+
+/**
+ * @param {object} o { info, quote, quoteState: loading|ready|refused|failed, refusal, products, win, option? }
+ */
+function checkoutView(o) {
+  const opt = o || {};
+  if (opt.option && opt.option.kind === 'product') return productView(opt);
+  const info = opt.info || {};
+  const quote = opt.quoteState === 'ready' ? (opt.quote || null) : null;
+  const listed = isNum(info.selfPlayPrice) ? Number(info.selfPlayPrice) : null;
+  const pay = quote && isNum(quote.payAmount) ? Number(quote.payAmount) : (opt.quoteState === 'refused' || opt.quoteState === 'failed' ? null : listed);
+  // l-pass:通行证覆盖(服务端 platformPassCovered === true)时报价已是 ¥0,减免额 = 原价,不是俱乐部会员减免。
+  const member = !!(quote && quote.platformPassCovered === true && pay !== null && !(pay > 0));
+  const discount = !member && quote && isNum(quote.memberDiscountYuan) && Number(quote.memberDiscountYuan) > 0 ? Number(quote.memberDiscountYuan) : 0;
+  const win = opt.win || {};
+
+  const bill = [];
+  if (pay !== null) {
+    const listAmount = member && isNum(quote.memberDiscountYuan) ? Number(quote.memberDiscountYuan) : (discount ? pay + discount : pay);
+    bill.push({ key: 'pass', k: '自玩门票 × 1', v: price(listAmount) });
+    if (discount) bill.push({ key: 'club', k: '俱乐部会员', v: '-' + price(discount), minus: true });
+    if (member) bill.push({ key: 'member', k: '通行证', v: '你已可直接游玩', minus: true });
+  }
+
+  const trust = [];
+  const refund = refundTrust(quote);
+  if (refund) trust.push(refund);
+  if (pay !== null) trust.push({ key: 'seat', icon: 'walk', label: '1 人自玩' });
+
+  const free = pay !== null && !(pay > 0);
+  const refused = opt.quoteState === 'refused';
+  // E-B9:报价请求失败不退回标价(会员减免/通行证覆盖时应付可能是 ¥0),支付置灰,改给「重新获取价格」。
+  const failed = opt.quoteState === 'failed';
+  // OR-046:已购买本主题(主题详情 isSignUp=1,或报价 purchased=true)→ 主按钮「继续游玩」,不再卖第二张
+  const purchased = Number(info.isSignUp) === 1 || !!(quote && quote.purchased === true);
+  const until = quoteUntilText(quote) || win.untilText || '';
+  const lines = noticeLines(quote, pay);
+  return {
+    pills: headPills(info),
+    single: {
+      title: purchased ? '已购买本主题' : '自玩门票',
+      price: pay === null ? '—' : price(pay),
+      strike: discount ? price(pay + discount) : '',
+      line: until ? '可玩至 ' + until : ''
+    },
+    purchased,
+    notice: lines.length ? { label: '购买须知与退款规则', lines } : null,
+    member,
+    passes: member ? [] : coveringPasses(opt.products, info.id),
+    bill,
+    totalText: pay === null ? '—' : price(pay),
+    peopleText: '1 人',
+    trust,
+    loading: opt.quoteState === 'loading',
+    refused,
+    failed,
+    refusal: refused ? playerText(opt.refusal) : '',
+    free,
+    productId: 0,
+    payLabel: purchased ? '继续游玩' : (refused ? '暂不可购买' : (failed ? '重新获取价格' : (free ? '免费领取' : (pay === null ? '支付' : '支付 ' + price(pay)))))
+  };
+}
+
+module.exports = { checkoutView, playerText, coveringPasses, headPills, refundTrust, yuan, price };

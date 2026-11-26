@@ -1,0 +1,25 @@
+:host { display: block; min-height: 100%; }
+.ticket-scene { position: relative; isolation: isolate; background: var(--cy-comp-sheet-player-bg); min-height: calc(100vh - 180rpx); box-sizing: border-box; padding: var(--cy-space-3) 0 calc(var(--cy-space-5) + env(safe-area-inset-bottom)); }
+
+/* a1-v3-17(2026-11-10 业主「不需要有白色的底 正常就是弹窗 直接放上二维码」):去掉外层白卡,标题与到期行直接写在弹层上(弹层 token 色);
+   码本身仍是白底方块 —— 黑点码要白底才扫得出,这是码不是卡。 */
+.voucher__card { display: flex; flex-direction: column; align-items: center; justify-content: center; margin: var(--cy-space-4) auto 0; }
+.voucher__title { max-width: 100%; font-size: var(--cy-type-section-title); font-weight: 700; color: var(--cy-comp-sheet-player-text); }
+.voucher__qr { position: relative; margin-top: 48rpx; width: 400rpx; height: 400rpx; border-radius: 28rpx; background: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 8rpx 28rpx rgba(0,0,0,.08); } /* ds-ok 与票夹码块同值;码的白底(扫码需要) */
+.voucher__qr-tip { font-size: var(--cy-type-label); color: rgba(17,17,17,.55); padding: 20rpx 30rpx; } /* ds-ok 白底码块上的读取中 */
+.voucher__exp { margin-top: var(--cy-space-4); font-size: var(--cy-type-label); color: var(--cy-comp-sheet-player-text-secondary); }
+.ep1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voucher__cta { flex: 1; height: var(--cy-btn-h); border-radius: var(--cy-radius-pill); background: var(--cy-text-title); color: var(--cy-bg-page); font-size: var(--cy-font-subtitle); font-weight: 700; display: flex; align-items: center; justify-content: center; }
+
+/* isolated 组件内全局 .cy-pressed 进不来,必须本地定义一份。
+   只减淡不位移:位移要配 .cy-motion-reduced 兜底,而那个类挂在组件外的祖先上,
+   isolated 下同样够不着 —— 与其留个撤不掉的位移,不如按仓库既有组件按压类的做法只减淡。 */
+.cy-pressed { opacity: .88; }
+
+.seat-choice { display: flex; flex-direction: column; gap: var(--cy-space-4); padding: var(--cy-space-5); color: var(--cy-text-title); }
+.seat-choice__title { font-size: var(--cy-font-subtitle); font-weight: 700; }
+.seat-choice__input { height: var(--cy-btn-h); padding: 0 var(--cy-space-4); background: var(--cy-color-bg-glass); border-radius: var(--cy-radius-pill); }
+.seat-choice__switch { text-align: center; padding: var(--cy-space-4); color: var(--cy-text-title); }
+
+/* 细节打磨二期 L1/L5/L7 */
+.voucher__cta { transition: var(--cy-tr-press); }

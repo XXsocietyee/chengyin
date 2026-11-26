@@ -1,0 +1,163 @@
+/* 结局清单:journeyStory.ending.endings 的作者侧镜像。
+ *
+ * 后端(JourneyStoryValidator.validateEndings)认的条件语法比手机上说得清的宽得多。
+ * 这一层只把其中两种翻成作者看得懂的话:
+ *   「想通了某个念头」 → {op:'HAS_TAG', value:'thought.<key>.done'}
+ *   「到过某个站点」   → {op:'NODE_COMPLETED', nodeId:<id>}
+ *   「选过某个选项」   → {op:'HAS_TAG', value:'tag.<名>'}(选项效果「贴标签」写的就是它,2026-09-24)
+ * 其余一律标成 kind='raw' 原样带回去 —— 界面表达不了不等于可以抹掉,那会让作者在
+ * 别处(后台 / 接口)配好的条件在手机上点一次「完成」就没了。
+ *
+ * ★ 念头键名 thought.<key>.done 不是这里自己编的:TopicRouteRuntimeServiceImpl.syncThoughts
+ *   想通时写的就是它(两端都有测试钉住,见 TopicRouteRuntimeServiceImplTest 与
+ *   PlayJourneyStoryServiceImplTest.endingBranchesOnThoughtDone)。
+ *
+ * ★ serialize 只动 ending.endings,journeyStory 的其它字段(call / stages / openingChapterId /
+ *   ending 的 epilogues·exhibits·badges·optionalClues·dispositionNodeId)原样保留。
+ */
+
+// D-66（业主 2026-11-11）：新发布/重新发布的主题最多 6 个结局（含恰好一个默认结局）。
+// 已发布主题的冻结快照不受影响：这里只在新发布/重发布这一侧拦，不做数据迁移。
+const MAX_ENDINGS = 6;
+const THOUGHT_TAG = /^thought\.([a-z][a-z0-9_]{0,47})\.done$/;
+const OPTION_TAG = /^tag\.[a-z][a-z0-9_]{0,47}$/;
+// D2 结局归属(角色契约 1119):endingFor = 角色 id。服务端在信任最高的那位的结局章里挑;平局 / 没有信任走默认结局。
+const CAST_ID = /^c_[a-z0-9]{6,12}$/;
+
+function parse(input) {
+  let root = {};
+  if (input && typeof input === 'string' && input.trim()) {
+    try { root = JSON.parse(input) || {}; } catch (e) { root = {}; }
+  } else if (input && typeof input === 'object') {
+    root = input;
+  }
+  const rows = (root.ending && Array.isArray(root.ending.endings)) ? root.ending.endings : [];
+  const list = rows.map(toDraft).filter(Boolean);
+  if (!list.some(item => item.fallback)) {
+    list.push({ code: 'default', title: '', summary: '', fallback: true, kind: 'fallback' });
+  }
+  return { root: root, list: list };
+}
+
+/** 服务端形状 → 界面形状。看不懂的条件留在 _when 里,serialize 时原样写回。 */
+function toDraft(row) {
+  if (!row || typeof row !== 'object') return null;
+  const base = {
+    code: String(row.code || '').trim(),
+    title: String(row.title || '').trim(),
+    summary: String(row.summary || '').trim(),
+    fallback: row.fallback === true,
+  };
+  if (base.fallback) return Object.assign(base, { kind: 'fallback' });
+
+  const when = Array.isArray(row.when) ? row.when : [];
+  if (row.endingFor != null && String(row.endingFor).trim()) {
+    return Object.assign(base, { kind: 'cast', endingFor: String(row.endingFor).trim() }, when.length ? { _when: when } : {});
+  }
+  if (when.length === 1 && when[0] && when[0].op === 'HAS_TAG') {
+    const hit = THOUGHT_TAG.exec(String(when[0].value || ''));
+    if (hit) return Object.assign(base, { kind: 'thought', thoughtKey: hit[1] });
+    if (OPTION_TAG.test(String(when[0].value || ''))) return Object.assign(base, { kind: 'tag', tag: String(when[0].value) });
+  }
+  if (when.length === 1 && when[0] && when[0].op === 'NODE_COMPLETED' && when[0].nodeId) {
+    return Object.assign(base, { kind: 'node', nodeId: Number(when[0].nodeId) });
+  }
+  return Object.assign(base, { kind: 'raw', _when: when });
+}
+
+/** 归属角色的结局:{endingFor}(+ 原样带回的 when)。没选角色就抛。 */
+function castEndingOf(item, title) {
+  const castId = String(item.endingFor || '').trim();
+  if (!CAST_ID.test(castId)) throw new Error('「' + title + '」要选归属角色');
+  const out = { endingFor: castId };
+  if (Array.isArray(item._when) && item._when.length) out.when = item._when;
+  return out;
+}
+
+/** 界面的一条条件 → 服务端 when。缺选择就抛一句作者看得懂的话。 */
+function conditionOf(item, title) {
+  if (item.kind === 'thought') {
+    const key = String(item.thoughtKey || '').trim();
+    if (!key) throw new Error('「' + title + '」要选一个伏笔');
+    return [{ op: 'HAS_TAG', value: 'thought.' + key + '.done' }];
+  }
+  if (item.kind === 'tag') {
+    const tag = String(item.tag || '').trim();
+    if (!OPTION_TAG.test(tag)) throw new Error('「' + title + '」要选一个选项');
+    return [{ op: 'HAS_TAG', value: tag }];
+  }
+  if (item.kind === 'node') {
+    const nodeId = Number(item.nodeId);
+    if (!nodeId) throw new Error('「' + title + '」要选一个节点');
+    return [{ op: 'NODE_COMPLETED', nodeId: nodeId }];
+  }
+  const raw = Array.isArray(item._when) ? item._when : [];
+  if (!raw.length) throw new Error('「' + title + '」还没有触发条件');
+  return raw;
+}
+
+/* ===== 结局 = 结局章(2026-09-24 用户:「结局应该是添加章节,打开结局开关」)=====
+ * 章节上挂 ending:{fallback} 或 {kind, thoughtKey / tag / nodeId / _when}(界面形状,与上面结局清单同一套 kind)。
+ * 提交时转成 ChapterDTO.ending;服务端按结局章重建 ending.endings,并记下 chapterId。 */
+
+/** 章节结局 → ChapterDTO.ending;没开返回 null */
+function chapterEndingPayload(ending, name) {
+  if (!ending || typeof ending !== 'object') return null;
+  if (ending.fallback === true) return { fallback: true };
+  if (ending.kind === 'cast') return castEndingOf(ending, name || '这个结局章');
+  return { when: conditionOf(ending, name || '这个结局章') };
+}
+
+/** 整本书的结局章检查:最多 MAX_ENDINGS 个,且恰好一章兜底(D-66) */
+function endingChaptersIssue(chapters) {
+  const endings = (chapters || []).filter(c => c && c.ending);
+  if (!endings.length) return '';
+  if (endings.length > MAX_ENDINGS) return '结局最多 ' + MAX_ENDINGS + ' 个（含默认结局）';
+  const fallbacks = endings.filter(c => c.ending.fallback === true).length;
+  return fallbacks === 1 ? '' : (fallbacks ? '结局章里只能有一个默认结局' : '结局章里要有一个默认结局');
+}
+
+/**
+ * 回显:journeyStory 里带 chapterId 的结局挂回对应章节;没有 chapterId 的老结局
+ * 交给调用方转成新的结局章(legacy 里给出标题 / 一句话 / 条件)。
+ */
+function attachEndingsToChapters(chapters, journeyStory) {
+  const rows = parse(journeyStory).root;
+  const list = rows && rows.ending && Array.isArray(rows.ending.endings) ? rows.ending.endings : [];
+  const out = (chapters || []).map(c => Object.assign({}, c, { ending: null }));
+  const legacy = [];
+  list.forEach((row) => {
+    const draft = toDraft(row);
+    if (!draft) return;
+    const ending = draft.fallback ? { fallback: true, kind: 'fallback' }
+      : { fallback: false, kind: draft.kind, thoughtKey: draft.thoughtKey || '', tag: draft.tag || '',
+        nodeId: draft.nodeId == null ? null : draft.nodeId, _when: draft._when };
+    if (draft.endingFor) ending.endingFor = draft.endingFor;
+    if (row.chapterId != null) {
+      const hit = out.find(c => c.id != null && String(c.id) === String(row.chapterId));
+      if (hit) { hit.ending = ending; return; }
+    }
+    legacy.push({ title: draft.title, summary: draft.summary, ending });
+  });
+  return { chapters: out, legacy };
+}
+
+/**
+ * 提交前:结局都在章节上,剧情里的结局清单交给服务端按章重建。
+ * ending 里只剩 endings 就整段去掉;还有尾声 / 展品等别的段,就留着旧清单过保存校验(服务端会换掉它)。
+ */
+function withoutEndingList(input) {
+  let root;
+  try { root = input && typeof input === 'string' && input.trim() ? JSON.parse(input) : (input && typeof input === 'object' ? input : null); } catch (e) { root = null; }
+  if (!root || !root.ending || typeof root.ending !== 'object') return input || '';
+  const rest = Object.keys(root.ending).filter(k => k !== 'endings');
+  if (rest.length) return typeof input === 'string' ? input : JSON.stringify(root);
+  const next = Object.assign({}, root);
+  delete next.ending;
+  return JSON.stringify(next);
+}
+
+/* L04-097:旧的结局清单编辑器(serialize / appendTo / countOf / chapterEndingIssue)已被结局章取代,
+   写入走 chapterEndingPayload + withoutEndingList,旧函数无产品调用方,已删。 */
+module.exports = { parse,
+  chapterEndingPayload, endingChaptersIssue, attachEndingsToChapters, withoutEndingList };

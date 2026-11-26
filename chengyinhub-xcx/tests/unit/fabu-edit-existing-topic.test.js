@@ -1,0 +1,658 @@
+// [B3b] publish/fabu 编辑既有主题 —— 行为测试,不看源码文本。
+//
+// 病:项目列表的「草稿 / 未通过」卡、模板页「使用此模板」三个入口都带 ?id= 跳进编辑器,
+// 但页面从不读 options.id、保存又只调 /api/topic/create ⇒ 打开是空白表单、保存是再新建一条,
+// 原草稿纹丝不动,重复主题越攒越多。整条链路上没有任何报错 —— 只有钉死请求形状才抓得到。
+//
+// 承重不变量:
+//  - 带 id 进入 → 必须先拉 /api/topic/author-edit-detail 回填 formData(名字/章节/票都要落到位)
+//  - 保存 → 必须打 /api/topic/update 且 payload 带 id;绝不能再打 /api/topic/create
+//  - 不带 id(新建)→ 行为不变,仍打 /api/topic/create 且 payload 不带 id
+//  - editScope=WHITELIST(已过审开卖)→ 上送体必须剔掉日期/章节结构/票,只留白名单文案与图
+const { test, beforeEach } = require('node:test');
+const assert = require('node:assert/strict');
+
+const PAGE = '../../pages/publish/fabu/index.js';
+
+let sent = [];
+let storage = {};
+let navigations = [];
+let toasts = [];
+let modals = [];
+let currentAuthor = 7;
+let currentAuthorization = 'author-session';
+let currentSessionRevision = 1;
+
+global.getApp = () => ({
+  globalData: { statusBarHeight: 20, navBarHeight: 44 },
+  sendRequest: (p) => { sent.push(p); },
+  tips: (m) => { toasts.push(m); },
+  getRequestErrorMessage: (res, fallback) => (res && res.msg) || fallback,
+  chooseImage: () => {},
+  getUserID: () => currentAuthor,
+  getAuthorization: () => currentAuthorization,
+  getSession: () => ({ getRevision: () => currentSessionRevision }),
+  getNickname: () => '测试作者',
+  getAvatar: () => '',
+  getUserInfo: () => null,
+  getToken: () => '',
+});
+global.wx = {
+  getStorageSync: (k) => storage[k],
+  setStorageSync: (k, v) => { storage[k] = v; },
+  removeStorageSync: (k) => { delete storage[k]; },
+  getSystemInfoSync: () => ({ windowWidth: 375 }),
+  showToast: (o) => { toasts.push(o && o.title); },
+  showLoading: () => {}, hideLoading: () => {},
+  showModal: (options) => { modals.push(options); if (options.success) options.success({ confirm: true }); },
+  navigateTo: (options) => { navigations.push(options.url); },
+  redirectTo: (options) => { navigations.push(options.url); },
+  createMapContext: () => ({ getCenterLocation: () => {} }),
+  pageScrollTo: () => {}, nextTick: (f) => f(),
+};
+
+let pageConfig = null;
+global.Page = (cfg) => { pageConfig = cfg; };
+
+beforeEach(() => {
+  sent = [];
+  storage = {};
+  navigations = [];
+  toasts = [];
+  modals = [];
+  currentAuthor = 7;
+  currentAuthorization = 'author-session';
+  currentSessionRevision = 1;
+  pageConfig = null;
+  delete require.cache[require.resolve(PAGE)];
+  require(PAGE);
+});
+
+function makePage() {
+  const inst = Object.assign({}, pageConfig);
+  inst.data = JSON.parse(JSON.stringify(pageConfig.data));
+  inst.data.draftUuid = 'logged-in-test-draft';
+  inst.data.draftMemberId = 7;
+  inst.setData = function (patch, cb) {
+    Object.keys(patch).forEach((k) => {
+      const parts = k.replace(/\[(\d+)\]/g, '.$1').split('.');
+      let o = inst.data;
+      for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]];
+      o[parts[parts.length - 1]] = patch[k];
+    });
+    if (cb) cb();
+  };
+  return inst;
+}
+
+test('俱乐部异步列表到达后立即刷新发布按钮状态', () => {
+  const page = makePage();
+  page.data.formData.clubId = '';
+  page.data.canPublish = true;
+  page.refreshPrimaryActionState = function () {
+    const needsClub = this.data.myClubs.length > 0;
+    this.setData({ canPublish: !needsClub || !!this.data.formData.clubId });
+  };
+
+  page.loadMyClubs();
+  assert.equal(sent.length, 1);
+  sent[0].success({
+    code: '200',
+    data: { owned: [{ id: 11, status: 1 }, { id: 12, status: 1 }] }
+  });
+
+  assert.equal(page.data.myClubs.length, 2);
+  assert.equal(page.data.canPublish, false);
+})
+
+function editDetailFixture(editScope) {
+  return {
+    editScope: editScope || 'FULL',
+    topic: {
+      id: 77,
+      name: '午夜巴士',
+      subtitle: '一条老线路',
+      description: '沿着 71 路走一遍',
+      startDate: '2026-09-01',
+      endDate: '2026-09-30',
+      imgUrl: 'cover.jpg',
+      imgArr: 'a.jpg,b.jpg',
+      categoryIds: '3,4',
+      productType: 1,
+      merchantStatus: 1,
+      openClubPool: 0,
+      publishMode: 'pro',
+      selfPlay: 1,
+      selfPlayPrice: 9.9,
+      selfPlayQuota: 50,
+      finishMedalName: '夜行者',
+      finishMedalImg: 'https://cdn.example.com/medal-night.png',
+      completeRewardCouponId: 12,
+    },
+    chapters: [{
+      id: 5,
+      name: '第一章',
+      cmsTopicNodeList: [{ id: 51, name: '外滩', address: '中山东一路', nodeTime: 20 }],
+    }],
+    tickets: [{ id: 9, name: '早鸟票', price: 19.9, totalInventory: 100, startTime: '2026-09-01', endTime: '2026-09-30' }],
+    collaboratorIds: [201, 202],
+  };
+}
+
+/** 带 id 打开编辑器,并把 edit-detail 的响应喂回去。 */
+function openForEdit(editScope) {
+  const page = makePage();
+  page.onLoad({ id: '77' });
+  const detailReq = sent.find((r) => r.url === '/api/topic/author-edit-detail');
+  assert.ok(detailReq, '带 id 进入必须去拉主题详情回填，否则编辑器就是个空白新建表单');
+  assert.equal(detailReq.data.id, '77');
+  detailReq.success({ code: '200', data: editDetailFixture(editScope) });
+  return page;
+}
+
+test('真实 author-edit-detail 冷回填替代配置，author-saved-detail 新节点 ID 回填替换旧配置', () => {
+  const page = makePage(); page.onLoad({ id: '77' });
+  const request = sent.find(row => row.url === '/api/topic/author-edit-detail');
+  const detail = editDetailFixture('FULL');
+  detail.nodeAlternativeConfigsLoaded = true;
+  detail.nodeAlternativeConfigs = { 51: [
+    { type: 'QUIZ', promptText: '原题', enabled: true, answerConfigured: true },
+    { type: 'PHOTO', promptText: '原拍摄内容', enabled: false, answerConfigured: false },
+  ] };
+  request.success({ code: 200, data: detail });
+  assert.equal(page._altDrafts[51].QUIZ.on, true); assert.equal(page._altDrafts[51].QUIZ.answer, '');
+  assert.equal(page._altDrafts[51].PHOTO.on, false);
+  const saver = page.getServerDraftSaver();
+  const rebuilt = editDetailFixture('FULL'); rebuilt.chapters[0].cmsTopicNodeList[0].id = 61;
+  rebuilt.nodeAlternativeConfigsLoaded = true;
+  rebuilt.nodeAlternativeConfigs = { 51: detail.nodeAlternativeConfigs[51], 61: detail.nodeAlternativeConfigs[51] };
+  rebuilt.isDraft = true; rebuilt.topic.status = 0; rebuilt.topic.configVersion = 1;
+  rebuilt.chapters[0].topicId = 77;
+  Object.assign(rebuilt.chapters[0].cmsTopicNodeList[0], { topicId: 77, chapterId: 5 });
+  let applied = false;
+  saver.save({ name: '午夜巴士', chapters: [{ name: '第一章', nodes: [{ name: '外滩' }] }] }, {
+    onSuccess: result => { applied = true; page.applyEditingTopic(result.detail); },
+    onFail: result => assert.fail(result.msg),
+  });
+  sent.at(-1).success({ code: 200, data: { topicId: 77 } });
+  assert.equal(sent.at(-1).url, '/api/topic/author-saved-detail');
+  sent.at(-1).success({ code: 200, data: rebuilt });
+  assert.equal(applied, true);
+  assert.equal(page._altDrafts[51], undefined); assert.equal(page._altDrafts[61].QUIZ.answerConfigured, true);
+  assert.equal(page.data.formData.chapters[0].nodes[0].id, 61);
+  page.loadEditingTopic('77'); assert.deepEqual(page._altDrafts, {});
+  sent.at(-1).fail({ msg: '读取失败' }); assert.deepEqual(page._altDrafts, {});
+});
+
+test('作者读取代次、同账号新会话与代理范围切换后，旧详情不能回填替代配置', () => {
+  const page = makePage(); page.data.editingTopicId = '77';
+  const detail = editDetailFixture('FULL');
+  detail.nodeAlternativeConfigsLoaded = true;
+  detail.nodeAlternativeConfigs = { 51: [{ type: 'QUIZ', promptText: '旧会话题目', enabled: true, answerConfigured: true }] };
+  for (const mutate of [() => currentAuthor++, () => { currentAuthorization += '-new'; },
+    () => { page.data.operationScope = 'proxy'; }, () => { page.loadEditingTopic('77'); }]) {
+    page.loadEditingTopic('77'); const request = sent.at(-1);
+    mutate(); request.success({ code: 200, data: detail });
+    assert.deepEqual(page._altDrafts, {});
+  }
+});
+
+for (const [context, mutate] of [
+  ['authorization', () => { currentAuthorization += '-new'; }],
+  ['session revision', () => { currentSessionRevision++; }],
+  ['scope', page => { page.data.operationScope = 'proxy'; }],
+]) {
+  for (const callback of ['success', 'fail', 'successStatusAbnormal']) {
+    test(`最新同作者读取的 ${context} 改变后 ${callback} 完成：丢弃详情并结束等待，可手动重读`, () => {
+      const page = makePage(); page.data.editingTopicId = '77';
+      page.loadEditingTopic('77'); const request = sent.at(-1), token = page._editLoadToken;
+      const originalForm = JSON.parse(JSON.stringify(page.data.formData));
+      const detail = editDetailFixture('FULL');
+      detail.nodeAlternativeConfigsLoaded = true;
+      detail.nodeAlternativeConfigs = { 51: [{ type: 'QUIZ', promptText: '旧上下文题目', enabled: true, answerConfigured: true }] };
+      mutate(page);
+      request[callback](callback === 'success' ? { code: 200, data: detail } : { code: 401, reason: 'sessionChanged' }, 401);
+      assert.deepEqual(page.data.formData, originalForm);
+      assert.deepEqual(page._altDrafts, {});
+      assert.equal(page.data.editLoaded, false);
+      request.complete();
+      assert.equal(page.data.editLoading, false);
+      assert.match(page.data.editLoadError, /重新读取|重新加载|重试/);
+      assert.equal(page.data.editLoadIsAccess, false);
+      assert.equal(page.data.creatorLoginRequired, false);
+      assert.equal(page._editLoadToken, token, '收尾不能重置请求代次或自动恢复会话');
+      assert.equal(sent.length, 1, '丢弃旧上下文不自动重发请求');
+      const authorization = currentAuthorization, revision = currentSessionRevision;
+      page.retryLoadEditingTopic();
+      assert.equal(sent.length, 2);
+      const retry = sent.at(-1);
+      assert.equal(retry.data.scope, page.data.operationScope);
+      retry.success({ code: 200, data: editDetailFixture('FULL') }); retry.complete();
+      assert.equal(page.data.formData.name, '午夜巴士');
+      assert.equal(page.data.editLoaded, true);
+      assert.equal(page.data.editLoading, false);
+      assert.equal(page.data.editLoadError, '');
+      assert.equal(currentAuthorization, authorization);
+      assert.equal(currentSessionRevision, revision);
+    });
+  }
+}
+
+for (const newerState of ['loading', 'error', 'loaded']) {
+  test(`旧请求回调和收尾不改动新请求的 ${newerState} 状态`, () => {
+    const page = makePage(); page.data.editingTopicId = '77';
+    page.loadEditingTopic('77'); const oldRequest = sent.at(-1);
+    currentAuthorization += '-new'; page.data.operationScope = 'proxy';
+    page.loadEditingTopic('77'); const newRequest = sent.at(-1);
+    if (newerState === 'error') newRequest.fail({ msg: '新请求失败' });
+    if (newerState === 'loaded') newRequest.success({ code: 200, data: editDetailFixture('FULL') });
+    const state = JSON.stringify(page.data), token = page._editLoadToken;
+    oldRequest.success({ code: 200, data: editDetailFixture('FULL') });
+    oldRequest.fail({ reason: 'sessionChanged' });
+    oldRequest.successStatusAbnormal({ code: 401 }, 401); oldRequest.complete();
+    assert.equal(JSON.stringify(page.data), state);
+    assert.equal(page._editLoadToken, token);
+    assert.equal(sent.length, 2);
+  });
+}
+
+for (const reason of ['owner changed', 'unloaded']) {
+  test(`${reason} 后旧读取回调和收尾不改动页面`, () => {
+    const page = makePage(); page.data.editingTopicId = '77';
+    page.loadEditingTopic('77'); const request = sent.at(-1);
+    if (reason === 'owner changed') currentAuthor++;
+    else page.onUnload();
+    const state = JSON.stringify(page.data), token = page._editLoadToken;
+    request.success({ code: 200, data: editDetailFixture('FULL') });
+    request.fail({ reason: 'sessionChanged' });
+    request.successStatusAbnormal({ code: 401 }, 401); request.complete();
+    assert.equal(JSON.stringify(page.data), state);
+    assert.deepEqual(page._altDrafts, {});
+    assert.equal(page._editLoadToken, token);
+    assert.equal(sent.length, 1);
+  });
+}
+
+test('真实页面隐藏后替代保存解除等待且保留输入，旧写回包不继续回读', () => {
+  const page = makePage(); page.onLoad({ id: '77' });
+  const detail = editDetailFixture('FULL');
+  detail.themeRuntimeConfig = JSON.stringify({ schemaVersion: 1, gameplayRuntime: { runtimeScope: 'PLAYER' } });
+  detail.nodeAlternativeConfigsLoaded = true;
+  detail.nodeAlternativeConfigs = { 51: [{ type: 'QUIZ', promptText: '原题', enabled: true, answerConfigured: true }] };
+  sent.find(row => row.url === '/api/topic/author-edit-detail').success({ code: 200, data: detail });
+  page.data.nodesForm = page.data.formData.chapters[0].nodes[0];
+  page.openStructure({ currentTarget: { dataset: { kind: 'quests' } } });
+  page.onStructureAltInput({ currentTarget: { dataset: { type: 'QUIZ', field: 'prompt' } }, detail: { value: '待保存题目' } });
+  page.saveStructure(); const request = sent.at(-1), count = sent.length;
+  assert.equal(request.url, '/api/orient/task/alternative'); assert.equal(page.data.structureSaving, true);
+  page.onHide(); assert.equal(page.data.structureSaving, false);
+  assert.equal(page._altWritePending[51].rows.find(row => row.type === 'QUIZ').prompt, '待保存题目');
+  request.success({ code: 200 }); assert.equal(sent.length, count); assert.equal(page._altDirty.QUIZ, true);
+});
+
+test('带 id 进入:拉 edit-detail 并把内容回填到 formData', () => {
+  const page = openForEdit('FULL');
+
+  assert.equal(page.data.editingTopicId, '77');
+  assert.equal(page.data.formData.name, '午夜巴士');
+  assert.equal(page.data.formData.subtitle, '一条老线路');
+  assert.equal(page.data.formData.startDate, '2026-09-01');
+  assert.deepEqual(page.data.selectedCategoryIds, ['3', '4']);
+  // 章节的节点在后端叫 cmsTopicNodeList,编辑器叫 nodes —— 这层落差漏了就是「编辑一次丢光路线」
+  assert.equal(page.data.formData.chapters.length, 1);
+  assert.equal(page.data.formData.chapters[0].nodes.length, 1);
+  assert.equal(page.data.formData.chapters[0].nodes[0].name, '外滩');
+  // 票的库存字段两边也不同名
+  assert.equal(page.data.formData.tickets.length, 1);
+  assert.equal(page.data.formData.tickets[0].totalStock, 100);
+  // 通关勋章图:漏了回填映射的话,编辑既有主题会静默把已传的勋章图清空 —— 保存后才发现。
+  assert.equal(page.data.formData.finishMedalImg, 'https://cdn.example.com/medal-night.png',
+    '通关勋章图必须回填，否则编辑主题会静默丢图');
+  assert.deepEqual(page.data.formData.collaboratorIds, [201, 202]);
+  assert.equal(page.data.formData.openMerchantPool, true, 'merchantStatus=1 → 进商家池');
+  assert.equal(page.data.formData.selfPlay, true);
+  assert.deepEqual(page.data.imgArrList, ['a.jpg', 'b.jpg']);
+});
+
+test('编辑详情拒绝数组对象及畸形章节/票种，保留原表单', () => {
+  const malformed = [
+    [],
+    { topic: {}, chapters: {}, tickets: [], collaboratorIds: [] },
+    { topic: {}, chapters: [null], tickets: [], collaboratorIds: [] },
+    { topic: {}, chapters: [{ cmsTopicNodeList: [null] }], tickets: [], collaboratorIds: [] },
+    { topic: {}, chapters: [], tickets: [null], collaboratorIds: [] },
+    { topic: {}, chapters: [], tickets: [], collaboratorIds: [null] },
+    { topic: {}, chapters: [], tickets: [], collaboratorIds: [{}] },
+    { topic: {}, chapters: [], tickets: [], collaboratorIds: ['not-an-id'] },
+  ];
+  for (const data of malformed) {
+    const page = makePage();
+    page.data.formData.name = '原主题';
+    page.loadEditingTopic('77');
+    const request = sent.at(-1);
+    assert.doesNotThrow(() => request.success({ code: '200', data }));
+    assert.equal(page.data.editLoaded, false);
+    assert.equal(page.data.formData.name, '原主题');
+    assert.match(page.data.editLoadError, /主题|打开|重试/);
+    assert.deepEqual(toasts, [], '畸形 payload 应留在可重试错误态，不应只弹 toast');
+  }
+});
+
+test('节点玩法选择器拒绝非数组和空元素，不生成可点击伪选项', () => {
+  for (const rows of [{}, [null]]) {
+    const page = makePage();
+    page.getTempList();
+    const request = sent.at(-1);
+    assert.doesNotThrow(() => request.success({ code: '200', data: { rows } }));
+    assert.deepEqual(page.data.tempList, []);
+  }
+});
+
+test('保存:走 /api/topic/v2/update 且带 id,绝不再打 create', () => {
+  const page = openForEdit('FULL');
+  sent = [];
+
+  page._doSubmit();
+
+  const req = sent.find((r) => r.url === '/api/topic/v2/update');
+  assert.ok(req, '编辑保存必须打 update;打 create 就是原 bug —— 每保存一次多一条重复主题');
+  assert.equal(sent.filter((r) => r.url === '/api/topic/v2/create').length, 0);
+  const body = JSON.parse(req.data);
+  assert.equal(body.id, '77', 'update 不带 id 后端不知道改谁');
+  assert.equal(body.name, '午夜巴士');
+  assert.equal(body.chapters.length, 1, 'FULL 档要整包上送，章节结构可改');
+});
+
+test('不带 id(新建):专业故事走 V2 create 且不带 id', () => {
+  const page = makePage();
+  page.onLoad({});
+
+  assert.equal(page.data.editingTopicId, '');
+  assert.equal(sent.filter((r) => r.url === '/api/topic/author-edit-detail').length, 0,
+    '新建不该去拉详情');
+  sent = [];
+  page._doSubmit();
+
+  const req = sent.find((r) => r.url === '/api/topic/v2/create');
+  assert.ok(req, '专业故事必须走 V2 create');
+  assert.equal(JSON.parse(req.data).id, undefined);
+});
+
+test('editScope=WHITELIST:上送体只剩白名单文案与图,日期/章节/票被剔掉', () => {
+  const page = openForEdit('WHITELIST');
+  sent = [];
+
+  page._doSubmit();
+
+  const req = sent.find((r) => r.url === '/api/topic/v2/update');
+  assert.ok(req);
+  const body = JSON.parse(req.data);
+  // 能改的
+  assert.equal(body.name, '午夜巴士');
+  assert.equal(body.imgArr, 'a.jpg,b.jpg');
+  assert.equal(body.categoryIds, '3,4');
+  // 不能改的:已开卖的主题改这三样是资损。后端会当场拒收,前端先剔掉免得每次保存都撞
+  assert.equal(body.startDate, undefined, '已开卖不得上送开始日期');
+  assert.equal(body.endDate, undefined, '已开卖不得上送结束日期');
+  assert.equal(body.chapters, undefined, '已开卖不得上送章节站点结构');
+  assert.equal(body.tickets, undefined, '已开卖不得上送票种与价格');
+});
+
+test('WHITELIST 档改了票价:必须当场说清楚,不许静默剔掉后报「已保存」', () => {
+  const page = openForEdit('WHITELIST');
+  // 用户在编辑器里把票价改了
+  page.data.formData.tickets[0].price = 999;
+  sent = [];
+  modals = [];
+
+  page._doSubmit();
+
+  assert.equal(sent.length, 0, '改了锁定字段就不该发请求 —— 发了就等于「保存成功但没生效」');
+  assert.equal(modals.length, 1, '必须给一条可识别的拒绝信息，而不是默默吞掉');
+  assert.ok(/票种与价格|不能再改/.test(modals[0].content), modals[0].content);
+});
+
+test('WHITELIST 档只改文案:照常保存', () => {
+  const page = openForEdit('WHITELIST');
+  page.data.formData.name = '午夜巴士(改名版)';
+  sent = [];
+  modals = [];
+
+  page._doSubmit();
+
+  assert.equal(modals.length, 0, '只改文案不该被拦');
+  const req = sent.find((r) => r.url === '/api/topic/v2/update');
+  assert.ok(req);
+  assert.equal(JSON.parse(req.data).name, '午夜巴士(改名版)');
+});
+
+test('WHITELIST 自由探索章流只改文案仍走V2，瘦payload不夹带冻结配置', () => {
+  const page = makePage();
+  page.data.editingTopicId = '77';
+  const detail = editDetailFixture('WHITELIST');
+  detail.topic.productType = 2;
+  detail.chapters[0].blocks = [
+    { key: 'intro', type: 'text', content: '已发布剧情' },
+    { key: 'station', type: 'node', nodeId: 51 }
+  ];
+  page.applyEditingTopic(detail);
+  page.data.formData.subtitle = '只改白名单副标题';
+  sent = [];
+  page._doSubmit();
+  const request = sent.find(r => r.url === '/api/topic/v2/update');
+  assert.ok(request, '已有章流不能因白名单payload不带chapters而退回426旧入口：' + JSON.stringify({ urls: sent.map(r => r.url), toasts, modals }));
+  assert.deepEqual(JSON.parse(request.data), {
+    name: '午夜巴士', subtitle: '只改白名单副标题', description: '沿着 71 路走一遍',
+    imgUrl: 'cover.jpg', imgArr: 'a.jpg,b.jpg', categoryIds: '3,4', scope: '', id: '77'
+  });
+});
+
+test('WHITELIST 无章流的简易自由探索保留既有legacy入口', () => {
+  const page = makePage();
+  page.data.editingTopicId = '77';
+  const detail = editDetailFixture('WHITELIST');
+  detail.topic.productType = 2;
+  detail.topic.publishMode = 'ai_simple';
+  page.applyEditingTopic(detail);
+  sent = [];
+  page._doSubmit();
+  assert.ok(sent.find(r => r.url === '/api/topic/update'));
+  assert.equal(sent.some(r => r.url === '/api/topic/v2/update'), false);
+});
+
+test('WHITELIST 合作预览锁住总开关，旧handler不修改冻结值', () => {
+  const template = require('node:fs').readFileSync(require.resolve('../../pages/publish/fabu/step3.wxml'), 'utf8');
+  const switchTag = template.match(/<cy-switch[^>]*bindchange="onMerchantPoolChange"[^>]*\/>/)[0];
+  assert.match(switchTag, /checked="\{\{formData\.openMerchantPool\}\}"/);
+  assert.match(switchTag, /disabled="\{\{editScope === 'WHITELIST'\}\}"/);
+  assert.match(template.match(/<cy-switch[^>]*bindchange="onClubPoolChange"[^>]*\/>/)[0], /disabled="\{\{editScope === 'WHITELIST'\}\}"/);
+  const page = openForEdit('WHITELIST');
+  const originalChapters = JSON.stringify(page.data.formData.chapters);
+  const originalPool = page.data.formData.openMerchantPool;
+  const originalClubPool = page.data.formData.openClubPool;
+  const switches = page._buildPublishPreview([]).switches;
+  assert.equal(switches.find(row => row.key === 'merchant').locked, true);
+  assert.equal(switches.find(row => row.key === 'merchant').on, originalPool);
+  assert.equal(switches.find(row => row.key === 'club').locked, true);
+  page.onMerchantPoolChange({ detail: { value: !originalPool } });
+  page.onPreviewMerchantRecruit({ detail: { value: !originalPool } });
+  page.onClubPoolChange({ detail: { value: !originalClubPool } });
+  page.onPreviewClubPool({ detail: { value: !originalClubPool } });
+  assert.equal(page.data.formData.openMerchantPool, originalPool);
+  assert.equal(page.data.formData.openClubPool, originalClubPool);
+  assert.equal(JSON.stringify(page.data.formData.chapters), originalChapters);
+});
+
+test('WHITELIST 自由探索预览不能总改已冻结的逐章招商', () => {
+  const page = makePage();
+  page.data.editingTopicId = '77';
+  const detail = editDetailFixture('WHITELIST');
+  detail.topic.productType = 2;
+  detail.chapters[0].recruitEnabled = 1;
+  page.applyEditingTopic(detail);
+  const before = JSON.stringify(page.data.formData.chapters);
+  const row = page._buildPublishPreview([]).switches.find(row => row.key === 'merchant');
+  assert.equal(row.on, true);
+  assert.equal(row.locked, true);
+  page.onPreviewMerchantRecruit({ detail: { value: false } });
+  assert.equal(JSON.stringify(page.data.formData.chapters), before);
+});
+
+test('WHITELIST 资格快照只锁UI，不清空回填的招商现值', () => {
+  const roleGuard = require('../../utils/roleGuard.js');
+  const previous = { hasSnapshot: roleGuard.hasSnapshot, isClubLeader: roleGuard.isClubLeader };
+  try {
+    roleGuard.hasSnapshot = () => true;
+    roleGuard.isClubLeader = () => false;
+    const page = openForEdit('WHITELIST');
+    assert.equal(page.data.formData.openMerchantPool, true);
+    page._syncMerchantPoolEligibility();
+    assert.equal(page.data.formData.openMerchantPool, true);
+    assert.equal(page.data.merchantPoolEditable, false);
+  } finally {
+    Object.assign(roleGuard, previous);
+  }
+});
+
+test('回填还没到位就点保存:拦住,别拿空表单去重建', () => {
+  const page = makePage();
+  page.onLoad({ id: '77' });   // 详情请求在途,success 没回来
+  sent = [];
+
+  page.submitForm();
+
+  assert.equal(sent.length, 0, 'FULL 档保存会整体重建章节/票，空表单存下去等于把原主题删空');
+  assert.ok(toasts.some((t) => /加载/.test(String(t))), '要告诉用户为什么点不动:' + JSON.stringify(toasts));
+});
+
+test('主题初始状态通过手机表单保存，编辑回填及 V2 提交保持一致', () => {
+  const page = openForEdit('FULL');
+  page.openInitialState();
+  page.addInitialState({ currentTarget: { dataset: { type: 'hp' } } });
+  page.onInitialStateField({ currentTarget: { dataset: { field: 'hp.init' } }, detail: { value: '8' } });
+  page.saveInitialState();
+  const saved = page.data.formData.journeyRules;
+  assert.equal(JSON.parse(saved).hp.init, 8);
+  assert.equal(JSON.parse(saved).hp.enabled, true);
+  sent = [];
+  page._doSubmit();
+  const request = sent.find(r => r.url === '/api/topic/v2/update');
+  assert.equal(JSON.parse(request.data).journeyRules, saved);
+  request.success({ code: 200, data: { topicId: 77, published: false, reviewState: 'PENDING' } });
+  assert.equal(page.data.resultSheet.title, '已提交审核');
+  assert.doesNotMatch(page.data.resultSheet.sub, /已经发布/);
+});
+
+// L03-010 业主默认 B(2026-11-24):首次发布不再直接 create 上架,而是带意图键建服务端草稿(saveDraft=1),
+// 建好后从回执的 topicId 记主题号(不把对象当主题号),再走回读 → publish-draft(见 fabu-server-draft.test.js)。
+test('V2 首次发布先建服务端草稿：回执从 topicId 取主题号，接着回读这一份', () => {
+  const page = makePage();
+  page.onLoad({});
+  page._doSubmit();
+  const create = sent.find(r => r.url === '/api/topic/v2/create');
+  assert.ok(create, '专业版首发仍走 v2 建题入口');
+  assert.equal(JSON.parse(create.data).saveDraft, 1);
+  assert.ok(JSON.parse(create.data).requestId);
+  create.success({ code: 200, data: { topicId: 123, published: false } });
+  assert.equal(page.data.editingTopicId, '123');
+  assert.doesNotMatch(String(page.data.editingTopicId), /object/);
+  const readback = sent.find(r => r.url === '/api/topic/author-saved-detail');
+  assert.ok(readback, '建好后先回读确认,再发布');
+  assert.equal(readback.data.id, 123);
+});
+
+test('自由探索编辑伏笔后随原主题保存，重开保留资源和应验条件', () => {
+  const page = openForEdit('FULL');
+  page.data.formData.productType = 2;
+  page.data.formData.journeyRules = JSON.stringify({
+    schemaVersion: 1,
+    hp: { enabled: true, init: 10, max: 10 },
+    luck: { enabled: true, init: 3, max: 3 },
+    thoughts: [{ key: 'window', name: '那扇窗', need: 120,
+      when: [{ op: 'HAS_TAG', value: 'tag.saw_window' }],
+      doneWhen: [{ op: 'HAS_TAG', value: 'tag.opened_window' }] }]
+  });
+  page.openThoughts();
+  page.onThoughtInput({ currentTarget: { dataset: { index: 0, field: 'desc' } }, detail: { value: '窗后的回声' } });
+  page.saveThoughts();
+  assert.equal(page.data.thoughtsEditor.show, false);
+  assert.equal(page.data.thoughtsEditor.count, 1);
+  sent = [];
+  page._doSubmit();
+  const request = sent.find(r => r.url === '/api/topic/v2/update');
+  assert.ok(request, '普通自由探索编辑伏笔保存原主题，不新建主题');
+  const payload = JSON.parse(request.data);
+  assert.equal(payload.id, '77');
+  assert.equal(payload.productType, 2);
+  const rules = JSON.parse(payload.journeyRules);
+  assert.equal(rules.thoughts[0].name, '那扇窗');
+  assert.equal(rules.thoughts[0].desc, '窗后的回声');
+  assert.equal(rules.thoughts[0].key, 'window');
+  assert.deepEqual(rules.thoughts[0].doneWhen, [{ op: 'HAS_TAG', value: 'tag.opened_window' }]);
+  assert.equal(rules.hp.init, 10);
+  page.data.formData.journeyRules = payload.journeyRules;
+  page.openThoughts();
+  assert.equal(page.data.thoughtsEditor.list[0].name, '那扇窗');
+  assert.equal(page.data.thoughtsEditor.list[0].desc, '窗后的回声');
+  assert.deepEqual(page.data.thoughtsEditor.list[0].doneWhen, [{ op: 'HAS_TAG', value: 'tag.opened_window' }]);
+});
+
+test('普通自由探索的章节故事流保存走 V2，保留正文、节点引用和计酬条款', () => {
+  for (const editingId of ['77', '']) {
+    storage = {}; // Independent create/update fixtures must not restore the previous in-flight write.
+    const page = openForEdit('FULL');
+    page.data.editingTopicId = editingId;
+    page.data.formData.productType = 2;
+    const chapter = page.data.formData.chapters[0];
+    chapter.blocks = [
+      { key: 'intro', type: 'text', content: '保存后仍须显示这段剧情' },
+      { key: 'game', type: 'node', nodeKey: chapter.nodes[0]._localId, locationRequired: false }
+    ];
+    chapter.termsMode = 'REVSHARE';
+    chapter.maxPerHeadFee = 0.02;
+    sent = [];
+    page._doSubmit();
+    const endpoint = editingId ? '/api/topic/v2/update' : '/api/topic/v2/create';
+    const request = sent.find(r => r.url === endpoint);
+    assert.ok(request, '有故事流的普通自由探索不能走旧接口');
+    const payload = JSON.parse(request.data);
+    assert.equal(payload.chapters[0].blocks[0].content, '保存后仍须显示这段剧情');
+    assert.equal(payload.chapters[0].blocks[1].nodeIndex, 0);
+    assert.equal(payload.chapters[0].blocks[1].locationRequired, false);
+    assert.equal(payload.chapters[0].termsMode, 'REVSHARE');
+    assert.equal(payload.chapters[0].maxPerHeadFee, 0.02);
+    assert.equal(payload.id, editingId || undefined);
+  }
+});
+
+test('普通自由探索服务器回填还原无需地点的故事玩法，保留故事块位置', () => {
+  const page = makePage();
+  page.data.editingTopicId = '77';
+  const detail = editDetailFixture('FULL');
+  detail.topic.productType = 2;
+  detail.chapters[0].cmsTopicNodeList[0].templateId = 71;
+  detail.chapters[0].cmsTopicNodeList[0].address = null;
+  detail.chapters[0].blocks = [
+    { key: 'intro', type: 'text', content: '先阅读剧情' },
+    { key: 'game', type: 'node', nodeId: 51, locationRequired: false }
+  ];
+  page.applyEditingTopic(detail);
+  const chapter = page.data.formData.chapters[0];
+  assert.equal(chapter.nodes[0]._storyGame, true, '重开不能把无需地点玩法误判成缺坐标的站点');
+  assert.equal(chapter.blocks[1].nodeKey, chapter.nodes[0]._localId);
+  assert.equal(chapter.blocks[1].locationRequired, false);
+  assert.equal(chapter.blocks[0].content, '先阅读剧情');
+  assert.equal(page.data.chapterStates[0].nodesMissingCoords, 0);
+});
+
+test('初始状态打开时物理返回只关闭弹层', () => {
+  const page = makePage();
+  page.openInitialState();
+  const originalRules = page.data.formData.journeyRules;
+  page.onNativeBackGuard();
+  assert.equal(page.data.initialStateEditor.show, false);
+  assert.equal(page.data.formData.journeyRules, originalRules);
+  assert.deepEqual(navigations, []);
+});
+
+

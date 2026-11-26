@@ -1,0 +1,181 @@
+<view class="team-page theme-dark" style="padding-top: {{statusBarHeight + navBarHeight}}px;">
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+  <view wx:if="{{recoveryShown}}" class="team-card" aria-role="status">
+    <text>{{commandRecovery.label}}</text>
+    <text>{{commandRecovery.message}}</text>
+    <block wx:if="{{commandRecovery.state === 'UNKNOWN'}}">
+      <cy-btn disabled="{{commandRecovery.busy}}" bindtap="queryCommand">查询原请求</cy-btn>
+      <cy-btn disabled="{{commandRecovery.busy}}" bindtap="retryCommand">按原输入重试</cy-btn>
+      <cy-btn disabled="{{commandRecovery.busy}}" bindtap="cancelCommand">终止尚未执行的请求</cy-btn>
+      <text>终止只针对未执行的原请求；已经提交的业务不会撤销。</text>
+    </block>
+  </view>
+  <cy-nav-bar back />
+  <cy-page-title title="队伍详情" safe-top="{{false}}" flush="{{true}}" />
+  <cy-skeleton wx:if="{{loading && !team}}" type="detail" count="{{1}}" loading-label="正在加载队伍详情" />
+  <cy-state-shell wx:elif="{{error && !team}}" kind="{{errorKind}}"
+                  title="{{error}}" sub="{{errorSub}}" primary="{{errorAction}}"
+                  fill size="lg" bind:primary="onErrorAction" auto-back="{{errorKind !== 'missing-param'}}" class="cy-fade-in" />
+  <block wx:else>
+    <view class="team-refresh-state cy-fade-in">
+      <text wx:if="{{refreshing && team}}" class="team-sync" aria-role="status">正在确认队伍状态…</text>
+    </view>
+  <block wx:if="{{team}}">
+    <view class="team-head cy-fade-in">
+      <view class="team-status {{team.status < 2 ? 'live' : ''}}">{{statusText}}</view>
+      <view class="team-title">{{teamTitle || team.title || '一起出发的玩家队伍'}}</view>
+      <view wx:if="{{!(leader && team.status == 0)}}" class="team-sub">{{team.joinMode == 2 ? '公开招募' : '仅邀请'}}</view>
+      <view class="team-meta">
+        <view class="team-meta-item"><text class="team-meta-value">{{team.joinedCount || 0}} / {{team.maxMembers || 0}}</text><text class="team-meta-key">当前成员</text></view>
+        <view class="team-meta-item"><text class="team-meta-value">{{expireText || '待定'}}</text><text class="team-meta-key">场次开始</text></view>
+      </view>
+    </view>
+
+    <!-- U06-01 席位(r2-join):已入队成员头像 + 空位虚线圈;空位数只来自服务端(seats.available 或 max-joined),
+         读不到不画。下方小标签:持有效票 / 票已失效(红) / 待审申请 / 邀请到期 -->
+    <view class="team-card tm-seats cy-fade-in" wx:if="{{members.length || openSeats.length || seatChips.length || inviteText}}">
+      <view class="tm-seat-strip {{seatIn === 1 ? 'is-pre' : ''}} {{seatBreath === 0 ? '' : 'is-lit'}}" wx:if="{{members.length || openSeats.length}}">
+        <view class="tm-seat-cell" wx:for="{{members}}" wx:key="memberId" style="--tm-d: {{index * 70}}ms">
+          <image class="tm-seat-av" src="{{item.memberAvatar || '/images/d_profile.png'}}" mode="aspectFill" />
+          <view class="tm-seat-crown" wx:if="{{item.role == 1}}">队长</view>
+        </view>
+        <view class="tm-seat-cell" wx:for="{{openSeats}}" wx:key="*this" style="--tm-d: {{(members.length + index) * 70}}ms">
+          <view class="tm-seat-open"><cy-icon name="plus" size="32" /></view>
+        </view>
+      </view>
+      <view class="tm-chips" wx:if="{{seatChips.length || inviteText}}">
+        <view class="tm-chip {{item.bad ? 'is-bad' : ''}}" wx:for="{{seatChips}}" wx:key="key"><text>{{item.label}}</text><text class="tm-chip__v">{{item.value}}</text></view>
+        <view class="tm-chip" wx:if="{{inviteText}}"><cy-icon name="clock" size="24" /><text>{{inviteText}}</text></view>
+      </view>
+    </view>
+
+    <view class="team-actions cy-fade-in" wx:if="{{team.status == 0}}">
+      <!-- l-after:邀请队友走统一的 Spotify 式邀请页(cy-share-card kind=invite);「发给微信好友」仍走本页 onShareAppMessage(按邀请码落加入页) -->
+      <view class="team-action primary" bindtap="openInvite" aria-role="button" aria-label="邀请队友" hover-class="cy-pressed" hover-stay-time="80">邀请队友</view>
+      <view wx:if="{{joined}}" class="team-action secondary" bindtap="openInviteQr"
+            aria-role="button" aria-label="队伍二维码与加入码" hover-class="cy-pressed" hover-stay-time="80">二维码</view>
+      <view wx:if="{{!joined}}" class="team-action secondary" bindtap="goJoin"
+            aria-role="button" aria-label="加入队伍" hover-class="cy-pressed" hover-stay-time="80">加入队伍</view>
+    </view>
+
+    <!-- C-02b:队长在招募中可把「公开招募」改回「仅邀请」(或反向)。后端 join-mode 只认队长,
+         UI 只在 status=0 给入口 —— 满员/进行中/已结束的队伍已不在「附近的队伍」里,切了也无处生效。 -->
+    <view class="team-card cy-fade-in" wx:if="{{leader && team.status == 0}}">
+      <view class="team-member">
+        <view class="team-member-main">
+          <view class="team-member-name">公开招募</view>
+        </view>
+        <cy-switch checked="{{joinModePublic}}" disabled="{{joinModeSaving}}"
+                   bindchange="onJoinModeChange" accessibility-label="公开招募" />
+      </view>
+      <text wx:if="{{commandReject.action === 'join-mode'}}" class="team-reject" aria-role="alert">{{commandReject.message}}</text>
+    </view>
+
+    <block wx:if="{{applicantsState}}">
+      <view class="team-section-title cy-fade-in">入队申请{{applicants.length ? ' · ' + applicants.length : ''}}</view>
+      <cy-skeleton wx:if="{{applicantsState === 'loading'}}" type="list" count="1" loading-label="正在读取入队申请" class="cy-fade-in" />
+      <cy-inline-error wx:elif="{{applicantsState === 'error'}}" title="入队申请没读到" action="重试" bind:action="retryApplicants" class="cy-fade-in" />
+      <view wx:else class="team-card cy-fade-in">
+        <view wx:if="{{!applicants.length}}" class="team-member"><view class="team-member-main"><view class="team-member-role">暂无申请</view></view></view>
+        <view class="team-member" wx:for="{{applicants}}" wx:key="memberId">
+          <image class="team-avatar" src="{{item.avatar || '/images/d_profile.png'}}" mode="aspectFill" />
+          <view class="team-member-main">
+            <view class="team-member-name">{{item.name}}</view>
+            <view class="team-member-role">{{item.sub}}</view>
+            <view wx:if="{{item.messageText}}" class="team-member-role">{{item.messageText}}</view>
+          </view>
+          <view class="team-member-op" bindtap="rejectApplicant" data-id="{{item.memberId}}" data-name="{{item.name}}"
+                aria-role="button" aria-label="拒绝 {{item.name}}" hover-class="cy-pressed" hover-stay-time="80">拒绝</view>
+          <view class="team-member-op team-op-ok" bindtap="approveApplicant" data-id="{{item.memberId}}"
+                aria-role="button" aria-label="同意 {{item.name}}" hover-class="cy-pressed" hover-stay-time="80">同意</view>
+        </view>
+        <text wx:if="{{commandReject.action === 'handle'}}" class="team-reject" aria-role="alert">{{commandReject.message}}</text>
+      </view>
+    </block>
+
+    <view class="team-section-title cy-fade-in">队伍成员</view>
+    <view class="team-card cy-fade-in">
+      <cy-empty wx:if="{{!members.length}}" kind="empty" title="还没有队员" />
+      <view class="team-member" wx:for="{{members}}" wx:key="memberId">
+        <image class="team-avatar" src="{{item.memberAvatar || '/images/d_profile.png'}}" mode="aspectFill" />
+        <view class="team-member-main">
+          <view class="team-member-name">{{item.memberName || '城瘾玩家'}}</view>
+          <view class="team-member-role">{{item.role == 1 ? '队长' : '队员'}}</view>
+        </view>
+        <view wx:if="{{leader && item.role != 1}}" class="team-member-op" bindtap="kick" data-id="{{item.memberId}}" data-name="{{item.memberName || '这名队员'}}"
+              aria-role="button" aria-label="移出队员 {{item.memberName || '城瘾玩家'}}" hover-class="cy-pressed" hover-stay-time="80">移出</view>
+      </view>
+      <text wx:if="{{commandReject.action === 'kick'}}" class="team-reject" aria-role="alert">{{commandReject.message}}</text>
+    </view>
+
+    <!-- 定向开关关闭 / 普通队伍 / 非成员(无法确认是否定向队)不适用看板:整段不渲染,不给普通队伍挂定向提示。
+         原型 B T-32:成员 × 节点矩阵(横滑),最后一行写全队是否完成;排名名次按服务端顺排。 -->
+    <view wx:if="{{boardState === 'loading' || boardState === 'error' || boardState === 'login' || boardState === 'ready'}}" class="team-section-title cy-fade-in">队伍进度</view>
+    <cy-skeleton wx:if="{{boardState === 'loading'}}" type="list" count="2" loading-label="正在加载队伍进度" class="cy-fade-in" />
+    <cy-inline-error wx:if="{{boardState === 'error' || boardState === 'login'}}" class="cy-fade-in"
+      title="{{boardState === 'login' ? boardMessage : '队伍进度加载失败'}}" action="{{boardState === 'login' ? '登录' : '重试'}}" bind:action="retryBoard" />
+    <block wx:if="{{boardState === 'ready' && board}}">
+      <view class="team-card cy-fade-in">
+        <view class="team-member tm-sum"><view class="team-member-main"><view class="team-member-name">全队已完成 {{board.summary.teamDoneCount}} / {{board.summary.totalTasks || 0}} 个节点</view></view></view>
+        <cy-empty wx:if="{{!board.tasks.length}}" title="暂无节点" />
+        <scroll-view wx:else scroll-x class="tm-matrix" enhanced show-scrollbar="{{false}}">
+          <view class="tm-mx">
+            <view class="tm-mx-row tm-mx-head"><text class="tm-mx-name"></text><text class="tm-mx-cell" wx:for="{{board.tasks}}" wx:for-item="task" wx:key="taskId">{{task.name}}</text></view>
+            <view class="tm-mx-row" wx:for="{{board.rows}}" wx:for-item="row" wx:key="memberId" aria-label="{{row.name}}">
+              <text class="tm-mx-name">{{row.name}}</text>
+              <view class="tm-mx-cell" wx:for="{{row.cells}}" wx:for-item="cell" wx:key="taskId"><view class="tm-dot {{cell.done ? 'on' : ''}}" aria-label="{{cell.done ? '已完成' : '未完成'}}"></view></view>
+            </view>
+            <view class="tm-mx-row tm-mx-foot"><text class="tm-mx-name">全队</text><text class="tm-mx-cell {{task.teamDone ? 'ok' : ''}}" wx:for="{{board.tasks}}" wx:for-item="task" wx:key="taskId">{{task.teamDone ? '完成' : (task.completedCount || 0) + '/' + (board.threshold.required || 0)}}</text></view>
+          </view>
+        </scroll-view>
+      </view>
+      <view class="team-section-title cy-fade-in">本场队伍排名</view>
+      <cy-skeleton wx:if="{{rankingState === 'loading'}}" type="list" count="2" loading-label="正在加载队伍排名" class="cy-fade-in" />
+      <cy-inline-error wx:if="{{rankingState === 'error'}}" title="队伍排名加载失败" action="重试" bind:action="retryBoard" class="cy-fade-in" />
+      <view wx:if="{{rankingState === 'ready'}}" class="team-card cy-fade-in">
+        <cy-empty wx:if="{{!boardRanks.length}}" title="暂无队伍排名" />
+        <view class="team-member" wx:for="{{boardRanks}}" wx:key="teamId">
+          <text class="tm-rank">{{item.rank}}</text>
+          <view class="team-member-main"><view class="team-member-name">{{item.title}}{{item.mine ? ' · 我的队伍' : ''}}</view></view>
+          <text class="tm-val">{{item.teamDoneCount}} / {{item.totalTasks || 0}}</text>
+        </view>
+      </view>
+    </block>
+
+    <text wx:if="{{commandReject.action === 'quit' || commandReject.action === 'disband'}}" class="team-reject" aria-role="alert">{{commandReject.message}}</text>
+    <view class="team-actions cy-fade-in" wx:if="{{joined && team.status < 2}}">
+      <view class="team-action secondary" bindtap="quit" aria-role="button"
+            aria-label="{{leader ? '退出并移交队长' : '退出队伍'}}" hover-class="cy-pressed" hover-stay-time="80">{{leader ? '退出并移交队长' : '退出队伍'}}</view>
+      <view wx:if="{{leader}}" class="team-action danger" bindtap="disband"
+            aria-role="button" aria-label="解散队伍" hover-class="cy-pressed" hover-stay-time="80">解散队伍</view>
+    </view>
+    <view class="team-note team-report cy-fade-in" wx:if="{{!leader}}" bindtap="openReport" aria-role="button" aria-label="举报这支队伍"
+          hover-class="cy-pressed" hover-stay-time="80">举报队伍</view>
+  </block>
+  </block>
+  <cy-share-card show="{{inviteShow}}" card="{{inviteCard}}" bind:close="closeInvite" />
+  <!-- qx-final:邀请卡「保存图片」走 wx.saveImageToPhotosAlbum,隐私授权在本页内弹(同 settle 页) -->
+  <cy-privacy-gate show="{{privacyGateShow}}" bind:settled="onPrivacyGateSettled" />
+</view>
+
+<!-- 危险动作三段式确认:文案来自 utils/danger-actions.js,页面只给 key -->
+<cy-danger-confirm id="dcQuit" bind:confirm="onConfirmQuit" />
+<cy-danger-confirm id="dcKick" bind:confirm="onConfirmKick" />
+<cy-danger-confirm id="dcReject" bind:confirm="onConfirmReject" />
+<cy-danger-confirm id="dcDisband" bind:confirm="onConfirmDisband" bind:alt="onDisbandAlt" />
+<team-report-sheet show="{{reportShow}}" team-id="{{reportTeamId}}" bind:close="closeReport" />
+<!-- l-misc 队伍小程序码:码图白底方块(扫码要白底);微信不可用时只给加入码 -->
+<cy-sheet show="{{qrSheet.show}}" title="队伍二维码" closable maskClosable bind:close="closeInviteQr">
+  <view class="tm-qr">
+    <image wx:if="{{qrSheet.state === 'ready'}}" class="tm-qr__img" src="{{qrSheet.qr}}" mode="aspectFit" show-menu-by-longpress aria-label="队伍小程序码" />
+    <text wx:elif="{{qrSheet.state === 'loading'}}" class="tm-qr__state" aria-role="status">正在加载…</text>
+    <text wx:elif="{{qrSheet.state === 'error'}}" class="tm-qr__state" aria-role="alert">{{qrSheet.message}}</text>
+    <view wx:if="{{qrSheet.code}}" class="tm-qr__code" bindtap="copyJoinCode" aria-role="button" aria-label="复制加入码 {{qrSheet.code}}" hover-class="cy-pressed" hover-stay-time="80">
+      <text class="tm-qr__k">加入码</text>
+      <text class="tm-qr__v" user-select>{{qrSheet.code}}</text>
+      <text class="tm-qr__copy">复制</text>
+    </view>
+  </view>
+</cy-sheet>

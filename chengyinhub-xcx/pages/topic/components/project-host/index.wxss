@@ -1,0 +1,945 @@
+@import '../../../../style/fade-in.wxss';
+@import '/style/merchant-light.wxss';
+
+/* ============================================================
+ * 我的参与视图 —— 2026-08-04 按 Figma 重做
+ * 页面 = 浅灰底 + 一列白色圆角卡;每张卡要么是一个入口,要么是一组数字。
+ * 二级内容(玩法规则/剧情/条款原文)一律不在本页铺开,点进去看。
+ * ============================================================ */
+
+/* 底部操作栏是 fixed 的,末尾的 .foot-space 替它占位(L06-117:不再在根节点另垫 260rpx,两处叠加多出一截空白) */
+.page { min-height: 100vh; box-sizing: border-box; background: var(--cy-bg-page); }  /* ds-ok: 量表外遗留值,复核保留;2026-10-31 P-6 根节点自己铺底色,俱乐部主办深色时不露页面的浅色底 */
+.page-pad { height: var(--cy-space-2); }
+
+/* ===== Hero ===== */
+.hero {
+  position: relative;
+  width: 100%;
+  height: 480rpx;  /* ds-ok: 封面比例按稿,非量表值 */
+}
+.hero-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.hero-img--fallback {
+  background: linear-gradient(135deg, var(--cy-bg-subtle), var(--cy-border-line));
+}
+.hero-scrim {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.24), rgba(0, 0, 0, 0) 42%, rgba(0, 0, 0, 0.62)); /* ds-ok: 图片压暗 scrim,方向/停点按稿 */
+}
+.hero-status {
+  position: absolute;
+  right: var(--cy-space-3);
+  bottom: 76rpx;  /* ds-ok: 与角标底对齐,按稿 */
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-1-5);
+  padding: 10rpx var(--cy-space-3);  /* ds-ok: 胶囊内距按稿 */
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-comp-scrim);
+  font-size: var(--cy-font-label);
+  font-weight: 500;
+  color: var(--cy-text-inverse);
+}
+.hero-status-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: var(--cy-text-inverse);
+}
+.hero-status-dot.state-danger  { background: var(--cy-danger); }
+.hero-status-dot.state-running { background: var(--cy-success); }
+.hero-status-dot.state-ok      { background: var(--cy-accent); }
+.hero-status-dot.state-neutral { background: var(--cy-color-status-warning); }
+
+
+/* ===== 标题 / 时间 / 标签 ===== */
+.head {
+  padding: 68rpx var(--cy-page-x) 0;  /* ds-ok: 让开角标的负偏移 */
+}
+.head-title {
+  font-size: var(--cy-font-page-title);
+  font-weight: 700;
+  color: var(--cy-text-title);
+  line-height: var(--cy-leading-tight);
+}
+.head-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cy-space-3);
+  margin-top: var(--cy-space-2);
+}
+.meta-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-1);
+  font-size: var(--cy-font-label);
+  color: var(--cy-text-secondary);
+}
+.head-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cy-space-1-5);
+  margin-top: var(--cy-space-2-5);
+}
+.head-role { margin-left: auto; flex-shrink: 0; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--cy-space-1) var(--cy-space-2-5);
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-bg-accent-weak);
+  font-size: var(--cy-font-label);
+  font-weight: 500;
+  color: var(--cy-text-body);
+}
+
+/* ===== 未通过:驳回原因告示条 =====
+   软底只做底,正文仍用 text-title —— 同色系软底配同色文字会把对比度吃掉。 */
+.reject {
+  padding: var(--cy-space-3);
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-danger-soft);
+}
+
+/* ===== 四个关系入口 ===== */
+.qa {
+  display: flex;
+  padding: var(--cy-space-4) var(--cy-page-x) var(--cy-space-1);
+}
+.qa-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cy-space-1-5);
+}
+.qa-btn--tap { opacity: .6; }
+/* 2026-10-31:发布时没开的承接,工作台对应按钮灰掉;点了说明原因(merchantinfo.hostRecruitGate) */
+.qa-btn--off { opacity: .35; }
+.qa-ico {
+  width: 104rpx;
+  height: 104rpx;
+  border-radius: 50%;
+  background: var(--cy-bg-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.qa-ico-img {
+  width: 48rpx;
+  height: 48rpx;
+}
+.qa-label {
+  font-size: var(--cy-font-label);
+  font-weight: 500;
+  color: var(--cy-text-title);
+}
+
+/* ===== 分组:标题在卡外,内容在白卡里 ===== */
+.sec {
+  padding: var(--cy-space-4) var(--cy-page-x) 0;
+}
+.sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--cy-space-2-5);
+}
+.sec-title {
+  font-size: var(--cy-font-subtitle);
+  font-weight: 700;
+  color: var(--cy-text-title);
+  line-height: var(--cy-leading-tight);
+}
+.sec-action {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-1);
+  font-size: var(--cy-font-label);
+  font-weight: 500;
+  color: var(--cy-text-secondary);
+}
+.sec-empty {
+  font-size: var(--cy-font-label);
+  color: var(--cy-text-secondary);
+  line-height: var(--cy-leading-normal);
+}
+.card {
+  padding: var(--cy-space-3);
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-bg-card);
+  overflow: hidden;
+}
+
+/* ===== 核销:一行三格 ===== */
+.metrics {
+  display: flex;
+  gap: var(--cy-space-2);
+}
+.metric {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cy-space-1);
+  padding: var(--cy-space-3) var(--cy-space-1);
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-bg-card);
+}
+.metric-n {
+  font-family: var(--cy-font-family-numeric, inherit);
+  font-size: 60rpx;  /* ds-ok: 数字比正文量表大一档,按稿 */
+  font-weight: 500;
+  line-height: 1;
+  color: var(--cy-text-title);
+}
+.metric-l {
+  font-size: var(--cy-font-caption);
+  color: var(--cy-text-secondary);
+}
+.metrics + .sec-empty { margin-top: var(--cy-space-2); }
+
+
+/* ===== 这一站玩什么 ===== */
+.game {
+  display: flex;
+  gap: var(--cy-space-3);
+}
+.game-img {
+  width: 160rpx;
+  height: 160rpx;
+  flex: none;
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-bg-subtle);
+}
+
+/* 玩家能拿到:贴在玩法卡里的浅底条 */
+.reward {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2-5);
+  margin-top: var(--cy-space-3);
+  padding: var(--cy-space-2-5) var(--cy-space-3);
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-bg-card-2);
+}
+
+
+.tl-item:last-child .tl-body { padding-bottom: 0; }
+
+.prep + .todos {
+  margin-top: var(--cy-space-2-5);
+  padding-top: var(--cy-space-2-5);
+  border-top: 1rpx solid var(--cy-border-card);
+}
+.todo {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2);
+}
+.todo + .todo { margin-top: var(--cy-space-2); }
+
+/* ===== 整页错误态 ===== */
+.load-error {
+  margin: 120rpx var(--cy-page-x) 0; /* ds-ok: 量表外遗留值,复核保留 */
+  text-align: center;
+}
+.load-error-title {
+  font-size: var(--cy-font-title);
+  font-weight: 700;
+  color: var(--cy-text-title);
+}
+.load-error-tip {
+  margin: var(--cy-space-2) 0 var(--cy-space-4);
+  font-size: var(--cy-font-label);
+  color: var(--cy-text-secondary);
+  line-height: var(--cy-leading-normal);
+}
+
+/* ===== 底部操作栏 ===== */
+.bottom-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  padding: 0 var(--cy-page-x) calc(env(safe-area-inset-bottom) + var(--cy-space-3));
+  /* 固定/粘性底栏必须自带不透明底,否则下方内容从 padding 区透出来,按钮看上去压在正文上
+     (2026-08-19 C27 实拍坐实同一病因)。 */
+  background: var(--cy-bg-page);
+}
+.club {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-3);
+  padding: var(--cy-space-3) 0;
+}
+.club + .club { border-top: 1rpx solid var(--cy-border-card); }
+
+.rules {
+  min-height: 88rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cy-space-1);
+  font-size: var(--cy-font-label);
+  color: var(--cy-text-secondary);
+  line-height: var(--cy-leading-normal);
+}
+
+.open-node + .open-node { margin-top: var(--cy-space-2-5); }
+.mch + .mch { border-top: 1rpx solid var(--cy-border-card); }
+
+/* ===== 抽屉内容 =====
+   ⚠️ 必须放在父组件里,不能放 project-drawer:内容是 slot 传进去的,
+   slot 内容属于父组件、吃父组件的样式。写在子组件里一行都不生效。
+
+   结构按稿:面板(浅灰底)里是「粗黑大标题 + 白卡列表」的分组,
+   不是把行直接铺在浅灰上。 */
+
+/* 分组大标题:粗黑,不是小灰 label */
+.dg-label {
+  font-size: var(--cy-font-subtitle);
+  font-weight: 700;
+  color: var(--cy-text-title);
+  margin: var(--cy-space-4) 0 var(--cy-space-2-5);
+}
+.dg-sub {
+  font-size: var(--cy-font-label);
+  color: var(--cy-text-secondary);
+  margin-bottom: var(--cy-space-2);
+}
+/* 白卡:一组一张,条目之间细分隔线 */
+.dcard {
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-bg-card);
+  overflow: hidden;
+}
+
+/* 一行:头像 + 名称/站点/电话 */
+.dr {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-3);
+  padding: var(--cy-space-3);
+}
+.dr + .dr { border-top: 1rpx solid var(--cy-border-card); }
+.dr-avatar {
+  width: 112rpx;
+  height: 112rpx;
+  flex: none;
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-bg-subtle);
+}
+.dr-avatar--round { border-radius: 50%; }
+.dr-avatar--fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--cy-font-title);
+  font-weight: 700;
+  color: var(--cy-text-secondary);
+}
+.dr-text { flex: 1; min-width: 0; }
+.dr-line1 {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-1-5);
+  /* 不换行:名字过长时省略它,而不是把状态标签挤到下一行 */
+  min-width: 0;
+}
+.dr-line1 .dr-name { flex: 0 1 auto; min-width: 0; }
+.dr-line1 .dr-tag { flex: none; }
+.dr-name {
+  font-size: var(--cy-font-title);
+  font-weight: 700;
+  color: var(--cy-text-title);
+}
+.dr-tag {
+  padding: 2rpx var(--cy-space-2);  /* ds-ok: 小徽标内距,按稿 */
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-bg-accent-weak);
+  font-size: var(--cy-font-caption);
+  color: var(--cy-text-secondary);
+}
+.dr-tag--ok   { background: var(--cy-color-status-success-soft); color: var(--cy-success); }
+.dr-tag--wait { background: var(--cy-color-status-warning-soft); color: var(--cy-color-status-warning); }
+.dr-tag--self { background: var(--cy-color-status-info-soft);    color: var(--cy-info); }
+.dr-sub {
+  display: block;
+  margin-top: var(--cy-space-1);
+  font-size: var(--cy-font-body);
+  color: var(--cy-text-body);
+}
+/* 电话 + 复制图标(按稿是图标,不是文字按钮) */
+.dr-phone {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2);
+  margin-top: var(--cy-space-1);
+}
+.dr-phone-n {
+  font-size: var(--cy-font-body);
+  color: var(--cy-text-body);
+  letter-spacing: 1rpx;
+}
+.dr-copy-img { width: 32rpx; height: 32rpx; }
+.dr-copy {
+  width: var(--cy-btn-h);
+  height: var(--cy-btn-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cy-text-placeholder);
+}
+.dr-right { flex: none; text-align: right; }
+.dr-state {
+  font-size: var(--cy-font-label);
+  font-weight: 600;
+  color: var(--cy-text-placeholder);
+}
+.dr-state--arrived { color: var(--cy-success); }
+/* 已退款:这行不是待办也不是成绩,用危险色标出来,别让它混进「还没来」里 */
+.dr-state--refunded { color: var(--cy-danger); }
+.dr-time {
+  display: block;
+  margin-top: 4rpx;  /* ds-ok: 两行贴合,按稿 */
+  font-size: var(--cy-font-caption);
+  color: var(--cy-text-placeholder);
+}
+
+/* 还没人接:白卡里的行,左边一个虚线方框 */
+.dn {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-3);
+  padding: var(--cy-space-3);
+}
+.dn + .dn { border-top: 1rpx solid var(--cy-border-card); }
+.dn-plus {
+  width: 112rpx;
+  height: 112rpx;
+  flex: none;
+  border-radius: var(--cy-radius-md);
+  border: 2rpx dashed var(--cy-border-line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cy-text-placeholder);
+}
+.dn-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--cy-font-body);
+  color: var(--cy-text-title);
+}
+.dn-btn {
+  flex: none;
+  padding: var(--cy-space-2) var(--cy-space-3);
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-btn-solid-bg);
+  font-size: var(--cy-font-label);
+  font-weight: 600;
+  color: var(--cy-btn-solid-fg);
+}
+
+/* 二选一列表 */
+/* 稿 468:1126 的抽屉行。⚠️ 与 project-join 的 .dpick 是同一套稿(同一个抽屉的四种身份变体),
+   原来两边度量各写各的:这边行内距 12px、标题走 body/600,那边 16px、走 subtitle。
+   同一个抽屉在主办方和承接方眼里长得不一样,是拆组件时各自抄的后果。按稿统一。 */
+.dpick {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-3);
+  padding: var(--cy-space-3-5) var(--cy-space-4);
+}
+.dpick + .dpick { border-top: 1rpx solid var(--cy-border-card); }
+.dpick-text { flex: 1; min-width: 0; }
+.dpick-name {
+  display: block;
+  font-size: var(--cy-font-subtitle);
+  font-weight: 500;   /* 稿 Inter:Medium */
+  color: var(--cy-text-title);
+}
+.dpick-sub {
+  display: block;
+  margin-top: 4rpx;   /* ds-ok: 稿标题↔副文案 2px */
+  font-size: var(--cy-font-caption);
+  color: var(--cy-text-secondary);
+}
+
+/* 玩家:汇总 + 筛选 + 场次分组 */
+.dsum {
+  display: flex;
+  gap: 16rpx;
+  font-size: var(--cy-font-label);
+  color: var(--cy-text-secondary);
+}
+.dsum-n { font-weight: 700; color: var(--cy-text-title); }
+/* ⚠️ 2026-09-08 补「已接洽」这一档时发现这两个颜色是反的:
+   待核销(还欠着的活)一直是绿的、已核销(已经做完的)一直是红的。
+   实拍并排才看见 —— 读代码看不出来,token 名都对,只是配错了语义。
+   现在:待核销 = warning(要你去做)、已接洽 = 中性(人已经在店里了,等确认)、
+        已核销 = success(做完了)。 */
+.dsum-pending { color: var(--cy-color-status-warning); }
+.dsum-contacted { color: var(--cy-text-secondary); }
+.dsum-redeemed { color: var(--cy-success); }
+.dsum-pending .dsum-n, .dsum-contacted .dsum-n, .dsum-redeemed .dsum-n { color: inherit; }
+.dfil {
+  display: flex;
+  gap: 34rpx;
+  margin-top: 32rpx;
+}
+.dfil-item {
+  flex: 1;
+  height: 68rpx;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-bg-card-2);
+  text-align: center;
+  font-size: 26rpx; /* ds-ok: Figma 25:125 筛选项 13px */
+  color: var(--cy-text-secondary);
+}
+.dfil-item--on {
+  background: var(--cy-text-title);
+  color: var(--cy-btn-solid-fg);
+  font-weight: 600;
+}
+.drun {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cy-space-2);
+  margin: var(--cy-space-4) 0 var(--cy-space-2);
+}
+.drun-when {
+  font-size: var(--cy-font-subtitle);
+  font-weight: 700;
+  color: var(--cy-text-title);
+}
+.drun-src {
+  padding: 2rpx var(--cy-space-2);  /* ds-ok: 小徽标内距,按稿 */
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-bg-accent-weak);
+  font-size: var(--cy-font-caption);
+  color: var(--cy-text-secondary);
+}
+.dempty {
+  padding: var(--cy-space-6) var(--cy-space-3);
+  text-align: center;
+  font-size: var(--cy-font-label);
+  color: var(--cy-text-secondary);
+  line-height: var(--cy-leading-normal);
+}
+
+/* Figma 25:125：商家和俱乐部名单共用同一组尺寸，仅由服务端决定是否给电话。 */
+.player-list { margin-top: 54rpx; }
+.player-row {
+  position: relative;
+  min-height: 181rpx;
+  gap: 34rpx;
+  padding: 0;
+  align-items: flex-start;
+}
+.player-row::after {
+  content: '';
+  position: absolute;
+  left: 132rpx;
+  right: 26rpx;
+  bottom: 0;
+  height: 1rpx;
+  background: var(--cy-border-card);
+}
+.player-row .dr-avatar { width: 92rpx; height: 92rpx; }
+.player-row .dr-text { margin-top: -12rpx; }
+.player-row .dr-name { font-size: var(--cy-font-subtitle); line-height: 42rpx; }
+.player-row .dr-sub,
+.player-row .dr-phone-n { font-size: 27rpx; line-height: 34rpx; } /* ds-ok: Figma 25:125 电话 13.5px */
+.player-row .dr-sub { margin-top: 4rpx; }
+.player-row .dr-phone { margin-top: 12rpx; gap: 4rpx; }
+.player-row .dr-copy { position: relative; width: 29rpx; height: 29rpx; }
+.player-row .dr-copy::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 88rpx;
+  height: 88rpx;
+  transform: translate(-50%, -50%);
+}
+.player-row .dr-copy-img { width: 29rpx; height: 29rpx; }
+.player-row .dr-right { margin-top: 16rpx; }
+.player-row .dr-state,
+.player-row .dr-time { font-size: var(--cy-font-label); line-height: 36rpx; }
+/* ⚠️ 2026-09-08:这三行原来把 pending 涂成 success、arrived/redeemed 涂成 danger,
+   跟上面基础规则的 .dr-state--arrived{success} 正好相反 —— 后面的 .player-row 覆盖赢了,
+   于是「已核销」在名单里是红的、「待核销」是绿的。实拍并排才看见。
+   现在与汇总行同一套语义:待核销=要你去做(warning)、已接洽=中性、已核销=做完了(success)。 */
+.player-row .dr-state--pending { color: var(--cy-color-status-warning); }
+.player-row .dr-state--contacted { color: var(--cy-text-secondary); }
+.player-row .dr-state--arrived,
+.player-row .dr-state--redeemed { color: var(--cy-success); }
+
+
+.review-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cy-space-3);
+  margin-top: var(--cy-space-3);
+  padding: var(--cy-space-3);
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-color-status-warning-soft);
+  font-size: var(--cy-font-label);
+  color: var(--cy-text-body);
+}
+.review-retry {
+  flex: none;
+  font-weight: 600;
+  color: var(--cy-text-title);
+}
+.review-row {
+  padding: var(--cy-space-3);
+}
+.review-row + .review-row { border-top: 1rpx solid var(--cy-border-card); }
+.review-main { min-width: 0; }
+.review-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--cy-space-2);
+  margin-top: var(--cy-space-3);
+}
+.review-btn {
+  min-width: 112rpx;
+  padding: var(--cy-space-2) var(--cy-space-3);
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-btn-solid-bg);
+  text-align: center;
+  font-size: var(--cy-font-label);
+  font-weight: 600;
+  color: var(--cy-btn-solid-fg);
+}
+.review-btn--ghost {
+  background: var(--cy-bg-card-2);
+  color: var(--cy-text-title);
+}
+
+/* 「更多」抽屉的分组头与禁用行(2026-09-05) */
+.dgroup-head {
+  display: block;
+  padding: var(--cy-space-4) var(--cy-space-1) var(--cy-space-2);
+  font-size: var(--cy-font-caption);
+  color: var(--cy-text-secondary);
+}
+.dpick--off { opacity: .42; }
+.dpick-chev { flex: none; color: var(--cy-text-placeholder); }
+.dpick-name--danger { color: var(--cy-danger); }
+.dpick-tag {
+  flex: none;
+  padding: var(--cy-space-1) var(--cy-space-3);
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-bg-card-2);
+  font-size: var(--cy-font-caption);
+  color: var(--cy-text-secondary);
+}
+/* 稿 468:1162:开关类标签的「开」用软绿(#E4F5EE 底 / #0E7A57 字),
+   与进度行的「已通过」同一对 token;「关」和「可改/不可用」仍是中性灰。
+   ⚠️ 必须排在 .dpick-tag **之后** —— 同特异度下后写的赢,写在前面整条会被基类覆盖掉。 */
+.dpick-tag--on {
+  background: var(--cy-color-status-success-soft);
+  color: var(--cy-success);
+}
+
+.more-card { margin-bottom: var(--cy-space-3); }
+
+/* 走查 v2 R04/R16:底部进度(参考 shedsgns 视频:洋红勾、蓝色状态字、子项分支、最后一步蓝锁 + 琥珀标签) */
+.pg { margin: var(--cy-space-5) var(--cy-page-x) var(--cy-space-6); padding: var(--cy-space-4) var(--cy-space-4) var(--cy-space-1); border-radius: var(--cy-radius-xl); background: var(--cy-bg-card); }
+.pg-h { margin-bottom: var(--cy-space-3); }
+.pg-t { font-size: var(--cy-type-section-title); font-weight: 700; color: var(--cy-text-title); }
+.pg-row { display: flex; gap: var(--cy-space-3); padding-bottom: var(--cy-space-4); }
+.pg-rail { width: 36rpx; flex: none; display: flex; flex-direction: column; align-items: center; }
+.pg-dot { width: 36rpx; height: 36rpx; border-radius: 50%; flex: none; box-sizing: border-box; display: flex; align-items: center; justify-content: center; background: var(--cy-bg-card); box-shadow: 0 0 0 2rpx rgba(0, 0, 0, 0.06), 0 4rpx 12rpx rgba(0, 0, 0, 0.08); /* ds-ok: 进度圆点浮起,按参考 */ color: var(--cy-text-inverse, #fff); }
+.pg-dot--done { background: #E5338F; box-shadow: none; } /* ds-ok: 进度洋红,按业主参考视频 */
+.pg-dot--run { border: 4rpx solid #E5338F; box-shadow: 0 0 0 8rpx rgba(229, 51, 143, 0.14); } /* ds-ok: 同上 */
+.pg-dot--lock { border: 3rpx solid #2F7FEA; box-shadow: none; color: #2F7FEA; } /* ds-ok: 锁定步蓝色,按参考 */
+.pg-line { flex: 1; width: 4rpx; min-height: 28rpx; margin-top: 4rpx; background: var(--cy-bg-card-2); }
+.pg-line--done { background: #E5338F; } /* ds-ok: 同上 */
+.pg-row:last-child .pg-line { display: none; }
+.pg-m { flex: 1; min-width: 0; }
+.pg-top { display: flex; align-items: center; justify-content: space-between; gap: var(--cy-space-2); min-height: 36rpx; }
+.pg-lab { font-size: var(--cy-font-body); font-weight: 600; color: var(--cy-text-title); }
+.pg-row--todo .pg-lab { color: var(--cy-text-tertiary); font-weight: 500; }
+.pg-row--done .pg-lab { color: var(--cy-text-secondary); font-weight: 500; }
+.pg-row--lock .pg-lab { color: var(--cy-text-title); font-weight: 600; }
+.pg-stat { font-size: var(--cy-font-label); font-weight: 600; color: #2F7FEA; } /* ds-ok: 状态蓝字,按参考 */
+.pg-ask { font-size: var(--cy-font-caption); font-weight: 600; color: #B8650A; background: #FDEBD3; padding: 4rpx 18rpx; border-radius: 12rpx; } /* ds-ok: 琥珀标签,按参考 */
+.pg-sub { margin-top: var(--cy-space-2); display: flex; flex-direction: column; gap: var(--cy-space-2); }
+.pg-si { display: flex; align-items: center; gap: var(--cy-space-2); font-size: var(--cy-font-label); color: var(--cy-text-secondary); }
+.pg-si-dot { width: 10rpx; height: 10rpx; border-radius: 50%; flex: none; background: var(--cy-bg-card-2); }
+.pg-si--now { color: var(--cy-text-title); }
+.pg-si--now .pg-si-dot { background: #E5338F; } /* ds-ok: 同上 */
+.pg-si-t { flex: 1; min-width: 0; }
+.pg-go { flex: none; font-weight: 600; color: #2F7FEA; } /* ds-ok: 同上 */
+
+/* 走查 v2 R14:自由探索待俱乐部承办提示 */
+
+/* 进度对齐定稿原型:做完是实心洋红圆 + 白勾(CSS 画),表头右侧写类型 · 身份,子项从当前步分出去 */
+.pg-h { display: flex; align-items: baseline; justify-content: space-between; }
+.pg-hr { font-size: var(--cy-font-caption); color: var(--cy-text-tertiary); }
+.pg-dot--done { position: relative; }
+.pg-dot--done::after { content: ""; position: absolute; left: 50%; top: 46%; width: 12rpx; height: 7rpx; margin: -5rpx 0 0 -6rpx; border-left: 3rpx solid #fff; border-bottom: 3rpx solid #fff; transform: rotate(-45deg); } /* ds-ok: 白勾 */
+.pg-row { padding-bottom: var(--cy-space-5); }
+.pg-sub { position: relative; margin-left: -44rpx; padding-left: 48rpx; }
+.pg-sub::before { content: ""; position: absolute; left: 16rpx; top: -20rpx; bottom: 14rpx; width: 18rpx; border-left: 3rpx solid var(--cy-bg-card-2); border-bottom: 3rpx solid var(--cy-bg-card-2); border-bottom-left-radius: 18rpx; }
+.pg-si--ok .pg-si-dot { background: #BDBDC4; } /* ds-ok: 已就绪子项灰点 */
+.pg-go-ico { flex: none; margin-left: -6rpx; color: #2F7FEA; } /* ds-ok: 同上 */
+
+/* 走查 v2 R08:更多 = 白底发丝线行(Threads 式),危险项红字 */
+.more-group { padding: 0 var(--cy-space-2); }
+.more-group + .more-group { border-top: 12rpx solid var(--cy-bg-page); }
+.more-group .dpick { min-height: 108rpx; padding: 0 var(--cy-space-3); background: transparent; border-radius: 0; }
+.more-group .dpick-name { font-size: var(--cy-font-body); font-weight: 500; }
+
+/* 走查 v2 R05:俱乐部弹窗顶部三格 + 行尾「邀约 / 主页」 */
+.cs-sum { display: flex; gap: var(--cy-space-2); margin-bottom: var(--cy-space-3); }
+.cs-sum-i { flex: 1; display: flex; flex-direction: column; padding: var(--cy-space-3) var(--cy-space-4); border-radius: var(--cy-radius-lg); background: var(--cy-bg-card); }
+.cs-sum-n { font-size: var(--cy-font-display); font-weight: 800; color: var(--cy-text-title); font-variant-numeric: tabular-nums; }
+.cs-sum-l { font-size: var(--cy-font-caption); color: var(--cy-text-secondary); }
+.cs-pill { flex: none; height: 60rpx; line-height: 60rpx; padding: 0 var(--cy-space-4); margin-left: var(--cy-space-2); border-radius: var(--cy-radius-pill); background: var(--cy-btn-solid-bg); color: var(--cy-btn-solid-fg); font-size: var(--cy-font-caption); font-weight: 600; }
+.cs-pill--g { background: var(--cy-bg-card-2); color: var(--cy-text-title); }
+.cs-list .dr { align-items: center; }
+.cs-list .dr-avatar { width: 80rpx; height: 80rpx; }
+.cs-list .dr-name, .cs-list .dr-sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-list .dr-line1 { flex-wrap: nowrap; }
+.cs-list .dr-line1 .dr-name { flex: 0 1 auto; min-width: 0; }
+.cs-list .dr-line1 .dr-tag { flex: none; }
+
+/* 走查 v2 R06:还没人接的站用主题图(不再是加号框) */
+.dn-img { width: 88rpx; height: 88rpx; flex: none; border-radius: var(--cy-radius-md); background: var(--cy-bg-card-2); }
+.dn-img--none { display: flex; align-items: center; justify-content: center; color: var(--cy-text-tertiary); }
+.dn .dn-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 走查 v2 R07(业主 2026-10-30 定稿 r_cust3):客户弹窗——数字格汇总、自适应宽度的筛选胶囊、
+   行内头像 / 名字 + 场次 / 右侧状态胶囊,行间发丝线。核销时间并进场次那一行。 */
+.dsum { display: flex; gap: 16rpx; }
+.dsum-i { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8rpx; padding: 24rpx 24rpx 22rpx; border-radius: var(--cy-radius-lg); background: var(--cy-bg-card); }
+.dsum-i .dsum-n { font-size: var(--cy-font-display); line-height: 52rpx; font-weight: 700; color: var(--cy-text-title); font-variant-numeric: tabular-nums; }
+.dsum-l { font-size: var(--cy-font-caption); color: var(--cy-text-secondary); white-space: nowrap; }
+.dfil { gap: 16rpx; margin-top: 28rpx; flex-wrap: wrap; }
+.dfil-item { flex: none; padding: 0 28rpx; height: 64rpx; background: var(--cy-bg-card); color: var(--cy-text-title); }
+.player-list { margin-top: 16rpx; }
+.player-row { min-height: 0; padding: 28rpx 0; gap: 24rpx; align-items: center; }
+.player-row .dr-avatar { width: 80rpx; height: 80rpx; }
+.player-row .dr-text { margin-top: 0; min-width: 0; }
+.player-row .dr-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-row .dr-sub { margin-top: 6rpx; color: var(--cy-text-secondary); }
+.player-row .dr-state { flex: none; padding: 6rpx 18rpx; border-radius: var(--cy-radius-pill); font-weight: 600; }
+.player-row .dr-state--pending { color: var(--cy-color-status-warning); background: var(--cy-color-status-warning-soft); }
+.player-row .dr-state--contacted { color: var(--cy-text-secondary); background: var(--cy-bg-card-2); }
+.player-row .dr-state--arrived,
+.player-row .dr-state--redeemed { color: var(--cy-success); background: var(--cy-color-status-success-soft); }
+.player-row .dr-state--refunded { color: var(--cy-danger); background: var(--cy-color-status-danger-soft); }
+.dfil-item.dfil-item--on { background: var(--cy-text-title); color: var(--cy-btn-solid-fg); }
+
+/* 走查 v2 R07:客户弹窗最后一行「定向广播」 */
+.bcast-row { display: flex; align-items: center; gap: 12rpx; margin-top: 24rpx; padding: 32rpx; border-radius: var(--cy-radius-lg); background: var(--cy-bg-card); color: var(--cy-text-tertiary); }
+.bcast-t { flex: none; font-size: var(--cy-font-body); font-weight: 600; color: var(--cy-text-title); }
+.bcast-s { flex: 1; min-width: 0; text-align: right; font-size: var(--cy-font-caption); color: var(--cy-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 走查 v2 W2-07 / F7:客户名单段头(还没到店 / 已核销)与未售票态 */
+.pl-h { display: flex; align-items: baseline; gap: 12rpx; margin-top: var(--cy-space-4); font-size: var(--cy-font-label); font-weight: 600; color: var(--cy-text-secondary); }
+.pl-h-n { font-variant-numeric: tabular-nums; color: var(--cy-text-tertiary); }
+.dempty--closed { font-size: var(--cy-font-subtitle); font-weight: 600; color: var(--cy-text-title); }
+
+/* ===== 2026-10-31 业主批准 P-6:邀约状态条 / 站点档位 / 叠层内容 ===== */
+/* 三格状态:走完的实心,当前一格在走(进度条从左往右填) */
+.trk { display: flex; gap: var(--cy-space-1); margin-top: var(--cy-space-1); }
+.trk-i { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6rpx; font-size: var(--cy-font-micro); color: var(--cy-text-secondary); }
+.trk-bar { height: 6rpx; border-radius: var(--cy-radius-pill); background: var(--cy-bg-card-2); overflow: hidden; }
+.trk-fill { width: 100%; height: 100%; background: var(--cy-text-title); transform: scaleX(0); transform-origin: 0 50%; transition: transform .4s ease-out; }
+.trk-i.is-done .trk-fill { transform: scaleX(1); }
+.trk-i.is-done, .trk-i.is-cur { color: var(--cy-text-title); font-weight: 600; }
+.trk-i.is-cur .trk-fill { transform: scaleX(.5); }
+/* 站点行:名字下面档位小标 + 条件 */
+.st3-t { display: flex; align-items: center; gap: var(--cy-space-1); min-width: 0; margin-top: 4rpx; }
+.tchip { flex: none; padding: 2rpx 14rpx; border-radius: var(--cy-radius-pill); font-size: var(--cy-font-micro); font-weight: 700; }
+.tchip--perk { background: var(--cy-color-status-success-soft); color: var(--cy-success); }
+.tchip--traffic { background: var(--cy-color-status-info-soft); color: var(--cy-info); }
+.tchip--revshare { background: var(--cy-color-status-warning-soft); color: var(--cy-color-status-warning); }
+/* 叠层:收件人 / 合作方式 / 邀请语 / 发送 */
+.lv-to { display: flex; align-items: center; gap: var(--cy-space-3); padding: var(--cy-space-2) 0; }
+.lv-to-t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.lv-to-n { font-size: var(--cy-font-subtitle); font-weight: 700; color: var(--cy-text-title); }
+.lv-to-s { margin-top: 4rpx; font-size: var(--cy-font-caption); color: var(--cy-text-secondary); }
+.lv-terms { padding: var(--cy-space-3); }
+.lv-seg { display: flex; padding: 6rpx; border-radius: var(--cy-radius-pill); background: var(--cy-bg-card-2); }
+.lv-seg-i { flex: 1; height: 68rpx; line-height: 68rpx; text-align: center; border-radius: var(--cy-radius-pill); font-size: var(--cy-font-body); color: var(--cy-text-secondary); }
+.lv-seg-i.is-on { background: var(--cy-bg-card); color: var(--cy-text-title); font-weight: 700; }
+.lv-fee { display: flex; align-items: center; justify-content: space-between; margin-top: var(--cy-space-3); font-size: var(--cy-font-body); color: var(--cy-text-secondary); }
+.lv-fee-v { display: flex; align-items: baseline; gap: 6rpx; color: var(--cy-text-title); }
+.lv-fee-in { width: 160rpx; text-align: right; font-size: var(--cy-font-display); font-weight: 800; font-style: italic; color: var(--cy-text-title); }
+.lv-msg { padding: var(--cy-space-3); }
+.lv-msg-in { width: 100%; min-height: 120rpx; font-size: var(--cy-font-body); line-height: 1.6; color: var(--cy-text-title); }
+.lv-err { display: block; margin-top: var(--cy-space-2); font-size: var(--cy-font-caption); color: var(--cy-color-action-danger-bg); }
+.lv-note { display: block; margin-top: var(--cy-space-2); font-size: var(--cy-font-caption); color: var(--cy-text-secondary); }
+.lv-send { height: var(--cy-btn-h); line-height: var(--cy-btn-h); text-align: center; border-radius: var(--cy-radius-pill); background: var(--cy-btn-solid-bg); color: var(--cy-btn-solid-fg); font-size: var(--cy-font-body); font-weight: 700; }
+.lv-send.is-busy { opacity: .5; }
+/* 俱乐部主页 */
+.lv-cover { display: block; width: 100%; height: 300rpx; border-radius: var(--cy-radius-lg); }
+.lv-id { display: flex; align-items: center; gap: var(--cy-space-3); margin-top: var(--cy-space-3); }
+.lv-logo { width: 96rpx; height: 96rpx; }
+.lv-home-n { font-size: var(--cy-font-title); font-weight: 800; color: var(--cy-text-title); }
+.lv-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12rpx; margin: var(--cy-space-3) 0 var(--cy-space-2); }
+.lv-stat { display: flex; flex-direction: column; padding: 20rpx 16rpx; border-radius: var(--cy-radius-md); background: var(--cy-bg-card); }
+.lv-stat-n { font-size: var(--cy-font-display); line-height: 1.1; font-weight: 800; font-style: italic; color: var(--cy-text-title); font-variant-numeric: tabular-nums; }
+.lv-stat-l { margin-top: 4rpx; font-size: var(--cy-font-micro); color: var(--cy-text-secondary); }
+.lv-tags { display: flex; flex-wrap: wrap; gap: 12rpx; margin-bottom: var(--cy-space-2); }
+.lv-tag { padding: 8rpx 20rpx; border-radius: var(--cy-radius-pill); background: var(--cy-bg-card); font-size: var(--cy-font-caption); color: var(--cy-text-secondary); }
+.lv-tag--area { background: transparent; box-shadow: inset 0 0 0 1rpx var(--cy-border); }
+.lv-bio { display: block; font-size: var(--cy-font-body); line-height: 1.7; color: var(--cy-text-secondary); white-space: pre-wrap; }
+.lv-acts { white-space: nowrap; }
+.lv-act { display: inline-flex; flex-direction: column; width: 260rpx; margin-right: var(--cy-space-2); vertical-align: top; }
+.lv-act-img { width: 260rpx; height: 180rpx; border-radius: var(--cy-radius-md); background: var(--cy-bg-card-2); }
+.lv-act-t { margin-top: 8rpx; font-size: var(--cy-font-caption); font-weight: 600; color: var(--cy-text-title); white-space: normal; }
+.lv-post { padding: var(--cy-space-3); display: flex; flex-direction: column; gap: 8rpx; }
+.lv-post-t { font-size: var(--cy-font-body); line-height: 1.6; color: var(--cy-text-title); }
+.lv-post-m { font-size: var(--cy-font-micro); color: var(--cy-text-secondary); }
+.lv-members { display: flex; align-items: center; flex-wrap: wrap; gap: 12rpx; }
+.lv-members .dr-avatar { width: 64rpx; height: 64rpx; }
+.lv-members-more { font-size: var(--cy-font-caption); color: var(--cy-text-secondary); }
+/* 这一站的档位 */
+.lv-st { margin-bottom: var(--cy-space-2); font-size: var(--cy-font-body); font-weight: 700; color: var(--cy-text-title); }
+.lv-st--acts { display: flex; align-items: center; }
+.lv-st-t { flex: 1; min-width: 0; }
+.cs-pill.cs-pill--share { width: auto; min-height: 0; margin: 0 0 0 var(--cy-space-2); }
+.cs-pill--share::after { border: none; }
+.lv-tiers { display: flex; flex-direction: column; gap: var(--cy-space-2); }
+.lv-tier { padding: var(--cy-space-3); border-radius: var(--cy-radius-lg); background: var(--cy-bg-card); box-shadow: inset 0 0 0 2rpx transparent; }
+.lv-tier.is-on { box-shadow: inset 0 0 0 4rpx var(--cy-text-title); }
+.lv-tier-h { display: flex; align-items: center; justify-content: space-between; font-size: var(--cy-font-subtitle); font-weight: 700; color: var(--cy-text-title); }
+.lv-tier-v { display: flex; align-items: baseline; gap: 4rpx; font-size: var(--cy-font-caption); font-weight: 600; color: var(--cy-text-secondary); }
+.lv-tier-in { width: 120rpx; text-align: right; font-size: var(--cy-font-subtitle); font-weight: 800; color: var(--cy-text-title); }
+.lv-tier-d { display: block; margin-top: 8rpx; font-size: var(--cy-font-caption); line-height: 1.6; color: var(--cy-text-secondary); }
+.lv-cnt { display: flex; align-items: center; justify-content: space-between; padding: var(--cy-space-2) var(--cy-space-3); font-size: var(--cy-font-body); color: var(--cy-text-title); }
+.lv-step { display: flex; align-items: center; gap: var(--cy-space-2); }
+.lv-step-b { width: var(--cy-btn-h); height: var(--cy-btn-h); display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--cy-bg-card-2); font-size: var(--cy-font-title); color: var(--cy-text-title); }
+.lv-step-minus { width: 28rpx; height: 4rpx; border-radius: var(--cy-radius-pill); background: currentColor; }
+.lv-step-v { min-width: 80rpx; text-align: center; font-size: var(--cy-font-subtitle); font-weight: 800; color: var(--cy-text-title); font-variant-numeric: tabular-nums; }
+.lv-inv3 { display: flex; align-items: center; gap: var(--cy-space-2); font-size: var(--cy-font-body); color: var(--cy-text-title); }
+/* 2026-10-31 P-6 俱乐部主办深色(真机走查):封面角标在照片压暗层上恒为白字;关系入口的 SVG 图标是深色线稿,深色底上反相 */
+.theme-dark .hero-status { color: #FFFFFF; } /* ds-ok 照片压暗层上的白字 */
+.theme-dark .qa-ico-img { filter: invert(1); }
+
+/* ===== 2026-11-01 业主:与俱乐部活动详情同构 —— 主题卡(→ 剧情与玩法)与底部固定条 ===== */
+.tcard {
+  display: flex; gap: var(--cy-space-3); align-items: flex-start;
+  padding: 20rpx var(--cy-space-3) 20rpx 20rpx;
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-bg-card);
+}
+.tcard-cover { flex: none; width: 192rpx; height: 192rpx; border-radius: var(--cy-radius-md); background: var(--cy-bg-card-2); }
+.tcard-body { flex: 1 1 0; min-width: 0; min-height: 152rpx; display: flex; flex-direction: column; gap: var(--cy-space-1-5); padding-top: 4rpx; }
+.tcard-name { font-size: var(--cy-font-subtitle); font-weight: 700; color: var(--cy-text-title); }
+.tcard-sub { font-size: var(--cy-font-label); color: var(--cy-text-secondary); }
+.tcard-more { margin-top: auto; display: flex; align-items: center; gap: 8rpx; font-size: var(--cy-font-label); font-weight: 600; color: var(--cy-text-title); }
+
+.foot-space { height: calc(var(--cy-btn-h) + 88rpx + env(safe-area-inset-bottom) + var(--cy-space-5)); }
+.bottom-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  padding: 0 var(--cy-page-x) calc(env(safe-area-inset-bottom) + var(--cy-space-3));
+  background: var(--cy-bg-page); /* 固定底栏自带不透明底,正文不从下面透出来 */
+}
+
+/* ===== 2026-11-01 业主定稿(审阅页 65gFrW…):定向广播叠层 + 客户多选,参考 Revolut 选收款人 ===== */
+.pl-sel { flex: none; margin-left: auto; padding: 12rpx 4rpx 12rpx 24rpx; font-size: var(--cy-font-label); font-weight: 600; color: var(--cy-text-title); }
+.pl-check { flex: none; position: relative; width: 48rpx; height: 48rpx; margin-right: 8rpx; box-sizing: border-box; border-radius: var(--cy-radius-pill); border: 3rpx solid var(--cy-color-border-strong); display: flex; align-items: center; justify-content: center; color: var(--cy-color-action-primary-fg); }
+.pl-check--on { border: 0; background: var(--cy-color-action-primary-bg); }
+.pl-check--on::after, .bx-tick::after { content: ""; width: 10rpx; height: 20rpx; margin-top: -4rpx; border: solid currentColor; border-width: 0 4rpx 4rpx 0; transform: rotate(45deg); }
+.player-row--off .dr-avatar, .player-row--off .dr-text, .player-row--off .pl-check { opacity: .4; }
+.pl-nomsg { flex: none; font-size: var(--cy-font-caption); color: var(--cy-text-secondary); }
+
+.bx-to { display: flex; align-items: baseline; gap: 16rpx; min-height: 72rpx; padding-bottom: 16rpx; }
+.bx-to-t { font-size: var(--cy-font-body); color: var(--cy-text-secondary); }
+.bx-to-n { font-size: var(--cy-font-display); font-weight: 800; color: var(--cy-text-title); font-variant-numeric: tabular-nums; }
+.bx-clear { margin-left: auto; align-self: center; padding: 12rpx 0 12rpx 24rpx; font-size: var(--cy-font-label); font-weight: 600; color: var(--cy-text-secondary); }
+.bx-strip { width: calc(100% + 2 * var(--cy-page-x)); margin-left: calc(-1 * var(--cy-page-x)); white-space: nowrap; }
+.bx-strip-in { display: inline-flex; gap: 28rpx; padding: 12rpx var(--cy-page-x); }
+.bx-p { flex: none; width: 128rpx; display: inline-flex; flex-direction: column; align-items: center; gap: 8rpx; }
+.bx-av { position: relative; width: 112rpx; height: 112rpx; border-radius: var(--cy-radius-pill); display: flex; align-items: center; justify-content: center; background: var(--cy-bg-card); font-size: var(--cy-font-subtitle); font-weight: 700; color: var(--cy-text-title); }
+.bx-av-img { width: 100%; height: 100%; border-radius: var(--cy-radius-pill); }
+.bx-av--sk { background: var(--cy-color-skeleton-base); }
+.bx-sk-t { width: 80rpx; height: 24rpx; border-radius: var(--cy-radius-pill); background: var(--cy-color-skeleton-base); }
+.bx-p--on .bx-av { box-shadow: 0 0 0 4rpx var(--cy-bg-page), 0 0 0 8rpx var(--cy-color-action-primary-bg); }
+.bx-tick { position: absolute; right: -8rpx; bottom: -8rpx; width: 44rpx; height: 44rpx; box-sizing: border-box; border-radius: var(--cy-radius-pill); border: 4rpx solid var(--cy-bg-page); background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg); display: none; align-items: center; justify-content: center; }
+.bx-p--on .bx-tick { display: flex; }
+.bx-p--off .bx-av, .bx-p--off .bx-pn { opacity: .4; }
+.bx-pn { max-width: 128rpx; font-size: var(--cy-font-label); font-weight: 600; color: var(--cy-text-title); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bx-ps { font-size: var(--cy-font-caption); color: var(--cy-text-secondary); white-space: nowrap; }
+.bx-ps--arrived { color: var(--cy-color-status-success); }
+.bx-p--off .bx-ps { color: var(--cy-text-secondary); }
+.bx-quiet { min-height: 156rpx; display: flex; align-items: center; justify-content: center; gap: 24rpx; border-radius: var(--cy-radius-lg); background: var(--cy-bg-card); font-size: var(--cy-font-label); color: var(--cy-text-secondary); }
+.bx-quiet-a { padding: 16rpx 8rpx; font-weight: 600; color: var(--cy-text-title); }
+.bx-seg { display: flex; flex-wrap: wrap; gap: 16rpx; margin: 28rpx 0; }
+.bx-chip { min-height: 68rpx; padding: 0 28rpx; display: flex; align-items: center; border-radius: var(--cy-radius-pill); background: var(--cy-bg-card); font-size: var(--cy-font-label); font-weight: 600; color: var(--cy-text-title); }
+.bx-chip--on { background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg); }
+.bx-field { position: relative; border-radius: var(--cy-radius-lg); background: var(--cy-bg-card); }
+.bx-ta { display: block; width: 100%; height: 224rpx; box-sizing: border-box; padding: 28rpx 28rpx 56rpx; font-size: var(--cy-font-body); line-height: 1.5; color: var(--cy-text-title); }
+.bx-count { position: absolute; right: 24rpx; bottom: 16rpx; font-size: var(--cy-font-caption); color: var(--cy-text-secondary); font-variant-numeric: tabular-nums; }
+.bx-send { min-height: var(--cy-btn-h); display: flex; align-items: center; justify-content: center; border-radius: var(--cy-radius-pill); background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg); font-size: var(--cy-type-button); font-weight: 700; }
+.bx-send--off { opacity: .3; }
+.bx-sent { display: flex; flex-direction: column; align-items: center; gap: 12rpx; padding: 36rpx 0 44rpx; }
+.bx-sent-ok { width: 112rpx; height: 112rpx; margin-bottom: 16rpx; border-radius: var(--cy-radius-pill); background: var(--cy-color-status-success); color: var(--cy-color-text-inverse); display: flex; align-items: center; justify-content: center; }
+.bx-sent-ok::after { content: ""; width: 22rpx; height: 44rpx; margin-top: -8rpx; border: solid currentColor; border-width: 0 6rpx 6rpx 0; transform: rotate(45deg); }
+.bx-sent-t { font-size: var(--cy-font-body); color: var(--cy-text-secondary); }
+.bx-sent-n { font-size: var(--cy-font-page-title); font-weight: 800; color: var(--cy-text-title); font-variant-numeric: tabular-nums; }
+.bx-rows { border-radius: var(--cy-radius-lg); background: var(--cy-bg-card); overflow: hidden; }
+.bx-row { display: flex; align-items: center; justify-content: space-between; gap: 24rpx; padding: 26rpx 28rpx; }
+.bx-row + .bx-row { border-top: 1rpx solid var(--cy-color-border-subtle); }
+.bx-row-t { font-size: var(--cy-font-body); color: var(--cy-text-title); }
+.bx-row-s { font-size: var(--cy-font-label); color: var(--cy-text-secondary); }
+.bx-quote { margin-top: 24rpx; padding: 28rpx; border-radius: var(--cy-radius-lg); background: var(--cy-bg-card); font-size: var(--cy-font-body); line-height: 1.5; color: var(--cy-text-title); }
+
+/* 细节打磨二期 L1/L5/L7 */
+.sec-action { transition: var(--cy-tr-press); }
+.tcard { transition: var(--cy-tr-press); }
+.pg-go { transition: var(--cy-tr-press); }
+.rules { transition: var(--cy-tr-press); }
+.dr-copy { transition: var(--cy-tr-press); }
+.cs-pill { transition: var(--cy-tr-press); }
+.cs-pill--g { transition: var(--cy-tr-press); }
+.review-retry { transition: var(--cy-tr-press); }
+.review-btn { transition: var(--cy-tr-press); }
+.review-btn--ghost { transition: var(--cy-tr-press); }
+.dr-sub { transition: var(--cy-tr-press); }
+.dpick { transition: var(--cy-tr-press); }
+.dfil-item { transition: var(--cy-tr-press); }
+.pl-sel { transition: var(--cy-tr-press); }
+.bcast-row { transition: var(--cy-tr-press); }
+.bx-clear { transition: var(--cy-tr-press); }
+.bx-quiet-a { transition: var(--cy-tr-press); }
+.bx-chip { transition: var(--cy-tr-press); }
+.bx-send { transition: var(--cy-tr-press); }
+.lv-seg-i { transition: var(--cy-tr-press); }
+.lv-send { transition: var(--cy-tr-press); }
+.lv-tier { transition: var(--cy-tr-press); }
+.lv-step-b { transition: var(--cy-tr-press); }
+.metric-n,
+.metric-l,
+.pg-stat,
+.lv-fee,
+.lv-fee-in,
+.lv-stat-l,
+.lv-cnt { font-variant-numeric: tabular-nums; }

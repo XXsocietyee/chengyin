@@ -1,0 +1,221 @@
+const { readReducedMotion } = require('../../utils/motion-preference.js');
+const cyToast = require('../../utils/toast.js');
+const { readPageStyle } = require('../../utils/font-scale.js');
+const app = getApp();
+const policy = require('../../utils/identity/identity-policy.js');
+const merchantTheme = require('../../utils/merchant-theme.js');
+const merchantAccessPolicy = require('../../utils/merchant-access-policy.js');
+
+// 2026-10-28 业主定稿原型 v21:货架(主题 / 玩法 tab、精选、标签、货架、分类页)整块移进
+// templatedetail 分包的 tpl-shelf 组件，本页只留顶栏、发布入口与底栏。
+// 主题点开 → topic-preview(卡堆预览 +「用这个模板」);玩法点开 → 既有 templatedetail。
+Page({
+  _pubLoaded: false,
+  data: {
+    reducedMotion: false,
+    pageMetaStyle: '',
+    operationScope: '',
+    merchantAccessLoaded: false,
+    canManageMerchantProjects: false,
+    // 发布广场 —— 发布能力卡(/api/publish/home)
+    pub: {
+      role: 'player',
+      roleText: '玩家',
+      isMerchant: false,
+      permission: {},
+      quota: { maxThemes: null, themesOnline: 0, themesRemaining: null },
+      projectSummary: { total: 0, pending: 0, online: 0, offline: 0, rejected: 0 }
+    },
+    publishSheetShow: false,
+
+    statusBarHeight: getApp().globalData.statusBarHeight,
+    navBarHeight: getApp().globalData.navBarHeight,
+    tabBarRaised: true,
+    topbarSolid: false,
+
+    // 胶囊安全区：胶囊底部 + 额外间距，整体页面从此线开始
+    safeTop: 0,
+    titBarHeight: 0,
+    headerRightInset: 0
+  },
+
+  onLoad(options) {
+    options = options || {};
+    const mi = getApp().globalData.menuButtonInfo || {};
+    const sh = this.data.statusBarHeight;
+    const capsuleBottom = mi.bottom || (sh + this.data.navBarHeight);
+    const safeTop = capsuleBottom + 8;  // 胶囊底 + 8px 呼吸空间
+    const windowInfo = wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync();
+    const windowWidth = Number(windowInfo.windowWidth) || 375;
+    const capsuleLeft = Number(mi.left) || 0;
+    const headerRightInset = capsuleLeft > 0 && capsuleLeft < windowWidth
+      ? windowWidth - capsuleLeft + 8
+      : windowWidth * 32 / 750;
+    this.setData({
+      operationScope: (options.mode === 'merchant' || options.scope === 'MERCHANT') ? 'MERCHANT' : '',
+      safeTop: safeTop,
+      titBarHeight: safeTop - sh,     // titBar = 胶囊底到状态栏底的距离
+      headerRightInset: headerRightInset
+    });
+  },
+
+  onShow() {
+    this.setData({ pageMetaStyle: readPageStyle() });
+    wx.hideTabBar();
+    // 收敛:商家玩家共用发布广场,底部 tabBar 按本地身份立即渲染(避免等 /api/publish/home 异步返回时闪 consumer)
+    // pub.role 同步用本地快照预填:发布弹窗的活动卡锁态在接口返回前也判得对(权威值随 getPublishHome 覆盖)
+    const merchantView = this.data.operationScope === 'MERCHANT'
+      || policy.isMerchantView({ role: app.getUserRole(), userType: app.getUserType() });
+    if (merchantView) merchantTheme.merchantPageShow();
+    else merchantTheme.merchantPageRestore();
+    // L06-160:reducedMotion 并入这次 setData(字阶仍在 onShow 开头单独写,dynamic-type 合同要求)
+    this.setData({
+      reducedMotion: readReducedMotion(),
+      tabBarRaised: true,
+      isMerchant: merchantView,
+      'pub.role': app.getUserRole()
+    });
+    // L06-161/162:凡商家视角都先查发布权限;60 秒内同账号不重拉,失败仍重试
+    if (merchantView && (this.data.merchantAccessError
+      || this._accessUser !== app.getUserID() || Date.now() - (this._accessAt || 0) > 6e4)) this.loadMerchantAccess();
+    // L06-048:发布能力只喂商家可见的发布弹窗(fab 仅商家显示);玩家走 tabBar 自己的发布入口
+    if (merchantView) this.getPublishHome();
+  },
+
+  loadMerchantAccess() {
+    const that = this;
+    app.sendRequest({
+      hideLoading: true,
+      url: '/api/merchant/access/me',
+      method: 'POST',
+      data: {},
+      success(res) {
+        if (!res || res.code != '200') { that.setData({ merchantAccessError: true }); return; }
+        const access = merchantAccessPolicy.normalizeMerchantAccess(res.data);
+        that._accessAt = Date.now(); that._accessUser = app.getUserID();
+        that.setData({ merchantAccessError: false });
+        that.applyMerchantPublishAccess(access.canManageProjects);
+      },
+      // 网络失败不等于没权限：单独记错误态，提供重试，不改写已有权限
+      fail() { that.setData({ merchantAccessError: true }); }
+    });
+  },
+
+  retryMerchantAccess() { this.loadMerchantAccess(); },
+
+  applyMerchantPublishAccess(canManage) {
+    const permission = Object.assign({}, (this.data.pub && this.data.pub.permission) || {}, {
+      canSimplePublish: !!canManage,
+      canProPublish: !!canManage,
+      canCreateTemplate: !!canManage
+    });
+    this.setData({
+      merchantAccessLoaded: true,
+      canManageMerchantProjects: !!canManage,
+      'pub.role': 'merchant',
+      'pub.isMerchant': true,
+      'pub.permission': permission
+    });
+  },
+  // ===== 发布广场:发布能力卡 =====
+  getPublishHome(fromUser) {
+    const that = this;
+    // MC-036:失败不再吞掉 —— 数字保持 0,记 capabilityError;用户点发布时补拉仍失败就提示。
+    const failed = () => {
+      that._capabilityError = true; // 页面上已无能力数字可标注,失败记在实例上,由用户点发布时提示
+      if (fromUser === true) cyToast('发布信息加载失败，请重试');
+    };
+    const ROLE_TEXT = { player: '玩家', club: '俱乐部主理人', merchant: '商家' };
+    app.sendRequest({
+      hideLoading: true,
+      url: '/api/publish/home',
+      method: 'POST',
+      data: {},
+      success(res) {
+        if (!(res && res.code == '200' && res.data)) { failed(); return; }
+        {
+          const d = res.data;
+          const q = d.quota || {};
+          const merchantScoped = that.data.operationScope === 'MERCHANT';
+          const permission = merchantScoped
+            ? Object.assign({}, d.permission || {}, {
+              canSimplePublish: that.data.canManageMerchantProjects,
+              canProPublish: that.data.canManageMerchantProjects,
+              canCreateTemplate: that.data.canManageMerchantProjects
+            })
+            : (d.permission || {});
+          that._pubLoaded = true;
+          that._capabilityError = false;
+          that.setData({
+            pub: {
+              role: merchantScoped ? 'merchant' : (d.role || 'player'),
+              roleText: merchantScoped ? '商家' : (ROLE_TEXT[d.role] || '玩家'),
+              isMerchant: merchantScoped || !!d.isMerchant,
+              permission: permission,
+              quota: {
+                maxThemes: q.maxThemes,
+                themesOnline: q.themesOnline || 0,
+                themesRemaining: q.themesRemaining
+              },
+              projectSummary: d.projectSummary || {}
+            }
+          });
+        }
+      },
+      fail() { failed(); }
+    });
+  },
+
+  // ===== 头部入口:搜索(货架组件里的搜索框)、铃铛=站内收件箱 =====
+  // 2026-10-22 owner 裁决:模板页搜索入口统一走通用搜索(pages/search2),模板作为结果类型出现在那里。
+  goSearch() { wx.navigateTo({ url: '/pages/search2/index' }); },
+  goInbox() { wx.navigateTo({ url: '/subpackageB/pages/im/list/index' }); },
+  onShelfToast(e) { cyToast(((e && e.detail) || {}).text || ''); },
+
+  // ===== 发布弹窗(cy-publish-sheet,唯一发布触发) =====
+  openPublishSheet() {
+    if (this.data.isMerchant && !this.data.canManageMerchantProjects) {
+      cyToast('当前身份不能发布项目');
+      return;
+    }
+    // 能力卡上次没拉成：弹窗打开时补拉一次，不让弹窗锁在默认玩家态
+    if (!this._pubLoaded) this.getPublishHome(true);
+    this.setData({ publishSheetShow: true });
+  },
+  closePublishSheet() { this.setData({ publishSheetShow: false }); },
+
+  onUnload() {
+    this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1;
+    if (this._scrollStopTimer) clearTimeout(this._scrollStopTimer);
+    merchantTheme.merchantPageRestore();
+  },
+
+  onPageScroll(e) {
+    // _lastScrollTop/_scrollStopTimer 不进 data:wxml 从不读,逐帧 setData 是白付的跨线序列化(2026-09-19 性能批3)
+    const currentScrollTop = e.scrollTop || 0;
+    // V3-43:顶栏只在离开顶部后才铺底色;只在越界时 setData,不逐帧写。
+    const topbarSolid = currentScrollTop > 4;
+    if (topbarSolid !== !!this.data.topbarSolid) this.setData({ topbarSolid: topbarSolid });
+    const isScrollingDown = currentScrollTop > (this._lastScrollTop || 0);
+
+    if (this._scrollStopTimer) {
+      clearTimeout(this._scrollStopTimer);
+    }
+
+    if (isScrollingDown && currentScrollTop > 50 && this.data.tabBarRaised) {
+      this.setData({ tabBarRaised: false });
+    }
+
+    this._scrollStopTimer = setTimeout(() => {
+      if (!this.data.tabBarRaised) {
+        this.setData({ tabBarRaised: true });
+      }
+    }, 300);
+
+    this._lastScrollTop = currentScrollTop;
+  },
+
+  onHide() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1;
+    merchantTheme.merchantPageRestore();
+  }
+});

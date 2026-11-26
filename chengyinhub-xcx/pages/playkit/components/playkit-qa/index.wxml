@@ -1,0 +1,162 @@
+<!-- 三种问答共用这一屏,模式由玩法本身决定(type / pick / shot),不从 chip 读。
+     铺成三个组件的话,同一处改动要改三遍,而它们的差别只在中间那一块。
+     ⚠️ 逐值照原型 playkit.html 的 .hdr / .qabody / .qaopt / .qaentry / .qafb。 -->
+<cy-play-stage id="cy-play-stage" skin="{{theme === 'light' ? 'qa' : 'qadark'}}" show="{{show}}" back-label="退出"
+               limit-seconds="{{finished ? 0 : limitSeconds}}" tries="{{triesCap}}" used="{{passed ? 0 : attempts}}"
+               bind:back="onClose" bind:verdict="onVerdict" bind:burn="onBurn">
+  <view class="g-col qa {{burning ? 'qa--burning' : ''}} {{reducedMotion ? 'qa--reduced' : ''}}">
+    <!-- 拍照那一档的大字默认回落成题干(见 advanced-game-preview 的 shotLead)。
+         两处印同一句话时,只留中间那一句 —— 上面再来一遍是重复,不是强调。 -->
+    <view class="qa__q pe pe--blur" wx:if="{{!(mode === 'shot' && shotLead === title)}}">{{title}}</view>
+
+    <view class="qa__body">
+      <!-- 题干附件:商家没配就整块不出。没内容就不要显示提示语 -->
+      <view class="qa__media" wx:if="{{imageUrl}}">
+        <image wx:if="{{!imgFailed}}" class="qa__img" src="{{imageUrl}}" mode="widthFix" bindtap="onPreviewQuestion" binderror="onQuestionImgError" aria-role="button" aria-label="{{imageAlt || '查看题目大图'}}" hover-class="qa__press" hover-stay-time="80" />
+        <view wx:else class="qa__img-fail" aria-role="alert">
+          <text class="qa__img-alt">{{imageAlt || '图片没加载出来'}}</text>
+          <view class="qa__img-retry" bindtap="onRetryQuestionImg" aria-role="button" aria-label="重新加载图片" hover-class="qa__press" hover-stay-time="80">重试</view>
+        </view>
+      </view>
+      <view class="qa__ref" wx:if="{{referenceUrl}}" bindtap="onOpenReference" aria-role="button" aria-label="看不清？查看资料图" hover-class="qa__press" hover-stay-time="80">看不清？查看资料图</view>
+      <view class="qa__audio" wx:if="{{audioUrl}}" bindtap="onToggleAudio"
+            aria-role="button" aria-label="{{playing ? '暂停题目音频' : '播放题目音频'}}"
+            hover-class="qa__press" hover-stay-time="80">{{playing ? '暂停' : '播放这段'}}</view>
+
+      <!-- 前置步骤:先做点什么再答(闭眼盲品那类)。商家没填就不出 -->
+      <!-- 拍照那一档的大字用的就是 lead,这里再画一遍就是同一句话印两遍 -->
+      <view class="qa__lead" wx:if="{{lead && mode !== 'shot'}}">{{lead}}</view>
+
+      <!-- ① 打字作答 -->
+      <!-- ①′ 字符池(F03,服务端给了 letterPool):空格在上、候选字在下(每行 7 个,用掉的置灰);点字填进第一个空格,点已填的格退回 -->
+      <block wx:if="{{mode === 'type' && poolOn}}">
+        <view class="lp__slots" aria-role="group" aria-label="答案格，点已填的格子把字退回">
+          <view wx:for="{{poolCells}}" wx:key="i"
+                class="lp__slot {{item.next ? 'is-next' : ''}} {{typeWrong ? 'is-wrong' : ''}} {{passed ? 'is-ok' : ''}}"
+                data-i="{{item.i}}" bindtap="onPoolSlot"
+                aria-role="{{item.tap && !passed && !finished ? 'button' : 'text'}}"
+                aria-label="第 {{item.i + 1}} 格{{item.ch ? '：' + item.ch : '：空'}}{{item.tap && !passed && !finished ? '，点一下退回' : ''}}"
+                hover-class="{{item.tap && !passed && !finished ? 'lp__press' : ''}}" hover-stay-time="80">{{item.ch}}</view>
+        </view>
+        <view class="lp__grid" wx:if="{{!passed && !finished}}" aria-role="group" aria-label="候选字">
+          <view wx:for="{{poolRows}}" wx:for-item="row" wx:key="r" class="lp__row">
+            <view wx:for="{{row.keys}}" wx:key="k" class="lp__key {{item.used ? 'is-used' : ''}}"
+                  data-k="{{item.k}}" bindtap="onPickPool"
+                  aria-role="button" aria-label="候选字 {{item.ch}}{{item.used ? '，已用' : ''}}" aria-disabled="{{item.used}}"
+                  hover-class="{{item.used ? '' : 'lp__press'}}" hover-stay-time="80">{{item.ch}}</view>
+          </view>
+        </view>
+        <view class="lp__clear {{poolCanClear ? '' : 'is-off'}}" wx:if="{{!passed && !finished}}" bindtap="onClearPool"
+              aria-role="button" aria-label="清空" aria-disabled="{{!poolCanClear}}" hover-class="{{poolCanClear ? 'lp__press' : ''}}" hover-stay-time="80">清空</view>
+      </block>
+      <block wx:elif="{{mode === 'type'}}">
+        <input class="qa__input {{typeWrong ? 'qa__input--wrong' : ''}}" value="{{typed}}" bindinput="onInput" confirm-type="done"
+               disabled="{{passed || finished}}" focus="{{typeWrong && selectAll > 0}}"
+               selection-start="{{typeWrong && selectAll > 0 ? 0 : -1}}" selection-end="{{typeWrong && selectAll > 0 ? selectAll : -1}}"
+               placeholder="在这里作答" placeholder-class="qa__ph" bindconfirm="onSubmitText" />
+      </block>
+
+      <!-- ② 选项作答。每一条的文案、对错、反馈都在它自己里面 -->
+      <!-- ②a 图片选项(l-kits 2026-11-10,照 proto/game gp-kit-embed「玩法 · 嵌入(无框大图)」):
+           一道题 + 四张大图,两列、没有底、没有卡;字母和文案压在图下沿;选中上浮,对 = 描边绿,错 = 描边红 + 红字落在题下。 -->
+      <!-- ②0 证据表(qa.table,2026-11-24 主人批准的原型):规则 + 记录表在上;点行划掉 / 再点恢复,
+           右侧圆点选一行,底部「确认选择」提交。判错:那一行与它违反的规则标红,作者的话落在表下。 -->
+      <view class="qa__tb" wx:elif="{{mode === 'pick' && tableOn}}">
+        <view class="qa__rules" wx:if="{{ruleList.length}}" aria-role="group" aria-label="规则">
+          <view wx:for="{{ruleList}}" wx:key="i" class="qa__rule {{item.hot ? 'is-hot' : ''}} {{item.open ? 'is-open' : ''}}"
+                data-i="{{item.i}}" bindtap="onRule"
+                aria-role="button" aria-label="规则 {{item.k}}：{{item.t}}{{item.hot ? '，没对上' : ''}}"
+                hover-class="qa__press" hover-stay-time="80">
+            <text class="qa__rule-k">{{item.k}}</text>
+            <text class="qa__rule-t">{{item.t}}</text>
+          </view>
+        </view>
+        <scroll-view class="qa__grid" scroll-x scroll-y>
+          <view class="qa__grid-in">
+            <view class="qa__tr qa__tr--h" aria-hidden="true">
+              <view class="qa__td" wx:for="{{tableCols}}" wx:key="*this">{{item}}</view>
+              <view class="qa__pick-h"></view>
+            </view>
+            <view wx:for="{{tableRows}}" wx:key="id" class="qa__tr {{item.struck ? 'is-struck' : ''}} {{item.state}}">
+              <view class="qa__cells" data-i="{{index}}" bindtap="onStrike"
+                    aria-role="button" aria-label="{{item.line}}{{item.struck ? '，已划掉，点一下恢复' : '，点一下划掉'}}"
+                    hover-class="qa__press" hover-stay-time="80">
+                <view class="qa__td" wx:for="{{item.cells}}" wx:for-item="cell" wx:for-index="c" wx:key="c">{{cell}}</view>
+              </view>
+              <view class="qa__radio" data-i="{{index}}" bindtap="onPick"
+                    aria-role="button" aria-label="选这一行：{{item.label}}" aria-selected="{{item.state === 'is-on'}}"
+                    aria-disabled="{{item.struck || finished || passed || submitted}}"
+                    hover-class="{{item.struck ? '' : 'qa__press'}}" hover-stay-time="80">
+                <view class="qa__dot" aria-hidden="true"></view>
+              </view>
+            </view>
+          </view>
+        </scroll-view>
+        <view wx:if="{{anyStruck}}" class="qa__restore" bindtap="onRestoreAll"
+              aria-role="button" aria-label="全部恢复" hover-class="qa__press" hover-stay-time="80">全部恢复</view>
+      </view>
+
+      <view class="qa__opts qa__opts--pic" wx:elif="{{mode === 'pick' && picGrid}}">
+        <view class="qa__pic {{item.state}}"
+              wx:for="{{optionList}}" wx:key="k"
+              data-i="{{index}}" bindtap="onPick"
+              aria-disabled="{{finished || passed || submitted}}" aria-selected="{{item.state === 'is-on'}}" aria-role="button" aria-label="选项 {{item.key}}:{{item.t}}{{item.alt && item.alt !== item.t ? '，' + item.alt : ''}}"
+              hover-class="qa__press" hover-stay-time="80">
+          <image wx:if="{{item.img}}" class="qa__pic-img" src="{{item.img}}" mode="aspectFill" aria-hidden="true" binderror="onOptionImgError" data-i="{{index}}" />
+          <view wx:else class="qa__pic-img qa__pic-img--none" aria-hidden="true">{{item.key}}</view>
+          <view class="qa__pic-ring" aria-hidden="true"></view>
+          <view class="qa__pic-lb"><view class="qa__pic-k">{{item.key}}</view><view class="qa__pic-t">{{item.t}}</view></view>
+          <view class="qa__pic-tag" wx:if="{{item.chosen}}">你的选择</view>
+          <view class="qa__pic-tag" wx:if="{{item.answer}}">正确答案</view>
+        </view>
+      </view>
+
+      <view class="qa__opts" wx:elif="{{mode === 'pick'}}">
+        <view class="qa__opt {{item.state}} {{index === 0 ? 'qa__opt--first' : ''}}"
+              wx:for="{{optionList}}" wx:key="k"
+              data-i="{{index}}" bindtap="onPick"
+              aria-disabled="{{finished || passed || submitted}}" aria-selected="{{item.state === 'is-on'}}" aria-role="button" aria-label="选项 {{item.key}}:{{item.t}}{{item.alt && item.alt !== item.t ? '，' + item.alt : ''}}"
+              hover-class="qa__press" hover-stay-time="80">
+          <view class="qa__opt-main">
+            <view class="qa__opt-k">{{item.key}}</view>
+            <!-- 这儿原先还有「选项配图」和「选项配音」两个角标。删掉的理由:**商家配不了** ——
+                 选项配置只有 {id, label, fb, correct},pickPlayKit 也只过桥 {id, t},
+                 img / audio 全链路没有一处产出。留着它只在夹具里演:实测选项 B 空出一个
+                 方框、选项 C 多一个播放角标,而玩家永远看不到。要做就连配置一起做。 -->
+            <view class="qa__opt-t">{{item.t}}</view>
+          </view>
+          <view class="qa__opt-tag" wx:if="{{item.chosen}}">你的选择</view>
+          <view class="qa__opt-tag" wx:if="{{item.answer}}">正确答案</view>
+        </view>
+      </view>
+
+      <!-- ③ 拍照打卡:提示词大字摆在正中,那句话就是这一屏 -->
+      <block wx:else>
+        <view class="{{shotLead === title ? 'qa__shot-lead' : 'qa__lead'}} pe pe--blur">{{shotLead}}</view>
+        <view class="qa__shot-note" wx:if="{{shotNote}}">{{shotNote}}</view>
+      </block>
+
+      <view class="qa__shot-note" wx:if="{{submitted && !finished && !passed && !feedback}}" aria-live="polite">正在确认答案</view>
+      <view class="qa__fb qa__fb-enter {{passed ? 'qa__fb--ok' : (attempts > 0 || typeWrong ? 'qa__fb--no' : '')}}"
+            wx:if="{{feedback || shownFeedbackImages.length || (judge !== false && (passed || attempts > 0))}}">
+        <!-- 过了就一直写着结果:拍照题过了以后 finished 也为真,原来整块被藏掉,屏上只剩题面,看不出照片过没过(实走复核) -->
+        <view class="qa__fb-h" wx:if="{{judge !== false && (passed || !finished)}}">{{fbHead}}</view>
+        {{feedback || (judge !== false && multi && attempts > 0 && !finished && !passed ? '还不对，可以再选一次。' : '')}}
+        <view class="qa__media" wx:for="{{shownFeedbackImages}}" wx:key="*this"
+              data-i="{{index}}" bindtap="onPreviewFeedback" aria-role="button" aria-label="查看反馈图片"
+              hover-class="qa__press" hover-stay-time="80">
+          <image class="qa__img" src="{{item}}" mode="aspectFill" />
+        </view>
+      </view>
+      <view wx:if="{{finished && answerText}}" class="qa__fb" aria-live="polite">{{answerText}}</view>
+      <view wx:if="{{remember && (finished || passed)}}" class="qa__remember" aria-live="polite">{{remember}}</view>
+    </view>
+  </view>
+
+  <!-- 故事流内嵌且已答对:下面就是「继续故事」,这里不再叠一枚同义的「继续」(实走复核:两枚白按钮上下摞着) -->
+  <view wx:if="{{!(inline && (passed || finished || ctaLabel === '继续'))}}" class="g-btn {{ctaDisabled ? 'g-btn--disabled' : ''}} {{burning ? 'qa__cta--burn' : ''}}"
+        bindtap="onCta"
+        aria-role="button" aria-label="{{ctaLabel}}" hover-class="g-btn--press" hover-stay-time="80">
+    {{ctaLabel}}
+  </view>
+</cy-play-stage>

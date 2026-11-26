@@ -1,0 +1,23 @@
+{
+  "note": "2026-11-21 startup-perf: 主包源码字节棘轮(口径 = scripts/lib/package-graph.js 的 raw:不在任何分包 root 下、且未被 project.config.json packOptions.ignore 排除的文件)。只许往下调;要调高必须在 PR 里写明原因。真实判据仍是 DevTools 编译值(主包 / 每个分包 2MB)。",
+  "main": {
+    "assetBytes": 288069,
+    "assetCeilingBytes": 288069,
+    "rawBytes": 3063166,
+    "rawCeilingBytes": 3095934
+  },
+  "est": {
+    "note": "2026-11-21 play 分包拆分:编译后粗估(scripts/lib/package-graph.js estimate)棘轮。2026-11-22 主包瘦身(#895,真编译器报主包 2061KB > 2048KB):主包与每个分包 est 硬上限 1950KB(真编译上限 2048KB;主包 est/真值 ≈ 1.06,est 1950KB ≈ 真值 1840KB);主包另按基线棘轮,只许往下调,余量不超过 16KB。",
+    "mainBytes": 1983988,
+    "mainCeilingBytes": 1996800,
+    "playLimitBytes": 1996800,
+    "packageLimitBytes": 1996800
+  },
+  "total": {
+    "note": "2026-11-22 AUDIT-1122 A3:全部包(主包 + 全部分包)est 合计的棘轮(口径 = package-graph estimate,资源按 A1 全部计入)。只许往下调,余量不超过 64KB。硬上限按微信「整个小程序所有分包合计 20MB」的保守读法 × 1950/2048 安全系数 = 19500KB;微信现行总上限(各文档说法 16MB / 20MB / 30MB 不一)与 DevTools 真编译总量都待业主在开发者工具里读出后回填 devtoolsTotalBytes。",
+    "estBytes": 17187022,
+    "estCeilingBytes": 17252558,
+    "estLimitBytes": 19968000,
+    "devtoolsTotalBytes": null
+  }
+}

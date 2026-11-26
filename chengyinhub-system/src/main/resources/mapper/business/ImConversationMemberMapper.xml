@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.chengyinhub.business.mapper.ImConversationMemberMapper">
+
+    <resultMap type="ImConversationMember" id="ImConversationMemberResult">
+        <result property="id"            column="id"               />
+        <result property="conversationId" column="conversation_id" />
+        <result property="memberId"      column="member_id"        />
+        <result property="role"          column="role"             />
+        <result property="unreadCount"   column="unread_count"     />
+        <result property="lastReadMsgId" column="last_read_msg_id" />
+        <result property="muted"         column="muted"            />
+        <result property="deleted"       column="deleted"          />
+        <result property="createTime"    column="create_time"      />
+    </resultMap>
+
+    <insert id="insertImConversationMember" parameterType="ImConversationMember" useGeneratedKeys="true" keyProperty="id">
+        insert into im_conversation_member (conversation_id, member_id, role, unread_count, last_read_msg_id, muted, deleted, create_time)
+        values (#{conversationId}, #{memberId}, #{role}, 0, 0, 0, 0, sysdate())
+    </insert>
+
+    <select id="selectByConvAndMember" resultMap="ImConversationMemberResult">
+        select id, conversation_id, member_id, role, unread_count, last_read_msg_id, muted, deleted, create_time
+        from im_conversation_member
+        where conversation_id = #{conversationId} and member_id = #{memberId} limit 1
+    </select>
+
+    <select id="selectByConvAndMemberForUpdate" resultMap="ImConversationMemberResult" useCache="false" flushCache="true">
+        select id, conversation_id, member_id, role, unread_count, last_read_msg_id, muted, deleted, create_time
+        from im_conversation_member
+        where conversation_id = #{conversationId} and member_id = #{memberId} limit 1 for update
+    </select>
+
+    <update id="addUnreadForActiveMember">
+        update im_conversation_member m
+        join im_conversation c on c.id = m.conversation_id and c.status = 0
+        set m.unread_count = m.unread_count + #{delta}
+        where m.conversation_id = #{conversationId} and m.member_id = #{memberId} and m.deleted = 0
+    </update>
+
+    <select id="selectMyConversations" resultMap="ImConversationMemberResult">
+        select m.id, m.conversation_id, m.member_id, m.role, m.unread_count, m.last_read_msg_id, m.muted, m.deleted, m.create_time
+        from im_conversation_member m
+        join im_conversation c on c.id = m.conversation_id
+        where m.member_id = #{memberId} and m.deleted = 0 and c.status = 0
+        order by c.last_msg_at desc
+    </select>
+
+    <resultMap id="ConversationSummaryResult"
+               type="com.chengyinhub.business.mapper.ImConversationMemberMapper$ConversationSummary"
+               extends="ImConversationMemberResult">
+        <id property="id" column="id"/>
+        <result property="counterpartyId" column="counterparty_id"/>
+        <association property="conversation" javaType="com.chengyinhub.business.domain.ImConversation"
+                     notNullColumn="conv_id">
+            <id property="id" column="conv_id"/>
+            <result property="type" column="conv_type"/>
+            <result property="bizKey" column="conv_biz_key"/>
+            <result property="status" column="conv_status"/>
+        </association>
+        <association property="latest" javaType="com.chengyinhub.business.domain.ImMessage"
+                     notNullColumn="latest_id">
+            <id property="id" column="latest_id"/>
+            <result property="conversationId" column="conversation_id"/>
+            <result property="senderId" column="latest_sender_id"/>
+            <result property="msgType" column="latest_msg_type"/>
+            <result property="content" column="latest_content"/>
+            <result property="extraJson" column="latest_extra_json"/>
+            <result property="status" column="latest_status"/>
+            <result property="checkStatus" column="latest_check_status"/>
+            <result property="visibleOrderAt" column="latest_visible_order_at"/>
+            <result property="createTime" column="latest_create_time"/>
+        </association>
+        <association property="counterpartyProfile" javaType="com.chengyinhub.business.domain.UmsMember"
+                     notNullColumn="profile_id">
+            <id property="id" column="profile_id"/>
+            <result property="nickname" column="profile_nickname"/>
+            <result property="name" column="profile_name"/>
+            <result property="avatar" column="profile_avatar"/>
+        </association>
+    </resultMap>
+
+    <!-- 每个成员索引一行。两个相关子查询只选主键，不把会话历史/参与者扇出到应用层。
+         最新消息的条件、可见序与 ImMessageMapper.selectVisiblePage(cursor=null,size=1) 保持一致。
+         群业务权限与路线卡当前权限不在此查询中推断。 -->
+    <select id="selectMyConversationSummaries" resultMap="ConversationSummaryResult">
+        select m.id, m.conversation_id, m.member_id, m.role, m.unread_count, m.last_read_msg_id,
+               m.muted, m.deleted, m.create_time,
+               c.id as conv_id, c.type as conv_type, c.biz_key as conv_biz_key, c.status as conv_status,
+               msg.id as latest_id, msg.sender_id as latest_sender_id, msg.msg_type as latest_msg_type,
+               msg.content as latest_content, msg.extra_json as latest_extra_json,
+               msg.status as latest_status, msg.check_status as latest_check_status,
+               msg.create_time as latest_create_time,
+               date_format(coalesce(msg.visible_at, msg.create_time), '%Y-%m-%d %H:%i:%s.%f') as latest_visible_order_at,
+               other.member_id as counterparty_id, u.id as profile_id, u.nickname as profile_nickname,
+               u.name as profile_name, u.avatar as profile_avatar
+        from im_conversation_member m
+        join im_conversation c on c.id = m.conversation_id
+        left join im_message msg on msg.id = (
+            select id from im_message
+            where conversation_id = c.id and status != 2
+              and (msg_type != 2 or check_status = 1 or sender_id = #{memberId})
+            order by coalesce(visible_at, create_time) desc, id desc limit 1)
+        left join im_conversation_member other on other.id = (
+            select p.id from im_conversation_member p
+            where p.conversation_id = c.id and p.member_id != #{memberId} limit 1)
+            and (c.type is null or c.type not in (2, 3, 4))
+        left join ums_member u on u.id = other.member_id
+        where m.member_id = #{memberId} and m.deleted = 0 and c.status = 0
+        order by c.last_msg_at desc
+    </select>
+
+    <resultMap id="ClubConversationSummaryResult"
+               type="com.chengyinhub.business.mapper.ImConversationMemberMapper$ClubConversationSummary">
+        <id property="id" column="id"/>
+        <result property="memberId" column="member_id"/>
+        <result property="name" column="name"/>
+        <result property="logo" column="logo"/>
+        <result property="memberCount" column="member_count"/>
+        <result property="status" column="status"/>
+        <result property="delFlag" column="del_flag"/>
+        <result property="viewerMember" column="viewer_member"/>
+    </resultMap>
+
+    <!-- ClubMapper.selectClubById: id + del_flag=0；会员 EXISTS 保留原 status=1/del_flag=0。
+         IDs 由 Java 沿原 Long.valueOf(bizKey) 解析，不能用字符串 JOIN 改写 +号/前导零语义。
+         EXISTS 不扇出历史会员；只返回本次摘要涉及的 club。空集合绝不全表加载。 -->
+    <select id="selectClubConversationSummaries" resultMap="ClubConversationSummaryResult" useCache="false" flushCache="true">
+        select c.id,c.member_id,c.name,c.logo,c.member_count,c.status,c.del_flag,
+               exists(select 1 from club_member cm
+                      where cm.club_id=c.id and cm.member_id=#{memberId}
+                        and cm.status=1 and cm.del_flag=0) as viewer_member
+        from club c
+        where c.del_flag=0
+        <choose>
+            <when test="clubIds != null and clubIds.size() > 0">
+                and c.id in <foreach collection="clubIds" item="clubId" open="(" separator="," close=")">#{clubId}</foreach>
+            </when>
+            <otherwise>and 1=0</otherwise>
+        </choose>
+    </select>
+
+    <select id="sumInboxUnread" resultType="java.lang.Long">
+        select coalesce(sum(m.unread_count), 0)
+        from im_conversation_member m
+        join im_conversation c on c.id = m.conversation_id and c.status = 0
+        where m.member_id = #{memberId} and m.deleted = 0
+          and (m.muted is null or m.muted != 1)
+          and (c.type is null or c.type != 4)
+    </select>
+
+    <select id="selectByConversation" resultMap="ImConversationMemberResult">
+        select id, conversation_id, member_id, role, unread_count, last_read_msg_id, muted, deleted, create_time
+        from im_conversation_member
+        where conversation_id = #{conversationId}
+    </select>
+
+    <select id="selectByConversationForUpdate" resultMap="ImConversationMemberResult">
+        select id, conversation_id, member_id, role, unread_count, last_read_msg_id, muted, deleted, create_time
+        from im_conversation_member
+        where conversation_id = #{conversationId} for update
+    </select>
+
+    <update id="addUnread">
+        update im_conversation_member m
+        join im_conversation c on c.id = m.conversation_id and c.status = 0
+        set m.unread_count = m.unread_count + #{delta}, m.deleted = 0
+        where m.conversation_id = #{conversationId} and m.member_id = #{memberId}
+    </update>
+
+    <sql id="storedReadCutoff">
+        select coalesce(visible_at, create_time) from im_message
+        where id = #{lastReadMsgId} and conversation_id = #{conversationId} and status != 2
+          and (msg_type != 2 or check_status = 1 or sender_id = #{memberId})
+    </sql>
+    <update id="markRead">
+        update im_conversation_member
+        set last_read_msg_id = #{lastReadMsgId},
+            last_read_visible_at = coalesce((<include refid="storedReadCutoff"/>), '1970-01-01 00:00:00.000000'),
+            unread_count = (select count(*) from im_message msg
+                where msg.conversation_id = #{conversationId} and msg.sender_id != #{memberId}
+                  and msg.status != 2 and (msg.msg_type != 2 or msg.check_status = 1)
+                  and (coalesce(msg.visible_at, msg.create_time) &gt; coalesce((<include refid="storedReadCutoff"/>), '1970-01-01 00:00:00.000000')
+                       or (coalesce(msg.visible_at, msg.create_time) = coalesce((<include refid="storedReadCutoff"/>), '1970-01-01 00:00:00.000000')
+                           and msg.id &gt; #{lastReadMsgId})))
+        where conversation_id = #{conversationId} and member_id = #{memberId}
+    </update>
+
+    <update id="markReadVisible">
+        update im_conversation_member
+        set last_read_msg_id = #{lastReadMsgId}, last_read_visible_at = #{visibleOrderAt},
+            unread_count = (select count(*) from im_message msg
+                where msg.conversation_id = #{conversationId} and msg.sender_id != #{memberId}
+                  and msg.status != 2 and (msg.msg_type != 2 or msg.check_status = 1)
+                  and (coalesce(msg.visible_at, msg.create_time) &gt; #{visibleOrderAt}
+                       or (coalesce(msg.visible_at, msg.create_time) = #{visibleOrderAt}
+                           and msg.id &gt; #{lastReadMsgId})))
+        where conversation_id = #{conversationId} and member_id = #{memberId} and deleted = 0
+          and ((#{lastReadMsgId} = 0 and #{visibleOrderAt} = '1970-01-01 00:00:00.000000')
+               or exists (select 1 from im_message cutoff
+                    where cutoff.id = #{lastReadMsgId} and cutoff.conversation_id = #{conversationId}
+                      and cutoff.status != 2
+                      and (cutoff.msg_type != 2 or cutoff.check_status = 1 or cutoff.sender_id = #{memberId})
+                      and date_format(coalesce(cutoff.visible_at, cutoff.create_time), '%Y-%m-%d %H:%i:%s.%f') = #{visibleOrderAt}))
+    </update>
+
+    <!-- N-04 消息被审核屏蔽(delta=-1)/恢复(delta=+1)时修正各读者未读,不等下一次 markRead 才重算。
+         只动「这条消息当前计在其未读里」的读者,判据与 markRead 的重算同口径:
+         非发送者、对读者可见类型(非图片或图片已过审)、位于读者已存已读位之后(可见序 visible_at,id)、
+         且晚于读者入会(新入群成员的未读不含入会前历史)。下限 0,不出现负数角标。 -->
+    <update id="adjustUnreadForModeratedMessage">
+        update im_conversation_member m
+        set m.unread_count = greatest(m.unread_count + #{delta}, 0)
+        where m.conversation_id = (select x.conversation_id from im_message x where x.id = #{messageId})
+          <if test="delta &lt; 0">and m.unread_count &gt; 0</if>
+          and exists (select 1 from im_message msg
+                where msg.id = #{messageId} and msg.conversation_id = m.conversation_id
+                  and msg.sender_id != m.member_id
+                  and (msg.msg_type != 2 or msg.check_status = 1)
+                  and coalesce(msg.visible_at, msg.create_time) &gt;= m.create_time
+                  and (coalesce(msg.visible_at, msg.create_time) &gt; coalesce(m.last_read_visible_at, '1970-01-01 00:00:00.000000')
+                       or (coalesce(msg.visible_at, msg.create_time) = coalesce(m.last_read_visible_at, '1970-01-01 00:00:00.000000')
+                           and msg.id &gt; m.last_read_msg_id)))
+    </update>
+
+    <select id="sumUnread" resultType="java.lang.Integer">
+        select coalesce(sum(m.unread_count), 0)
+        from im_conversation_member m
+        join im_conversation c on c.id = m.conversation_id and c.status = 0
+        where m.member_id = #{memberId} and m.deleted = 0 and m.muted = 0
+    </select>
+
+    <update id="markDeleted">
+        update im_conversation_member set deleted = 1
+        where conversation_id = #{conversationId} and member_id = #{memberId}
+    </update>
+
+    <update id="markAllDeleted">
+        update im_conversation_member set deleted = 1, unread_count = 0
+        where conversation_id = #{conversationId}
+    </update>
+
+    <update id="updateMuted">
+        update im_conversation_member set muted = #{muted}
+        where conversation_id = #{conversationId} and member_id = #{memberId}
+    </update>
+
+</mapper>

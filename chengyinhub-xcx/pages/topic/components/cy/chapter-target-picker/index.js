@@ -1,0 +1,182 @@
+// cy-chapter-target-picker · 选承接标的(Figma F3 159:346)。
+//
+// 稿把「选哪一章 + 用哪个玩法」收成一个 T1 弹层,两组都横滑,底部一个「下一步 · 填报名」。
+// 现码原来是两步散开的:wx.showActionSheet 选章节(系统列表,看不到章节还缺几家),
+// 玩法在下一页的 cy-dropdown 里选 —— 商家得先盲选章节才知道里面能配什么玩法。
+//
+// ⚠️ 章节卡的副信息**不是**稿上那句「09-10 起」:CmsTopicChapter 与 TopicTemplateRecruitVO
+//    都没有章节开始时间字段,后端给不出来。这里改用真实存在的招商事实
+//    (remainingMerchantCount「还缺 N 家」),拿不到就不显示 —— 不编一个日期。
+//    这条已记进 Figma 代码待改表。
+const app = getApp();
+
+function text(v) {
+  return v === 0 ? '0' : String(v == null ? '' : v).trim();
+}
+
+/** imgUrl 可能是逗号分隔的多图,取第一张 */
+function firstImg(value) {
+  const first = String(value || '').split(',')[0];
+  return first.trim();
+}
+
+/** 章节卡的副信息:只说后端真给了的事实 */
+function chapterSub(chapter) {
+  const recruit = (chapter && chapter.recruitStatus) || {};
+  const remaining = Number(recruit.remainingMerchantCount);
+  if (Number.isFinite(remaining) && remaining > 0) return '还缺 ' + remaining + ' 家';
+  if (Number.isFinite(remaining) && remaining === 0) return '名额已满';
+  return '';
+}
+
+Component({
+  options: { addGlobalClass: true },
+  properties: {
+    show: { type: Boolean, value: false },
+    // 宿主已经拉好的可申请章节(recruitStatus.isOpen === true 那批)
+    chapters: { type: Array, value: [] },
+    /* 章节这一侧的取数状态由宿主给:loading / error / category-missing / ready。
+       没有它,「还没拉到」和「一章都没开放」会印同一句话 —— 后者会让商家以为
+       这条路线不招商就退出去了。 */
+    chaptersState: { type: String, value: 'ready' },
+    chaptersError: { type: String, value: '' },
+    // P0-3:带着位置来的(招商码 / 分享卡),打开时先选中这一章
+    focusChapterId: { type: Number, value: 0 },
+    // 招商窗口关着时能看不能投:按钮置灰并说明原因,而不是让人填完才被拒
+    applicationOpen: { type: Boolean, value: true },
+    /* 2026-11-03 业主:主题一章都没有(且招商开着)⇒ 只选玩法即可报名,章节由服务端建。
+       有章节但都没开时这里是 false:不绕过主办方招商,出关闭空态、不留按钮。 */
+    emptyTopic: { type: Boolean, value: false },
+    submitting: { type: Boolean, value: false },
+  },
+  data: {
+    rows: [],
+    templates: [],
+    templatesState: 'idle',   // idle | loading | ready | error | empty
+    templatesError: '',
+    noChapters: false,
+    pickedChapterId: 0,
+    pickedTemplateId: 0,
+  },
+  observers: {
+    'show, chapters, chaptersState': function (show, chapters, chaptersState) {
+      if (!show) { this._shown = false; return; }
+      // 每次打开都重拉玩法:从「去创建玩法」回来时新玩法要立刻在这里出现(M-09)
+      const opening = !this._shown;
+      this._shown = true;
+      // L06-134:原始章节留实例上(确认时按 id 取回),不进 setData
+      const raw = (chapters || []).filter((c) => c && c.id);
+      this._chapters = raw;
+      const rows = raw.map((c) => ({
+        id: c.id,
+        name: text(c.name) || '未命名章节',
+        sub: chapterSub(c),
+        needShops: text(c.roleNeedShops),
+        needPerkExample: text(c.roleNeedPerkExample),
+        needMinDelivery: text(c.roleNeedMinDelivery),
+        needRaw: text(c.roleNeedRaw),
+      }));
+      // 只有一章时直接选中:再让人点一次没有信息量
+      const focusRow = opening ? rows.filter((r) => Number(r.id) === this.data.focusChapterId)[0] : null;
+      const pickedChapterId = rows.length === 1 ? rows[0].id : (focusRow ? focusRow.id : this.data.pickedChapterId);
+      this.setData({
+        rows,
+        noChapters: chaptersState === 'ready' && !rows.length,
+        pickedChapterId,
+      });
+      if (opening || this.data.templatesState === 'idle' || this.data.templatesState === 'error') this.loadTemplates();
+    },
+  },
+  methods: {
+    /* 我已有的玩法模板。与 chapter-node-form 同一条 /api/template/my-list ——
+       两处必须是同一份「我能用哪些玩法」的定义,否则这里选得到、下一页却选不到。 */
+    loadTemplates() {
+      if (this._tplLoading) return;
+      this._tplLoading = true;
+      const that = this;
+      // 已有结果时静默刷新,不闪骨架
+      const st = this.data.templatesState;
+      if (st !== 'ready' && st !== 'empty') this.setData({ templatesState: 'loading', templatesError: '' });
+      app.sendRequest({
+        url: '/api/template/my-list', method: 'POST', hideLoading: true, silentError: true,
+        data: { scope: 'MERCHANT' },
+        success(res) {
+          that._tplLoading = false;
+          const rows = res && res.code == '200' && res.data && Array.isArray(res.data.rows)
+            ? res.data.rows.filter((t) => t && t.id && text(t.title)) : null;
+          if (!rows) {
+            // 读不到 ≠ 一个玩法都没有。两者要分开,否则商家会去重新建一个已经有的玩法。
+            that.setData({
+              templatesState: 'error',
+              templatesError: app.getRequestErrorMessage(res, '玩法模板没读出来'),
+            });
+            return;
+          }
+          that.setData({
+            templates: rows.map((t) => ({
+              id: t.id,
+              title: text(t.title),
+              sub: text(t.description),
+              // 稿 159:346 的玩法卡主体是**封面方图**,文字在图下方;
+              // 没有封面的才退回首字母占位块 —— 不留一个空方块
+              cover: firstImg(t.imgUrl),
+              initial: text(t.title).slice(0, 1),
+            })),
+            templatesState: rows.length ? 'ready' : 'empty',
+            templatesError: '',
+          });
+        },
+        fail(res) {
+          that._tplLoading = false;
+          that.setData({
+            templatesState: 'error',
+            templatesError: app.getRequestErrorMessage(res, '玩法模板没读出来，检查网络后重试'),
+          });
+        },
+      });
+    },
+
+    onPickChapter(e) {
+      if (this.data.submitting) return;
+      const id = Number(e.currentTarget.dataset.id) || 0;
+      this.setData({ pickedChapterId: id });
+    },
+    onPickTemplate(e) {
+      if (this.data.submitting) return;
+      this.setData({ pickedTemplateId: Number(e.currentTarget.dataset.id) || 0 });
+    },
+    onClose() {
+      if (this.data.submitting) return;
+      this.triggerEvent('close', {});
+    },
+    onRetryChapters() {
+      this.triggerEvent('retrychapters', {});
+    },
+    onGoCategory() {
+      this.triggerEvent('gocategory', {});
+    },
+    onNext() {
+      const template = this.data.templates.filter((t) => t.id === this.data.pickedTemplateId)[0] || null;
+      if (this.data.emptyTopic && !this.data.rows.length) {
+        this.triggerEvent('confirm', {
+          emptyTopic: true,
+          chapter: { termsMode: 'PERK' },
+          chapterId: 0,
+          chapterName: '',
+          templateId: template ? template.id : 0,
+          templateName: template ? template.title : '',
+        });
+        return;
+      }
+      const chapter = this.data.rows.filter((r) => r.id === this.data.pickedChapterId)[0];
+      if (!chapter) return;
+      this.triggerEvent('confirm', {
+        chapter: (this._chapters || []).filter((c) => c.id === chapter.id)[0],
+        chapterId: chapter.id,
+        chapterName: chapter.name,
+        templateId: template ? template.id : 0,
+        templateName: template ? template.title : '',
+      });
+    },
+  },
+});

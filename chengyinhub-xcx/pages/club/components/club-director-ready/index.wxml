@@ -1,0 +1,17 @@
+<view class="cdready">
+  <text class="cdready__title">{{title}}</text>
+
+  <view class="cdready__section">
+    <text class="cdready__section-title">{{stationTitle}}</text>
+    <text class="cdready__section-sub" wx:if="{{stationSub}}">{{stationSub}}</text>
+    <cy-club-director-row-list rows="{{stations}}" surface="elevated" />
+  </view>
+
+  <view class="cdready__section">
+    <text class="cdready__section-title">{{teamTitle}}</text>
+    <text class="cdready__section-sub" wx:if="{{teamSub}}">{{teamSub}}</text>
+    <cy-club-director-row-list rows="{{teams}}" surface="elevated" />
+  </view>
+
+  <text class="cdready__caption cdready__caption--{{captionTone}}" wx:if="{{caption}}">{{caption}}</text>
+</view>

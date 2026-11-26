@@ -1,0 +1,11 @@
+@import "../../style/director-pill.wxss";
+:host { display: block; }
+.cdcs__body { display: flex; flex-direction: column; }
+.cdcs__caption {
+  display: block;
+  margin-top: 20rpx;
+  text-align: center;
+  color: var(--cy-color-status-warning);
+  font-size: var(--cy-font-caption);
+}
+

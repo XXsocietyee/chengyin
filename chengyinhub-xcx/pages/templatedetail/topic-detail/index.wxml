@@ -1,0 +1,166 @@
+<!-- 主题模板详情(2026-10-30 业主 V-24):版式照抄玩法模板详情 templatedetail —— 封面 + 名字 + 发布方、
+     「应用」与分享同款、详情 / 能力两个 tab。 -->
+<view class="{{light ? 'theme-merchant' : 'theme-dark'}}">
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+<view class="xb-page">
+  <view class="xb-bg" wx:if="{{ cover }}">
+    <image class="xb-bg-img" src="{{ cover }}" mode="aspectFill" />
+    <view class="xb-bg-mask"></view>
+  </view>
+
+  <cy-nav-bar overlay pill="{{!!cover}}" custom-back bind:back="goBack" />
+
+  <view class="xb-state" style="padding-top:{{statusBarHeight + navBarHeight + 24}}px;" wx:if="{{ loading }}">
+    <cy-skeleton type="detail" />
+  </view>
+  <view class="xb-state" style="padding-top:{{statusBarHeight + navBarHeight + 24}}px;" wx:if="{{ loadError && !loading }}">
+    <cy-empty wx:if="{{refusal}}" class="fill-slot" kind="not-found" fill size="lg" title="{{refusal}}" cta="返回" bind:cta="goBack" />
+    <cy-error wx:else load-failure class="fill-slot" fill="{{true}}" size="lg" title="主题模板没能打开" sub="{{loadErrorMsg}}" bind:retry="onRetry" auto-back />
+  </view>
+
+  <view class="td-viewport" wx:if="{{ !loading && !loadError }}" style="top:{{statusBarHeight + navBarHeight}}px;">
+  <scroll-view class="xb-scroll xb-scroll--bleed" scroll-y enhanced show-scrollbar="{{ false }}">
+
+    <view class="xb-head">
+      <view class="xb-head-cover">
+        <image wx:if="{{ cover }}" src="{{ cover }}" mode="aspectFill" />
+        <!-- 2026-10-30 业主「不能只是占位」:主题模板没有封面时用城市 3D 图标做封面,与玩法模板详情同一套 -->
+        <view wx:else class="xb-head-cover-ph" aria-role="img" aria-label="{{ name || '该主题' }} 的封面">
+          <image class="xb-cover-art" src="/pages/templatedetail/art/cat/city.png" mode="aspectFit" />
+        </view>
+      </view>
+      <view class="xb-head-meta">
+        <view class="xb-head-title ep2">{{ name || '主题模板' }}</view>
+        <view class="xb-head-sub ep1">{{ author }}</view>
+        <text class="xb-head-badge" wx:if="{{ official }}">官方</text>
+      </view>
+    </view>
+
+    <!-- 「应用」与右边分享键同一套样式(V-24 业主「应用和旁边分享一样的样式」),点了直接复制进主题配置 -->
+    <view class="xb-cta">
+      <cy-btn class="xb-cta-btn" bindtap="useTemplate">用这个模板</cy-btn>
+      <button class="xb-share" open-type="share" aria-label="分享主题模板" hover-class="cy-pressed" hover-stay-time="80">
+        <cy-icon name="share" size="40" />
+      </button>
+    </view>
+
+    <view class="xb-tabs-wrap">
+      <cy-tabs tabs="{{ tabs }}" active="{{ activeTab }}" bind:change="switchTab" />
+    </view>
+
+    <!-- ===== 详情 ===== -->
+    <block wx:if="{{ activeTab === 'details' }}">
+      <!-- 剧情:开场白(默认收 4 行,量到更高才出「展开」)→ 每章一张紧凑卡(编号 + 章名 + 一句话)。
+           2026-11-14 业主「太复杂」:章节卡不再列这一章的站点路径,站点只在「能力」里按章分组出卡。 -->
+      <view class="xb-block xb-block--lead" wx:if="{{ opening || chapters.length }}">
+        <view class="xb-section-title">
+          <image class="xb-section-ico" src="/pages/templatedetail/art/3d/book.png" mode="aspectFit" aria-hidden="true" />
+          <text>剧情</text>
+        </view>
+        <view id="td-opening" class="xb-body xb-body--soft {{ openingExpanded ? '' : 'td-opening--clamp' }}" wx:if="{{ opening }}">{{ opening }}</view>
+        <view class="xb-link-more" wx:if="{{ openingNeedMore || openingExpanded }}" bindtap="toggleOpening" aria-role="button" hover-class="cy-pressed" hover-stay-time="80">{{ openingExpanded ? '收起' : '展开' }}</view>
+        <view class="st-ch" wx:for="{{ chapters }}" wx:key="key">
+          <view class="st-ch__no" wx:if="{{ item.no }}">{{ item.no }}</view>
+          <view class="st-ch__main">
+            <text class="st-ch__t ep1">{{ item.name }}</text>
+            <text class="st-ch__p ep1" wx:if="{{ item.text }}">{{ item.text }}</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="xb-stat-grid" wx:if="{{ stats.length }}">
+        <view class="xb-stat-card" wx:for="{{ stats }}" wx:key="label">
+          <view class="xb-stat-value">{{ item.value }}</view>
+          <view class="xb-stat-label">{{ item.label }}</view>
+        </view>
+      </view>
+
+      <!-- 节点图只在这里出一组(L06-158),点开看大图 -->
+      <view class="xb-block" wx:if="{{ gallery.length }}">
+        <view class="xb-section-title">
+          <image class="xb-section-ico" src="/images/publish-quick/explore.png" mode="aspectFit" aria-hidden="true" />
+          <text>节点</text>
+        </view>
+        <scroll-view class="xb-node-scroll" scroll-x enhanced show-scrollbar="{{ false }}">
+          <view class="xb-node-inner">
+            <view class="xb-node-card" wx:for="{{ gallery }}" wx:key="index" bindtap="previewNode" aria-role="button" aria-label="查看大图" data-url="{{ item.img }}" hover-class="cy-pressed" hover-stay-time="80">
+              <image class="xb-node-img" src="{{ item.img }}" mode="aspectFill" lazy-load="true" />
+              <view class="xb-node-foot">
+                <text class="xb-node-name">{{ item.name || '节点 ' + (index + 1) }}</text>
+                <text class="xb-node-desc ep1" wx:if="{{ item.teaser }}">{{ item.teaser }}</text>
+                <text class="td-credit ep1" wx:if="{{ item.credit }}">{{ item.credit }}</text>
+              </view>
+            </view>
+          </view>
+        </scroll-view>
+      </view>
+
+      <view class="xb-block" wx:if="{{ medalName }}">
+        <view class="xb-section-title">
+          <cy-icon name="star" size="30" />
+          <text>通关勋章</text>
+        </view>
+        <view class="xb-quote-card">
+          <image wx:if="{{ medalImg }}" class="td-medal-img" src="{{ medalImg }}" mode="aspectFit" />
+          <view class="xb-quote-copy">
+            <text class="xb-quote-author">{{ medalName }}</text>
+            <text class="xb-quote-text">走完全部节点时点亮</text>
+          </view>
+        </view>
+      </view>
+      <view class="td-credit td-cover-credit" wx:if="{{ coverCredit }}">封面 · {{ coverCredit }}</view>
+    </block>
+
+    <!-- ===== 能力:概要数字卡 → 按章分组、每站一张卡 → 采用条件键值卡 =====
+         2026-11-14 业主「能力那块没有排版,要卡片和样式」:概要从一排 chip 改成与详情同款的 xb-stat-card;
+         站点从平铺行改成卡(序号徽标 / 站名 / 玩法药丸带货架道具图 / 玩家做什么两行 / 时长);不可点、无按压态。 -->
+    <block wx:if="{{ activeTab === 'capabilities' }}">
+      <view class="cap-sum" wx:if="{{ summary.length }}">
+        <view class="xb-stat-card" wx:for="{{ summary }}" wx:key="label">
+          <view class="xb-stat-value">{{ item.value }}</view>
+          <view class="xb-stat-label">{{ item.label }}</view>
+        </view>
+      </view>
+      <block wx:if="{{ stops.length }}">
+        <view class="cap-ch" wx:for="{{ stopGroups }}" wx:key="key">
+          <view class="cap-ch__hd" wx:if="{{ item.no || item.name }}">
+            <text class="cap-ch__no" wx:if="{{ item.no }}">{{ item.no }}</text>
+            <text class="cap-ch__t ep1">{{ item.name }}</text>
+          </view>
+          <view class="cap-card" wx:for="{{ item.stops }}" wx:for-item="stop" wx:key="no">
+            <view class="cap-card__no">{{ stop.no }}</view>
+            <view class="cap-card__main">
+              <text class="cap-card__name ep1">{{ stop.name }}</text>
+              <view class="cap-card__pill" wx:if="{{ stop.game }}">
+                <image wx:if="{{ stop.gameIcon }}" class="cap-card__pill-img" src="{{ stop.gameIcon }}" mode="aspectFit" aria-hidden="true" />
+                <cy-icon wx:else name="play" size="24" />
+                <text class="ep1">{{ stop.game }}</text>
+              </view>
+              <text class="cap-card__do ep2" wx:if="{{ stop.doText }}">{{ stop.doText }}</text>
+              <view class="cap-card__dur" wx:if="{{ stop.dur }}"><cy-icon name="clock" size="22" /><text>{{ stop.dur }}</text></view>
+            </view>
+          </view>
+        </view>
+      </block>
+      <cy-empty wx:else kind="empty" title="暂无玩法安排" sub="" />
+      <!-- U02-01 采用条件:只读 contentDelivery;只画有权威事实的行,没有事实的行不出现。
+           2026-11-14:改成本页家族的分组键值卡(xb-kv-card:标签左 / 值右 / 细分隔线)。 -->
+      <view class="xb-block td-cond" wx:if="{{ deliveryRows.length }}">
+        <view class="xb-section-title"><text>采用条件</text></view>
+        <view class="xb-kv-card">
+          <view class="xb-kv-row" wx:for="{{ deliveryRows }}" wx:key="key">
+            <text class="xb-kv-k">{{ item.label }}</text>
+            <text class="xb-kv-v">{{ item.value }}</text>
+          </view>
+        </view>
+      </view>
+    </block>
+
+    <view class="xb-scroll-pad"></view>
+  </scroll-view>
+  </view>
+</view>
+
+</view>

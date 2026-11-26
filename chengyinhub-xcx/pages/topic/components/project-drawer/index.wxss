@@ -1,0 +1,184 @@
+@import '/style/merchant-light.wxss';
+
+/* 项目长面板与客户半屏共用标题、关闭、字号与安全区。 */
+/* 2026-09-27：按内容撑高的浮动底部卡片，安全区留在卡片内。 */
+/* 面板下方压暗:面板不铺到屏幕底,露出来的页面要压暗 + 虚化。
+   ⚠️ 安卓部分机型不支持 backdrop-filter,所以底色本身就给足不透明度。 */
+.dw-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: var(--cy-z-sheet);
+  background: rgba(0, 0, 0, 0.45);  /* ds-ok: 遮罩不透明度按稿 */
+  backdrop-filter: blur(10rpx);     /* ds-ok: 背景虚化按稿 */
+}
+.dw {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--cy-drawer-top, 136rpx);
+  bottom: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  box-sizing: border-box;
+  z-index: calc(var(--cy-z-sheet) + 1);
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--cy-comp-sheet-radius) var(--cy-comp-sheet-radius) 0 0;
+  background: var(--cy-bg-page);
+  overflow: hidden;
+  box-sizing: border-box;
+  box-shadow: 0 -8rpx 40rpx rgba(0, 0, 0, 0.18);  /* ds-ok: 面板浮起,按稿 */
+}
+
+.dw--compact {
+  left: var(--cy-space-2);
+  right: var(--cy-space-2);
+  top: auto;
+  bottom: var(--cy-space-2);
+  max-height: min(var(--cy-comp-sheet-full), var(--cy-comp-sheet-max-h, var(--cy-comp-sheet-max-height)));   /* 2026-10-23 业主:弹窗上限到胶囊底,不再卡 70vh */
+  border-radius: var(--cy-comp-sheet-radius);
+}
+.dw--compact .dw-scroll {
+  flex: 0 1 auto;
+  /* L06-117:面板本身已不再卡 70vh(见上);这里只限内容滚动区,让紧凑抽屉的标题与底部按钮总在屏内 */
+  max-height: calc(70vh - 240rpx);
+}
+
+/* 走查 v2 R07(业主 2026-10-30):客户弹窗和其他弹窗一样拉到胶囊下沿,不再卡 70vh */
+.dw--customer {
+  overflow: hidden;
+}
+
+.dw--customer .dw-head {
+  padding: 40rpx 40rpx 0; /* ds-ok: 走查 v2 R07 定稿 r_cust3:标题贴近弹窗上沿,x=20 */
+}
+
+.dw--customer .dw-title {
+  font-size: 46rpx; /* ds-ok: Figma 标题 23px */
+  line-height: 54rpx;
+}
+
+.dw--customer .dw-close {
+  width: var(--cy-btn-h);
+  height: var(--cy-btn-h);
+  /* 圆底退役后热区盒不变:负 margin 把 44px 盒位校正回 Figma 稿面位置。 */
+  margin: -17rpx -27rpx;
+}
+
+.dw--customer .dw-scroll {
+  flex: 1;
+  min-height: 0;
+  padding-top: 10rpx;
+}
+/* 走查 v2 R07:左右留白放到内容层(border-box),scroll-view 自身不再 100% 宽再加内距、整块溢出屏幕 */
+.dw--customer .dw-scroll-content { padding-left: 40rpx; padding-right: 40rpx; } /* ds-ok: Figma 内容 x=20 */
+.dw-head {
+  flex: none;
+  display: flex;
+  /* 有副标题时标题块变两行,叉号要跟标题那一行对齐,不能跟着整块居中 */
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: var(--cy-space-2) 0 var(--cy-space-1) var(--cy-page-x);
+}
+.dw-head-text { flex: 1; min-width: 0; }
+/* 稿 468:*:标题下一行灰小字 */
+.dw-sub {
+  display: block;
+  margin-top: var(--cy-space-1);
+  font-size: var(--cy-font-caption);
+  color: var(--cy-text-secondary);
+}
+.dw-title {
+  display: flex;
+  align-items: center;
+  min-height: var(--cy-btn-h);
+  font-size: var(--cy-comp-sheet-title-size);
+  line-height: var(--cy-comp-sheet-title-leading);
+  font-weight: 700;
+  color: var(--cy-text-title);
+}
+/* CU-C-126 一并删掉 .dw-head--action / .dw-title--center / .dw-act / .dw-act--done:
+   action 头档没有宿主在用,留着就是「右上角那颗写着完成、点了却只关面板」的复活入口。 */
+/* 右上角 ✕ 口径(2026-09-19 收编):纯字形无圆底,与 cy-sheet / cy-scene-sheet 同档 ——
+   原「灰圆底嵌小叉」的稿面作废。热区仍是 --cy-btn-h(44px ≥88rpx)方框:
+   方框是热区,字形是视觉,两件事。 */
+.dw-close {
+  flex: none;
+  width: var(--cy-btn-h);
+  height: var(--cy-btn-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cy-text-secondary);
+}
+
+.dw-scroll {
+  flex: 1;
+  min-height: 0;
+}
+.dw-scroll-content {
+  /* 头部与内容之间要有呼吸,否则进度条顶到标题下沿被压掉半行 */
+  padding: var(--cy-space-2) var(--cy-page-x) 0;
+  box-sizing: border-box;
+}
+.dw-scroll-pad { height: calc(var(--cy-space-3) + env(safe-area-inset-bottom)); }
+
+/* 黑按钮固定在面板底部,不随内容滚 */
+.dw-cta {
+  position: relative;
+  flex: none;
+  display: flex;
+  gap: var(--cy-space-2);
+  padding: var(--cy-space-3) var(--cy-page-x) calc(var(--cy-space-3) + env(safe-area-inset-bottom));
+}
+.dw-btn {
+  position: relative;
+  flex: 1;
+  min-height: var(--cy-btn-h);
+  min-width: 0;
+  padding: var(--cy-space-2);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-btn-solid-bg);  /* 浅色主题即纯黑(按稿);俱乐部主办深色层跟 theme-dark 的主 CTA 走(ROUND5E) */
+  font-size: var(--cy-type-button);
+  line-height: var(--cy-leading-normal);
+  text-align: center;
+  word-break: break-word;
+  font-weight: 600;
+  color: var(--cy-btn-solid-fg);
+}
+.dw-btn--ghost {
+  background: var(--cy-bg-card);
+  color: var(--cy-text-title);
+}
+
+
+.dw--compact .dw-head { align-items: center; }
+.dw--compact .dw-head-text { padding-left: var(--cy-space-4); }
+.dw--compact .dw-title { font-size: var(--cy-type-sheet-title); }
+
+/* 2026-10-31 P-6 叠层:上面再叠一层时,这一层缩到 0.94 压暗、露出顶边(iOS 叠卡) */
+.dw { transition: transform .3s cubic-bezier(.2, .8, .2, 1), filter .3s; }
+.dw--under { transform: translateY(-10px) scale(.94); transform-origin: 50% 0; filter: brightness(.7); pointer-events: none; }  /* qx-u3:与 cy-sheet / cy-scene-sheet 同一组景深 */
+@media (prefers-reduced-motion: reduce) { .dw { transition: none; } }
+
+/* 2026-11-01 业主:客户抽屉的底部按钮悬浮吸附 —— 名单滚到按钮后面,不在按钮上方硬切一刀 */
+.dw--customer .dw-cta {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding-top: var(--cy-space-6);
+  background: linear-gradient(180deg, transparent 0%, var(--cy-bg-page) 42%);
+  pointer-events: none;
+}
+.dw--customer .dw-btn { pointer-events: auto; border-radius: var(--cy-radius-pill); }
+.dw--customer .dw-scroll-pad { height: calc(var(--cy-btn-h) + var(--cy-space-7) + env(safe-area-inset-bottom)); }
+.dw-done { flex: none; padding: var(--cy-space-2) 0 var(--cy-space-2) var(--cy-space-3); font-size: var(--cy-type-button); font-weight: 600; color: var(--cy-text-title); }
+
+/* 细节打磨二期 L1/L5/L7 */
+.dw-done { transition: var(--cy-tr-press); }
+.dw-close { transition: var(--cy-tr-press); }
+.dw-btn { transition: var(--cy-tr-press); }

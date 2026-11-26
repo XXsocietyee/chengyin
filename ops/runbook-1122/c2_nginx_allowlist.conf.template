@@ -1,0 +1,6 @@
+# 审计 C2：后台访问白名单（模板）。复制到服务器后把占位符替换为真实地址；真实地址不要提交到仓库。
+# 只 include 到后台 server/location 块里；不要 include 到 /api/、支付回调、文件读取路径。
+allow <ALLOWED_CIDR_1>;
+allow <ALLOWED_CIDR_2>;
+# 需要更多地址就继续加 allow 行
+deny all;

@@ -1,0 +1,420 @@
+package com.chengyinhub.web.controller.api;
+
+import com.chengyinhub.business.domain.CmsTopic;
+import com.chengyinhub.business.domain.ThemeStateKey;
+import com.chengyinhub.business.domain.dto.TopicStateKeyRegisterDTO;
+import com.chengyinhub.business.domain.dto.TopicStateKeyUpdateDTO;
+import com.chengyinhub.business.service.ICmsTopicService;
+import com.chengyinhub.business.service.support.ThemeStateKeyService;
+import com.chengyinhub.business.service.support.TopicPublishCheckService;
+import com.chengyinhub.business.service.support.TopicStateKeyRefService;
+import com.chengyinhub.common.core.domain.AjaxResult;
+import com.chengyinhub.common.exception.ServiceException;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * R8 创作者端状态键接口:越权被拒;删除被引用键被拒并列出引用位置;
+ * 发布前试检查原样返回结构化列表。getAppUserId 不可 mock,所以按既有做法 spy 掉。
+ */
+class ApiTopicStateKeyControllerTest {
+
+    private static final long CALLER = 901L;
+    private static final long TOPIC_ID = 7001L;
+
+    private ICmsTopicService topicService;
+    private ThemeStateKeyService keyService;
+    private TopicStateKeyRefService refService;
+    private TopicPublishCheckService checkService;
+    private com.chengyinhub.business.service.impl.TopicPublicationService topicPublicationService;
+    private ApiTopicStateKeyController controller;
+
+    @BeforeEach
+    void setUp() {
+        topicService = mock(ICmsTopicService.class);
+        keyService = mock(ThemeStateKeyService.class);
+        refService = mock(TopicStateKeyRefService.class);
+        checkService = mock(TopicPublishCheckService.class);
+        controller = spy(new ApiTopicStateKeyController());
+        doReturn(CALLER).when(controller).getAppUserId();
+        ReflectionTestUtils.setField(controller, "cmsTopicService", topicService);
+        ReflectionTestUtils.setField(controller, "themeStateKeyService", keyService);
+        ReflectionTestUtils.setField(controller, "topicStateKeyRefService", refService);
+        ReflectionTestUtils.setField(controller, "topicPublishCheckService", checkService);
+        topicPublicationService = mock(com.chengyinhub.business.service.impl.TopicPublicationService.class);
+        ReflectionTestUtils.setField(controller, "topicPublicationService", topicPublicationService);
+    }
+
+    @Test
+    void listRejectsOtherMembersTopic() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(999L));
+
+        AjaxResult result = controller.listStateKeys(TOPIC_ID, null);
+
+        assertNotEquals(200, result.get(AjaxResult.CODE_TAG));
+        assertEquals("无权操作该主题", result.get(AjaxResult.MSG_TAG));
+        verify(keyService, never()).listByTopic(anyLong());
+    }
+
+    @Test
+    void listRejectsAnonymous() {
+        doThrow(new RuntimeException("no token")).when(controller).getAppUserId();
+
+        AjaxResult result = controller.listStateKeys(TOPIC_ID, null);
+
+        assertEquals("请先登录", result.get(AjaxResult.MSG_TAG));
+    }
+
+    @Test
+    void registerRejectsOtherMembersTopic() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(999L));
+        TopicStateKeyRegisterDTO dto = registerDto();
+
+        AjaxResult result = controller.registerStateKeys(dto);
+
+        assertNotEquals(200, result.get(AjaxResult.CODE_TAG));
+        verify(keyService, never()).register(anyLong(), any());
+    }
+
+    @Test
+    void registerDelegatesToServiceAfterOwnershipPasses() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(CALLER));
+        TopicStateKeyRegisterDTO dto = registerDto();
+
+        AjaxResult result = controller.registerStateKeys(dto);
+
+        assertEquals(200, result.get(AjaxResult.CODE_TAG), result.toString());
+        verify(keyService).register(eq(TOPIC_ID), eq(dto.getKeys()));
+    }
+
+    /**
+     * R18-DRAFT:草稿主题(未发布)上注册状态键必须可用 —— 服务端草稿 id 就是为这一步存在的,
+     * 没有它作者在第一次发布前根本没有 topicId 可传。
+     */
+    @Test
+    void registerAllowedOnDraftTopic() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(draftTopic(CALLER));
+        when(topicService.selectTopicIsDraft(TOPIC_ID)).thenReturn(1);
+        TopicStateKeyRegisterDTO dto = registerDto();
+
+        AjaxResult result = controller.registerStateKeys(dto);
+
+        assertEquals(200, result.get(AjaxResult.CODE_TAG), result.toString());
+        verify(keyService).register(eq(TOPIC_ID), eq(dto.getKeys()));
+    }
+
+    /** R18-DRAFT:草稿上发布前试检查必须可用 —— 试检查就是给「发布前」用的,只读不看发布态。 */
+    @Test
+    void publishCheckAllowedOnDraftTopic() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(draftTopic(CALLER));
+        when(topicService.selectTopicIsDraft(TOPIC_ID)).thenReturn(1);
+        when(checkService.check(any(CmsTopic.class)))
+                .thenReturn(Collections.<TopicPublishCheckService.PublishCheckIssue>emptyList());
+
+        AjaxResult result = controller.publishCheck(TOPIC_ID, null);
+
+        assertEquals(200, result.get(AjaxResult.CODE_TAG), result.toString());
+        verify(checkService).check(any(CmsTopic.class));
+    }
+
+    /**
+     * 编辑窗口与主题 update 同一口径:SELLING 起商业结构冻结,状态键注册表同属结构。
+     *
+     * <p>负控:把 editWindowDenial 调用摘掉,本用例立刻红。
+     */
+    @Test
+    void registerRejectedWhenTopicIsSellingFrozen() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(sellingTopic(CALLER));
+
+        AjaxResult result = controller.registerStateKeys(registerDto());
+
+        assertNotEquals(200, result.get(AjaxResult.CODE_TAG));
+        assertTrue(String.valueOf(result.get(AjaxResult.MSG_TAG)).contains("SELLING"), result.toString());
+        verify(keyService, never()).register(anyLong(), any());
+    }
+
+    /** 删除是写接口,同样被编辑窗口拦;不能靠删键绕开冻结。 */
+    @Test
+    void deleteRejectedWhenTopicIsSellingFrozen() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(sellingTopic(CALLER));
+
+        AjaxResult result = controller.deleteStateKey(TOPIC_ID, "tag.hurried", null);
+
+        assertNotEquals(200, result.get(AjaxResult.CODE_TAG));
+        assertTrue(String.valueOf(result.get(AjaxResult.MSG_TAG)).contains("SELLING"), result.toString());
+        verify(refService, never()).referencesOf(any(CmsTopic.class), eq("tag.hurried"));
+        verify(keyService, never()).delete(anyLong(), any());
+    }
+
+    /** GET 与 publish-check 是只读,冻结主题照常可读 —— 不然创作者连问题清单都看不到。 */
+    @Test
+    void listAndPublishCheckStayReadableWhenTopicIsSellingFrozen() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(sellingTopic(CALLER));
+        when(keyService.listByTopic(TOPIC_ID)).thenReturn(Collections.<ThemeStateKey>emptyList());
+        when(checkService.check(any(CmsTopic.class)))
+                .thenReturn(Collections.<TopicPublishCheckService.PublishCheckIssue>emptyList());
+
+        assertEquals(200, controller.listStateKeys(TOPIC_ID, null).get(AjaxResult.CODE_TAG));
+        assertEquals(200, controller.publishCheck(TOPIC_ID, null).get(AjaxResult.CODE_TAG));
+    }
+
+    @Test
+    void registerSurfacesBatchValidationError() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(CALLER));
+        doThrow(new ServiceException("状态键名不合法:BadKey")).when(keyService).register(anyLong(), any());
+
+        AjaxResult result = controller.registerStateKeys(registerDto());
+
+        assertNotEquals(200, result.get(AjaxResult.CODE_TAG));
+        assertTrue(String.valueOf(result.get(AjaxResult.MSG_TAG)).contains("状态键名不合法"), result.toString());
+    }
+
+    @Test
+    void deleteRejectsReferencedKeyWithPositions() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(CALLER));
+        when(refService.referencesOf(any(CmsTopic.class), eq("counter.coins")))
+                .thenReturn(Arrays.asList("节点「书房」", "主题数值规则"));
+
+        AjaxResult result = controller.deleteStateKey(TOPIC_ID, "counter.coins", null);
+
+        assertNotEquals(200, result.get(AjaxResult.CODE_TAG));
+        String message = String.valueOf(result.get(AjaxResult.MSG_TAG));
+        assertTrue(message.contains("counter.coins"), message);
+        assertTrue(message.contains("节点「书房」"), message);
+        assertTrue(message.contains("主题数值规则"), message);
+        verify(keyService, never()).delete(anyLong(), any());
+    }
+
+    @Test
+    void deleteRemovesUnreferencedKey() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(CALLER));
+        when(refService.referencesOf(any(CmsTopic.class), eq("tag.hurried")))
+                .thenReturn(Collections.<String>emptyList());
+        when(keyService.delete(TOPIC_ID, "tag.hurried")).thenReturn(true);
+
+        AjaxResult result = controller.deleteStateKey(TOPIC_ID, "tag.hurried", null);
+
+        assertEquals(200, result.get(AjaxResult.CODE_TAG), result.toString());
+        verify(keyService).delete(TOPIC_ID, "tag.hurried");
+    }
+
+    @Test
+    void deleteFailsClosedWhenConfigCannotBeParsed() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(CALLER));
+        when(refService.referencesOf(any(CmsTopic.class), eq("tag.hurried")))
+                .thenThrow(new ServiceException("主题存在无法解析的配置,暂不能删除状态键:节点「书房」..."));
+
+        AjaxResult result = controller.deleteStateKey(TOPIC_ID, "tag.hurried", null);
+
+        assertNotEquals(200, result.get(AjaxResult.CODE_TAG));
+        verify(keyService, never()).delete(anyLong(), any());
+    }
+
+    @Test
+    void publishCheckReturnsStructuredIssues() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(CALLER));
+        List<TopicPublishCheckService.PublishCheckIssue> issues = Arrays.asList(
+                TopicPublishCheckService.PublishCheckIssue.error("STATE_KEY_UNREGISTERED", 77L, "状态键未注册:clue.x"));
+        when(checkService.check(any(CmsTopic.class))).thenReturn(issues);
+
+        AjaxResult result = controller.publishCheck(TOPIC_ID, null);
+
+        assertEquals(200, result.get(AjaxResult.CODE_TAG), result.toString());
+        assertEquals(issues, result.get("data"));
+    }
+
+    @Test
+    void publishCheckRejectsOtherMembersTopic() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(999L));
+
+        AjaxResult result = controller.publishCheck(TOPIC_ID, null);
+
+        assertNotEquals(200, result.get(AjaxResult.CODE_TAG));
+        verify(checkService, never()).check(any(CmsTopic.class));
+    }
+
+    /**
+     * 发布状态接口与 publish-check 同一道归属闸:不是自己的主题一律拒,且不许去读状态。
+     * 负控:把 publishStatus 里的 editableDenial 摘掉,本用例红。
+     */
+    @Test
+    void publishStatusRejectsOtherMembersTopic() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(999L));
+
+        // 越权分支根本不该调用 owner 投影,所以这里不 stub publicationStatus。
+        AjaxResult result = controller.publishStatus(TOPIC_ID, null);
+
+        assertNotEquals(200, result.get(AjaxResult.CODE_TAG));
+        assertEquals("无权操作该主题", result.get(AjaxResult.MSG_TAG));
+        verify(topicPublicationService, never()).publicationStatus(any(CmsTopic.class));
+    }
+
+    /** 本人主题:原样返回发布域给出的五段事实,控制器不重算任何判据。 */
+    @Test
+    void publishStatusReturnsThePublicationOwnersProjection() {
+        CmsTopic owned = topic(CALLER);
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(owned);
+        com.chengyinhub.business.domain.vo.TopicPublicationStatusVO status =
+                new com.chengyinhub.business.domain.vo.TopicPublicationStatusVO(
+                        new com.chengyinhub.business.domain.vo.TopicPublicationStatusVO.Draft(true, true, null),
+                        new com.chengyinhub.business.domain.vo.TopicPublicationStatusVO.Review(
+                                com.chengyinhub.business.domain.vo.TopicPublicationStatusVO.REVIEW_DRAFT,
+                                "草稿", false, false, null, null),
+                        new com.chengyinhub.business.domain.vo.TopicPublicationStatusVO.Visibility(
+                                false, "尚未发布，玩家看不到"),
+                        new com.chengyinhub.business.domain.vo.TopicPublicationStatusVO.Sale(
+                                false, false, false, null, "lifecycle 必须为 SELLING"),
+                        new com.chengyinhub.business.domain.vo.TopicPublicationStatusVO.Playable(
+                                false, "路线尚未发布", null, false));
+
+        // 控制器不重算判据,只透传 owner 的投影:必须显式给出该 stub,否则拿到 null 是装置问题。
+        when(topicPublicationService.publicationStatus(owned)).thenReturn(status);
+        AjaxResult result = controller.publishStatus(TOPIC_ID, null);
+
+        assertEquals(200, result.get(AjaxResult.CODE_TAG), result.toString());
+        assertEquals(status, result.get("data"));
+        verify(topicPublicationService).publicationStatus(owned);
+    }
+
+    @Test
+    void publishCheckRejectsAnonymousAndUnauthorizedMerchantWithoutIssueReads() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(CALLER));
+        doReturn(0L).when(controller).getAppUserId();
+        AjaxResult anonymous = controller.publishCheck(TOPIC_ID, null);
+        assertEquals("请先登录", anonymous.get("msg"));
+        assertTrue(!anonymous.containsKey("data"));
+        doReturn(CALLER).when(controller).getAppUserId();
+        var merchant = mock(com.chengyinhub.business.access.merchant.IMerchantAccessService.class);
+        ReflectionTestUtils.setField(controller, "merchantAccessService", merchant);
+        when(merchant.require(eq(CALLER), any())).thenThrow(new ServiceException("无商家项目管理权限", 403));
+        AjaxResult denied = controller.publishCheck(TOPIC_ID, "MERCHANT");
+        assertEquals("无商家项目管理权限", denied.get("msg"));
+        assertTrue(!denied.containsKey("data"));
+        verify(checkService, never()).check(any());
+    }
+
+    private static CmsTopic topic(Long ownerMemberId) {
+        CmsTopic topic = new CmsTopic();
+        topic.setId(TOPIC_ID);
+        topic.setMemberId(ownerMemberId);
+        topic.setDelFlag(0);
+        topic.setLifecycle(0);
+        return topic;
+    }
+
+    /** 已开卖主题:生命周期 SELLING,编辑窗口判定为 SELLING_FROZEN。 */
+    private static CmsTopic sellingTopic(Long ownerMemberId) {
+        CmsTopic topic = topic(ownerMemberId);
+        topic.setStatus(1);
+        topic.setLifecycle(3);
+        return topic;
+    }
+
+    /** 服务端草稿:status=0 且 is_draft=1,从未公开过。 */
+    private static CmsTopic draftTopic(Long ownerMemberId) {
+        CmsTopic topic = topic(ownerMemberId);
+        topic.setStatus(0);
+        topic.setUserStatus(0);
+        return topic;
+    }
+
+    private static TopicStateKeyRegisterDTO registerDto() {
+        ThemeStateKey key = new ThemeStateKey();
+        key.setStateKey("clue.ledger_page");
+        key.setKeyType("flag");
+        key.setScope("run");
+        TopicStateKeyRegisterDTO dto = new TopicStateKeyRegisterDTO();
+        dto.setTopicId(TOPIC_ID);
+        dto.setKeys(Collections.singletonList(key));
+        return dto;
+    }
+
+    /** F2 T01:PUT 只改自己的主题;越权不进服务层。 */
+    @Test
+    void updateRejectsOtherMembersTopic() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(999L));
+
+        AjaxResult result = controller.updateStateKey("counter.str", updateDto());
+
+        assertEquals("无权操作该主题", result.get(AjaxResult.MSG_TAG));
+        verify(keyService, never()).updateDefinition(anyLong(), any(), any());
+    }
+
+    /** 服务层带码异常原样转成 code=400 + errorCode,客户端按码提示。 */
+    @Test
+    void updateMapsOutOfRangeToBadRequestWithErrorCode() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(CALLER));
+        when(keyService.updateDefinition(eq(TOPIC_ID), eq("counter.str"), any())).thenThrow(
+                new ServiceException("状态键初值 120 超出范围 0..100:counter.str", 400)
+                        .setDetailMessage(ThemeStateKeyService.ERR_RANGE));
+
+        AjaxResult result = controller.updateStateKey("counter.str", updateDto());
+
+        assertEquals(400, result.get(AjaxResult.CODE_TAG));
+        assertEquals(ThemeStateKeyService.ERR_RANGE, result.get("errorCode"));
+    }
+
+    @Test
+    void updateDelegatesWithThePathKey() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(CALLER));
+        TopicStateKeyUpdateDTO dto = updateDto();
+
+        AjaxResult result = controller.updateStateKey("counter.str", dto);
+
+        assertEquals(200, result.get(AjaxResult.CODE_TAG), result.toString());
+        verify(keyService).updateDefinition(TOPIC_ID, "counter.str", dto.getKey());
+    }
+
+    /** 试校验只读:问题列表 → 400 + problems;不写库。 */
+    @Test
+    void validateReportsProblemsAsBadRequest() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(CALLER));
+        when(keyService.check(any())).thenReturn(Arrays.asList("状态键初值 120 超出范围 0..100:counter.str"));
+
+        AjaxResult result = controller.validateStateKeys(registerDto());
+
+        assertEquals(400, result.get(AjaxResult.CODE_TAG));
+        assertEquals(ThemeStateKeyService.ERR_INVALID, result.get("errorCode"));
+        assertEquals(1, ((List<?>) result.get("problems")).size());
+        verify(keyService, never()).register(anyLong(), any());
+    }
+
+    @Test
+    void validatePassesAndRejectsForeignTopic() {
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(CALLER));
+        when(keyService.check(any())).thenReturn(Collections.<String>emptyList());
+        assertEquals(200, controller.validateStateKeys(registerDto()).get(AjaxResult.CODE_TAG));
+
+        when(topicService.selectCmsTopicById(TOPIC_ID)).thenReturn(topic(999L));
+        assertEquals("无权操作该主题", controller.validateStateKeys(registerDto()).get(AjaxResult.MSG_TAG));
+    }
+
+    private static TopicStateKeyUpdateDTO updateDto() {
+        TopicStateKeyUpdateDTO dto = new TopicStateKeyUpdateDTO();
+        dto.setTopicId(TOPIC_ID);
+        ThemeStateKey key = new ThemeStateKey();
+        key.setLabel("力量");
+        key.setInitialValue(3);
+        dto.setKey(key);
+        return dto;
+    }
+}

@@ -1,0 +1,650 @@
+package com.chengyinhub.common.utils.html;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * HTML过滤器，用于去除XSS漏洞隐患。
+ *
+ * @author ruoyi
+ */
+public final class HTMLFilter
+{
+    /**
+     * regex flag union representing /si modifiers in php
+     **/
+    private static final int REGEX_FLAGS_SI = Pattern.CASE_INSENSITIVE | Pattern.DOTALL;
+    private static final Pattern P_COMMENTS = Pattern.compile("<!--(.*?)-->", Pattern.DOTALL);
+    private static final Pattern P_COMMENT = Pattern.compile("^!--(.*)--$", REGEX_FLAGS_SI);
+    private static final Pattern P_TAGS = Pattern.compile("<(.*?)>", Pattern.DOTALL);
+    private static final Pattern P_END_TAG = Pattern.compile("^/([a-z0-9]+)", REGEX_FLAGS_SI);
+    private static final Pattern P_START_TAG = Pattern.compile("^([a-z0-9]+)(.*?)(/?)$", REGEX_FLAGS_SI);
+    private static final Pattern P_QUOTED_ATTRIBUTES = Pattern.compile("([a-z0-9]+)=([\"'])(.*?)\\2", REGEX_FLAGS_SI);
+    private static final Pattern P_UNQUOTED_ATTRIBUTES = Pattern.compile("([a-z0-9]+)(=)([^\"\\s']+)", REGEX_FLAGS_SI);
+    private static final Pattern P_PROTOCOL = Pattern.compile("^([^:]+):", REGEX_FLAGS_SI);
+    private static final Pattern P_ENTITY = Pattern.compile("&#(\\d+);?");
+    private static final Pattern P_ENTITY_UNICODE = Pattern.compile("&#x([0-9a-f]+);?");
+    private static final Pattern P_ENCODE = Pattern.compile("%([0-9a-f]{2});?");
+    private static final Pattern P_VALID_ENTITIES = Pattern.compile("&([^&;]*)(?=(;|&|$))");
+    private static final Pattern P_VALID_QUOTES = Pattern.compile("(>|^)([^<]+?)(<|$)", Pattern.DOTALL);
+    private static final Pattern P_END_ARROW = Pattern.compile("^>");
+    private static final Pattern P_BODY_TO_END = Pattern.compile("<([^>]*?)(?=<|$)");
+    private static final Pattern P_XML_CONTENT = Pattern.compile("(^|>)([^<]*?)(?=>)");
+    private static final Pattern P_STRAY_LEFT_ARROW = Pattern.compile("<([^>]*?)(?=<|$)");
+    private static final Pattern P_STRAY_RIGHT_ARROW = Pattern.compile("(^|>)([^<]*?)(?=>)");
+    private static final Pattern P_AMP = Pattern.compile("&");
+    private static final Pattern P_QUOTE = Pattern.compile("\"");
+    private static final Pattern P_LEFT_ARROW = Pattern.compile("<");
+    private static final Pattern P_RIGHT_ARROW = Pattern.compile(">");
+    private static final Pattern P_BOTH_ARROWS = Pattern.compile("<>");
+    /**
+     * 能被当成真标签的完整写法:ASCII 标签名 + 只由 ASCII 属性(可带值)组成的属性区 + '>'。
+     * 属性区里混了正文(如 {@code a<b 且 c>d} 的「且 c」)就不是标签,整段按文本处理,而不是被当成
+     * {@code <b>} 把「且 c」当非法属性删掉。占有量词防回溯。
+     */
+    private static final Pattern P_REAL_START_TAG = Pattern.compile(
+            "<[A-Za-z][A-Za-z0-9-]*+(?:[\\s/]++[A-Za-z_:@][-A-Za-z0-9_:.@]*+"
+                    + "(?:\\s*+=\\s*+(?:\"[^\"]*+\"|'[^']*+'|[^\\s\"'=<>`]++))?)*+[\\s/]*+>");
+    private static final Pattern P_REAL_END_TAG = Pattern.compile("</[A-Za-z][A-Za-z0-9-]*+\\s*+>");
+
+    // @xxx could grow large... maybe use sesat's ReferenceMap
+    private static final ConcurrentMap<String, Pattern> P_REMOVE_PAIR_BLANKS = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<String, Pattern> P_REMOVE_SELF_BLANKS = new ConcurrentHashMap<>();
+
+    /**
+     * set of allowed html elements, along with allowed attributes for each element
+     **/
+    private final Map<String, List<String>> vAllowed;
+    /**
+     * counts of open tags for each (allowable) html element
+     **/
+    private final Map<String, Integer> vTagCounts = new HashMap<>();
+
+    /**
+     * html elements which must always be self-closing (e.g. "<img />")
+     **/
+    private final String[] vSelfClosingTags;
+    /**
+     * html elements which must always have separate opening and closing tags (e.g. "<b></b>")
+     **/
+    private final String[] vNeedClosingTags;
+    /**
+     * set of disallowed html elements
+     **/
+    private final String[] vDisallowed;
+    /**
+     * attributes which should be checked for valid protocols
+     **/
+    private final String[] vProtocolAtts;
+    /**
+     * allowed protocols
+     **/
+    private final String[] vAllowedProtocols;
+    /**
+     * tags which should be removed if they contain no content (e.g. "<b></b>" or "<b />")
+     **/
+    private final String[] vRemoveBlanks;
+    /**
+     * entities allowed within html markup
+     **/
+    private final String[] vAllowedEntities;
+    /**
+     * flag determining whether comments are allowed in input String.
+     */
+    private final boolean stripComment;
+    private final boolean encodeQuotes;
+    /**
+     * flag determining whether to try to make tags when presented with "unbalanced" angle brackets (e.g. "<b text </b>"
+     * becomes "<b> text </b>"). If set to false, unbalanced angle brackets will be html escaped.
+     */
+    private final boolean alwaysMakeTags;
+
+    /**
+     * Default constructor.
+     */
+    public HTMLFilter()
+    {
+        vAllowed = new HashMap<>();
+
+        final ArrayList<String> a_atts = new ArrayList<>();
+        a_atts.add("href");
+        a_atts.add("target");
+        vAllowed.put("a", a_atts);
+
+        final ArrayList<String> img_atts = new ArrayList<>();
+        img_atts.add("src");
+        img_atts.add("width");
+        img_atts.add("height");
+        img_atts.add("alt");
+        vAllowed.put("img", img_atts);
+
+        final ArrayList<String> no_atts = new ArrayList<>();
+        vAllowed.put("b", no_atts);
+        vAllowed.put("strong", no_atts);
+        vAllowed.put("i", no_atts);
+        vAllowed.put("em", no_atts);
+
+        vSelfClosingTags = new String[] { "img" };
+        vNeedClosingTags = new String[] { "a", "b", "strong", "i", "em" };
+        vDisallowed = new String[] {};
+        vAllowedProtocols = new String[] { "http", "mailto", "https" }; // no ftp.
+        vProtocolAtts = new String[] { "src", "href" };
+        vRemoveBlanks = new String[] { "a", "b", "strong", "i", "em" };
+        vAllowedEntities = new String[] { "amp", "gt", "lt", "quot" };
+        stripComment = true;
+        encodeQuotes = true;
+        alwaysMakeTags = false;
+    }
+
+    /**
+     * Map-parameter configurable constructor.
+     *
+     * @param conf map containing configuration. keys match field names.
+     */
+    @SuppressWarnings("unchecked")
+    public HTMLFilter(final Map<String, Object> conf)
+    {
+
+        assert conf.containsKey("vAllowed") : "configuration requires vAllowed";
+        assert conf.containsKey("vSelfClosingTags") : "configuration requires vSelfClosingTags";
+        assert conf.containsKey("vNeedClosingTags") : "configuration requires vNeedClosingTags";
+        assert conf.containsKey("vDisallowed") : "configuration requires vDisallowed";
+        assert conf.containsKey("vAllowedProtocols") : "configuration requires vAllowedProtocols";
+        assert conf.containsKey("vProtocolAtts") : "configuration requires vProtocolAtts";
+        assert conf.containsKey("vRemoveBlanks") : "configuration requires vRemoveBlanks";
+        assert conf.containsKey("vAllowedEntities") : "configuration requires vAllowedEntities";
+
+        vAllowed = Collections.unmodifiableMap((HashMap<String, List<String>>) conf.get("vAllowed"));
+        vSelfClosingTags = (String[]) conf.get("vSelfClosingTags");
+        vNeedClosingTags = (String[]) conf.get("vNeedClosingTags");
+        vDisallowed = (String[]) conf.get("vDisallowed");
+        vAllowedProtocols = (String[]) conf.get("vAllowedProtocols");
+        vProtocolAtts = (String[]) conf.get("vProtocolAtts");
+        vRemoveBlanks = (String[]) conf.get("vRemoveBlanks");
+        vAllowedEntities = (String[]) conf.get("vAllowedEntities");
+        stripComment = conf.containsKey("stripComment") ? (Boolean) conf.get("stripComment") : true;
+        encodeQuotes = conf.containsKey("encodeQuotes") ? (Boolean) conf.get("encodeQuotes") : true;
+        alwaysMakeTags = conf.containsKey("alwaysMakeTags") ? (Boolean) conf.get("alwaysMakeTags") : true;
+    }
+
+    private void reset()
+    {
+        vTagCounts.clear();
+    }
+
+    // ---------------------------------------------------------------
+    // my versions of some PHP library functions
+    public static String chr(final int decimal)
+    {
+        return String.valueOf((char) decimal);
+    }
+
+    public static String htmlSpecialChars(final String s)
+    {
+        String result = s;
+        result = regexReplace(P_AMP, "&amp;", result);
+        result = regexReplace(P_QUOTE, "&quot;", result);
+        result = regexReplace(P_LEFT_ARROW, "&lt;", result);
+        result = regexReplace(P_RIGHT_ARROW, "&gt;", result);
+        return result;
+    }
+
+    // ---------------------------------------------------------------
+
+    /**
+     * given a user submitted input String, filter out any invalid or restricted html.
+     *
+     * @param input text (i.e. submitted by a user) than may contain html
+     * @return "clean" version of input, with only valid, whitelisted html elements allowed
+     */
+    public String filter(final String input)
+    {
+        reset();
+        String marker = "text-bracket-" + java.util.UUID.randomUUID() + "-";
+        while (input.contains(marker)) marker = "text-bracket-" + java.util.UUID.randomUUID() + "-";
+        String s = protectTextBrackets(input, marker);
+
+        s = escapeComments(s);
+
+        s = balanceHTML(s);
+
+        s = checkTags(s);
+
+        s = processRemoveBlanks(s);
+
+        // s = validateEntities(s);
+
+        return restoreTextBrackets(s, marker);
+    }
+
+    /**
+     * 把占位还原成文本尖括号。清洗会删掉标签/注释,原本隔开的文本 '<' 可能因此紧贴字母
+     * (如 {@code <<script></script>img onerror=...>}、{@code <<!-- -->script>}),
+     * 原样还原就会拼出一个新标签。这种 '<' 一律落成 {@code &lt;},不得重新组成标签。
+     */
+    private String restoreTextBrackets(String s, String marker)
+    {
+        String left = marker + "left";
+        String text = s.replace(marker + "right", ">");
+        StringBuilder out = new StringBuilder(text.length());
+        int from = 0;
+        int at;
+        while ((at = text.indexOf(left, from)) >= 0) {
+            out.append(text, from, at);
+            int next = at + left.length();
+            // 连续的文本 '<'(如 "<<10"):后面紧跟的是下一个占位,不是字母,不得被误判成标签开头。
+            char c = text.startsWith(left, next) ? '<' : next < text.length() ? text.charAt(next) : 0;
+            char afterSlash = next + 1 < text.length() ? text.charAt(next + 1) : 0;
+            out.append(startsTag(c, afterSlash) ? "&lt;" : "<");
+            from = next;
+        }
+        out.append(text, from, text.length());
+        return out.toString();
+    }
+
+    private static boolean isAsciiLetter(char c)
+    {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    }
+
+    /** '<' 后面紧跟这些字符时浏览器会按标签/注释/处理指令解析。 */
+    private static boolean startsTag(char next, char afterSlash)
+    {
+        return isAsciiLetter(next) || (next == '/' && isAsciiLetter(afterSlash)) || next == '!' || next == '?';
+    }
+
+    /**
+     * '<' 之后是否真是一个标签/注释/处理指令。注释与处理指令沿用原口径交给后续清洗;
+     * 起止标签必须整段符合 ASCII 标签语法并有收尾的 '>',否则按正文处理(PR10 复审 F-W5-12)。
+     */
+    private static boolean formsRealTag(String input, int at, char next)
+    {
+        if (next == '!' || next == '?') return true;
+        Matcher m = (next == '/' ? P_REAL_END_TAG : P_REAL_START_TAG).matcher(input);
+        m.region(at, input.length());
+        return m.lookingAt();
+    }
+
+    private String protectTextBrackets(String input, String marker)
+    {
+        StringBuilder text = new StringBuilder(input.length());
+        boolean tag = false;
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if (c == '<') {
+                char next = i + 1 < input.length() ? input.charAt(i + 1) : 0;
+                char afterSlash = i + 2 < input.length() ? input.charAt(i + 2) : 0;
+                if (startsTag(next, afterSlash) && formsRealTag(input, i, next)) { tag = true; text.append(c); }
+                // 不成标签的 '<'(含 a<b 且 c>d、x<y 这类紧跟字母的比较号)一律按文本保护;
+                // 还原时紧跟字母的落成 &lt;,浏览器不会把它解析成标签,正文一个字都不丢。
+                else text.append(marker).append("left");
+            } else if (c == '>') {
+                if (tag) { tag = false; text.append(c); }
+                else text.append(marker).append("right");
+            } else text.append(c);
+        }
+        return text.toString();
+    }
+
+    public boolean isAlwaysMakeTags()
+    {
+        return alwaysMakeTags;
+    }
+
+    public boolean isStripComments()
+    {
+        return stripComment;
+    }
+
+    private String escapeComments(final String s)
+    {
+        final Matcher m = P_COMMENTS.matcher(s);
+        final StringBuffer buf = new StringBuffer();
+        if (m.find())
+        {
+            final String match = m.group(1); // (.*?)
+            m.appendReplacement(buf, Matcher.quoteReplacement("<!--" + htmlSpecialChars(match) + "-->"));
+        }
+        m.appendTail(buf);
+
+        return buf.toString();
+    }
+
+    private String balanceHTML(String s)
+    {
+        if (alwaysMakeTags)
+        {
+            //
+            // try and form html
+            //
+            s = regexReplace(P_END_ARROW, "", s);
+            // 不追加结束标签
+            s = regexReplace(P_BODY_TO_END, "<$1>", s);
+            s = regexReplace(P_XML_CONTENT, "$1<$2", s);
+
+        }
+        else
+        {
+            //
+            // escape stray brackets
+            //
+            s = regexReplace(P_STRAY_LEFT_ARROW, "&lt;$1", s);
+            s = regexReplace(P_STRAY_RIGHT_ARROW, "$1$2&gt;<", s);
+
+            //
+            // the last regexp causes '<>' entities to appear
+            // (we need to do a lookahead assertion so that the last bracket can
+            // be used in the next pass of the regexp)
+            //
+            s = regexReplace(P_BOTH_ARROWS, "", s);
+        }
+
+        return s;
+    }
+
+    private String checkTags(String s)
+    {
+        Matcher m = P_TAGS.matcher(s);
+
+        final StringBuffer buf = new StringBuffer();
+        while (m.find())
+        {
+            String replaceStr = m.group(1);
+            replaceStr = processTag(replaceStr);
+            m.appendReplacement(buf, Matcher.quoteReplacement(replaceStr));
+        }
+        m.appendTail(buf);
+
+        // these get tallied in processTag
+        // (remember to reset before subsequent calls to filter method)
+        final StringBuilder sBuilder = new StringBuilder(buf.toString());
+        for (String key : vTagCounts.keySet())
+        {
+            for (int ii = 0; ii < vTagCounts.get(key); ii++)
+            {
+                sBuilder.append("</").append(key).append(">");
+            }
+        }
+        s = sBuilder.toString();
+
+        return s;
+    }
+
+    private String processRemoveBlanks(final String s)
+    {
+        String result = s;
+        for (String tag : vRemoveBlanks)
+        {
+            if (!P_REMOVE_PAIR_BLANKS.containsKey(tag))
+            {
+                P_REMOVE_PAIR_BLANKS.putIfAbsent(tag, Pattern.compile("<" + tag + "(\\s[^>]*)?></" + tag + ">"));
+            }
+            result = regexReplace(P_REMOVE_PAIR_BLANKS.get(tag), "", result);
+            if (!P_REMOVE_SELF_BLANKS.containsKey(tag))
+            {
+                P_REMOVE_SELF_BLANKS.putIfAbsent(tag, Pattern.compile("<" + tag + "(\\s[^>]*)?/>"));
+            }
+            result = regexReplace(P_REMOVE_SELF_BLANKS.get(tag), "", result);
+        }
+
+        return result;
+    }
+
+    private static String regexReplace(final Pattern regex_pattern, final String replacement, final String s)
+    {
+        Matcher m = regex_pattern.matcher(s);
+        return m.replaceAll(replacement);
+    }
+
+    private String processTag(final String s)
+    {
+        // ending tags
+        Matcher m = P_END_TAG.matcher(s);
+        if (m.find())
+        {
+            final String name = m.group(1).toLowerCase();
+            if (allowed(name))
+            {
+                if (!inArray(name, vSelfClosingTags))
+                {
+                    if (vTagCounts.containsKey(name))
+                    {
+                        vTagCounts.put(name, vTagCounts.get(name) - 1);
+                        return "</" + name + ">";
+                    }
+                }
+            }
+        }
+
+        // starting tags
+        m = P_START_TAG.matcher(s);
+        if (m.find())
+        {
+            final String name = m.group(1).toLowerCase();
+            final String body = m.group(2);
+            String ending = m.group(3);
+
+            // debug( "in a starting tag, name='" + name + "'; body='" + body + "'; ending='" + ending + "'" );
+            if (allowed(name))
+            {
+                final StringBuilder params = new StringBuilder();
+
+                final Matcher m2 = P_QUOTED_ATTRIBUTES.matcher(body);
+                final Matcher m3 = P_UNQUOTED_ATTRIBUTES.matcher(body);
+                final List<String> paramNames = new ArrayList<>();
+                final List<String> paramValues = new ArrayList<>();
+                while (m2.find())
+                {
+                    paramNames.add(m2.group(1)); // ([a-z0-9]+)
+                    paramValues.add(m2.group(3)); // (.*?)
+                }
+                while (m3.find())
+                {
+                    paramNames.add(m3.group(1)); // ([a-z0-9]+)
+                    paramValues.add(m3.group(3)); // ([^\"\\s']+)
+                }
+
+                String paramName, paramValue;
+                for (int ii = 0; ii < paramNames.size(); ii++)
+                {
+                    paramName = paramNames.get(ii).toLowerCase();
+                    paramValue = paramValues.get(ii);
+
+                    // debug( "paramName='" + paramName + "'" );
+                    // debug( "paramValue='" + paramValue + "'" );
+                    // debug( "allowed? " + vAllowed.get( name ).contains( paramName ) );
+
+                    if (allowedAttribute(name, paramName))
+                    {
+                        if (inArray(paramName, vProtocolAtts))
+                        {
+                            paramValue = processParamProtocol(paramValue);
+                        }
+                        params.append(' ').append(paramName).append("=\\\"").append(paramValue).append("\\\"");
+                    }
+                }
+
+                if (inArray(name, vSelfClosingTags))
+                {
+                    ending = " /";
+                }
+
+                if (inArray(name, vNeedClosingTags))
+                {
+                    ending = "";
+                }
+
+                if (ending == null || ending.length() < 1)
+                {
+                    if (vTagCounts.containsKey(name))
+                    {
+                        vTagCounts.put(name, vTagCounts.get(name) + 1);
+                    }
+                    else
+                    {
+                        vTagCounts.put(name, 1);
+                    }
+                }
+                else
+                {
+                    ending = " /";
+                }
+                return "<" + name + params + ending + ">";
+            }
+            else
+            {
+                return "";
+            }
+        }
+
+        // comments
+        m = P_COMMENT.matcher(s);
+        if (!stripComment && m.find())
+        {
+            return "<" + m.group() + ">";
+        }
+
+        return "";
+    }
+
+    private String processParamProtocol(String s)
+    {
+        s = decodeEntities(s);
+        final Matcher m = P_PROTOCOL.matcher(s);
+        if (m.find())
+        {
+            final String protocol = m.group(1);
+            if (!inArray(protocol, vAllowedProtocols))
+            {
+                // bad protocol, turn into local anchor link instead
+                s = "#" + s.substring(protocol.length() + 1);
+                if (s.startsWith("#//"))
+                {
+                    s = "#" + s.substring(3);
+                }
+            }
+        }
+
+        return s;
+    }
+
+    private String decodeEntities(String s)
+    {
+        StringBuffer buf = new StringBuffer();
+
+        Matcher m = P_ENTITY.matcher(s);
+        while (m.find())
+        {
+            final String match = m.group(1);
+            final int decimal = Integer.decode(match).intValue();
+            m.appendReplacement(buf, Matcher.quoteReplacement(chr(decimal)));
+        }
+        m.appendTail(buf);
+        s = buf.toString();
+
+        buf = new StringBuffer();
+        m = P_ENTITY_UNICODE.matcher(s);
+        while (m.find())
+        {
+            final String match = m.group(1);
+            final int decimal = Integer.valueOf(match, 16).intValue();
+            m.appendReplacement(buf, Matcher.quoteReplacement(chr(decimal)));
+        }
+        m.appendTail(buf);
+        s = buf.toString();
+
+        buf = new StringBuffer();
+        m = P_ENCODE.matcher(s);
+        while (m.find())
+        {
+            final String match = m.group(1);
+            final int decimal = Integer.valueOf(match, 16).intValue();
+            m.appendReplacement(buf, Matcher.quoteReplacement(chr(decimal)));
+        }
+        m.appendTail(buf);
+        s = buf.toString();
+
+        s = validateEntities(s);
+        return s;
+    }
+
+    private String validateEntities(final String s)
+    {
+        StringBuffer buf = new StringBuffer();
+
+        // validate entities throughout the string
+        Matcher m = P_VALID_ENTITIES.matcher(s);
+        while (m.find())
+        {
+            final String one = m.group(1); // ([^&;]*)
+            final String two = m.group(2); // (?=(;|&|$))
+            m.appendReplacement(buf, Matcher.quoteReplacement(checkEntity(one, two)));
+        }
+        m.appendTail(buf);
+
+        return encodeQuotes(buf.toString());
+    }
+
+    private String encodeQuotes(final String s)
+    {
+        if (encodeQuotes)
+        {
+            StringBuffer buf = new StringBuffer();
+            Matcher m = P_VALID_QUOTES.matcher(s);
+            while (m.find())
+            {
+                final String one = m.group(1); // (>|^)
+                final String two = m.group(2); // ([^<]+?)
+                final String three = m.group(3); // (<|$)
+                // 不替换双引号为&quot;，防止json格式无效 regexReplace(P_QUOTE, "&quot;", two)
+                m.appendReplacement(buf, Matcher.quoteReplacement(one + two + three));
+            }
+            m.appendTail(buf);
+            return buf.toString();
+        }
+        else
+        {
+            return s;
+        }
+    }
+
+    private String checkEntity(final String preamble, final String term)
+    {
+
+        return ";".equals(term) && isValidEntity(preamble) ? '&' + preamble : "&amp;" + preamble;
+    }
+
+    private boolean isValidEntity(final String entity)
+    {
+        return inArray(entity, vAllowedEntities);
+    }
+
+    private static boolean inArray(final String s, final String[] array)
+    {
+        for (String item : array)
+        {
+            if (item != null && item.equals(s))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean allowed(final String name)
+    {
+        return (vAllowed.isEmpty() || vAllowed.containsKey(name)) && !inArray(name, vDisallowed);
+    }
+
+    private boolean allowedAttribute(final String name, final String paramName)
+    {
+        return allowed(name) && (vAllowed.isEmpty() || vAllowed.get(name).contains(paramName));
+    }
+}

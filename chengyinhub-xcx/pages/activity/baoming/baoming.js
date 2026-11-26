@@ -1,0 +1,2185 @@
+const moneyFormat = require('../../../utils/money-format.js')
+const modal = require('../../../utils/modal.js');
+const cyLoading = require('../../../utils/loading.js');
+const toast = require('../../../utils/toast.js');
+const datetime = require('../../../utils/datetime.js');
+let legacyAddressKeyCleared = false;
+function openAddress() { return require('../../../utils/open-address.js') }
+const app = getApp();
+const analytics = require('../../../utils/analytics.js');
+const subscribe = require('../../../utils/subscribe.js');
+const { createCheckoutWorkflow, hasCompletePaymentParams, isOrderExpiredFailure, isTerminalOrderConflict,
+  ORDER_REBUILD_REQUIRED, ORDER_EXPIRED_USER_MESSAGE } = require('../../../utils/checkout/checkout-workflow.js');
+// j6 N1:服务端拒绝第二笔/取代旧单时带回要去的那笔订单 id(errorCode + data.registrationId)
+const PENDING_ORDER_REDIRECT = '__pending_order_redirect__';
+function pendingOrderRedirectId(res) {
+  if (!res || (res.errorCode !== 'PENDING_ORDER_EXISTS' && res.errorCode !== 'ORDER_SUPERSEDED')) return null;
+  const id = res.data && res.data.registrationId;
+  return id ? id : null;
+}
+const { createRegistrationPaymentVerifier } = require('../../../utils/checkout/registration-payment-verifier.js');
+const { isRecordList } = require('../../../utils/response-shape.js');
+const { ticketWindowPassed, sortBySessionStart } = require('../../../utils/ticket-window.js');
+
+function selectedAddressStorageKey(userId) {
+  return userId ? 'selectedAddressId_v1_' + String(userId) : '';
+}
+const { isValidMobile } = require('../../../utils/form-state.js');
+const indexFormat = require('../../../utils/index/index-format.js');
+const ticketSource = require('../../../utils/ticket-source.js');
+const familyTicket = require('../../../utils/family-ticket.js'); // F12 亲子票:只选儿童年龄
+const { refundRuleTiers } = require('../utils/refund-tiers.js'); // OR-022:退款三档同一份文案
+const marketingConsent = require('../../../utils/marketing-consent-entry.js');
+const quoteView = require('../utils/quote-view.js');
+const { hostReservationView } = require('../utils/host-reservation.js');
+const referral = require('../../../utils/commerce/referral.js');
+
+// 成功弹窗:停留时长 + 退场动画时长。后者必须和 wxss 里 --cy-motion-slow(350ms) 一致,
+// 短了会在动画没播完时就销毁节点(又变成凭空消失),长了会白白多停一截。
+const SUCCESS_HOLD_MS = 2000;
+/* 等 cy-sheet 播完退场再跳走。250 是 cy-sheet 的 exitMotion(250) 镜像 ——
+   WXSS 时长 JS 读不到,只能两处各留一份;改那边记得改这里。 */
+const SHEET_EXIT_MS = 250;
+
+function ticketIsSoldOut(ticket) {
+  if (!ticket) return false;
+  const raw = ticket.remainingInventory;
+  if (raw === null || raw === undefined || raw === '') return false;
+  const remaining = Number(raw);
+  return Number.isFinite(remaining) && remaining <= 0;
+}
+
+function parseOfferDeadline(value) {
+  if (!value) return '';
+  // L06-040:服务端时间按中国时区锚定(与 ticketWindowPassed 同一把尺子),不随手机时区漂移。
+  const ts = datetime.toTimestamp(value);
+  return Number.isNaN(ts) ? null : new Date(ts);
+}
+
+// 票种 endTime 在本仓口径里就是「报名截止时间」:详情组件把它标成「报名截止」
+// (scene-play-activity-detail/index.wxml:82)并用它拦过入口(:288)。但深链直入本页
+// 会绕过那道拦,用户填完整张表才被拒。这里用同一把尺子,在加载时就闸住。
+// 缺 endTime 视为「未设截止」不放行拦截 —— 与票种库存未知不判售罄同一条兜底方向。
+function ticketSignupClosed(ticket, now) {
+  if (!ticket || !ticket.endTime) return false;
+  const end = parseOfferDeadline(ticket.endTime);
+  return !!end && (now == null ? Date.now() : now) > end.getTime();
+}
+
+// U-168:置灰与建单闸(RegistrationOrderCreateGateImpl)用同一把钟。/api/activity/info 带回
+// serverNow(epoch ms)时记下「服务器 - 手机」的偏移,之后场次/票种/候补窗口的判断都按
+// Date.now() + 偏移;缺 serverNow 或值不可用才退回手机时钟(偏移 0)。
+function serverClockOffset(serverNow, receivedAt) {
+  if (serverNow === null || serverNow === undefined || serverNow === '') return 0;
+  const server = Number(serverNow);
+  return Number.isFinite(server) && server > 0 ? server - receivedAt : 0;
+}
+
+function formatOfferDeadline(value) {
+  const parts = datetime.chinaParts(value);
+  if (!parts) return '';
+  const pad = n => String(n).padStart(2, '0');
+  return pad(parts.month) + '-' + pad(parts.day) + ' '
+    + pad(parts.hours) + ':' + pad(parts.minutes);
+}
+
+const OFFER_WINDOW_MAX_MS = 1441 * 60_000;
+
+function offerDeadlineIsFuture(value, now) {
+  const date = parseOfferDeadline(value);
+  if (!date) return false;
+  const delay = date.getTime() - (now == null ? Date.now() : now);
+  // C-24(2026-11-02):候补认领窗口由系列配置,后端上限 1440 分钟(ClubEventOpsServiceImpl /
+  // club_event_series CHECK);原先按 120 分钟判,把 24 小时内仍有效的 OFFERED 当成已过期。超出上限仍 fail-closed。
+  return delay > 0 && delay <= OFFER_WINDOW_MAX_MS;
+}
+
+// CU-C-32(9-25 裁决):换票弹层是「场次选择器」,同日多场要能区分 —— 有开始时间就带上「MM-DD HH:mm」。
+function sessionOptionLabel(ticket) {
+  const price = '¥' + moneyFormat.decimalText((ticket && ticket.price) || 0);
+  const when = ticket && ticket.startTime ? formatOfferDeadline(ticket.startTime) : '';
+  const name = (ticket && ticket.name) || '';
+  return name + (when ? ' · ' + when : '') + ' · ' + price;
+}
+
+function waitlistEligibilityMessage(eligibility) {
+  const messages = {
+    NO_SERIES: '本活动未配置候补',
+    WAITLIST_CLOSED: '本场候补已关闭',
+    NOT_MEMBER: '仅俱乐部正常成员可加入候补',
+    ALREADY_REGISTERED: '你已有该票种的有效报名',
+    BLOCKED: '你当前无法参与该俱乐部'
+  };
+  return messages[eligibility] || '当前暂不可加入候补';
+}
+
+function waitlistCanJoin(data) {
+  const joinableStates = ['NONE', 'AVAILABLE', 'CANCELLED', 'EXPIRED'];
+  return !!data.ticketSoldOut && data.waitlistEligibility === 'ELIGIBLE'
+    && data.waitlistJoinAllowed === true && joinableStates.includes(data.waitlistState)
+    && !data.waitlistLoading;
+}
+
+const WAITLIST_STATES = Object.freeze([
+  'NONE', 'WAITING', 'OFFERED', 'CLAIMED', 'CONVERTED', 'CANCELLED', 'EXPIRED',
+  // §27.6 主持预约系列:申请中/未接受
+  'REQUESTED', 'REJECTED'
+]);
+const WAITLIST_ELIGIBILITIES = Object.freeze([
+  'NO_SERIES', 'WAITLIST_CLOSED', 'NOT_MEMBER', 'ALREADY_REGISTERED', 'ELIGIBLE', 'BLOCKED'
+]);
+
+function normalizeWaitlistStatus(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const state = String(value.state || '').toUpperCase();
+  const eligibility = String(value.eligibilityState || '').toUpperCase();
+  if (!WAITLIST_STATES.includes(state) || !WAITLIST_ELIGIBILITIES.includes(eligibility)
+      || typeof value.waitlistJoinAllowed !== 'boolean') return null;
+  const joinAllowed = value.waitlistJoinAllowed === true;
+  // 只能在 ELIGIBLE 时允许加入;ELIGIBLE 但不允许加入是服务端的合法形态
+  // (需先预约主持的系列、已关闭系列里仍在队列的条目),不能当作读取失败。
+  if (joinAllowed && eligibility !== 'ELIGIBLE') return null;
+  if (state !== 'NONE' && (!Number.isInteger(Number(value.id)) || Number(value.id) <= 0)) return null;
+  if ((state === 'CLAIMED' || state === 'CONVERTED')
+      && (!Number.isInteger(Number(value.registrationId)) || Number(value.registrationId) <= 0)) return null;
+  if (state === 'OFFERED' && (!value.offerToken || !value.offerExpiresAt)) return null;
+  return { entry: value, state, eligibility, joinAllowed };
+}
+
+function waitlistPresentation(data) {
+  if (data.waitlistEligibility !== 'ELIGIBLE' && data.waitlistEligibility !== 'UNKNOWN') {
+    const copy = {
+      NO_SERIES: ['本活动未配置候补', '票满后暂不提供排队，请关注其他票种或场次。'],
+      WAITLIST_CLOSED: ['本场候补已关闭', '当前不能新加入候补；已有名额仍可直接报名。'],
+      NOT_MEMBER: ['仅俱乐部成员可候补', '加入俱乐部并保持正常成员状态后，才能参与本场候补。'],
+      ALREADY_REGISTERED: ['你已有该票种报名', '无需重复候补，请从报名订单继续处理。'],
+      BLOCKED: ['当前无法参与候补', '你的俱乐部参与资格当前不可用。']
+    }[data.waitlistEligibility];
+    if (copy) return { title: copy[0], detail: copy[1] };
+  }
+  if (data.waitlistState === 'CANCELLED') {
+    return {
+      title: '已退出候补',
+      detail: data.ticketSoldOut ? '本票种仍已满，如仍需参加可重新加入候补。' : '当前已有名额，可直接报名。'
+    };
+  }
+  if (data.waitlistState === 'EXPIRED') {
+    return {
+      title: '候补名额已过期',
+      detail: data.ticketSoldOut ? '本票种仍已满，如仍需参加可重新加入候补。' : '当前已有名额，可直接报名。'
+    };
+  }
+  return {
+    title: '本票种已满',
+    detail: '加入后按先到先得顺序候补；名额保留有时限。'
+  };
+}
+
+function waitlistPaymentText(data) {
+  const eligibilityText = {
+    NO_SERIES: '本活动未配置候补',
+    WAITLIST_CLOSED: '本场候补已关闭',
+    NOT_MEMBER: '仅俱乐部成员可候补',
+    ALREADY_REGISTERED: '你已有该票种报名',
+    BLOCKED: '当前无法参与候补'
+  }[data.waitlistEligibility];
+  if (eligibilityText) return eligibilityText;
+  const stateText = {
+    WAITING: '候补排队中',
+    CLAIMED: '已生成报名订单',
+    CONVERTED: '报名已确认',
+    CANCELLED: '已退出候补',
+    EXPIRED: '候补名额已过期'
+  }[data.waitlistState];
+  return stateText || '等待候补名额';
+}
+
+Page({
+  onHide() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1; },
+  /**
+   * 页面的初始数据
+   */
+  data: {
+    // B-08:深链缺 ticketId 时原来静默选第一张票,页面上没有换票种入口。多票种时
+    // 票种行可点开 cy-option-sheet 重选(用的就是本页 ticketList,不新增取数口径)。
+    ticketSheetShow: false,
+    ticketSheetItems: [],
+    ticketSheetIndex: 0,
+    // CU-C-32:换票弹层实际列出的那些票(已剔除过期/已开始的场次)。选项文案与选中下标
+    // 必须来自同一份数组 —— 下标回读时拿原始 ticketList 会错位。
+    // 活动相关
+    activityId: null,
+    ticketId: null,
+    activityInfo: {},
+    // 场次详情:loading / ready / error / missing-param / gate。只有 ready 才渲染活动卡与报名入口,
+    // 避免详情拉取失败时页面仍摆出 ¥0 的可点付款按钮。
+    // gate = M1-3 俱乐部门卡(非成员):不是加载失败,重试到天荒地老也读不出来,出口是加入俱乐部。
+    pageState: 'loading',
+    // 活动详情成功渲染过没有。只用来判 auto-back(审查C A1)。
+    everLoaded: false,
+    loadErrorMsg: '',
+    gateClubId: 0,
+    skeletonItems: [1, 2], // 加载中两张卡:第三张会被底栏占位切掉一半(p08-baoming-loading)
+    ticketList: [],
+    selectedTicket: null,
+    refundTiers: [],
+    childAgeOptions: [], childAgeLabels: [], childAge: null, // F12 亲子票儿童年龄(只要年龄,不要姓名)
+    signupState: 'loading',
+    ticketSoldOut: false,
+    waitlistState: 'NONE',
+    waitlistEligibility: 'UNKNOWN',
+    waitlistJoinAllowed: false,
+    waitlistLoading: false,
+    waitlistError: '',
+    waitlistOfferId: null,
+    waitlistOfferToken: '',
+    waitlistRegistrationId: null,
+    waitlistExpiresText: '',
+    showWaitlistJoin: false,
+    showWaitlistCancel: false,
+    waitlistStatusTitle: '',
+    waitlistStatusDetail: '',
+    waitlistPaymentText: '等待候补名额',
+    
+    // 参与人信息：历史地址表仅作兼容存储，不再向报名订单提交地址。
+    selectedAddress: null,
+    addressList: [],
+    showAddressPopup: false,
+    participantState: 'loading',
+    participantErrorMsg: '',
+    
+    // 订单金额相关
+    useDiscount: false,
+    discountAmount: 0,
+    totalAmount: 0,
+    usedPoints: 0,
+    clubMemberDiscountAmount: 0,
+    clubPrioritySignupEnabled: false,
+    isClubMember: false,
+    
+    // 用户信息（从参与人信息获取）
+    userInfo: {
+      realName: '',
+      phone: '',
+      email: '',
+      point: 0
+    },
+    
+    // 支付相关
+    // 报名成功弹窗(替代原来的 wx.showModal / showToast)
+    resultSheet: { show: false, kind: 'success', title: '', sub: '', meta: '', pill: '',
+      why: '', primaryText: '', secondaryText: '', duration: SUCCESS_HOLD_MS,
+      consentName: '', consentChecked: false, consentState: 'idle', consentError: '' },
+    // 向活动主办方提供报名信息(姓名/手机号)的单独同意(PIPL 单独同意)
+    hostShareChecked: false,
+    // 第五轮 D:参与人信息一栏的输入问题(红字写在该栏下方)
+    participantError: '',
+    // 结算关键前置态同时落在 data，供 UI/自动化回读；私有字段只保留兼容。
+    hostShareConsentReady: false,
+    quoteReady: false,
+    // P-05:服务端报价拒绝的原因(如该主题暂不支持在线支付);非空即这场现在不能报名
+    quoteRefusal: '',
+    // U07-01 交付说明 / §17.6 报价分项 / §17.5 促销目录:全部只取服务端回包
+    deliveryRows: [],
+    hostResv: { show: false, required: false, text: '', canRequest: false, canCancel: false, awaitingPayment: false },
+    mkt: { show: false, listAmount: null, adjustments: [], coveredByPass: false, rewardCoupon: null },
+    promoCatalog: { show: false, offers: [], promotions: [], tiers: [] },
+    orderInfo: null,
+    isPaying: false,
+    paymentReady: false,
+    paymentReadinessChecking: false,
+    canPay: false,
+    // 拍板 2026-09-16 #10:所属商家已打烊时禁新报名,入口给明确提示(与后端
+    // IMerchantBusinessStatusService.MERCHANT_CLOSED_MESSAGE 同源)。
+    merchantClosed: false,
+    // 端到端审查 #3:票面报名窗口关闭(closeAtHour)单独成态,按钮文案「报名已截止」
+    signupClosed: false,
+    verifyingPayment: false,
+    submitError: ''
+  },
+
+  /**
+   * 生命周期函数--监听页面加载
+   */
+  /** U-168:置灰判断用的「现在」—— 按服务器时刻校准过的手机时钟。 */
+  // 第九轮 m1-9:活动地址一点开地图(有选点坐标直接开,只有文字走缓存的地址解析)
+  onAddressTap(e) { openAddress().openFromEvent(e); },
+
+  clockNow() {
+    return Date.now() + (this._serverClockOffset || 0);
+  },
+
+  onLoad(options) {
+    const that = this;
+    this._skipInitialShow = true;
+    this._destroyed = false;
+    this._waitlistOfferExpiresAt = null;
+
+    // 获取传递的参数
+    const loadOptions = options || {};
+    const activityId = loadOptions.activityId;
+    const ticketId = loadOptions.ticketId;
+
+    // 缺少活动标识时重试不会让参数凭空出现。直接进入不可重试终态，避免向三个接口
+    // 发送无法完成结算的请求；深链首屏和普通页面栈分别由下方两个真实出口承接。
+    if (activityId === undefined || activityId === null || String(activityId).trim() === '') {
+      that.setData({
+        activityId: null,
+        ticketId: ticketId || null,
+        pageState: 'missing-param',
+        signupState: 'unavailable',
+        loadErrorMsg: '',
+        canPay: false
+      });
+      return;
+    }
+
+    that.setData({
+      activityId: activityId,
+      ticketId: ticketId
+    });
+    that.getUserInfo();
+    // 获取场次详情
+    that.getActivityInfo();
+    that.loadPromotionCatalog();
+
+    // 获取参与人信息列表
+    that.getAddressList();
+
+    that._initWorkflow();
+  },
+
+  /**
+   * 获取用户信息（当没有参与人信息时预填）
+   */
+  getUserInfo() {
+    const that = this;
+    app.sendRequest({
+      url: '/api/user/info',
+      data: {
+        member_id: app.getUserID()
+      },
+      method: "POST",
+      success: function (res) {
+        if (res && res.code == "200" && res.data && typeof res.data === 'object' && !Array.isArray(res.data)) {
+          that.setData({
+            userInfo: res.data
+          });
+          // j6 F5 / r1 F3:参与人列表与资料并发,参与人先回包时资料会把已选参与人的姓名/手机冲掉,
+          // 付款就误报「参与人信息需要包含姓名」。已选了参与人就以参与人为准。
+          if (that.data.selectedAddress) that.updateUserInfoFromAddress(that.data.selectedAddress);
+        } else {
+          // 如果获取失败，使用默认信息
+          that.setData({
+            userInfo: {
+              realName: '',
+              phone: '',
+              email: '',
+              point: 0
+            }
+          });
+        }
+      },
+      fail: function (res) {
+        // 失败时使用默认信息
+        that.setData({
+          userInfo: {
+            realName: '',
+            phone: '',
+            email: '',
+            address: '',
+            point: 0
+          }
+        });
+      }
+    });
+  },
+
+  /**
+   * 检查并显示参与人信息弹窗；没有记录时直接进入轻表单。
+   */
+  checkAndShowAddressPopup() {
+    const that = this;
+    const { addressList, selectedAddress, participantState } = that.data;
+
+    // 在途/失败都不是「没有参与人」。先展示对应骨架或错误态，避免把未知状态误导成新增流程。
+    if (participantState === 'loading' || participantState === 'error') {
+      that.showAddressPopup();
+      return;
+    }
+    
+    // 如果没有参与人信息，直接跳转到添加页面
+    if (addressList.length === 0) {
+      that.goToAddAddress();
+      return;
+    }
+    
+    // 如果当前没有选中的参与人信息，但是列表非空，显示弹窗选择
+    if (!selectedAddress) {
+      that.showAddressPopup();
+      return;
+    }
+    
+    // 有参与人信息时显示选择弹窗
+    that.showAddressPopup();
+  },
+
+  /**
+   * 获取参与人信息列表（兼容历史 address API 存储）
+   */
+  getAddressList() {
+    const that = this;
+    if (that._participantRequest) {
+      return that._participantRequest.task || that._participantRequest;
+    }
+    const epoch = (that._participantEpoch || 0) + 1;
+    const requestContext = { task: null };
+    that._participantEpoch = epoch;
+    that._participantRequest = requestContext;
+    const isCurrent = function () {
+      return !that._destroyed
+        && that._participantEpoch === epoch
+        && that._participantRequest === requestContext;
+    };
+    const finish = function () {
+      if (that._participantRequest === requestContext) that._participantRequest = null;
+    };
+    that.setData({ participantState: 'loading', participantErrorMsg: '' });
+    const showLoadError = function (message) {
+      if (!isCurrent()) return;
+      finish();
+      that.setData({
+        participantState: that.data.addressList.length > 0 ? 'staleError' : 'error',
+        participantErrorMsg: message || '请稍后重试'
+      }, () => that.refreshPaymentState());
+      console.error('获取参与人信息失败');
+    };
+    requestContext.task = app.sendRequest({
+      url: '/api/user/address/list',
+      method: "POST",
+      data: {},
+      success: function (res) {
+        if (!isCurrent()) return;
+        if (res && res.code == "200" && res.data && isRecordList(res.data.rows)) {
+          finish();
+          const addressList = res.data.rows;
+          let selectedAddress = null;
+          const storageKey = selectedAddressStorageKey(app.getUserID && app.getUserID());
+
+          // 旧版曾长期缓存姓名、手机号、邮箱等完整对象；升级后立即清掉，只保留当前账号下的 ID。
+          // L06-139:旧全局键一次性清理,每个小程序进程只做一次
+          if (!legacyAddressKeyCleared) {
+            legacyAddressKeyCleared = true;
+            try { wx.removeStorageSync('selectedAddress'); } catch (e) {}
+          }
+          const cachedId = storageKey ? wx.getStorageSync(storageKey) : '';
+          if (cachedId !== '' && cachedId !== null && cachedId !== undefined) {
+            selectedAddress = addressList.find(item => String(item.id) === String(cachedId)) || null;
+          }
+          if (!selectedAddress && addressList.length > 0) {
+            // 否则选择首个可用参与人信息
+            selectedAddress = addressList.find(item => item.isDefault == 1) || addressList[0];
+          }
+          if (storageKey) {
+            if (selectedAddress && selectedAddress.id) wx.setStorageSync(storageKey, selectedAddress.id);
+            else wx.removeStorageSync(storageKey);
+          }
+          
+          that.setData({
+            addressList: addressList,
+            selectedAddress: selectedAddress,
+            participantState: 'ready',
+            participantErrorMsg: ''
+          }, () => {
+            // 如果选择了参与人信息，更新用户信息
+            if (selectedAddress) {
+              that.updateUserInfoFromAddress(selectedAddress);
+            }
+            that.refreshPaymentState();
+          });
+        } else {
+          showLoadError((res && res.msg) || '加载失败，请重试');
+        }
+      },
+      fail: function (res) {
+        showLoadError('网络异常，请重试');
+      }
+    });
+    return requestContext.task;
+  },
+
+  retryAddressList() {
+    this.getAddressList();
+  },
+
+  // 报名页与首页共用日期出口，避免年份、星期顺序再次漂移。
+  /* 已报名时的出口。⚠️ 不做「自动跳走」——用户可能是来给别人再报一单的,
+     替他决定去哪是「替用户断定」;给一个入口,去不去他说了算。 */
+  goMySignups() {
+    wx.navigateTo({
+      url: '/subpackageMember/mycanyu/mycanyu',
+      fail() { wx.switchTab({ url: '/pages/member/index/index' }); },
+    });
+  },
+
+  formatDateTimeForDisplay: function(date) {
+    return indexFormat.formatDateTimeForDisplay(date);
+  },
+  /**
+   * 从参与人信息更新报名联系人；不读取或提交历史地址字段。
+   */
+  updateUserInfoFromAddress(address) {
+    const that = this;
+    if (!address) return;
+    
+    const newUserInfo = {
+      realName: address.fullName || address.realName || '',
+      phone: address.mobilePhone || address.phone || '',
+      email: address.email || '',
+      point: address.point || that.data.userInfo.point || 0
+    };
+    
+    that.setData({
+      userInfo: newUserInfo,
+      participantError: ''   // 第五轮 D:换了参与人,字段下方的红字随之清掉
+    });
+  },
+
+  // 第五轮 D:参与人信息是本页第一栏,滚回顶部即可看到它下方的红字。
+  showParticipantError(message) {
+    this.setData({ participantError: message });
+    if (typeof wx !== 'undefined' && typeof wx.pageScrollTo === 'function') {
+      wx.pageScrollTo({ scrollTop: 0, duration: 200 });
+    }
+  },
+
+  /**
+   * 显示参与人信息选择弹窗
+   */
+  showAddressPopup() {
+    const that = this;
+    that.setData({
+      showAddressPopup: true
+    });
+  },
+
+  /**
+   * 隐藏参与人信息选择弹窗
+   */
+  hideAddressPopup() {
+    this.setData({
+      showAddressPopup: false
+    });
+  },
+
+  /**
+   * 选择参与人信息（在弹窗中）
+   */
+  selectAddress(e) {
+    const item = e.currentTarget.dataset.item;
+    this.setData({
+      selectedAddress: item,
+      showAddressPopup: false,
+      submitError: ''
+    }, () => {
+      // 更新用户信息
+      this.updateUserInfoFromAddress(item);
+      const storageKey = selectedAddressStorageKey(app.getUserID && app.getUserID());
+      if (storageKey && item && item.id) wx.setStorageSync(storageKey, item.id);
+      this.refreshPaymentState();
+    });
+  },
+
+  /**
+   * 跳转到参与人信息列表页面
+   */
+  goToAddressList() {
+    const that = this;
+    
+    wx.navigateTo({
+      url: '/pages/address/address?mode=participant',
+      success: function(res) {
+        // 监听参与人信息页面返回
+        res.eventChannel.on('addressSelected', (data) => {
+          if (data && data.address) {
+            that.handleAddressSelected(data.address);
+          }
+        });
+      }
+    });
+  },
+
+  /**
+   * 跳转到添加参与人信息页面
+   */
+  goToAddAddress() {
+    const that = this;
+    
+    wx.navigateTo({
+      url: '/pages/addressinfo/addressinfo?mode=participant',
+      events: {
+        // 监听从参与人信息页面返回的事件
+        addressAdded: function(data) {
+          // 重新获取参与人信息列表
+          that.getAddressList();
+          if (data && data.address) {
+            that.handleAddressSelected(data.address);
+          }
+          // 隐藏弹窗（如果还显示的话）
+          that.hideAddressPopup();
+        }
+      },
+      success: function(res) {
+        // 保留来源参数给历史页面兼容。
+        res.eventChannel.emit('fromPage', {
+          from: 'baoming',
+          activityId: that.data.activityId
+        });
+      }
+    });
+  },
+
+  /**
+   * 处理从参与人信息页面返回的选择
+   */
+  handleAddressSelected(address) {
+    const that = this;
+    
+    const storageKey = selectedAddressStorageKey(app.getUserID && app.getUserID());
+    if (storageKey && address && address.id) wx.setStorageSync(storageKey, address.id);
+    
+    that.setData({
+      selectedAddress: address,
+      showAddressPopup: false,
+      submitError: ''
+    }, () => {
+      // 更新用户信息
+      that.updateUserInfoFromAddress(address);
+      that.refreshPaymentState();
+    });
+  },
+
+  /**
+   * 获取场次详情
+   */
+  getActivityInfo() {
+    const that = this;
+    if (that.data.activityId === undefined || that.data.activityId === null
+      || String(that.data.activityId).trim() === '') {
+      that.setData({ pageState: 'missing-param', signupState: 'unavailable', canPay: false });
+      return null;
+    }
+    if (that._activityInfoRequest) {
+      return that._activityInfoRequest.task || that._activityInfoRequest;
+    }
+    const epoch = (that._activityInfoEpoch || 0) + 1;
+    const requestContext = { task: null };
+    that._activityInfoEpoch = epoch;
+    that._activityInfoRequest = requestContext;
+    const isCurrent = function () {
+      return !that._destroyed
+        && that._activityInfoEpoch === epoch
+        && that._activityInfoRequest === requestContext;
+    };
+    const finish = function () {
+      if (that._activityInfoRequest === requestContext) that._activityInfoRequest = null;
+    };
+    that.setData({
+      pageState: 'loading', signupState: 'loading', loadErrorMsg: '',
+      canPay: false, signupClosed: false,
+    });
+    requestContext.task = app.sendRequest({
+      url: '/api/activity/info',
+      autoErrorToast: false, // 失败由整页 auto-back fail 半屏讲原因,不再叠 toast
+      data: {
+        id: that.data.activityId
+      },
+      method: "POST",
+      success: function (res) {
+        if (!isCurrent()) return;
+        const receivedAt = Date.now();
+        // 只有「非数组对象 + 带非空 id」才算真拿到场次:后端偶发返回 {} / [] 时
+        // 旧逻辑会判成功,页面就摆出 ¥0 空活动卡和可点付款按钮。
+        const d = res && res.data;
+        // M1-3 门卡:俱乐部活动对非成员只回 {gate:true,...}。以前它落进下面的 error 分支,
+        // 页面说「活动信息没能加载出来」还给一个永远失败的重试。
+        if (res && res.code == '200' && d && typeof d === 'object' && !Array.isArray(d) && d.gate === true) {
+          finish();
+          that.setData({
+            pageState: 'gate',
+            signupState: 'unavailable',
+            canPay: false,
+            gateClubId: Number(d.clubId) || 0,
+            loadErrorMsg: d.message || '来自俱乐部的活动，加入后查看',
+          });
+          return;
+        }
+        const hasActivity = !!d && typeof d === 'object' && !Array.isArray(d)
+          && !!d.id;
+        const rawTickets = hasActivity ? d.omsTicketList : null;
+        const hasValidTickets = rawTickets == null || (isRecordList(rawTickets)
+          && rawTickets.every(function (ticket) {
+            return ticket.id != null && ticket.id !== ''
+              && typeof ticket.price === 'number' && Number.isFinite(ticket.price)
+              && ticket.price >= 0;
+          }));
+        if (res && res.code == "200" && hasActivity && hasValidTickets) {
+          finish();
+          const activityInfo = res.data;
+          that._serverClockOffset = serverClockOffset(activityInfo.serverNow, receivedAt);
+          const now = that.clockNow();
+          let ticketList = [];
+          let selectedTicket = null;
+
+          // 空值保护:startDate 缺失时 .replace 会抛错中断整页;空串→Invalid Date 由下行 isNaN 接住
+          const startDate = new Date(String(activityInfo['startDate'] || '').replace(/-/g, '/'));
+          if (!isNaN(startDate.getTime())) {
+            activityInfo['formattedDateTime'] = that.formatDateTimeForDisplay(startDate);
+          }
+
+          // 处理票务数据
+          if (activityInfo.omsTicketList && activityInfo.omsTicketList.length > 0) {
+            ticketList = activityInfo.omsTicketList;
+
+            // CU-C-32:票列表原来原样收下、默认选第一张。库里有 9.22 的条目时,
+            // 9.23 打开结算页会直接停在过期场次上;而换票弹层又把全量都列出来,
+            // 用户能选回去。显式指定了 ticketId 就尊重它(已过期也要如实告诉用户
+            // 这一场不能报),否则默认落在第一个还能卖的场次。
+            const requestedTicket = that.data.ticketId
+              ? ticketList.find(item => item.id == that.data.ticketId)
+              : null;
+            const sellableTickets = ticketList.filter(item => !ticketWindowPassed(item, now));
+            selectedTicket = requestedTicket || sellableTickets[0] || ticketList[0];
+          }
+
+          // 确保总金额保留两位小数
+          const totalAmount = selectedTicket ? parseFloat(selectedTicket.price.toFixed(2)) : 0;
+
+          const familyAge = familyTicket.familyAgeState(selectedTicket);
+          that.setData({
+            childAgeOptions: familyAge.childAgeOptions,
+            childAgeLabels: familyAge.childAgeLabels,
+            childAge: familyAge.childAge,
+            activityInfo: activityInfo,
+            merchantClosed: activityInfo.merchantClosed === true,
+            ticketList: ticketList,
+            selectedTicket: selectedTicket,
+            refundTiers: refundRuleTiers(selectedTicket),
+            ticketSoldOut: ticketIsSoldOut(selectedTicket),
+            waitlistState: 'LOADING',
+            waitlistEligibility: 'UNKNOWN',
+            waitlistJoinAllowed: false,
+            waitlistError: '',
+            waitlistOfferId: null,
+            waitlistOfferToken: '',
+            waitlistRegistrationId: null,
+            waitlistExpiresText: '',
+            totalAmount: totalAmount,
+            signupState: selectedTicket
+              ? ((ticketSignupClosed(selectedTicket, now) || ticketWindowPassed(selectedTicket, now)) ? 'closed' : 'available')
+              : 'unavailable',
+            pageState: 'ready',
+            everLoaded: true,
+            loadErrorMsg: ''
+          }, () => {
+            // 数据设置完成后重新计算折扣
+            that.recalculateDiscount();
+            that.loadWaitlistStatus();
+          });
+        } else {
+          finish();
+          that.setData({ pageState: 'error', signupState: 'error', loadErrorMsg: (res && res.msg) || '请稍后重试' });
+        }
+      },
+      fail: function (res) {
+        if (!isCurrent()) return;
+        finish();
+        that.setData({ pageState: 'error', signupState: 'error', loadErrorMsg: '加载失败，请重试' });
+      }
+    });
+    return requestContext.task;
+  },
+
+  /**
+   * 错误态重试:沿用当前 activityId/ticketId 重新拉详情。
+   */
+  retryActivityInfo() {
+    if (this.data.pageState === 'loading') return;
+    this.getActivityInfo();
+  },
+
+  // B-08:换票种。只在多票种且没有待支付的候补名额时开放 —— OFFERED 是真实票库存 hold,
+  // 换票会让那份 hold 与 ticketId 对不上,页面上另有候补卡的付款出口,这里不抢它。
+  openTicketSheet() {
+    const list = this.data.ticketList || [];
+    if (list.length < 2 || this.data.waitlistState === 'OFFERED') return;
+    // CU-C-32:换票弹层不出过期/已开始的场次(原来列全量,选回去就又是一张不能报的票)。
+    // 选项按场次开始时间升序,同日多场靠带上时间区分。
+    // 选项与索引必须来自同一份数组 —— onTicketSheetSelect 按下标回读,这里存下来给它用。
+    const now = this.clockNow();
+    const sellable = sortBySessionStart(list.filter((ticket) => !ticketWindowPassed(ticket, now)));
+    if (sellable.length < 2) return;
+    const selected = this.data.selectedTicket;
+    const currentIndex = Math.max(0, sellable.findIndex((ticket) => selected && ticket.id == selected.id));
+    this._ticketSheetList = sellable;   // 只给 onTicketSheetSelect 按下标回读,不进视图
+    this.setData({
+      ticketSheetItems: sellable.map(sessionOptionLabel),
+      ticketSheetIndex: currentIndex,
+      ticketSheetShow: true,
+    });
+  },
+
+  closeTicketSheet() {
+    this.setData({ ticketSheetShow: false });
+  },
+
+  // F12 亲子票:选儿童年龄(年龄段内每一岁)
+  onChildAgeChange(e) {
+    const index = Number(e && e.detail && e.detail.value);
+    const age = (this.data.childAgeOptions || [])[index];
+    if (age == null) return;
+    this.setData({ childAge: age });
+  },
+
+  onTicketSheetSelect(e) {
+    const index = Number(e && e.detail && e.detail.index);
+    // CU-C-32:读的是 openTicketSheet 过滤后的那份列表,与选项顺序一一对应。
+    const ticket = (this._ticketSheetList || [])[index];
+    this.setData({ ticketSheetShow: false });
+    if (!ticket) return;
+    const selected = this.data.selectedTicket;
+    if (selected && ticket.id == selected.id) return;
+    // 与首次加载同一套状态重置:金额/售罄/候补都跟着新票种走,报价由 recalculateDiscount
+    // 末尾的 refreshQuote 重新向服务端要(quoteSign 是绑定 ticketId 的,不能复用旧的)。
+    const familyAge = familyTicket.familyAgeState(ticket); // F12:换票种时重置儿童年龄
+    this.setData({
+      childAgeOptions: familyAge.childAgeOptions,
+      childAgeLabels: familyAge.childAgeLabels,
+      childAge: familyAge.childAge,
+      selectedTicket: ticket,
+      refundTiers: refundRuleTiers(ticket),
+      totalAmount: parseFloat(Number(ticket.price).toFixed(2)),
+      ticketSoldOut: ticketIsSoldOut(ticket),
+      // L06-141:与首次加载同一口径 —— 截止(endTime)或场次已过都算 closed
+      signupState: (ticketSignupClosed(ticket, this.clockNow()) || ticketWindowPassed(ticket, this.clockNow())) ? 'closed' : 'available',
+      waitlistState: 'LOADING',
+      waitlistEligibility: 'UNKNOWN',
+      waitlistJoinAllowed: false,
+      waitlistError: '',
+      waitlistOfferId: null,
+      waitlistOfferToken: '',
+      waitlistRegistrationId: null,
+      waitlistExpiresText: '',
+      submitError: '',
+    }, () => {
+      this.recalculateDiscount();
+      this.loadWaitlistStatus();
+    });
+  },
+
+  onNavBack() {
+    const fallback = () => this.goDiscoverActivities();
+    if (typeof getCurrentPages === 'function' && getCurrentPages().length > 1) {
+      wx.navigateBack({ fail: fallback });
+      return;
+    }
+    fallback();
+  },
+
+  // 分享直入:回本场详情,缺 activityId 才去列表
+  goDiscoverActivities() {
+    const id = this.data.activityId;
+    wx.redirectTo({ url: id ? '/pages/activity/detail/index?id=' + id : '/pages/activity/list/index' });
+  },
+
+  // 门卡出口:唯一能解锁报名的是加入俱乐部,不给重试。
+  goGateClub() {
+    const clubId = Number(this.data.gateClubId) || 0;
+    if (clubId > 0) {
+      wx.navigateTo({ url: '/pages/club/detail/index?id=' + clubId });
+      return;
+    }
+    this.goDiscoverActivities();
+  },
+
+  /** 当前成员在本活动+票种的候补真状态；OFFERED 才会返回短期原始 token。 */
+  loadWaitlistStatus() {
+    const that = this;
+    const ticket = that.data.selectedTicket;
+    if (!that.data.activityId || !ticket || !ticket.id) return;
+    // L06-037:换票/重进/卸载后,旧回包不得把 A 票的候补凭证写到 B 票上。
+    const epoch = (that._waitlistEpoch || 0) + 1;
+    that._waitlistEpoch = epoch;
+    const ticketId = ticket.id;
+    const isCurrent = function () {
+      const now = that.data.selectedTicket;
+      return !that._destroyed && that._waitlistEpoch === epoch && !!now && now.id === ticketId;
+    };
+    that.setData({ waitlistLoading: true, waitlistError: '' });
+    app.sendRequest({
+      url: '/api/club/event-ops/waitlist/status',
+      method: 'POST',
+      header: { 'Content-Type': 'application/json' },
+      hideLoading: true,
+      data: JSON.stringify({ activityId: that.data.activityId, ticketId: ticket.id }),
+      success(res) {
+        if (!isCurrent()) return;
+        if (!res || (res.code != 200 && res.code != '200')) {
+          that.setData({ waitlistLoading: false, waitlistState: 'ERROR', waitlistError: (res && res.msg) || '候补状态加载失败' },
+            () => that.refreshPaymentState());
+          return;
+        }
+        const normalized = normalizeWaitlistStatus(res.data);
+        if (!normalized) {
+          that._waitlistOfferExpiresAt = null;
+          that.setData({
+            waitlistLoading: false,
+            waitlistState: 'UNKNOWN',
+            waitlistEligibility: 'UNKNOWN',
+            waitlistJoinAllowed: false,
+            waitlistError: '候补状态加载失败，请重试',
+            waitlistOfferId: null,
+            waitlistOfferToken: '',
+            waitlistRegistrationId: null,
+            waitlistExpiresText: ''
+          }, () => that.refreshPaymentState());
+          return;
+        }
+        const entry = normalized.entry;
+        let state = normalized.state;
+        const eligibility = normalized.eligibility;
+        const joinAllowed = normalized.joinAllowed;
+        const activeOffer = state === 'OFFERED' && entry && entry.id && entry.offerToken
+          && offerDeadlineIsFuture(entry.offerExpiresAt, that.clockNow());
+        if (state === 'OFFERED' && !activeOffer) state = 'EXPIRED';
+        const offerId = activeOffer ? entry.id : null;
+        const offerToken = activeOffer ? entry.offerToken : '';
+        that._waitlistOfferExpiresAt = activeOffer ? entry.offerExpiresAt : null;
+        that.setData({
+          waitlistLoading: false,
+          waitlistState: state,
+          waitlistEligibility: eligibility,
+          waitlistJoinAllowed: joinAllowed,
+          waitlistError: '',
+          waitlistOfferId: offerId,
+          waitlistOfferToken: offerToken,
+          waitlistRegistrationId: entry && entry.registrationId || null,
+          waitlistExpiresText: activeOffer ? formatOfferDeadline(entry.offerExpiresAt) : '',
+          hostResv: hostReservationView(entry, that.data.ticketSoldOut)
+        }, function () {
+          that.refreshPaymentState();
+          that.scheduleWaitlistOfferExpiry();
+          if (activeOffer) that.refreshQuote();
+        });
+      },
+      fail() {
+        if (!isCurrent()) return;
+        that.setData({ waitlistLoading: false, waitlistState: 'ERROR', waitlistError: '网络异常，请重试候补状态' },
+          () => that.refreshPaymentState());
+      }
+    });
+  },
+
+  retryWaitlistStatus() {
+    if (this.data.waitlistLoading) return;
+    this.loadWaitlistStatus();
+  },
+
+  scheduleWaitlistOfferExpiry() {
+    clearTimeout(this._waitlistOfferTimer);
+    this._waitlistOfferTimer = null;
+    const deadline = parseOfferDeadline(this._waitlistOfferExpiresAt);
+    if (!deadline || this.data.waitlistState !== 'OFFERED') return;
+    const delay = deadline.getTime() - this.clockNow();
+    if (delay <= 0) {
+      this.expireWaitlistOfferInView();
+      return;
+    }
+    if (delay > OFFER_WINDOW_MAX_MS) {
+      this.expireWaitlistOfferInView();
+      return;
+    }
+    const that = this;
+    this._waitlistOfferTimer = setTimeout(function () {
+      that.expireWaitlistOfferInView();
+      that.loadWaitlistStatus();
+    }, delay + 50);
+  },
+
+  expireWaitlistOfferInView() {
+    if (this.data.waitlistState !== 'OFFERED') return;
+    clearTimeout(this._waitlistOfferTimer);
+    this._waitlistOfferTimer = null;
+    this._waitlistOfferExpiresAt = null;
+    this.setData({
+      waitlistState: 'EXPIRED',
+      waitlistOfferId: null,
+      waitlistOfferToken: '',
+      waitlistExpiresText: ''
+    }, () => this.refreshPaymentState());
+  },
+
+  joinWaitlist() {
+    if (app.ensureLoginFor && !app.ensureLoginFor('signup', () => this.joinWaitlist(), { owner: this, target: () => [this.data.activityId, this.data.selectedTicket && this.data.selectedTicket.id] })) return; // 2026-10-24 游客写前登录
+    const that = this;
+    const ticket = that.data.selectedTicket;
+    if (that.data.waitlistLoading || !ticket || !ticket.id) return;
+    if (!that.data.ticketSoldOut) {
+      app.tips('当前已有名额，请直接报名');
+      return;
+    }
+    if (!waitlistCanJoin(that.data)) {
+      app.tips(waitlistEligibilityMessage(that.data.waitlistEligibility));
+      return;
+    }
+    that.setData({ waitlistLoading: true, waitlistError: '' });
+    app.sendRequest({
+      url: '/api/club/event-ops/waitlist/join',
+      method: 'POST',
+      header: { 'Content-Type': 'application/json' },
+      data: JSON.stringify({ activityId: that.data.activityId, ticketId: ticket.id }),
+      success(res) {
+        if (res && (res.code == 200 || res.code == '200') && res.data) {
+          that.setData({ waitlistLoading: false, waitlistState: 'WAITING', waitlistError: '' },
+            () => that.refreshPaymentState());
+          return;
+        }
+        that.setData({ waitlistLoading: false, waitlistState: 'ERROR', waitlistError: (res && res.msg) || '加入候补失败' },
+          () => that.refreshPaymentState());
+      },
+      fail() {
+        that.setData({ waitlistLoading: false, waitlistState: 'ERROR', waitlistError: '网络异常，请重试加入候补' },
+          () => that.refreshPaymentState());
+      }
+    });
+  },
+
+  /** §27.6 请求主持:不传身份,不当作已持位;结果以重新读取的 reservationState 为准 */
+  requestHost() {
+    const that = this;
+    const ticket = that.data.selectedTicket;
+    if (that.data.waitlistLoading || !ticket || !ticket.id) return;
+    that.setData({ waitlistLoading: true });
+    app.sendRequest({
+      url: '/api/club/event-ops/host/request',
+      method: 'POST',
+      header: { 'Content-Type': 'application/json' },
+      hideLoading: true,
+      autoErrorToast: false,
+      data: JSON.stringify({ activityId: that.data.activityId, ticketId: ticket.id }),
+      success(res) {
+        that.setData({ waitlistLoading: false });
+        if (!res || (res.code != 200 && res.code != '200')) toast((res && res.msg) || '主持预约暂不可用');
+        that.loadWaitlistStatus();
+      },
+      fail() {
+        that.setData({ waitlistLoading: false });
+        that.loadWaitlistStatus();
+      }
+    });
+  },
+
+  cancelWaitlist() {
+    const that = this;
+    const ticket = that.data.selectedTicket;
+    if (that.data.waitlistLoading || !ticket || !ticket.id) return;
+    modal.show({
+      dangerKey: 'waitlist.quit',   // 三段式文案在 utils/danger-actions.js
+      success(result) {
+        if (!result.confirm) return;
+        that.setData({ waitlistLoading: true, waitlistError: '' });
+        app.sendRequest({
+          url: '/api/club/event-ops/waitlist/cancel',
+          method: 'POST',
+          header: { 'Content-Type': 'application/json' },
+          data: JSON.stringify({ activityId: that.data.activityId, ticketId: ticket.id }),
+          success(res) {
+            if (res && (res.code == 200 || res.code == '200')) {
+              clearTimeout(that._waitlistOfferTimer);
+              that._waitlistOfferTimer = null;
+              that._waitlistOfferExpiresAt = null;
+              that.setData({
+                // OFFERED 取消会真实回补并可能立即晋级下一位；旧票对象已经失真，
+                // 先封闭本地操作，再重拉活动票库存与候补状态。
+                waitlistLoading: true,
+                waitlistState: 'LOADING',
+                waitlistEligibility: 'UNKNOWN',
+                waitlistJoinAllowed: false,
+                waitlistOfferId: null,
+                waitlistOfferToken: '',
+                waitlistRegistrationId: null,
+                waitlistExpiresText: ''
+              }, function () {
+                that.refreshPaymentState();
+                that.getActivityInfo();
+              });
+              return;
+            }
+            that.setData({ waitlistLoading: false, waitlistState: 'ERROR', waitlistError: (res && res.msg) || '退出候补失败' },
+              () => that.refreshPaymentState());
+          },
+          fail() {
+            that.setData({ waitlistLoading: false, waitlistState: 'ERROR', waitlistError: '网络异常，请重试退出候补' },
+              () => that.refreshPaymentState());
+          }
+        });
+      }
+    });
+  },
+
+  goWaitlistOrder() {
+    const id = this.data.waitlistRegistrationId;
+    if (!id) { app.tips('报名订单尚未就绪，请稍后刷新'); return; }
+    wx.navigateTo({ url: '/subpackageMember/orderinfo/orderinfo?id=' + id + '&from=waitlist' });
+  },
+
+  /**
+   * 切换折扣使用
+   */
+  toggleDiscount() {
+    const that = this;
+    // D1(owner 2026-10-23):抵扣额只认服务端报价,本地不再按汇率/上限估算;切换后先回到票面价等报价覆盖
+    that.setData({ useDiscount: !that.data.useDiscount, submitError: '' }, () => that.recalculateDiscount());
+  },
+
+  /**
+   * 报价回包里与下单绑定的事实:quoteSign / marketingSign 只存实例属性(不展示),
+   * 交付说明、优惠分项进视图。签名换了且还没建出订单 ⇒ 作废旧动作号(§17.6)。
+   */
+  _applyQuoteFacts(data) {
+    const sign = (data && data.quoteSign) || '';
+    if (quoteView.shouldRotateRequestId(this._reqIdQuoteSign, sign, !!this._regId)) this._reqId = null;
+    this._quoteSign = sign;
+    this._marketingSign = (data && data.marketingSign) || null;
+    const delivery = quoteView.deliveryRows(data && data.delivery);
+    this.setData({ deliveryRows: delivery.rows, mkt: quoteView.marketingView(data) });
+  },
+
+  /** §17.5:本场促销目录(组合包/限时/人数阶梯)。读取失败或全空 ⇒ 整块不渲染。 */
+  loadPromotionCatalog() {
+    const that = this;
+    const activityId = that.data.activityId;
+    if (!activityId || !app.sendRequest) return;
+    app.sendRequest({
+      url: '/api/marketing/promotions/catalog',
+      method: 'GET',
+      data: { ownerType: 2, ownerId: activityId },
+      success: function (res) {
+        if (String(that.data.activityId) !== String(activityId)) return;
+        const ok = res && (res.code == 200 || res.code == '200') && res.data;
+        that.setData({ promoCatalog: ok ? quoteView.catalogView(res.data) : quoteView.catalogView(null) });
+      },
+      fail: function () {
+        that.setData({ promoCatalog: quoteView.catalogView(null) });
+      }
+    });
+  },
+
+  /**
+   * 服务端报价(M0-1):用后端 /api/registration/quote 覆盖本地估算,保证「展示金额 = 微信实付」。
+   * 返回的 quoteSign 存 that._quoteSign,下单时回传;后端重算不一致返回 409。
+   */
+  refreshQuote() {
+    const that = this;
+    const ticket = that.data.selectedTicket;
+    if (!ticket || !that.data.activityId) return;
+    // L06-036:连点积分/换票时只认最后一次报价,旧回包不得写金额与 quoteSign。
+    const quoteEpoch = (that._quoteEpoch || 0) + 1;
+    that._quoteEpoch = quoteEpoch;
+    const isCurrentQuote = function () { return !that._destroyed && that._quoteEpoch === quoteEpoch; };
+    if (that.data.ticketSoldOut && that.data.waitlistState !== 'OFFERED') {
+      that._quoteSign = '';
+      that.setData({ quoteReady: false });
+      return;
+    }
+    that._quoteSign = '';
+    // 退款性是纯闸门判据不进视图:data 里的字段必须被 wxml 渲染(U4 死数据门禁),
+    // 与 _nonRefundableConfirmed 同族走实例属性。null/undefined=未知(旧 jar)⇒ 不拦。
+    that._quoteRetried = false;
+    that._nonRefundableConfirmed = false;
+    that._quoteRefundableNow = null;
+    that.setData({ quoteReady: false, quoteRefusal: '' });
+    app.sendRequest({
+      url: '/api/registration/quote',
+      method: 'POST',
+      header: { 'Content-Type': 'application/json' },
+      data: JSON.stringify({
+        ownerType: 2,
+        ownerId: that.data.activityId,
+        ticketId: ticket.id,
+        isUsePoint: that.data.useDiscount ? 1 : 0,
+        waitlistOfferId: that.data.waitlistOfferId || null,
+        waitlistOfferToken: that.data.waitlistOfferToken || null
+      }),
+      success: function (res) {
+        if (!isCurrentQuote()) return;
+        if (res && (res.code == '200' || res.code == 200) && res.data) {
+          const pay = Number(res.data.payAmount || 0);
+          const pd = Number(res.data.pointsDeductYuan || 0);
+          const clubDiscount = Number(res.data.memberDiscountYuan || 0);
+          that._applyQuoteFacts(res.data);
+          // 1-22 附注(拍板 2026-09-19 第6条):下单前退款性由后端唯一场次钟判定,null=旧 jar 未下发,
+          // 前端零动作 —— 不许在这里自己按 startDate 减 24h 造第二口钟。
+          const refundableNow = res.data.refundableNow === true || res.data.refundableNow === false
+            ? res.data.refundableNow : null;
+          that._quoteRefundableNow = refundableNow;
+          // 2026-11-02 退款档位:集合前 24 小时内下单,取消只退 50%,下单前同样要确认。
+          that._quoteRefundPercentNow = Number.isFinite(Number(res.data.refundPercentNow))
+            && res.data.refundPercentNow !== null ? Number(res.data.refundPercentNow) : null;
+          that.setData({
+            quoteReady: !!that._quoteSign,
+            quoteRefusal: '',
+            totalAmount: parseFloat(pay.toFixed(2)),
+            discountAmount: parseFloat(pd.toFixed(2)),
+            usedPoints: res.data.pointsUsed || 0,
+            clubMemberDiscountAmount: parseFloat(clubDiscount.toFixed(2)),
+            clubPrioritySignupEnabled: res.data.prioritySignupEnabled === true,
+            isClubMember: res.data.clubMember === true,
+            // 第十二轮 k6(p1 N-1):服务端说这单不能抵积分(自由探索、可抵 0)就收起整行;没下发(旧 jar)保持原样。
+            pointsUsable: res.data.pointsUsable === false ? false
+              : (res.data.pointsUsable === true ? true : that.data.pointsUsable),
+            // U07-02:应付 > 0 而服务端说 JSAPI 通道未就绪 ⇒ 与支付就绪检查同一结论,不开放付款
+            paymentReady: pay <= 0 ? true
+              : (quoteView.paymentChannelState(res.data) === 'unavailable' ? false : that.data.paymentReady)
+          }, () => that.refreshPaymentState());
+          // D2:探店日等票种服务端关闭积分抵扣 —— 用户开了开关而权威报价回 0,
+          // 就收起整行并说明,不留一个勾着却 -¥0.00 的死开关。
+          if (that.data.useDiscount && pd <= 0) {
+            const noPoints = !(Number((that.data.userInfo || {}).point) > 0);
+            that.setData({ useDiscount: false, pointsUsable: false });
+            toast(noPoints ? '暂无可用积分' : '该票不支持积分抵扣');   // T32:0 积分用户的真实原因是没积分
+          }
+          if (pay > 0 && quoteView.paymentChannelState(res.data) !== 'unavailable') that.checkPaymentReadiness();
+        } else if (res && res.msg) {
+          // F-W1-05:报价被拒(如主题尚未开售)要说出真实原因,不能停在「重新检查支付服务」。
+          // P-05:报价拒绝是这场当前不能报名的真实原因,记下来并关掉付款按钮,
+          // 否则点付款会带着空签名建单,只换来一句「缺少报价签名」。
+          that.setData({ submitError: String(res.msg), quoteRefusal: String(res.msg) },
+            () => that.refreshPaymentState());
+          if (Number(that.data.totalAmount || 0) > 0 && !that.data.paymentReadinessChecking) {
+            that.checkPaymentReadiness();
+          }
+        }
+      },
+      // L06-036:网络失败不再静默停在 quoteReady=false;付款按钮的补报价分支会重试。
+      fail: function () {
+        if (!isCurrentQuote()) return;
+        that.setData({ submitError: '网络异常，价格未更新，请重试' }, () => that.refreshPaymentState());
+      }
+    });
+  },
+
+  /**
+   * 重新计算折扣
+   */
+  recalculateDiscount() {
+    const that = this;
+    const { selectedTicket } = that.data;
+    // D1(owner 2026-10-23):积分汇率与单笔上限只在服务端(sys_config),端上不算可抵扣额。
+    // 报价回来之前按票面价展示、抵扣记 0;refreshQuote 用 /api/registration/quote 的权威金额覆盖。
+    const ticketPrice = selectedTicket ? Number(selectedTicket.price) || 0 : 0;
+    that.setData({
+      discountAmount: 0,
+      totalAmount: parseFloat(ticketPrice.toFixed(2)),
+      usedPoints: 0
+    }, () => that.refreshPaymentState());
+    that.refreshQuote();
+  },
+
+  /* 报名/支付成功:弹上来 → 停 2s → 自己弹下去 → 跳订单详情。
+     用 redirectTo 不用 navigateTo:结算页已经完成使命,留在栈里的话用户从订单页
+     返回会掉回一个"订单已创建"的结算页,还能再点一次付款。
+     ⚠️ 两个定时器都要在 onUnload 里清:用户手动返回时页面已销毁,定时器还在跑,
+     到点会对着死页面 setData 并强行 redirect。 */
+  /* 2026-09-06 用户裁决:买完就直接跳,面板上不放按钮 —— B 模式(teamMode=2)也一样。
+     建队入口没有丢:落地的订单详情页有「和队友一起出发」整张卡(见
+     components/cy/scene-member-order-detail/index.wxml 的 info.teamOpen 分支(A/B 两种模式),
+     文案同样写明「组队与否不影响活动举行」)。面板本来就是要跳去那一页的,
+     等于把入口放在了用户下一秒就会看到的地方,而不是拦在半路让他先选一次。 */
+  showSignupSuccess({ title, detail }) {
+    this.setData({
+      resultSheet: {
+        show: true, kind: 'success', title: title, sub: detail, meta: '',
+        pill: '', why: '', primaryText: '', secondaryText: '', duration: SUCCESS_HOLD_MS,
+        consentName: '', consentChecked: false, consentState: 'idle', consentError: '',
+      },
+    });
+    // 2026-09-17 拍板第 40 条 A:这单背后有生效商家且尚未同意时,面板里多一行可选勾选。
+    // 拿不到 / 已同意 / 有歧义一律不出(见 utils/marketing-consent-entry.js)。
+    this._loadMarketingConsentOffer((this.data.activityInfo && this.data.activityInfo.memberId) || 0);
+  },
+
+  /* 同意入口:owner memberId 来自活动详情已返回的 memberId;商家一方 id 只认 GET 回包。
+     面板已收掉就不再补塞 —— 错过的用户在订单详情「权益已核销」处还有兜底入口。 */
+  _loadMarketingConsentOffer(ownerMemberId) {
+    const that = this;
+    that._consentOffer = null;
+    that._consentRequestId = null;
+    marketingConsent.loadOffer(app, ownerMemberId, function (offer) {
+      if (!offer) return;
+      if (!that.data.resultSheet || !that.data.resultSheet.show) return;
+      that._consentOffer = offer;
+      that._consentRequestId = marketingConsent.newRequestId('signup');
+      that.setData({
+        'resultSheet.consentName': offer.merchantName,
+        'resultSheet.consentChecked': false,
+        'resultSheet.consentState': 'idle',
+        'resultSheet.consentError': '',
+      });
+    });
+  },
+
+  onResultConsentChange(e) {
+    const checked = !!(e.detail && e.detail.checked);
+    const state = this.data.resultSheet.consentState;
+    if (state === 'saving') return;                       // 在途结果说了算,勾选态不来回抖
+    if (!checked) {
+      this.setData({ 'resultSheet.consentChecked': false, 'resultSheet.consentState': 'idle', 'resultSheet.consentError': '' });
+      return;
+    }
+    if (!this._consentOffer) return;
+    this._submitMarketingConsent(this._consentOffer);
+  },
+
+  onResultConsentRetry() {
+    if (!this._consentOffer || this.data.resultSheet.consentState === 'saving') return;
+    this._submitMarketingConsent(this._consentOffer);
+  },
+
+  /* 同一次勾选意图(含失败重试)复用同一个 requestId:重放由服务端识别,不写第二条。 */
+  _submitMarketingConsent(offer) {
+    const that = this;
+    if (!that._consentRequestId) that._consentRequestId = marketingConsent.newRequestId('signup');
+    that.setData({ 'resultSheet.consentChecked': true, 'resultSheet.consentState': 'saving', 'resultSheet.consentError': '' });
+    marketingConsent.optIn(app, offer, that._consentRequestId, function (result) {
+      if (result.ok) {
+        // 成功态就是面板上那行「已同意,可在设置里随时退订」—— 不再补一发两秒就没的 toast
+        // (成功 toast 棘轮只减不增:提示不替代状态)。
+        that.setData({ 'resultSheet.consentState': 'saved', 'resultSheet.consentError': '' });
+        return;
+      }
+      that.setData({ 'resultSheet.consentState': 'failed',
+        'resultSheet.consentError': result.message || '同意没有保存成功，请重试' });
+    });
+  },
+
+  /* 面板自己收完(或被划走)才跳走。退场动画归 cy-sheet,这里只等它播完 ——
+     直接 redirect 的话页面当场销毁,用户看到的是"凭空消失"。 */
+  onResultSheetClose() {
+    const that = this;
+    const wasSuccess = that.data.resultSheet.kind === 'success';
+    that.setData({ 'resultSheet.show': false });
+    if (!wasSuccess) return;   // 失败态收掉只是关面板,留在结算页重试
+    that._successLeaveTimer = setTimeout(function () {
+      if (that._destroyed) return;
+      wx.redirectTo({
+        url: '/subpackageMember/orderinfo/orderinfo?id=' + (that._regId || '') + '&from=signup',
+      });
+    }, SHEET_EXIT_MS);
+  },
+
+  /* 2026-09-06:报名成功面板去掉两颗按钮(用户裁决「买完直接跳」)后,
+     goToOrderDetail / startPostSignupTeam / onTeamSheetSelect / onTeamSheetCancel
+     在本页都没有调用点了,连同 creatingTeam / teamSheetItems / teamSheetShow 一起删。
+     ⚠️ 不是把 master 2026-09-02 的 cy-option-sheet 改造回退掉 —— 那套改造在
+     components/cy/scene-member-order-detail 里有**完全相同的一份**(startOrderTeam →
+     teamUp.memberSheet → cy-option-sheet),而面板收掉后正是跳去那一页。
+     所以这里删的是重复的那份,建队能力与改良后的选择器都还在。 */
+  finishSignup(successCopy) {
+    this.showSignupSuccess(successCopy)
+  },
+
+  /**
+   * 切换「向主办方提供信息」单独同意
+   */
+  toggleHostShare() {
+    const checked = !this.data.hostShareChecked;
+    if (!checked) this._hostShareConsentReady = false;
+    this.setData({
+      hostShareChecked: checked,
+      hostShareConsentReady: checked ? this.data.hostShareConsentReady : false,
+      submitError: '',
+    }, () => this.refreshPaymentState());
+  },
+
+  refreshPaymentState() {
+    const data = this.data;
+    const now = this.clockNow();
+    const activeOffer = data.waitlistState === 'OFFERED' && !!data.waitlistOfferId
+      && !!data.waitlistOfferToken && offerDeadlineIsFuture(this._waitlistOfferExpiresAt, now);
+    const waitlistAllowsCheckout = !data.ticketSoldOut || activeOffer;
+    // 票种过了报名截止,常规这条路当场关掉(原来能一路填到建单才被动拒)。候补名额除外:
+    // 它的售止口径是 signupDeadline ?? startTime,不是票的 endTime,拿着未过期凭证的人不该误伤。
+    // CU-C-32:履约窗(场次)已过与「报名已截止」同归这条闸 —— 两者都意味着这一场不能报。
+    const signupClosed = (ticketSignupClosed(data.selectedTicket, now) || ticketWindowPassed(data.selectedTicket, now))
+      && !activeOffer;
+    // §27.6:需预约主持的场次,只有主持接受后拿到服务端名额才能下单
+    const hostBlocked = !!(data.hostResv && data.hostResv.required) && !activeOffer;
+    const canPay = data.pageState === 'ready' && !!data.selectedTicket && !signupClosed && !hostBlocked
+      && !data.quoteRefusal
+      && data.hostShareChecked && !!data.selectedAddress
+      && !data.merchantClosed
+      && waitlistAllowsCheckout
+      && data.waitlistEligibility !== 'ALREADY_REGISTERED'
+      && !(Number(data.totalAmount) > 0 && data.paymentReady === false) && !data.isPaying;
+    const presentation = waitlistPresentation(data);
+    const paymentText = waitlistPaymentText(data);
+    const showWaitlistJoin = waitlistCanJoin(data);
+    const showWaitlistCancel = ['WAITING', 'OFFERED'].includes(data.waitlistState)
+      && data.waitlistEligibility !== 'NO_SERIES' && !data.waitlistLoading;
+    this.setData({
+      canPay,
+      signupClosed,
+      showWaitlistJoin,
+      showWaitlistCancel,
+      waitlistStatusTitle: presentation.title,
+      waitlistStatusDetail: presentation.detail,
+      waitlistPaymentText: paymentText
+    });
+  },
+
+  _initWorkflow() {
+    const that = this;
+    const verifyRegistrationPayment = createRegistrationPaymentVerifier(app);
+    that._workflow = createCheckoutWorkflow({
+      createOrder: function (payload, cb) {
+        const { activityId, selectedTicket, useDiscount, userInfo, quoteSign, marketingSign, requestId,
+          waitlistOfferId, waitlistOfferToken, childAge } = payload;
+        var data = {
+          ownerType: 2,
+          ownerId: activityId,
+          ticketId: selectedTicket.id,
+          realName: userInfo.realName,
+          phone: userInfo.phone,
+          email: userInfo.email || '',
+          isUsePoint: useDiscount ? 1 : 0,
+          quoteSign: quoteSign || '',
+          // §17.6:促销报价指纹原样回传;促销生效而不带它,后端一律 409
+          marketingSign: marketingSign || null,
+          requestId: requestId,
+          waitlistOfferId: waitlistOfferId || null,
+          waitlistOfferToken: waitlistOfferToken || null
+        };
+        if (childAge != null) data.childAge = childAge; // F12 亲子票儿童年龄
+        // 3-5 票源归因:只有「捕获到的那一期」== 「正在下单的这一期」才带标记。
+        // 期 = cms_activity.topicId;拿不到 topicId 就归平台,不拿 activityId 顶替(那是场次不是期)。
+        Object.assign(data, ticketSource.attributionPayload(
+          (that.data.activityInfo && that.data.activityInfo.topicId) || null));
+        return app.sendRequest({
+          url: '/api/registration/create',
+          data: JSON.stringify(data),
+          method: 'POST',
+          header: { 'Content-Type': 'application/json' },
+          success: function (res) {
+            if (isTerminalOrderConflict(res)) {
+              // fix-be-0917(B-R2):旧幂等键对应的单已取消(3)/已过期(4),后端不再把终态单
+              // 当重放返回,改为 409「该幂等键对应的报名已取消/已过期，请重新发起报名」。
+              // 不提示、不重报价 —— 作废旧键,交给 onOrderFail 换新键重建,玩家无感继续支付。
+              that._reqId = null;
+              that._rebuildFallbackMessage = res.msg || '';
+              cb({ ok: false, msg: ORDER_REBUILD_REQUIRED });
+              return;
+            }
+            cyLoading.hide();
+            // j6 N1:这一场已有一笔还能被扣款的单 —— 服务端不建第二笔,把玩家带去那一笔
+            const pendingOrderId = pendingOrderRedirectId(res);
+            if (pendingOrderId) {
+              that.setData({ isPaying: false }, () => that.refreshPaymentState());
+              cb({ ok: false, msg: PENDING_ORDER_REDIRECT, registrationId: pendingOrderId, text: res.msg });
+              return;
+            }
+            if (res.code == 409 || res.code == '409') {
+              // §17.6:两种 409 分开提示,都重新报价;报价签名变化后由 _applyQuoteFacts 换新动作号
+              const conflict = quoteView.classifyCreateConflict(res) || 'price';
+              that.setData({ isPaying: false }, () => that.refreshPaymentState());
+              app.tips(quoteView.CONFLICT_TEXT[conflict]);
+              that.refreshQuote();
+              cb({ ok: false, msg: 'price_changed', conflict: conflict });
+              return;
+            }
+            const registrationId = res && res.data
+              && (res.data.registrationId || (Array.isArray(res.data.registrationIds) && res.data.registrationIds[0]));
+            const payableAmount = res && res.data && res.data.payableAmount;
+            const hasValidAmount = payableAmount !== null && payableAmount !== undefined && payableAmount !== ''
+              && Number.isFinite(Number(payableAmount)) && Number(payableAmount) >= 0;
+            if (res && res.code == '200' && registrationId && hasValidAmount) {
+              that.setData({
+                orderInfo: res.data,
+                waitlistState: waitlistOfferId ? 'CLAIMED' : that.data.waitlistState,
+                waitlistRegistrationId: waitlistOfferId ? registrationId : that.data.waitlistRegistrationId
+              });
+              that._regId = registrationId;
+              referral.claimAfterOrder(app, registrationId); // §18 I 旁路归因,失败不上屏
+              // 重放命中已有订单时后端有意不下发 payParams(RegistrationCheckoutServiceImpl:107)。
+              // 旧代码直接把这些单判成「支付参数不完整」→ onPayFail → 取消订单 → 同一 requestId
+              // 再点又重放这张已取消的单,形成死循环。这里照主题自玩页的先例补一次取参数。
+              if (Number(payableAmount) > 0 && !hasCompletePaymentParams(res.data)) {
+                cyLoading.show('正在发起支付…');
+                app.sendRequest({
+                  url: '/api/registration/pay',
+                  method: 'POST',
+                  hideLoading: true,
+                  data: { id: registrationId },
+                  success: function (payRes) {
+                    // 拍板 #21:过期待支付单 —— 后端这次 /pay 已即时关单(started),旧幂等键
+                    // 重放只会再撞上这张关单。这里不显示、不撤单,交给 onOrderFail 换新键重建;
+                    // 重建走正常建单接口,闭店/名额/退款截止等校验一条不少。
+                    if (isOrderExpiredFailure(payRes)) {
+                      that._reqId = null;
+                      that._rebuildFallbackMessage = ORDER_EXPIRED_USER_MESSAGE;
+                      cb({ ok: false, msg: ORDER_REBUILD_REQUIRED });
+                      return;
+                    }
+                    cyLoading.hide();
+                    if (payRes && payRes.code == '200' && hasCompletePaymentParams(payRes.data)) {
+                      cb({ ok: true, data: payRes.data });
+                      return;
+                    }
+                    const supersededId = pendingOrderRedirectId(payRes);
+                    if (supersededId) {
+                      that.setData({ isPaying: false }, () => that.refreshPaymentState());
+                      cb({ ok: false, msg: PENDING_ORDER_REDIRECT, registrationId: supersededId, text: payRes.msg });
+                      return;
+                    }
+                    that.setData({ isPaying: false }, () => that.refreshPaymentState());
+                    cb({ ok: false, msg: (payRes && payRes.msg) || '支付发起失败，请重试' });
+                  },
+                  fail: function () {
+                    cyLoading.hide();
+                    that.setData({ isPaying: false }, () => that.refreshPaymentState());
+                    cb({ ok: false, msg: '网络错误，请重试' });
+                  }
+                });
+                return;
+              }
+              cb({ ok: true, data: res.data });
+            } else {
+              that.setData({ isPaying: false }, () => that.refreshPaymentState());
+              cb({ ok: false, msg: (res && res.msg) || '报名失败' });
+            }
+          },
+          fail: function (res) {
+            cyLoading.hide();
+            that.setData({ isPaying: false }, () => that.refreshPaymentState());
+            cb({ ok: false, msg: '网络错误，请重试' });
+          }
+        });
+      },
+      requestPayment: function (orderData, cb) {
+        var p = orderData.payParams;
+        wx.requestPayment({
+          timeStamp: p.timeStamp,
+          nonceStr: p.nonceStr,
+          package: p.package,
+          signType: p.signType,
+          paySign: p.paySign,
+          success: function () { cb({ ok: true }); },
+          fail: function (res) {
+            cb({ ok: false, cancelled: res.errMsg === 'requestPayment:fail cancel', errMsg: res.errMsg });
+          }
+        });
+      },
+      verifyPayment: function (data, cb) {
+        var regId = data.registrationId || (data.registrationIds && data.registrationIds[0]);
+        if (!regId) { cb({ ok: false, errMsg: '缺少订单编号' }); return; }
+        return verifyRegistrationPayment({ registrationId: regId }, cb);
+      },
+      isPayable: function (d) { return !!(d && (d.payParams || Number(d.payableAmount) > 0)); },
+      validatePayment: hasCompletePaymentParams
+    });
+  },
+
+  /**
+   * 处理付款
+   */
+  handlePayment() {
+    if (app.ensureLoginFor && !app.ensureLoginFor('checkout', () => this.handlePayment(), { owner: this, target: () => [this.data.activityId, this.data.selectedTicket && this.data.selectedTicket.id, this.data.waitlistOfferId] })) return; // 2026-10-24 游客写前登录
+    const that = this;
+
+    // 详情未就绪时禁止下单:此时票种/金额都不可信,CTA 之外再兜一道
+    if (that.data.pageState !== 'ready') {
+      app.tips('活动信息尚未加载完成，请稍后再试');
+      return;
+    }
+
+    // 拍板 2026-09-16 #10:商家闭店只挡新报名;已售订单(/pay 重试、候补转正)不受影响。
+    if (that.data.merchantClosed) {
+      app.tips('商家暂停营业，暂不可报名');
+      return;
+    }
+
+
+    if (that.data.isPaying) {
+      app.tips('订单提交中，请勿重复点击');
+      return;
+    }
+
+    if (that.data.quoteRefusal) {
+      that.setData({ submitError: that.data.quoteRefusal });
+      app.tips(that.data.quoteRefusal);
+      return;
+    }
+
+    if (that.data.waitlistState === 'OFFERED'
+      && !offerDeadlineIsFuture(that._waitlistOfferExpiresAt, that.clockNow())) {
+      that.expireWaitlistOfferInView();
+      app.tips('候补名额已过期，正在刷新');
+      that.loadWaitlistStatus();
+      return;
+    }
+
+    if (that.data.waitlistEligibility === 'ALREADY_REGISTERED') {
+      app.tips('已有该票种报名，请勿重复提交');
+      return;
+    }
+
+    if (that.data.ticketSoldOut && that.data.waitlistState !== 'OFFERED') {
+      const message = that.data.waitlistState === 'WAITING'
+        ? '候补排队中，获得名额后才能报名'
+        : that.data.waitlistState === 'CLAIMED'
+          ? '候补名额已生成报名订单，请到订单中继续'
+          : that.data.waitlistState === 'EXPIRED'
+            ? '候补名额已过期，请重新加入候补'
+            : that.data.waitlistState === 'CANCELLED'
+              ? '你已退出候补，如仍需参加请重新加入'
+              : that.data.waitlistEligibility !== 'ELIGIBLE'
+                ? waitlistEligibilityMessage(that.data.waitlistEligibility)
+                : '该票种已满，请先加入候补';
+      app.tips(message);
+      return;
+    }
+    if (that.data.waitlistState === 'OFFERED'
+      && (!that.data.waitlistOfferId || !that.data.waitlistOfferToken)) {
+      app.tips('候补凭证未就绪，正在刷新');
+      that.loadWaitlistStatus();
+      return;
+    }
+
+    if (Number(that.data.totalAmount || 0) > 0 && that.data.paymentReady === false) {
+      if (!that.data.paymentReadinessChecking) that.checkPaymentReadiness(true);
+      app.tips('正在重新检查支付服务，请稍后重试');
+      return;
+    }
+
+    // 验证数据
+    if (!that.data.selectedTicket) {
+      app.tips('暂不可报名：暂无可用票');
+      return;
+    }
+
+    // 已截止:CTA 与空态已经把话说明白了,这里是「绕过界面直接调用」的最后一道。
+    // 候补凭证未过期的人另算(售止口径不是票的 endTime),所以放在候补分支之后。
+    const claimingOffer = that.data.waitlistState === 'OFFERED'
+      && !!that.data.waitlistOfferId && !!that.data.waitlistOfferToken
+      && offerDeadlineIsFuture(that._waitlistOfferExpiresAt, that.clockNow());
+    if (ticketSignupClosed(that.data.selectedTicket, that.clockNow()) && !claimingOffer) {
+      app.tips('该票种报名已截止');
+      return;
+    }
+
+    // 第五轮 D(业主):参与人信息的问题写在该栏下方红字并滚回该栏,不再弹提示;
+    // 拦截与随后打开选择弹层/新增页都和原来一样。
+    if (!that.data.selectedAddress) {
+      that.showParticipantError('请选择参与人信息');
+      that.checkAndShowAddressPopup();
+      return;
+    }
+
+    if (!that.data.hostShareChecked) {
+      app.tips('请同意向主办方提供报名信息');
+      return;
+    }
+
+    // 验证用户信息（从参与人信息获取）
+    if (!that.data.userInfo.realName) {
+      that.showParticipantError('参与人信息需要包含姓名');
+      that.checkAndShowAddressPopup();
+      return;
+    }
+
+    if (!that.data.userInfo.phone) {
+      that.showParticipantError('参与人信息需要包含手机号');
+      that.checkAndShowAddressPopup();
+      return;
+    }
+
+    // 验证手机号格式
+    if (!isValidMobile(that.data.userInfo.phone)) {
+      that.showParticipantError('参与人信息中的手机号码格式不正确');
+      that.checkAndShowAddressPopup();
+      return;
+    }
+
+    // F12 亲子票:没选儿童年龄不下单(超出年龄段的选项根本不出,服务端同口径再判一次)。
+    // L06-002:必须在订阅/存证/isPaying/loading 之前拦,否则遮罩与 isPaying 永远不解。
+    if (familyTicket.isFamily(that.data.selectedTicket) && that.data.childAge == null) {
+      toast('请选择儿童年龄');
+      return;
+    }
+
+    // 1-22 附注(拍板 2026-09-19 第6条):已过退款截止的 ¥ 单必须先明确确认「本单不可退」。
+    // 退款性只信后端 quote 下发的 tri-state(false=已过截止,null=旧 jar 未下发 ⇒ 不拦),
+    // 纯积分/0 元单没有资金风险不拦。放在存证/订阅之前:确认键本身提供手势上下文。
+    if (Number(that.data.totalAmount || 0) > 0
+      && that._quoteRefundableNow === false && !that._nonRefundableConfirmed) {
+      modal.show({
+        title: '本单不可退',
+        content: '该场次已开始，支付后不可退款。确认继续下单？',
+        confirmText: '继续下单',
+        cancelText: '再想想',
+        success: function (res) {
+          if (res && res.confirm) {
+            that._nonRefundableConfirmed = true;
+            that.handlePayment();
+          }
+        }
+      });
+      return;
+    }
+
+    if (Number(that.data.totalAmount || 0) > 0
+      && that._quoteRefundPercentNow === 50 && !that._nonRefundableConfirmed) {
+      modal.show({
+        title: '取消只退 50%',
+        content: (that.data.selectedTicket && Number(that.data.selectedTicket.mode) === 2
+          ? '该场次已进入开始前 24 小时' : '该场次已进入集合前 24 小时') + '，支付后取消只退实付的 50%。确认继续下单？',
+        confirmText: '继续下单',
+        cancelText: '再想想',
+        success: function (res) {
+          if (res && res.confirm) {
+            that._nonRefundableConfirmed = true;
+            that.handlePayment();
+          }
+        }
+      });
+      return;
+    }
+
+    // 报名提醒订阅授权必须仍处于本次点击手势内；模板 ID 未配置或用户拒绝均不阻塞报名。
+    if (!that._signupSubscriptionRequested) {
+      that._signupSubscriptionRequested = true;
+      subscribe.request(['signupSuccess', 'activityStart', 'refund']);
+    }
+
+    // 后端创建报名单前会硬校验该单独同意已经落库。这里必须先等存证成功再建单，
+    // 否则弱网时前端同意请求与建单请求并发，会出现第一次提交被拒绝的竞态。
+    if (!that._hostShareConsentReady) {
+      if (!app.recordConsent) {
+        const message = '同意记录服务暂不可用，请稍后重试';
+        that.setData({ submitError: message });
+        app.tips(message);
+        return;
+      }
+      that.setData({ isPaying: true, submitError: '' }, () => that.refreshPaymentState());
+      cyLoading.show('提交中…');
+      app.recordConsent({
+        docType: 'activity_host_data_sharing',
+        scene: 'activity_signup',
+        eventType: 'AGREE'
+      }).then(function () {
+        if (that._destroyed) {
+          cyLoading.hide();
+          return;
+        }
+        that._hostShareConsentReady = true;
+        that.setData({ isPaying: false, hostShareConsentReady: true }, function () {
+          that.refreshPaymentState();
+          cyLoading.hide();
+          that.handlePayment();
+        });
+      }).catch(function () {
+        if (that._destroyed) {
+          cyLoading.hide();
+          return;
+        }
+        const message = '同意记录未保存，请检查网络后重试';
+        that.setData({ isPaying: false, submitError: message }, function () {
+          that.refreshPaymentState();
+          cyLoading.hide();
+          app.tips(message);
+        });
+      });
+      return;
+    }
+
+    // 设置支付中状态
+    that.setData({ isPaying: true, submitError: '' }, () => that.refreshPaymentState());
+
+    // 显示加载中
+    cyLoading.show('提交中…');
+
+    // BE-10:活动下单(ownerType=2)后端硬校验 quoteSign。若报价未就绪,先即时补一次报价再下单
+    if (!that._quoteSign && !that._quoteRetried) {
+      that._quoteRetried = true;
+      const { selectedTicket, activityId, useDiscount } = that.data;
+      // ⚠️ 重入 handlePayment 前必须先解锁并关掉 loading。上面已经置了 isPaying=true 并
+      // showLoading,而 handlePayment 开头就有 `if (isPaying) return` 守卫 —— 直接重入会被
+      // 自己挡住:loading 永远转、isPaying 永远 true,用户既等不到结果也无法重试。
+      // (wx.hideLoading 不能用 app.hideToast 代替,后者是 wx.hideToast,关不掉 loading。)
+      const resumePayment = function () {
+        that.setData({ isPaying: false }, function () {
+          that.refreshPaymentState();
+          cyLoading.hide();
+          that.handlePayment();
+        });
+      };
+      app.sendRequest({
+        url: '/api/registration/quote', method: 'POST', header: { 'Content-Type': 'application/json' },
+        data: JSON.stringify({
+          ownerType: 2,
+          ownerId: activityId,
+          ticketId: selectedTicket.id,
+          isUsePoint: useDiscount ? 1 : 0,
+          waitlistOfferId: that.data.waitlistOfferId || null,
+          waitlistOfferToken: that.data.waitlistOfferToken || null
+        }),
+        success: function (res) {
+          if (res && (res.code == 200 || res.code == '200') && res.data) {
+            that._applyQuoteFacts(res.data);
+            that._quoteRefundableNow = res.data.refundableNow === true || res.data.refundableNow === false
+              ? res.data.refundableNow : null;
+            that._quoteRefundPercentNow = Number.isFinite(Number(res.data.refundPercentNow))
+              && res.data.refundPercentNow !== null ? Number(res.data.refundPercentNow) : null;
+            that.setData({
+              quoteReady: !!that._quoteSign
+            });
+          } else if (res && res.msg) {
+            // P-05:补报价被拒就停在这里说真实原因,不带空签名去建单。
+            const refusal = String(res.msg);
+            that.setData({ isPaying: false, submitError: refusal, quoteRefusal: refusal }, function () {
+              that.refreshPaymentState();
+              cyLoading.hide();
+            });
+            return;
+          }
+          resumePayment();
+        },
+        fail: resumePayment
+      });
+      return;
+    }
+    that._quoteRetried = false;
+
+    // BE-03 幂等键
+    if (!that._reqId) {
+      that._reqId = 'req_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+      that._reqIdQuoteSign = that._quoteSign || '';
+    }
+
+    const payload = {
+      activityId: that.data.activityId,
+      childAge: familyTicket.isFamily(that.data.selectedTicket) ? that.data.childAge : null,
+      selectedTicket: that.data.selectedTicket,
+      useDiscount: that.data.useDiscount,
+      userInfo: that.data.userInfo,
+      quoteSign: that._quoteSign || '',
+      marketingSign: that._marketingSign || null,
+      requestId: that._reqId,
+      waitlistOfferId: that.data.waitlistOfferId || null,
+      waitlistOfferToken: that.data.waitlistOfferToken || null
+    };
+
+    var submitted = that._workflow.submit(payload, {
+      onOrderFail: function (res) {
+        if (res && res.msg === PENDING_ORDER_REDIRECT) {
+          that.openOrderForPendingConflict(res.registrationId, res.text);
+          return;
+        }
+        // 拍板 #21 / fix-be-0917:旧幂等键不可用(单已过期/已取消)时先自动换新键重建一次
+        // (玩家无感,不发提示);重建后仍失败才退回可见提示,防止在死循环里反复建单。
+        if (res && res.msg === ORDER_REBUILD_REQUIRED) {
+          if (that._rebuildOrderWithNewKey()) return;
+          // 重建过仍不可用:检测分支没关 loading/提交态,这里补上再给可见提示。
+          cyLoading.hide();
+          that.setData({ isPaying: false }, () => that.refreshPaymentState());
+          res = { msg: that._rebuildFallbackMessage || ORDER_EXPIRED_USER_MESSAGE };
+        }
+        const priceChanged = res && res.msg === 'price_changed';
+        const message = priceChanged ? quoteView.CONFLICT_TEXT[res.conflict || 'price']
+          : ((res && res.msg) || '报名失败，请重试');
+        that.setData({ submitError: message });
+        if (!priceChanged) {
+          app.tips(message);
+        }
+      },
+      onFreeSuccess: function (data) {
+        that.setData({
+          isPaying: false,
+          submitError: '',
+          waitlistState: that.data.waitlistOfferId ? 'CONVERTED' : that.data.waitlistState
+        }, () => that.refreshPaymentState());
+        const registrationId = data.registrationId || data.id || that._regId || '';
+        analytics.track('signup_submit', {
+          eventKey: registrationId ? 'signup_submit_registration_' + registrationId : undefined,
+          bizType: 'activity',
+          bizId: that.data.activityId,
+          properties: {
+            registrationId: registrationId,
+            payableAmount: data.payableAmount
+          }
+        });
+        that.finishSignup({
+          title: '报名成功',
+          detail: '票已放入票夹，出发前 30 分钟到集合点核验',
+        });
+      },
+      onPayVerifying: function (data) {
+        /* 在途是这个面板的**前一拍**,不是另一件事:正在支付 → 支付成功/失败,
+           稿(Payment Sheet States 帧 2→3/1)本来就是同一个 sheet 里的连续序列,
+           面板留在原地只换内容,而不是「先盖一层全屏遮罩、再弹一个面板」。
+           ⚠️ 所以这里不用 cyLoading —— 那是给「没有结果面板的通用阻塞等待」的
+           (比如发布页的安全预检),两者分工不同,不是同一件事两套机制。
+           duration: 0 —— 在途没有终点,不自愈;终点由下面各 onPay* 回调改写。 */
+        that.setData({
+          verifyingPayment: true,
+          resultSheet: { show: true, kind: 'loading', title: '确认支付结果',
+            sub: '正在确认支付', meta: '', pill: '', why: '',
+            primaryText: '', secondaryText: '', duration: 0 },
+        });
+      },
+      onPaySuccess: function (data) {
+        that.setData({
+          isPaying: false,
+          verifyingPayment: false,
+          submitError: '',
+          waitlistState: that.data.waitlistOfferId ? 'CONVERTED' : that.data.waitlistState
+        }, () => that.refreshPaymentState());
+        cyLoading.hide();
+        // 成功由 finishSignup 把面板改写成 success 态(loading → success 同一块面板),
+        // 这里不收 —— 收了会先闪一下空白再弹一次。
+        const registrationId = data.registrationId || data.id || that._regId || '';
+        analytics.track('payment_success', {
+          eventKey: registrationId ? 'payment_success_registration_' + registrationId : undefined,
+          bizType: 'activity',
+          bizId: that.data.activityId,
+          properties: {
+            registrationId: registrationId,
+            payableAmount: data.payableAmount || 0
+          }
+        });
+        that.finishSignup({
+          title: '支付成功',
+          detail: '票已放入票夹，可随时出示入场码',
+        });
+      },
+      onPayCancel: function () {
+        // 取消没有结果可报,把在途那张面板直接收掉
+        that.setData({ isPaying: false, submitError: '', 'resultSheet.show': false },
+          () => that.refreshPaymentState());
+        cyLoading.hide();
+        app.tips('您已取消支付');
+        // j6 N1:取消没落库(比如微信结果还在确认)就带玩家去那笔订单看清现状,不再无声退回详情页
+        that.cancelPendingOrder({ openOrderWhenStuck: true });
+      },
+      onPayFail: function (res) {
+        const message = (res && res.errMsg) || '支付失败，请重试';
+        cyLoading.hide();
+        that.setData({
+          isPaying: false, verifyingPayment: false, submitError: message,
+          // 面板负责「说清楚发生了什么」并自愈;重试出口是页内那条 submitError,
+          // 它一直留在页上 —— 恢复动作不能放进会自己消失的面板里。
+          // 原来这里还会再 app.tips 一次,和面板+页内错误就是同一句话说三遍,故去掉。
+          resultSheet: { show: true, kind: 'fail', title: '这笔没有付成功', sub: '未扣款，可重试',
+            meta: '', pill: '', why: message, primaryText: '', secondaryText: '', duration: SUCCESS_HOLD_MS },
+        }, () => that.refreshPaymentState());
+        that.cancelPendingOrder({ stayOnPage: true });
+      },
+      onPayUnknown: function () {
+        cyLoading.hide();
+        // 结果待确认:面板给不出结论,收掉交给下面的 modal 说清楚
+        that.setData({ isPaying: false, verifyingPayment: false, 'resultSheet.show': false },
+          () => that.refreshPaymentState());
+        modal.show(that._paymentUnknownDialog('请勿重复支付，稍后到订单中查看结果'));
+      }
+    });
+
+    if (!submitted) {
+      that.setData({ isPaying: false }, () => that.refreshPaymentState());
+      cyLoading.hide();
+      // unknown 是 workflow 故意留的闸(防重复建单扣款),但闸不能是哑巴:
+      // 「支付结果待确认」modal 被关掉后再点报名,原来什么都不说。
+      // 这里把同一句结论重新给一遍并指出去哪看,而不是让按钮看起来坏了。
+      if (that._workflow.getState() === 'unknown') {
+        modal.show(that._paymentUnknownDialog('这笔付款还在确认中，请勿重复支付'));
+      }
+    }
+  },
+
+  // 买家走查 1122:结果待确认只给一个下一步 ——「查看订单」直达这笔原单(有单号时),不让玩家自己去翻订单列表。
+  _paymentUnknownDialog(content) {
+    const id = this._regId;
+    return {
+      title: '支付结果待确认',
+      content,
+      showCancel: false,
+      confirmText: id ? '查看订单' : '知道了',
+      success: (r) => {
+        if (!id || !(r && r.confirm)) return;
+        wx.redirectTo({ url: '/subpackageMember/orderinfo/orderinfo?id=' + id + '&from=signup' });
+      },
+    };
+  },
+
+  checkPaymentReadiness(announceFailure) {
+    const that = this;
+    const requestEpoch = (that._paymentReadinessEpoch || 0) + 1;
+    that._paymentReadinessEpoch = requestEpoch;
+    const previous = that._paymentReadinessRequest;
+    if (previous && typeof previous.abort === 'function') previous.abort();
+    that._paymentReadinessRequest = null;
+    const isCurrent = function () {
+      return !that._destroyed && that._paymentReadinessEpoch === requestEpoch;
+    };
+    that.setData({ paymentReady: false, paymentReadinessChecking: true }, () => that.refreshPaymentState());
+    const settle = function (ready, message) {
+      if (!isCurrent()) return;
+      that.setData({ paymentReady: ready === true, paymentReadinessChecking: false }, function () {
+        that.refreshPaymentState();
+        if (announceFailure && ready !== true) app.tips(message || '支付服务暂不可用，请稍后重试');
+      });
+    };
+    const request = app.sendRequest({
+      url: '/api/registration/payment-readiness', method: 'POST', data: {}, hideLoading: true,
+      success(res) {
+        if (res && (res.code == 200 || res.code == '200') && res.data) {
+          settle(res.data.ready === true, res.data.message);
+          return;
+        }
+        settle(false, res && res.msg);
+      },
+      successStatusAbnormal(res) { settle(false, res && res.msg); },
+      fail() { settle(false, '支付服务检查失败，请检查网络后重试'); },
+      complete() { if (isCurrent()) that._paymentReadinessRequest = null; }
+    });
+    if (isCurrent() && request && typeof request.abort === 'function') {
+      that._paymentReadinessRequest = request;
+    }
+  },
+
+  /**
+   * 2026-09-17 拍板 #21(+fix-be-0917 B-R2):旧幂等键不可用时自动换新键重建,玩家无感继续支付。
+   *
+   * 触发面:① /pay 见过期拒绝(后端已即时关单);② /create 回终态单冲突 409(已取消/已过期)—— 
+   * 两种情况下旧键对应的单都已不可支付,重放只会再撞同一堵墙。检测点已作废旧键,这里回到正常
+   * 建单接口用新键重建(同样的票种/数量/报名信息,由 handlePayment 按当前页态重新组装),
+   * 闭店、名额、退款截止、报价等校验全部照走。
+   * 每次结账意图只自动重建一次;重建后仍不可用由 onOrderFail 给可见提示(旧键此时已作废,
+   * 用户再点一次就是全新一单,不会被同一堵墙卡住)。
+   */
+  _rebuildOrderWithNewKey() {
+    const that = this;
+    if (that._rebuildUsed) return false;
+    that._rebuildUsed = true;
+    that.setData({ isPaying: false }, function () {
+      that.refreshPaymentState();
+      // 先收掉上一跳的 loading 再重入:handlePayment 的早退分支(售罄/闭店/信息未就绪)
+      // 只给 tips 不关 loading,留着它会把页面永久锁死在遮罩下。重入到请求发出之间是同一个
+      // tick,用户看不到闪烁。
+      cyLoading.hide();
+      that.handlePayment();
+    });
+    return true;
+  },
+
+  /**
+   * 取消本次未支付报名(支付取消/失败时调),释放库存与已抵扣积分。best-effort,完成后返回。
+   */
+  cancelPendingOrder(options) {
+    const that = this;
+    const info = this.data.orderInfo || {};
+    const ids = (info.registrationIds && info.registrationIds.length)
+      ? info.registrationIds
+      : (info.registrationId ? [info.registrationId] : []);
+    const leave = !(options && options.stayOnPage);
+    const openWhenStuck = !!(options && options.openOrderWhenStuck);
+    let waiting = ids.length;
+    let stuckId = null;
+    const settle = function () {
+      waiting -= 1;
+      if (waiting > 0 || !leave || that._destroyed) return;
+      if (openWhenStuck && stuckId) {
+        wx.redirectTo({ url: '/subpackageMember/orderinfo/orderinfo?id=' + stuckId + '&from=signup' });
+        return;
+      }
+      app.goBack();
+    };
+    if (!ids.length) {
+      if (leave) app.goBack();
+      return;
+    }
+    ids.forEach(function (rid) {
+      app.sendRequest({
+        url: '/api/registration/cancel',
+        data: { id: rid },
+        method: 'POST',
+        hideLoading: true,
+        successStatusAbnormal: function () { stuckId = stuckId || rid; settle(); },
+        // 只有取消真的落库了才换幂等键:撤单成功后再用旧 requestId 重试会重放这张已取消的单
+        // (/api/registration/pay 对非待支付单必拒);撤单失败则保留旧键重放原单,由 /pay 兜底继续支付。
+        success: function (res) {
+          if (res && (res.code == 200 || res.code == '200')) that._reqId = null;
+          else stuckId = stuckId || rid;
+          settle();
+        },
+        fail: function () { stuckId = stuckId || rid; settle(); }
+      });
+    });
+  },
+
+  /** j6 N1:同一场已有一笔待支付的单 —— 说一句,再带去那笔订单(在那里继续支付或取消)。 */
+  openOrderForPendingConflict(registrationId, text) {
+    cyLoading.hide();
+    this.setData({ isPaying: false, submitError: '' }, () => this.refreshPaymentState());
+    if (text) app.tips(text);
+    if (this._destroyed || !registrationId) return;
+    wx.redirectTo({ url: '/subpackageMember/orderinfo/orderinfo?id=' + registrationId + '&from=signup' });
+  },
+
+  /**
+   * 生命周期函数--监听页面卸载
+   */
+  onUnload() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1;
+    this._destroyed = true;
+    this._activityInfoEpoch = (this._activityInfoEpoch || 0) + 1;
+    this._participantEpoch = (this._participantEpoch || 0) + 1;
+    this._quoteEpoch = (this._quoteEpoch || 0) + 1;
+    this._waitlistEpoch = (this._waitlistEpoch || 0) + 1;
+    if (this._activityInfoRequest && this._activityInfoRequest.task
+      && typeof this._activityInfoRequest.task.abort === 'function') {
+      this._activityInfoRequest.task.abort();
+    }
+    if (this._participantRequest && this._participantRequest.task
+      && typeof this._participantRequest.task.abort === 'function') {
+      this._participantRequest.task.abort();
+    }
+    this._activityInfoRequest = null;
+    this._participantRequest = null;
+    this._paymentReadinessEpoch = (this._paymentReadinessEpoch || 0) + 1;
+    if (this._paymentReadinessRequest && typeof this._paymentReadinessRequest.abort === 'function') {
+      this._paymentReadinessRequest.abort();
+    }
+    this._paymentReadinessRequest = null;
+    if (this._workflow) this._workflow.destroy();
+    // 成功弹窗的两个定时器:用户在 2s 内手动返回时页面已卸载,它们还在跑,
+    // 到点会对着死页面 setData,并把用户从别的页面强行 redirect 到订单详情。
+    clearTimeout(this._successLeaveTimer);
+    clearTimeout(this._waitlistOfferTimer);
+  },
+
+  /**
+   * 生命周期函数--监听页面显示
+   */
+  onShow() {
+    if (this._skipInitialShow) { this._skipInitialShow = false; return; }
+    if (this.data.pageState === 'missing-param') return;
+    // L06-041:付款弹层/验单期间回前台不重拉 —— 候补回包会 refreshQuote 清掉正在用的 quoteSign。
+    if (this.data.isPaying || (this._workflow && this._workflow.isBusy())) return;
+    // 页面显示时重新获取参与人信息列表
+    this.getAddressList();
+    this.loadWaitlistStatus();
+  },
+
+  /**
+   * 用户点击右上角分享
+   */
+});

@@ -1,0 +1,86 @@
+/* ⚠️ 2026-09-02 截图对稿:Figma E1 画板 375 宽,稿上的 px 写进 wxss 一律 ×2。
+   上一版把稿值直接当 rpx 写(页边 16px→写成 16rpx、行高 61px→104rpx),整页比稿窄一圈、行也矮一截。
+   页边统一用 --cy-page-x(=32rpx,全仓俱乐部页同款)。 */
+page { background: var(--cy-bg-page); }
+.page { min-height: 100vh; background: var(--cy-bg-page); color: var(--cy-color-text-primary); padding-bottom: calc(var(--cy-space-8) + var(--cy-safe-bottom)); }
+.page--fill { display: flex; flex-direction: column; box-sizing: border-box; } /* 无权限 cy-empty fill 在顶栏下方剩余空间居中 */
+.section { margin: var(--cy-space-4) var(--cy-page-x) 0; }
+cy-page-title + .section { margin-top: 0; } /* 2026-11-02 r2:页标题直接接首个区块时不再叠区块间距,标题→首块约 9px(与全站 cy-page-title 口径一致) */
+.section-title { display: block; font-size: var(--cy-font-title); line-height: 1.2; font-weight: 800; }
+.section-note { display: block; margin-top: var(--cy-space-3); color: var(--cy-color-text-tertiary); font-size: var(--cy-font-caption); line-height: 1.45; }
+/* CU-C-73:可更正时段被关掉是一条要看见的限制,不是背景说明 */
+.section-note--warning { color: var(--cy-color-status-warning); }
+
+/* 卡:整页上的卡用 bg-elevated,行与行之间用 hairline 分隔,不再画外描边(2026-09-02 对齐 Figma)。 */
+.card { margin-top: var(--cy-space-3); border-radius: var(--cy-radius-md); background: var(--cy-bg-elevated); overflow: hidden; }
+.row { min-height: 120rpx; display: flex; align-items: center; justify-content: space-between; gap: var(--cy-space-2); padding: 0 var(--cy-space-4); }
+.row--column { flex-direction: column; align-items: flex-start; padding: var(--cy-space-4); }
+.row--active { background: var(--cy-brand-soft); }
+.row-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3rpx; }
+.row-title { display: block; color: var(--cy-color-text-primary); font-size: var(--cy-font-body); }
+.row-meta { display: block; color: var(--cy-color-text-tertiary); font-size: var(--cy-font-caption); }
+.row-value { flex-shrink: 0; color: var(--cy-color-text-tertiary); font-size: var(--cy-font-label); white-space: nowrap; }
+.row-value--danger { color: var(--cy-color-status-danger); }
+.row-value-icon { flex-shrink: 0; color: var(--cy-color-text-tertiary); }
+.divider { height: 1rpx; margin: 0 var(--cy-space-4); background: var(--cy-border-card); }
+
+.field-label { display: block; margin: var(--cy-space-3) 0 var(--cy-space-1-5); color: var(--cy-color-text-secondary); font-size: var(--cy-font-label); font-weight: 600; }
+.field-label-value { float: right; color: var(--cy-color-text-tertiary); font-weight: 400; }
+.field-picker, .field-input { min-height: 84rpx; box-sizing: border-box; padding: 0 var(--cy-space-2-5); border: 1rpx solid var(--cy-border-card); border-radius: var(--cy-radius-sm); background: var(--cy-bg-card-2); color: var(--cy-color-text-primary); font-size: var(--cy-font-body); }
+.field-picker { display: flex; align-items: center; justify-content: space-between; }
+.field-chevron { flex-shrink: 0; transform: rotate(-90deg); color: var(--cy-color-text-secondary); }
+.field-input { width: 100%; height: 84rpx; }
+.option-row { display: flex; gap: var(--cy-space-1-5); }
+.option { flex: 1; min-height: 72rpx; display: flex; align-items: center; justify-content: center; border: 1rpx solid var(--cy-border-card); border-radius: var(--cy-radius-sm); color: var(--cy-color-text-secondary); font-size: var(--cy-font-label); }
+.option--active { border-color: var(--cy-brand); background: var(--cy-brand-soft); color: var(--cy-brand); font-weight: 700; }
+.date-row { display: flex; gap: var(--cy-space-1-5); margin-bottom: var(--cy-space-1-5); }
+.date-picker { flex: 1; }
+.remove-date, .add-date { min-height: var(--cy-btn-h); display: flex; align-items: center; justify-content: center; color: var(--cy-brand); font-size: var(--cy-font-label); }
+.remove-date { width: 100rpx; }
+.add-date { gap: var(--cy-space-1); border: 1rpx dashed var(--cy-border-card); border-radius: var(--cy-radius-sm); }
+.field-help { display: block; margin-top: var(--cy-space-1-5); color: var(--cy-color-text-tertiary); font-size: var(--cy-font-caption); line-height: 1.5; }
+.field-help--warning { color: var(--cy-color-status-warning); }
+.switch-row { min-height: 100rpx; display: flex; align-items: center; justify-content: space-between; margin-top: var(--cy-space-3); padding: 0 4rpx; border-top: 1rpx solid var(--cy-border-card); }
+.switch-title { display: block; font-size: var(--cy-font-body); font-weight: 700; }
+/* 1121:主按钮换成 cy-btn,原生 button 的特异度覆写随之退场 */
+.primary-cta { margin-top: var(--cy-space-3-5); }
+.editing-rail { min-height: 72rpx; display: flex; align-items: center; justify-content: space-between; gap: var(--cy-space-2); margin-top: var(--cy-space-1-5); padding: 0 var(--cy-space-2-5); border-radius: var(--cy-radius-sm); background: var(--cy-brand-soft); color: var(--cy-color-text-secondary); font-size: var(--cy-font-caption); }
+.editing-exit { color: var(--cy-brand); font-weight: 700; }
+/* 1121:文字动作命中区补到 88rpx,负外距抵消,条高不变 */
+.editing-exit { padding: var(--cy-space-3) var(--cy-space-2); margin: calc(-1 * var(--cy-space-3)) calc(-1 * var(--cy-space-2)); }
+.field-picker--locked { color: var(--cy-color-text-secondary); }
+.roster-section { margin-top: var(--cy-space-2-5); }
+.roster-filter { display: block; margin: var(--cy-space-1-5) 0 var(--cy-space-3); }
+.member-card { display: flex; align-items: center; min-height: 104rpx; border-bottom: 1rpx solid var(--cy-border-card); }
+.member-mark { width: 62rpx; height: 62rpx; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--cy-brand-soft); color: var(--cy-brand); font-size: var(--cy-font-label); font-weight: 800; }
+.member-main { min-width: 0; flex: 1; margin-left: var(--cy-space-2); }
+.member-name { display: block; font-size: var(--cy-font-body); font-weight: 700; }
+.member-meta { display: block; margin-top: 4rpx; color: var(--cy-color-text-secondary); font-size: var(--cy-font-caption); }
+.correct-btn { position: relative; min-height: 60rpx; display: flex; align-items: center; padding: 0 var(--cy-space-2-5); border: 1rpx solid var(--cy-border-card); border-radius: var(--cy-radius-sm); color: var(--cy-color-text-primary); font-size: var(--cy-font-caption); }
+/* 1121:描边小钮视觉 60rpx 不变,透明伪元素把命中区上下各撑 14rpx 到 88rpx */
+.correct-btn::after { content: ""; position: absolute; left: 0; right: 0; top: -14rpx; bottom: -14rpx; }
+.row-cta { margin-top: var(--cy-space-2-5); }
+.disabled { opacity: .45; pointer-events: none; }
+/* L08-082:灰「更正」仍接点按,回「现在不能更正」 */
+.correct-btn.disabled { pointer-events: auto; }
+
+/* ——— Figma E1「日期清单」——— */
+.row--sub { min-height: 72rpx; }
+.occurrence-list { padding: 8rpx 24rpx; background: var(--cy-color-bg-raised); border-radius: var(--cy-radius-md); }
+.occurrence-row { display: flex; align-items: center; gap: 20rpx; min-height: 104rpx; }
+.occurrence-row + .occurrence-row { border-top: 2rpx solid var(--cy-border-line); }
+.occurrence-badge { flex: none; font-size: var(--cy-font-caption); }
+.occurrence-badge--editable { color: var(--cy-text-title); }
+.occurrence-badge--locked { color: var(--cy-text-secondary); }
+.occurrence-badge--cancelled { color: var(--cy-color-status-danger); }
+.occurrence-note { display: block; padding: 24rpx 0; color: var(--cy-text-secondary); font-size: var(--cy-font-caption); }
+
+.field-required { color: var(--cy-color-status-danger); margin-left: var(--cy-space-1); }
+/* 2026-11-02:有号码权限时名册行右侧的拨号键(≥88rpx 触控) */
+.member-call { flex: none; width: 88rpx; height: 88rpx; display: flex; align-items: center; justify-content: center; margin-right: var(--cy-space-2); color: var(--cy-color-text-primary); }
+
+/* 细节打磨二期 L1/L5/L7 */
+.member-call { transition: var(--cy-tr-press); }
+.row { transition: var(--cy-tr-press); }
+.row--sub { transition: var(--cy-tr-press); }
+.row-value { font-variant-numeric: tabular-nums; }

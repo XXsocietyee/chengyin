@@ -1,0 +1,231 @@
+// BL-76 商家核销记录(只读)。结构照 pages/merchant/aftercare:access/me 判权 → 列表四态。
+// 接口 POST /api/merchant/finance/redemptions(与「核销与退款」同源)要 VERIFY_RECORD_READ(核销员也有),分页读全。
+// 页顶「今天」读 POST /api/merchant/desk/arrivals/today(同一权限),与记录列表各读各的,谁失败都不影响另一个。
+const app = getApp();
+const toast = require('../../../utils/toast.js'); const pageMotion = require('../../../utils/page-motion.js');
+const merchantTheme = require('../../../utils/merchant-theme.js');
+const { inactiveAccess, normalizeMerchantAccess } = require('../../../utils/merchant-access-policy.js');
+const {
+  STATUS_TABS,
+  shapeRecordList,
+  countByStatus,
+  groupRecords,
+  todayView,
+} = require('./view-model.js');
+const PAGE_SIZE = 50;
+// L07-007:首读只读 1 页就上屏,其余交给触底续读(原先最多串行 20 页才出第一屏)
+const MAX_PAGES = 1;
+// L07-042:当前分段行太少撑不满屏、无法触底时自动续读
+const FILL_ROWS = 10;
+
+Page({
+  data: {
+    statusBarHeight: 20,
+    navBarHeight: 44,
+    tabs: STATUS_TABS,
+    bucket: 'VERIFIED',
+    pageState: 'loading',
+    hasMore: false,
+    errorMessage: '',
+    groups: [],
+    todayState: '',
+    todayTotal: 0,
+    todayTopics: [],
+  },
+
+  onLoad() {
+    const info = wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync();
+    this._merchantAccess = inactiveAccess();
+    this.setData({
+      statusBarHeight: info.statusBarHeight || 20,
+      navBarHeight: (app.globalData && app.globalData.navBarHeight) || 44,
+    });
+    this.loadAccess();
+  },
+
+  onShow() { merchantTheme.merchantPageShow(); },
+  onHide() { merchantTheme.merchantPageRestore(); },
+  onUnload() { merchantTheme.merchantPageRestore(); },
+
+  // 原地无权限态的唯一动作:非成员申请入驻,在营成员返回
+  onDenyCta() { require('../../../utils/merchant-no-permission.js').followDenyCta(this, this.data.accessMember === true, '/pages/merchant/index/index'); },
+  onNavBack() {
+    if (getCurrentPages().length > 1) wx.navigateBack();
+    else wx.reLaunch({ url: '/pages/merchant/index/index' });
+  },
+
+  loadAccess() {
+    this.setData({ pageState: 'loading', errorMessage: '' });
+    app.sendRequest({
+      hideLoading: true,
+      silentError: true,
+      url: '/api/merchant/access/me',
+      method: 'POST',
+      success: (res) => {
+        if (!successObject(res)) {
+          this.setData({ pageState: 'error', errorMessage: errorText(res, '经营身份加载失败') });
+          return;
+        }
+        const access = normalizeMerchantAccess(res.data);
+        this._merchantAccess = access;
+        if (!access.active || !access.canReadVerifyRecords) {
+          this._items = [];
+          this.setData({ pageState: 'no-permission', accessMember: access.active === true, groups: [], todayState: '', todayTotal: 0, todayTopics: [] });
+          return;
+        }
+        this.loadList();
+        this.loadToday();
+      },
+      fail: () => this.setData({ pageState: 'error', errorMessage: '网络异常，请重试' }),
+    });
+  },
+
+  retry() {
+    if (this._merchantAccess && this._merchantAccess.canReadVerifyRecords) this.loadList();
+    else this.loadAccess();
+  },
+
+  // 下拉:已有列表时静默重读,失败只轻提示并保留列表;无权限/失败态走 retry
+  onPullDownRefresh() {
+    const state = this.data.pageState;
+    const canRead = !!(this._merchantAccess && this._merchantAccess.canReadVerifyRecords);
+    if (canRead && (state === 'ready' || state === 'empty')) { this.loadList(true); this.loadToday(true); return; }
+    wx.stopPullDownRefresh();
+    if (state !== 'loading') this.retry();
+  },
+
+  loadList(fromPull) {
+    if (!this._merchantAccess || !this._merchantAccess.canReadVerifyRecords) {
+      if (fromPull) wx.stopPullDownRefresh();
+      return;
+    }
+    // 过期回包丢弃:retry 与首读/下拉并发时只认最后一次
+    this._listSeq = (this._listSeq || 0) + 1;
+    const seq = this._listSeq;
+    const keep = !!fromPull;
+    if (!keep) this.setData({ pageState: 'loading', errorMessage: '' });
+    const settle = () => {
+      if (fromPull) wx.stopPullDownRefresh();
+      return seq === this._listSeq;
+    };
+    const collected = [];
+    const failed = (res) => {
+      if (keep) toast('刷新失败，稍后再试');
+      else this.setData({ pageState: 'list-error', errorMessage: res ? errorText(res, '核销记录加载失败') : '网络异常，请重试' });
+    };
+    // 与「核销与退款」同源分页读取;服务端每页最多 50 条,读满 total 或到上限为止。
+    const readPage = (pageNum) => app.sendRequest({
+      hideLoading: true,
+      silentError: true,
+      url: '/api/merchant/finance/redemptions',
+      method: 'POST',
+      // 服务端按 @RequestBody 收 JSON(与核销与退款页同一写法)
+      data: JSON.stringify({ filter: 'all', pageNum, pageSize: PAGE_SIZE }),
+      header: { 'Content-Type': 'application/json' },
+      success: (res) => {
+        if (seq !== this._listSeq) { if (fromPull) wx.stopPullDownRefresh(); return; }
+        const items = isSuccess(res) ? shapeRecordList(res.data) : null;
+        if (!items) { if (settle()) failed(res); return; }
+        collected.push.apply(collected, items);
+        const total = Number(res.data.total) || 0;
+        const more = items.length === PAGE_SIZE && collected.length < total;
+        if (more && pageNum < MAX_PAGES) { readPage(pageNum + 1); return; }
+        if (!settle()) return;
+        // MC-020:超过首批上限不再静默截断 —— 记下续读页,分段计数标「+」,触底按需续读。
+        this._morePage = more ? pageNum + 1 : 0;
+        this.applyItems(collected, this.data.bucket);
+      },
+      fail: () => {
+        if (!settle()) return;
+        failed(null);
+      },
+    });
+    readPage(1);
+  },
+
+  // 「今天」区:失败只落本区的错误态(带重新加载),不动下面的记录列表;下拉时原地重读不切回加载态。
+  loadToday(keep) {
+    if (!this._merchantAccess || !this._merchantAccess.canReadVerifyRecords) return;
+    this._todaySeq = (this._todaySeq || 0) + 1;
+    const seq = this._todaySeq;
+    if (!keep) this.setData({ todayState: 'loading' });
+    const failed = () => { if (seq === this._todaySeq) this.setData({ todayState: 'error' }); };
+    app.sendRequest({
+      hideLoading: true,
+      silentError: true,
+      url: '/api/merchant/desk/arrivals/today',
+      method: 'POST',
+      success: (res) => {
+        if (seq !== this._todaySeq) return;
+        const view = isSuccess(res) ? todayView(res.data) : null;
+        if (!view) { failed(); return; }
+        this.setData({ todayState: 'ready', todayTotal: view.total, todayTopics: view.topics });
+      },
+      fail: failed,
+    });
+  },
+
+  retryToday() { this.loadToday(); },
+
+  onReachBottom() {
+    if (!this._morePage || this._loadingMore || this.data.pageState !== 'ready' && this.data.pageState !== 'empty') return;
+    const seq = this._listSeq;
+    const pageNum = this._morePage;
+    this._loadingMore = true;
+    app.sendRequest({
+      hideLoading: true,
+      silentError: true,
+      url: '/api/merchant/finance/redemptions',
+      method: 'POST',
+      data: JSON.stringify({ filter: 'all', pageNum, pageSize: PAGE_SIZE }),
+      header: { 'Content-Type': 'application/json' },
+      success: (res) => {
+        this._loadingMore = false;
+        if (seq !== this._listSeq) return;
+        const items = isSuccess(res) ? shapeRecordList(res.data) : null;
+        if (!items) { toast((!isSuccess(res) && res && res.msg) || '加载失败，请重试'); return; }
+        const seen = new Set((this._items || []).map(item => item.id));
+        const all = (this._items || []).concat(items.filter(item => !seen.has(item.id)));
+        const total = Number(res.data.total) || 0;
+        this._morePage = items.length === PAGE_SIZE && all.length < total ? pageNum + 1 : 0;
+        this.applyItems(all, this.data.bucket);
+      },
+      fail: () => { this._loadingMore = false; toast('加载失败，请重试'); },
+    });
+  },
+
+  switchBucket(event) {
+    const bucket = event && event.detail && event.detail.key;
+    if (!STATUS_TABS.some(item => item.key === bucket) || bucket === this.data.bucket) return;
+    this.applyItems(this._items || [], bucket);
+  },
+
+  applyItems(items, bucket) {
+    const counts = countByStatus(items);
+    const groups = groupRecords(items, bucket);
+    // 全量行只给分段切换用,不上屏,不走 setData(U4)
+    this._items = items;
+    pageMotion.enter(this, 'pmList'); this.setData({
+      bucket,
+      tabs: STATUS_TABS.map(tab => ({ key: tab.key, label: `${tab.label} ${counts[tab.key] || 0}${this._morePage && counts[tab.key] ? '+' : ''}` })),
+      groups,
+      hasMore: !!this._morePage,
+      pageState: groups.length ? 'ready' : 'empty',
+      errorMessage: '',
+    });
+    const shown = groups.reduce((n, group) => n + ((group && group.items && group.items.length) || 0), 0);
+    if (this._morePage && shown < FILL_ROWS) this.onReachBottom();
+  },
+});
+
+function isSuccess(res) {
+  return !!(res && (res.code === 200 || res.code === '200'));
+}
+
+function successObject(res) {
+  return !!(isSuccess(res) && res.data && typeof res.data === 'object' && !Array.isArray(res.data));
+}
+
+function errorText(res, fallback) {
+  return (app.getRequestErrorMessage && app.getRequestErrorMessage(res, fallback)) || fallback;
+}

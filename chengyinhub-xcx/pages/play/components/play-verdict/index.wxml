@@ -1,0 +1,30 @@
+<!-- 判定屏只有两张:猜中了走 win,其余走 fail。凡是「猜中了」都走这一个,
+     每个玩法自己发明一套的话,玩家会以为自己在玩不同的产品。 -->
+<view class="pv pv-tapsurface pv--{{kind}} {{neutral ? 'pv--neutral' : ''}} {{rising ? 'pv--on' : ''}} {{reducedMotion ? 'pv--reduced' : ''}} {{closable ? 'pv--closable' : ''}} {{leaving ? 'pv--leaving' : ''}} {{flash ? 'pv--flash' : ''}}" wx:if="{{show}}" bindtap="onTap" hover-class="none"
+      aria-role="alert" aria-label="{{(kind === 'win' ? ('通过。' + (text || '')) : word) + (closable ? '，轻点' + (ctaLabel || '继续') : '')}}">
+  <!-- 2026-11-24 业主:不要晃动的效果 —— 液面、浪尖、气泡都撤了,底色淡入;答错只有一下淡红闪(pv__flash) -->
+  <view class="pv__fill"></view>
+  <view class="pv__flash"></view>
+
+  <view class="pv__body">
+    <!-- 赢:一枚盖上去的「通过」章(2026-11-23 业主:原来那枚柠檬绿卡通对勾在年代 / 黑色电影外观里跳戏),颜色跟路线外观(见 wxss .pv__stamp),只落章一次、不循环;
+         中性判定不画:选的是去向不是答案,盖章读起来就是「答对了」(实走 A35 复核) -->
+    <view class="pv__art" wx:if="{{kind === 'win' && !neutral}}">
+      <view class="pv__stamp"><view class="pv__stamp-in">通过</view></view>
+    </view>
+    <!-- 输:「失败」插图 + 两个字。规则说明是写给刚失败的人看的,那个时候没人读 -->
+    <block wx:elif="{{kind !== 'win'}}">
+      <view class="pv__art"><cy-illus wx:if="{{rising}}" name="fail" size="{{200}}" reduced-motion="{{reducedMotion}}" /></view>
+      <view class="pv__word">{{word}}</view>
+    </block>
+    <!-- 2026-10-22 玩法模板「结果反馈」:成功 / 失败反馈的文字与配图就落在这一屏(照试玩台 liquidWin 的 txt)。
+         没配反馈时和原来一样:赢只有对勾,输只有两个字。 -->
+    <view class="pv__text" wx:if="{{text}}">{{shownText || text}}</view>
+    <view class="pv__imgs" wx:if="{{images.length}}">
+      <image class="pv__img" wx:for="{{images}}" wx:key="*this" src="{{item}}" mode="aspectFill" aria-label="结果配图 {{index + 1}}" />
+    </view>
+    <!-- 角色信任:这一站改了谁的信任,结果屏也留着「X会记住这件事」(与故事流 .chfull__remember 同一句) -->
+    <view class="pv__remember" wx:if="{{remember}}">{{remember}}</view>
+    <!-- 不留「继续」钮(2026-11-24 业主):独立弹出时整屏点一下回故事(onTap) -->
+  </view>
+</view>

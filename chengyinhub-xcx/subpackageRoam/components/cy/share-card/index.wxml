@@ -1,0 +1,62 @@
+<!-- 通用分享层(2026-10-31 业主批准 P-8;r3-share 按 refs4/share-page-cards 改版):
+     每种内容一张整色卡 —— 上面是封面(勋章是勋章本身),下沿一道弧,城瘾徽标压在弧上,下面大号两行标题;
+     卡下是色块圆点、一颗主按钮「发给微信好友」、一排小渠道。活动 / 主题 / 勋章 / 店铺走这一层。 -->
+<view wx:if="{{show}}" class="sc {{scIn === 1 ? 'sc--pre' : ''}}" style="--sc-bg:{{bg}};padding-top:{{statusBarHeight}}px;" catchtouchmove="noop">
+  <view class="sc-top">
+    <view class="sc-x" bindtap="close" aria-role="button" aria-label="关闭分享" hover-class="cy-pressed" hover-stay-time="80"><cy-icon name="close" size="36" /></view>
+    <text class="sc-h">{{heading}}</text>
+    <view class="sc-sp"></view>
+  </view>
+
+  <view class="sc-stage">
+    <!-- l-after 邀请卡(proto sh-invite):封面压暗铺满,眉题、大斜体主题名、竖向路线点、邀请人 + 剩余席位、城瘾 + 码;卡片完整可见 -->
+    <view class="sc-card sc-card--invite" wx:if="{{kind === 'invite'}}">
+      <image wx:if="{{cover}}" class="sc-inv-bg" src="{{cover}}" mode="aspectFill" aria-hidden="true" />
+      <view class="sc-inv-shade"></view>
+      <view class="sc-inv">
+        <text class="sc-inv-eb">{{eyebrow}}</text>
+        <text class="sc-inv-big">{{title}}</text>
+        <view class="sc-inv-line">
+          <view class="sc-inv-step" wx:for="{{steps}}" wx:key="*this"><text class="sc-inv-dot">{{index + 1}}</text><text class="sc-inv-name">{{item}}</text></view>
+        </view>
+        <view class="sc-inv-who" wx:if="{{inviterText}}"><image wx:if="{{art}}" class="sc-inv-art" src="{{art}}" mode="aspectFit" aria-hidden="true" /><text>{{inviterText}}</text></view>
+        <view class="sc-foot"><text class="sc-brand">城瘾</text><image class="sc-qr sc-qr--inv {{qrReady || reducedMotion ? 'sc-qr--ready' : ''}}{{reducedMotion ? ' sc-qr--static' : ''}}" wx:if="{{qr}}" src="{{qr}}" mode="aspectFit" bindload="onQrLoad" binderror="onQrLoad" /></view>
+      </view>
+    </view>
+    <view class="sc-card sc-card--{{kind}}" wx:else>
+      <!-- 上半:主题 / 活动 / 店铺是封面(没有就用路线插画);勋章是勋章本身 -->
+      <view class="sc-art">
+        <block wx:if="{{kind === 'medal'}}">
+          <view class="sc-glow"></view>
+          <view class="sc-medal"><image class="sc-medal-img" wx:if="{{cover}}" src="{{cover}}" mode="aspectFit" /><cy-icon wx:else name="star-filled" size="150" /></view>
+        </block>
+        <image class="sc-cover" wx:elif="{{cover}}" src="{{cover}}" mode="aspectFill" />
+        <!-- 没有封面:我们自己的路线插画(导出图同一张) -->
+        <image class="sc-cover" wx:else src="/subpackageRoam/components/cy/share-card/route-art.png" mode="aspectFill" />
+      </view>
+      <view class="sc-arc"></view>
+      <view class="sc-badge"><image class="sc-badge-img" src="/images/cy_logo_mark.png" mode="aspectFit" /></view>
+      <view class="sc-in">
+        <text class="sc-eb">{{eyebrow}}</text>
+        <text class="sc-big">{{title}}</text>
+        <text class="sc-m" wx:if="{{sub}}">{{sub}}</text>
+        <view class="sc-foot"><text class="sc-brand">城瘾</text><image class="sc-qr {{qrReady || reducedMotion ? 'sc-qr--ready' : ''}}{{reducedMotion ? ' sc-qr--static' : ''}}" wx:if="{{qr}}" src="{{qr}}" mode="aspectFit" bindload="onQrLoad" binderror="onQrLoad" /></view>
+      </view>
+    </view>
+  </view>
+
+  <view class="sc-sw">
+    <view class="sc-swatch {{index === colorIndex ? 'is-on' : ''}}" wx:for="{{colors}}" wx:key="*this"
+          data-i="{{index}}" bindtap="pickColor" aria-role="button" aria-label="换第 {{index + 1}} 种底色" hover-class="cy-pressed" hover-stay-time="80"><view class="sc-dot" style="background:{{item}}"></view></view>
+  </view>
+
+  <view class="sc-acts">
+    <button class="sc-primary" open-type="share" data-share-kind="card" aria-label="发给微信好友" hover-class="cy-pressed" hover-stay-time="80">发给微信好友</button>
+    <scroll-view class="sc-ch" scroll-x enhanced show-scrollbar="{{false}}"><view class="sc-ch-row">
+      <view class="sc-ch-i" wx:for="{{channels}}" wx:key="key" data-key="{{item.key}}" bindtap="onChannel" aria-role="button" aria-label="{{item.label}}" hover-class="cy-pressed" hover-stay-time="80">
+        <view class="sc-ch-c"><cy-icon name="{{item.icon}}" size="52" /></view><text>{{item.label}}</text>
+      </view>
+    </view></scroll-view>
+  </view>
+  <canvas type="2d" id="sccv" class="sc-cv"></canvas>
+</view>

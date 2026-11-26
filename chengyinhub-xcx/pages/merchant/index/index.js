@@ -1,0 +1,1807 @@
+const { seatTarget, seatKey, captureLogin, loginCurrent, seatRecovery } = require('../../../utils/registration-seat.js');
+const loading = require('../../../utils/loading.js'); const pageMotion = require('../../../utils/page-motion.js');
+const { chinaParts } = require('../../../utils/datetime');
+const cyToast = require('../../../utils/toast.js');
+const modal = require('../../../utils/modal.js');
+const app = getApp();
+const { activityShareFromEvent } = require('../../../utils/activity-share.js');
+const merchantTheme = require('../../../utils/merchant-theme.js');
+const { merchantHomeUrl } = require('../../../utils/merchant-home-link.js');
+const { isRecord, isRecordList, isBizOk } = require('../../../utils/response-shape.js');
+const { inactiveAccess, normalizeMerchantAccess } = require('../../../utils/merchant-access-policy.js');
+const { ensureSession } = require('../utils/session/ensure-session.js'); const { retryLogin, waitForInitialSession } = require('../../../utils/session/login-reload.js');
+const identitySync = require('../../../utils/identity-sync.js');
+
+// cms_topic.product_type → 展示名(与 marketing 页同口径)
+const PRODUCT_TYPE_TEXT = { 1: '城市定向', 2: '自由探索' };
+
+// L07-082:待办汇总的空态只此一份,三处写入(初值/无权限/换主体)不再各写各的字段。
+// 不带 byProject:缺它 = 「未取到」,项目卡那格留空而不是写成「无待办」(见 merchant-workbench 的 todoUnavailable)
+function emptyTodo() {
+  return {
+    biddingTopics: 0, pendingVerify: 0, verifiedCount: 0, pendingScanConfirm: 0,
+    pendingOrders: 0, refundCount: 0, pendingPredict: 0,
+  };
+}
+
+function finiteCount(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const count = Number(value);
+  return Number.isFinite(count) ? count : null;
+}
+
+function authenticationFailureCode(res, status) {
+  const candidates = [
+    status,
+    res && res.statusCode,
+    res && res.code,
+  ];
+  for (let index = 0; index < candidates.length; index += 1) {
+    const code = String(candidates[index] == null ? '' : candidates[index]);
+    if (code === '401' || code === '2') return code;
+  }
+  return '';
+}
+
+function clearInvalidSession() {
+  const session = typeof app.getSession === 'function' ? app.getSession() : null;
+  if (session && typeof session.clearSession === 'function') session.clearSession();
+}
+
+const { resolveVerificationResult, verificationSheetView, classifyVerificationOutcome, createVerificationWorkflow } = require('../../../utils/merchant-verification.js');
+const { resolveVerificationScan } = require('../../../utils/verification-scan.js');
+const { manualCodeError, manualRoute, chosenRoute } = require('../utils/manual-code.js');
+const { deskReceiptView } = require('../utils/desk-receipt.js');
+const { getScene } = require('../../../utils/scene-registry.js');
+const { pushScene, popScene, currentScene, exitDecision } = require('../../../utils/scene-stack.js');
+const { hasTodoSummaryPayload, buildProjectCards, isHiddenProjectCard, sortProjectCards, isEndedProject, isPendingChapterInvite, localToday, attachVisitTexts } = require('../../../utils/merchant-workbench.js');
+const { resolveApplicationResponse, decorateApplication } = require('../../../utils/merchant-identity-policy.js');
+const { offerVerificationReadback } = require('../../../utils/verification-readback.js');
+const { createGameSessionClient } = require('../../../utils/game-session-client.js');
+const { attachMerchantGameEntries } = require('../utils/game-session-merchant.js');
+const motion = require('../../../utils/motion.js');
+const { readReducedMotion } = require('../../../utils/motion-preference.js');
+const { buildInboxPreview, readKey: inboxReadKey } = require('../utils/inbox-preview.js');
+const { decorate: decorateInvites } = require('../../../utils/coop-invite-view.js');
+
+// 累计收入滚动(2026-10-22 owner 裁决):慢-快-慢,约 1.3s、60fps;帧内金额没变就不 setData。
+const REVENUE_COUNT_MS = 1300;
+const REVENUE_COUNT_FPS = 60;
+
+Page({
+  data: {
+    refreshing: false,
+    privacyGateShow: false,
+    // [P0-2] ③ 选章核销面板:交集 ≥2 时装候选章节,商家选完调 scan_qr_code_chapter
+    chapterSheet: { show: false, code: '', items: [] },
+    manualChoice: { show: false, title: '', items: [] },
+    stationSheet: { show: false, code: '', items: [] },
+    verificationResult: { show: false, state: '', title: '', message: '' },
+    statusBarHeight: 44,
+    navBarHeight: 44,
+    joinLoading: true,
+    joinError: false,
+    hostProjectTotal: 0,
+    hostLoading: true,
+    hostError: false,
+    gameEntryLoading: true,
+    displayName: '商家',
+    businessStatus: 1, // 1营业中 0已打烊
+    merchantInfo: {},
+    dashboardData: {
+      revenue: null,
+    },
+    dashboardError: '',
+    // 屏上正在显示的累计收入(两位小数字符串):首帧 0.00,真值到了从当前显示值滚过去;
+    // 返回页面不归零,出错保留上次显示值。只在换商家主体时归零。
+    revenueShown: '0.00',
+    // 默认 fail closed，避免首帧把上一商家或假零报表先露出来。
+    merchantAccess: inactiveAccess(),
+    // 身份/加载没能确认时的页内错误(cy-inline-error 承接),不再是整屏身份闸。
+    consoleError: '', consoleLogin: false,
+    // 已确认没有商家身份(access/me inactive 且无入驻申请):原地「当前身份不能查看经营台」+ 申请入驻,不再静默 switchTab 回我的。
+    consoleDenied: false,
+    // 入驻申请审核中/未通过/停用时的页内状态卡(来源 /api/merchant/info + decorateApplication)。
+    // 无商家身份的普通玩家落 consoleDenied 原地无权限态。
+    consoleStatus: null,
+    // 参与项目真实总数(卡片只铺前几条,空态文案不能拿截断列表报数)
+    joinTotal: 0,
+    // 「我的消息」:站内会话 + 收到的协作邀请 + 经营动态合并后的前 3 条(utils/inbox-preview.js)。
+    // inboxLoaded=false 时只占一行高度不画内容,避免加载中冒充「还没有消息」。
+    inboxItems: [], msgOpen: false, inboxAllRead: false,
+    inboxLoaded: false,
+    inboxError: false,
+    // BL-85 开通前置检查未完成项(只读;全部完成/无数据/失败时为空,不展示)
+    todo: emptyTodo(),
+    todoLoading: true,
+    // 项目卡:承接的主题 + 主办的主题/活动合成一列,待办与动态按 (ownerType,ownerId) 归属
+    projectCards: [],
+    sceneStack: [],
+    sceneCurrent: null,
+    sceneConfirm: { show: false, action: null, pending: null },
+  },
+
+  // 隐私授权闸:app.js 优先调这里(真弹窗),没有这个方法的页面才回退到 /pages/privacy 路由页。
+  showPrivacyGate() {
+    this.setData({ privacyGateShow: true });
+  },
+  onPrivacyGateSettled() {
+    this.setData({ privacyGateShow: false });
+  },
+
+
+  onLoad(options) {
+    const gd = app.globalData || {}; pageMotion.enter(this, 'pmPage'); // 2026-10-23:工作台各块依次浮上来
+    this._gameSessionClient = createGameSessionClient({ sendRequest: app.sendRequest.bind(app) });
+    this._gameSummaryGeneration = 0;
+    this._upcomingRuns = [];
+    this._merchantGameEntries = [];
+    this._merchantGameEntryTask = null;
+    this.setData({
+      statusBarHeight: gd.statusBarHeight || 44,
+      navBarHeight: gd.navBarHeight || 44,
+    });
+    // G-5 / M-27(2026-10-27):品牌中心换 Logo / 改店名后立刻换掉首页头像与问候名,随后 onShow 的 access/me 回读兜底
+    this._offIdentitySync = identitySync.onIdentityChange((evt) => {
+      if (evt.scope !== 'merchant' || !this.data.merchantAccess.active) return;
+      const merchantInfo = Object.assign({}, this.data.merchantInfo, evt.patch);
+      this.setData({ merchantInfo });
+      this.refreshProfileHeader(merchantInfo, this._userInfo);
+    });
+    // 首屏数据统一由紧随其后的 onShow 在远程身份确认后加载，避免 onLoad/onShow 并发拉两整组工作台。
+    if (options && options.scene) this.openScene(options.scene, { id: options.id, tab: options.tab });
+    // 2026-11-01 业主:主题工作台「扫码 / 去核销」直接开扫码 —— 核销整套(选席位 / 选章节 / 结果待确认)
+    // 只在本页一份,工作台带 scan=1 进来就拉起扫码,返回仍回到主题。核销权限由服务端核验接口自己判。
+    // 只挂在 onLoad,不挂在身份回读回调里:那条回调「重新加载」等按钮也会走,不能顺带拉起扫码。
+    if (options && options.scan === '1') wx.nextTick(() => this.goScanQR());
+  },
+
+  refreshProfileHeader(merchantInfo, userInfo) {
+    const info = merchantInfo || {};
+    // G-5(2026-10-27):商家视角名称只认商家名,不再拿会员昵称兜底(同一家店不能有两个名字)
+    const displayName = info.name || '商家';
+    const businessStatus = (info.businessStatus === 0 || info.businessStatus === '0') ? 0 : 1;
+    this.setData({ displayName: displayName, businessStatus: businessStatus });
+  },
+
+  // 切换营业状态是资料写操作；员工页即使误触方法也必须在请求前关闭。
+  toggleBusiness() {
+    if (!this.data.merchantAccess.canWriteProfile) return;
+    const next = this.data.businessStatus === 1 ? 0 : 1;
+    if (next === 0) {
+      // M-13:一次误触就打烊,先确认;打烊不挡核销,话要说实。
+      const that = this;
+      modal.show({
+        title: '暂停营业？',
+        content: '玩家会看到本店今日已打烊，到店仍可核销。',
+        confirmText: '暂停营业',
+        cancelText: '继续营业',
+        success(r) { if (r && r.confirm) that._applyBusinessStatus(0); },
+      });
+      return;
+    }
+    this._applyBusinessStatus(next);
+  },
+
+  _applyBusinessStatus(next) {
+    if (!this.data.merchantAccess.canWriteProfile) return;
+    const that = this;
+    const actionEpoch = (this._businessActionEpoch || 0) + 1;
+    this._businessActionEpoch = actionEpoch;
+    const scopeKey = this._merchantScopeKey || '';
+    const isCurrentAction = function () {
+      return actionEpoch === (that._businessActionEpoch || 0)
+        && scopeKey === (that._merchantScopeKey || '');
+    };
+    app.sendRequest({
+      url: '/api/merchant/business-status/update', method: 'POST',
+      data: { business_status: next },
+      success(res) {
+        if (!isCurrentAction()) return;
+        if (res.code == '200' || res.code === 200) {
+          // BL-141:写成功不等于状态已落库,以 /api/merchant/business-status 回读为准再刷新开关。
+          that.readBackBusinessStatus(next, isCurrentAction);
+        } else {
+          cyToast(app.getRequestErrorMessage(res, '切换失败'));
+        }
+      },
+      fail() {
+        if (!isCurrentAction()) return;
+        cyToast('网络异常，请重试');
+      }
+    });
+  },
+
+  readBackBusinessStatus(expected, isCurrentAction) {
+    const that = this;
+    app.sendRequest({
+      url: '/api/merchant/business-status', method: 'POST', silentError: true,
+      success(res) {
+        if (!isCurrentAction()) return;
+        const data = res && (res.code == '200' || res.code === 200) ? res.data : null;
+        const actual = data ? Number(data.businessStatus) : NaN;
+        if (actual !== 0 && actual !== 1) {
+          cyToast('状态更新中，请刷新');
+          return;
+        }
+        that.setData({ businessStatus: actual });
+        cyToast(actual === expected ? (actual === 1 ? '已营业' : '已打烊')
+          : '状态更新中，当前' + (data.businessStatusText || (actual === 1 ? '营业中' : '已打烊')));
+      },
+      fail() {
+        if (!isCurrentAction()) return;
+        cyToast('状态更新中，请刷新');
+      }
+    });
+  },
+
+  formatJoinCards(list) {
+    return (list || []).map(function (item) {
+      const reportVolume = Number(item.registrationCount || item.orderCount || item.reportCount || 0);
+      const assignment = [];
+      if (item.chapterName) assignment.push(item.chapterName);
+      if (item.nodeName && item.nodeName !== item.chapterName) assignment.push(item.nodeName);
+      // M-04 第4轮:不带日期的那半段单独留一份,卡上出现「今天 几点」时只写它,免得一张卡两个日期。
+      const placeText = assignment.join(' · ');
+      if (item.startDateStr) assignment.push(item.startDateStr);
+      // ⚠️ 这里曾按 searchStatus 编出 62/38 两个数,当「售出/购买比例」渲染给商家看 ——
+      // 后端从来不下发这个数据,它是纯捏造的。真实数据到位前一律不显示。
+      return Object.assign({}, item, {
+        reportVolume: reportVolume,
+        assignmentText: assignment.join(' · '),
+        assignmentPlaceText: placeText,
+        // 类型标签只在后端确实下发 productType 时才出;拿不到就不显示,别猜
+        productTypeText: PRODUCT_TYPE_TEXT[item.productType] || '',
+      });
+    });
+  },
+
+  // 以下页内面板一律走场景栈:payload 仍留在各自 data 里,只有「显不显示」交给 sceneStack。
+  openMoreMenu() {
+    this.openScene('merchant-more-menu');
+  },
+
+  closeMoreMenu() {
+    this.closeScene();
+  },
+
+
+  openScene(id, params = {}) {
+    const next = getScene(id, params);
+    if (exitDecision(this.data.sceneStack, 'close') === 'confirm') {
+      this.setData({ sceneConfirm: { show: true, action: 'replace', pending: next } });
+      return false;
+    }
+    const sceneStack = pushScene(this.data.sceneStack, next);
+    this.setData({ sceneStack, sceneCurrent: currentScene(sceneStack), sceneConfirm: { show: false, action: null, pending: null } });
+    return true;
+  },
+  backScene() {
+    if (exitDecision(this.data.sceneStack, 'back') === 'confirm') {
+      this.setData({ sceneConfirm: { show: true, action: 'back', pending: null } });
+      return;
+    }
+    const sceneStack = popScene(this.data.sceneStack);
+    this.setData({ sceneStack, sceneCurrent: currentScene(sceneStack), sceneConfirm: { show: false, action: null, pending: null } });
+  },
+  closeScene() { this.setData({ sceneStack: [], sceneCurrent: null, sceneConfirm: { show: false, action: null, pending: null } }); },
+  requestSceneClose() {
+    if (exitDecision(this.data.sceneStack, 'close') === 'confirm') {
+      this.setData({ sceneConfirm: { show: true, action: 'close', pending: null } });
+      return;
+    }
+    this.closeScene();
+  },
+  confirmSceneDiscard() {
+    if (this.data.sceneConfirm.action === 'back') {
+      const sceneStack = popScene(this.data.sceneStack);
+      this.setData({ sceneStack, sceneCurrent: currentScene(sceneStack), sceneConfirm: { show: false, action: null, pending: null } });
+      return;
+    }
+    if (this.data.sceneConfirm.action === 'replace' && this.data.sceneConfirm.pending) {
+      const sceneStack = pushScene(this.data.sceneStack, this.data.sceneConfirm.pending);
+      this.setData({ sceneStack, sceneCurrent: currentScene(sceneStack), sceneConfirm: { show: false, action: null, pending: null } });
+      return;
+    }
+    this.closeScene();
+  },
+  cancelSceneDiscard() { this.setData({ sceneConfirm: { show: false, action: null, pending: null } }); },
+  onPoiTitle(event) {
+    const scene = this.data.sceneCurrent, detail = event.detail || {};
+    if (!scene || scene.id !== 'roam-poi-detail' || !detail.name || scene.title === detail.name
+        || String(scene.params.poiId || '') !== String(detail.poiId || '')
+        || String(scene.params.merchantId || '') !== String(detail.merchantId || '')) return;
+    this.setData({ 'sceneCurrent.title': detail.name, sceneStack: this.data.sceneStack.map((row, index) => index === this.data.sceneStack.length - 1 ? Object.assign({}, row, { title: detail.name }) : row) });
+  },
+  setSceneDirty(dirty) {
+    if (!this.data.sceneStack.length) return;
+    const sceneStack = this.data.sceneStack.slice();
+    sceneStack[sceneStack.length - 1] = { ...sceneStack[sceneStack.length - 1], dirty: dirty === true };
+    this.setData({ sceneStack, sceneCurrent: currentScene(sceneStack) });
+  },
+  onSceneDirtyChange(event) { this.setSceneDirty(event.detail && event.detail.dirty); },
+  openChildScene(event) {
+    const detail = event.detail || {};
+    if (detail.id) this.openScene(detail.id, detail.params || {});
+  },
+  openCityStamp(event) {
+    const place = (event && event.detail && event.detail.place) || '这一站';
+    if (this._navigating) return; this.closeScene(); // 跳转中不响应连点,免得叠两层城市签页
+    this._navigating = true; wx.navigateTo({ url: '/subpackageRoam/citystamp/index?kind=sign&place=' + encodeURIComponent(place), complete: () => { this._navigating = false; } });
+  },
+  submitSceneForm() {
+    const content = this.selectComponent('#sceneRouteContent');
+    if (content && typeof content.submitForm === 'function') content.submitForm();
+  },
+  blockSceneTouch() {},
+
+  onMoreItem(e) {
+    const action = e.currentTarget.dataset.action;
+    this.closeMoreMenu();
+    if (action === 'messages') this.goMessages();
+    else if (action === 'coupon') this.goManageCoupon();
+    else if (action === 'brand') this.goBrandManage();
+    else if (action === 'aftercare') this.goAftercare();
+    else if (action === 'verifyRecords') this.goVerifyRecords();
+    else if (action === 'bundleReservations') this.goBundleReservations();
+    else if (action === 'payoutAccount') this.goPayoutAccount();
+  },
+
+  goManageCoupon() {
+    if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/subpackageMember/coupon/coupon?scope=MERCHANT', complete: () => { this._navigating = false; } }); // 跳转中不响应连点,免得叠两层券管理页
+  },
+
+  goAftercare() {
+    if (!this.data.merchantAccess.canReadAftercare || this._navigating) return; // 跳转中不响应连点
+    this._navigating = true; wx.navigateTo({ url: '/pages/merchant/aftercare/index', complete: () => { this._navigating = false; } });
+  },
+
+  goBundleReservations() {
+    if (!this.data.merchantAccess.canVerify || this._navigating) return;
+    this._navigating = true;
+    wx.navigateTo({ url: '/pages/merchant/bundle-reservations/index', complete: () => { this._navigating = false; } });
+  },
+
+  goVerifyRecords() {
+    if (!this.data.merchantAccess.canReadVerifyRecords || this._navigating) return; // 跳转中不响应连点,免得叠两层核销记录页
+    this._navigating = true;
+    wx.navigateTo({ url: '/pages/merchant/verify-records/index', complete: () => { this._navigating = false; } });
+  },
+  goPayoutAccount() {
+    if (!this.data.merchantAccess.canReadFinance || this._navigating) return; // 跳转中不响应连点
+    this._navigating = true;
+    wx.navigateTo({ url: '/pages/merchant/payout-account/index', complete: () => { this._navigating = false; } });
+  },
+  // 今日待办(待核销/扫码待确认/待处理):后端 /api/merchant/todo-summary
+  loadTodo(dataEpoch = this._dataEpoch || 0) {
+    const that = this;
+    // L07-012:todoError / projectList / hostProjectList 只给 JS 用,不进 setData
+    this._todoError = false;
+    this.setData({ todoLoading: true });
+    app.sendRequest({
+      hideLoading: true, url: '/api/merchant/todo-summary', method: 'POST',
+      retry: 2, // 只读,断网/超时自动重发两跳
+      success(res) {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        if ((res.code === '200' || res.code === 200) && hasTodoSummaryPayload(res.data)) {
+          that.setData({ todo: res.data, todoLoading: false });
+          that.refreshProjectCards();
+        } else {
+          that._todoError = true;
+          that.setData({ todoLoading: false });
+          that.refreshProjectCards();
+        }
+        that._refreshSettled('todo');
+      },
+      fail() {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        that._todoError = true;
+        that.setData({ todoLoading: false });
+        that.refreshProjectCards();
+        that._refreshSettled('todo');
+      },
+    });
+  },
+
+  // 项目卡的三块数据(承接列表 / 主办列表 / 待办 / 动态)是四个独立请求,
+  // 谁先回来都得能重算一次,所以统一收在这里,由各 load* 成功后调用。
+  refreshProjectCards() {
+    // 2026-09-16 用户裁决:「项目已结束就不显示了」。判据直接用卡片自己的状态签
+    // (与 buildProjectCards 内同一条 statusLabelOf),不另按日期算一套。
+    // 结束的项目仍在「全部」完整列表页里可查,工作台只是不再占位。
+    const legacyTopics = new Set((this._projectList || []).map((item) => String(item.topicId)));
+    const chapterProjects = (this._chapterProjectList || [])
+      .filter((item) => !legacyTopics.has(String(item.topicId)));
+    const invitedTopics = new Set();
+    const projectCards = buildProjectCards({
+      joinList: (this._projectList || []).map(item => {
+        const topicId = String(item.topicId);
+        if (invitedTopics.has(topicId)) return item;
+        const invite = (this._chapterProjectList || []).find(row => String(row.topicId) === topicId && isPendingChapterInvite(row));
+        if (!invite) return item;
+        invitedTopics.add(topicId);
+        return invite;
+      }).concat(chapterProjects),
+      hostList: this._hostProjectList || [],
+      todoByProject: this.data.todo.byProject,
+      events: this._notifications || [],
+      todoError: this._todoError === true,
+    }).filter((card) => !isHiddenProjectCard(card));
+    this.refreshGameStationSummaries(sortProjectCards(projectCards));
+  },
+
+  // activityId 只来自服务端按当前登录商家过滤的 entries(只用来补出没对上承接卡的活动卡);
+  // 主题报名卡仅按服务端回传的 topicId 关联,不从报名 id/topicId 猜活动 id。
+  // 2026-09-23 用户裁决:卡上不写「本站可接待」这类站点状态(项目卡都是已确定接待的),
+  // 改写俱乐部「谁、哪天几点到店」—— 原先为状态字逐场拉 projection 的请求一并撤掉。
+  refreshGameStationSummaries(projectCards) {
+    const decorated = attachMerchantGameEntries(projectCards, this._merchantGameEntries);
+    const next = attachVisitTexts(decorated, this._upcomingRuns);
+    // L07-011:七路加载各自回来都会重建卡片;内容没变就不再整表 setData,
+    // 入场动画只在卡片从无到有时播一次(原先列表为空期间每次都重播)
+    const signature = JSON.stringify(next);
+    if (signature === this._projectCardsSignature) return;
+    this._projectCardsSignature = signature;
+    if (!this.data.projectCards.length && next.length) pageMotion.enter(this, 'pmProj');
+    this.setData({ projectCards: next });
+  },
+
+  // 俱乐部/团队即将到店的场次(含俱乐部自己开的场次);接口要 VERIFY_RECORD_READ,没这个岗位权限就不读、卡上不写。
+  loadUpcomingRuns(dataEpoch = this._dataEpoch || 0) {
+    if (!this.data.merchantAccess.canReadVerifyRecords) { this._upcomingRuns = []; return; }
+    const that = this;
+    app.sendRequest({
+      hideLoading: true, url: '/api/merchant/upcoming-runs', method: 'POST',
+      data: JSON.stringify({}), header: { 'Content-Type': 'application/json' },
+      success(res) {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        that._upcomingRuns = (res.code === '200' || res.code === 200) && Array.isArray(res.data) ? res.data : [];
+        that.refreshProjectCards();
+      },
+    });
+  },
+
+  loadMerchantGameEntries() {
+    if (!this._gameSessionClient) return;
+    const generation = this._gameSummaryGeneration || 0;
+    if (this._merchantGameEntryTask && typeof this._merchantGameEntryTask.abort === 'function') {
+      this._merchantGameEntryTask.abort();
+    }
+    this.setData({ gameEntryLoading: true });
+    const task = this._gameSessionClient.loadMerchantEntries();
+    this._merchantGameEntryTask = task;
+    task.then((result) => {
+      if (generation !== this._gameSummaryGeneration) return;
+      this._merchantGameEntryTask = null;
+      if (result && result.status === 'ready') {
+        this._merchantGameEntries = result.data;
+        this.setData({ gameEntryLoading: false });
+      } else {
+        this._merchantGameEntries = [];
+        this.setData({ gameEntryLoading: false });
+      }
+      this.refreshProjectCards();
+    });
+  },
+
+  // 只作废在途请求;已确认的入口留到新一轮回来再替换(2026-10-22 owner 裁决:重载不变形)。
+  // clearEntries=true 才连同已确认入口一起清掉并重绘卡片。
+  resetGameStationSummaries(clearEntries = false) {
+    const renderCards = clearEntries === true;
+    this._gameSummaryGeneration = (this._gameSummaryGeneration || 0) + 1;
+    if (renderCards) this._merchantGameEntries = [];
+    if (this._merchantGameEntryTask && typeof this._merchantGameEntryTask.abort === 'function') {
+      this._merchantGameEntryTask.abort();
+    }
+    this._merchantGameEntryTask = null;
+    if (renderCards && this.data.projectCards.length) {
+      // L07-011:卡片被直接改写,下次重建必须重新下发
+      this._projectCardsSignature = '';
+      this.setData({
+        projectCards: attachMerchantGameEntries(this.data.projectCards, []),
+        gameEntryLoading: true,
+      });
+    }
+  },
+
+  // 实时动态唯一来源:/api/merchant/events(真实事件:收入到账/核销);空数组就是没有动态,不编造。
+  loadEvents(dataEpoch = this._dataEpoch || 0) {
+    const that = this;
+    app.sendRequest({
+      hideLoading: true, url: '/api/merchant/events', method: 'POST',
+      retry: 2,
+      success(res) {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        const ok = (res.code === '200' || res.code === 200) && Array.isArray(res.data);
+        const data = ok ? res.data : [];
+        // 经营动态只喂项目卡铃铛与「我的消息」合并,不直接上屏 ⇒ 放实例属性,不走 setData(U4 死字段门禁)。
+        that._notifications = data.map((e, i) => Object.assign({ id: i }, e));
+        that.refreshProjectCards();
+        that.settleInboxSource(dataEpoch, 'events', ok ? data : null);
+      },
+      fail() {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        that.settleInboxSource(dataEpoch, 'events', null);
+      },
+    });
+  },
+
+  // 「我的消息」三路来源(会话 / 收到的邀请 / 经营动态)全部落定后一次性合并渲染:
+  // 逐路渲染会让列表在加载中来回重排。返回页面时旧列表留在屏上,直到新一轮合并完成。
+  startInbox(dataEpoch, access) {
+    const sources = ['conversations'];
+    if (access.canManageCoop) sources.push('invites');
+    if (access.canReadFinance || access.canReadVerifyRecords) sources.push('events');
+    this._inbox = { epoch: dataEpoch, pending: new Set(sources), total: sources.length, failed: 0,
+      rows: { conversations: [], invites: [], events: [] } };
+    this.loadInboxConversations(dataEpoch);
+    if (access.canManageCoop) this.loadInboxInvites(dataEpoch);
+  },
+
+  settleInboxSource(dataEpoch, source, rows) {
+    const box = this._inbox;
+    if (!box || box.epoch !== dataEpoch || !box.pending.has(source)) return;
+    box.pending.delete(source);
+    if (rows) box.rows[source] = rows;
+    else box.failed += 1;
+    if (box.pending.size) return;
+    // 全部来源都失败:保留上次确认的列表,没有就如实说没读到(不冒充「还没有消息」)。
+    if (box.failed === box.total) {
+      this.setData({ inboxLoaded: true, inboxError: !this.data.inboxItems.length });
+      return;
+    }
+    // 走查 v2 R02:叠层里标过已读的(× / 清空)不再露出;全标完收成「都看完了」。
+    const read = this.inboxReadMap();
+    this._inboxUnread = buildInboxPreview(box.rows, { limit: 50, isRead: (k) => !!read[k] });
+    const items = this._inboxUnread.slice(0, 3);
+    const allRead = !items.length && buildInboxPreview(box.rows, { limit: 1 }).length > 0;
+    this.setData({ inboxItems: items, inboxAllRead: allRead, inboxLoaded: true, inboxError: false });
+  },
+
+  // 与 subpackageB/pages/im/list 同一请求(/api/im/conversations)
+  loadInboxConversations(dataEpoch) {
+    const that = this;
+    app.sendRequest({
+      url: '/api/im/conversations', method: 'POST', hideLoading: true, silentError: true,
+      success(res) {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        that.settleInboxSource(dataEpoch, 'conversations',
+          res && res.code == 200 && isRecordList(res.data) ? res.data : null);
+      },
+      fail() {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        that.settleInboxSource(dataEpoch, 'conversations', null);
+      },
+    });
+  },
+
+  // 与 subpackageB/pages/im/list 同一请求与投影(/api/coop/list → decorateInvites),只取收到的
+  loadInboxInvites(dataEpoch) {
+    const that = this;
+    app.sendRequest({
+      url: '/api/coop/list', method: 'POST',
+      data: JSON.stringify({}), header: { 'Content-Type': 'application/json' },
+      hideLoading: true, silentError: true,
+      success(res) {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        const d = res && res.code == 200 ? res.data : null;
+        const ok = d && isRecordList(d.received);
+        that.settleInboxSource(dataEpoch, 'invites',
+          ok ? decorateInvites(d.received, d.slots).filter((it) => it.inviteId) : null);
+      },
+      fail() {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        that.settleInboxSource(dataEpoch, 'invites', null);
+      },
+    });
+  },
+
+  // L07-010:轻量回读 —— 只读会在几十秒内变化的待办、看板与消息;权限码判断与整链一致
+  loadVolatileConsole(currentAccess, dataEpoch) {
+    if (currentAccess.canReadFinance || currentAccess.canReadOrders || currentAccess.canReadMarketing) this.loadDashboard(dataEpoch);
+    if (currentAccess.canReadVerifyRecords || currentAccess.canReadOrders
+      || currentAccess.canReadAftercare || currentAccess.canManageProjects) this.loadTodo(dataEpoch);
+    this.startInbox(dataEpoch, currentAccess);
+    // startInbox 按同一权限把「经营动态」记为待落定的一路:这里不读,我的消息就永远合不上
+    if (currentAccess.canReadFinance || currentAccess.canReadVerifyRecords) this.loadEvents(dataEpoch);
+    // 离开时被中止的游戏入口读取要补上,否则入口区一直停在加载中
+    if (this.data.gameEntryLoading) this.loadMerchantGameEntries();
+  },
+
+  loadMerchantConsole(access, dataEpoch = this._dataEpoch || 0) {
+    const currentAccess = access || this.data.merchantAccess;
+    // 岗位权限与上次整链时不同(如资金/项目读权被收回):不能沿用轻量回读,整链按新权限重建或清空
+    const accessKey = JSON.stringify(currentAccess || {});
+    const light = this._lightReload === true && accessKey === this._fullLoadAccessKey;
+    this._lightReload = false;
+    if (light) {
+      this.loadVolatileConsole(currentAccess, dataEpoch);
+      return;
+    }
+    this._fullLoadMember = String(app.getUserID() || '');
+    this._fullLoadAccessKey = accessKey;
+    this._lastFullLoadAt = Date.now();
+    // access/me 已给出可安全展示的商家摘要；完整资料接口要求 PROFILE_WRITE，
+    // 核销员/运营/财务不得为了加载工作台而先撞一次 403。
+    if (currentAccess.canWriteProfile) this.loadMerchantInfo(dataEpoch);
+    this.loadUserInfo(dataEpoch);
+    // master #807 的商家游戏模组入口:自带 client 空守卫,与角色无关,所有员工都能看到入口。
+    this.loadMerchantGameEntries();
+    this.loadUpcomingRuns(dataEpoch);
+    // P4 #17-1:看板/待办/动态不再只给店主,按岗位权限码加载,各自接口内部再按
+    // FINANCE_READ / ORDER_READ / VERIFY_RECORD_READ 等数据块权限取数。
+    if (currentAccess.canReadFinance || currentAccess.canReadOrders || currentAccess.canReadMarketing) {
+      this.loadDashboard(dataEpoch);
+    } else {
+      this.setData({
+        dashboardData: { revenue: null },
+        dashboardError: '',
+      });
+      this._refreshSettled('dashboard');
+    }
+    const canReadTodo = currentAccess.canReadVerifyRecords || currentAccess.canReadOrders
+      || currentAccess.canReadAftercare || currentAccess.canManageProjects;
+    if (canReadTodo) {
+      this.loadTodo(dataEpoch);
+    } else {
+      // 没权限 ≠ 今日无待办:保持「未取到」态,项目卡这一格留空,不写假空态
+      // (判据见 utils/merchant-workbench.js 的 todoUnavailable)。
+      this.setData({
+        todo: emptyTodo(),
+        todoLoading: false,
+      });
+      this._todoError = true;
+      this._refreshSettled('todo');
+    }
+    this.startInbox(dataEpoch, currentAccess);
+    if (currentAccess.canReadFinance || currentAccess.canReadVerifyRecords) {
+      this.loadEvents(dataEpoch);
+    } else {
+      this._notifications = [];
+    }
+    if (currentAccess.canManageProjects) {
+      this.loadJoinList(dataEpoch);
+      this.loadChapterProjectList(dataEpoch);
+      this.loadHostProjects(dataEpoch);
+    } else {
+      this.resetJoinState();
+      this._projectList = [];
+      this._hostProjectList = [];
+      // L07-011:卡片被直接改写,下次重建必须重新下发
+      this._projectCardsSignature = '';
+      this.setData({
+        joinTotal: 0, joinLoading: false, joinError: false,
+        hostProjectTotal: 0, hostLoading: false, hostError: false,
+        projectCards: [],
+      });
+    }
+  },
+
+  // 重新加载:清掉页内错误再走一遍 onShow 的身份+数据链路。
+  onConsoleLogin() { retryLogin(this, app, this.enterConsole); },
+
+  reloadConsole() {
+    this.setData({ consoleError: '' });
+    this.onShow();
+  },
+
+  // L07-082:报名/章节项目的实例状态清零,无权限分支与换主体共用
+  resetJoinState() {
+    this._legacyJoinLoading = false;
+    this._chapterJoinLoading = false;
+    this._legacyJoinError = false;
+    this._chapterJoinError = false;
+    this._legacyJoinTotal = 0;
+    this._legacyJoinTopicIds = new Set();
+    this._chapterJoinTopicIds = new Set();
+    this._chapterProjectList = [];
+  },
+
+  // 商家主体发生变化时不能把上一主体的金额/项目短暂显示给新主体。
+  clearMerchantScopedData() {
+    // L07-010:换主体后第一次回到页面必须走整条读取链
+    this._lastFullLoadAt = 0;
+    if (this._verificationWorkflow) {
+      this._verificationWorkflow.destroy();
+      this._verificationWorkflow = null;
+      if (this._verificationLoadingOwners) { this._verificationLoadingOwners.forEach(() => loading.hide()); this._verificationLoadingOwners.clear(); }
+    }
+    // hero 头像不再兜底个人头像后,userInfo 只剩 js 内部读(昵称兜底/角色同步),不进 data
+    this._userInfo = null;
+    this._userInfoMember = '';
+    this.resetJoinState();
+    this._merchantGameEntries = [];
+    this._notifications = [];
+    this._inbox = null;
+    this._inboxUnread = null;
+    if (this._revHoldTimer) { clearTimeout(this._revHoldTimer); this._revHoldTimer = null; }
+    if (this._revenueCountStop) this._revenueCountStop();
+    this._revenueCountStop = null;
+    // L07-011:卡片被直接改写,下次重建必须重新下发
+    this._projectCardsSignature = '';
+    this.setData({
+      displayName: '商家',
+      businessStatus: 1,
+      merchantInfo: {},
+      dashboardData: { revenue: null },
+      dashboardError: '',
+      revenueShown: '0.00',
+      joinTotal: 0,
+      joinLoading: true,
+      joinError: false,
+      hostProjectTotal: 0,
+      hostLoading: true,
+      hostError: false,
+      todo: emptyTodo(),
+      todoLoading: true,
+      projectCards: [],
+      inboxItems: [],
+      inboxAllRead: false,
+      inboxLoaded: false,
+      inboxError: false,
+      chapterSheet: { show: false, code: '', items: [] },
+      manualChoice: { show: false, title: '', items: [] },
+      stationSheet: { show: false, code: '', items: [] },
+      verificationResult: { show: false, state: '', title: '', message: '' },
+      sceneStack: [],
+      sceneCurrent: null,
+    });
+  },
+
+  isCurrentDataEpoch(dataEpoch) {
+    const currentMemberId = String(app.getUserID() || '');
+    return dataEpoch === (this._dataEpoch || 0)
+      && (this._dataMemberId === undefined || this._dataMemberId === currentMemberId);
+  },
+
+  refreshJoinRequestState() {
+    this.setData({
+      joinLoading: !!(this._legacyJoinLoading || this._chapterJoinLoading),
+      joinError: !!(this._legacyJoinError || this._chapterJoinError),
+    });
+  },
+
+  refreshJoinTotal() {
+    const legacyTopics = this._legacyJoinTopicIds || new Set();
+    const chapterTopics = this._chapterJoinTopicIds || new Set();
+    let chapterOnly = 0;
+    chapterTopics.forEach((topicId) => {
+      if (!legacyTopics.has(topicId)) chapterOnly += 1;
+    });
+    this.setData({ joinTotal: (this._legacyJoinTotal || 0) + chapterOnly });
+  },
+
+  syncMerchantScope(userInfo) {
+    const info = userInfo || {};
+    const merchant = info.merchant || {};
+    const nextKey = String(app.getUserID() || '') + ':' + String(merchant.id || merchant.merchantId || '');
+    if (this._merchantScopeKey !== nextKey) {
+      this._businessActionEpoch = (this._businessActionEpoch || 0) + 1;
+      if (this._merchantScopeKey) this.clearMerchantScopedData();
+    }
+    this._merchantScopeKey = nextKey;
+  },
+
+  onShow(options) {
+    merchantTheme.merchantPageShow(); this._navigating = false; this._hidden = false;
+    // L07-002:系统相机让本页 onHide/onShow 一次。扫码往返不算离开:保留核销 epoch,不重跑整条读取链
+    if (this._hiddenForScan) { this._hiddenForScan = false; return; }
+    if (this.data && this.data.msgOpen) this.setData({ msgOpen: false });
+    // 回到页面不剥掉已确认的游戏入口卡(否则项目列先缩后涨);换主体时 clearMerchantScopedData 才清。
+    this.resetGameStationSummaries();
+    this._businessActionEpoch = (this._businessActionEpoch || 0) + 1;
+    // 页面重新进入时作废离开前的写操作；页内下拉刷新只重读经营数据，
+    // 不能让一笔仍在途的核销回执静默消失。
+    if (!(options && options.preserveVerification === true)) {
+      this._verificationEpoch = (this._verificationEpoch || 0) + 1;
+    }
+    // L07-010:同一账号 60s 内回到工作台只重读易变的三块(待办/看板/消息);
+    // 下拉刷新(preserveVerification)、换账号换主体、超过 60s 仍走整条读取链
+    const memberId = String(app.getUserID() || '');
+    // 接受合作邀约 / 发布活动后回来:项目列表立刻整链重读(业主 2026-11-24)
+    // 标记写在 app.globalData.merchantWorkbenchStale(写方:coop/invite-detail、topic/merchantinfo、publish/activity)
+    const stale = !!(app.globalData && app.globalData.merchantWorkbenchStale === true);
+    if (stale) app.globalData.merchantWorkbenchStale = false;
+    this._lightReload = !stale && !(options && options.preserveVerification === true)
+      && this._fullLoadMember === memberId && Date.now() - (this._lastFullLoadAt || 0) < 60000
+      // 上一轮项目列表还在途或失败:下面 enterConsole 推进 epoch 会丢掉在途回包,只能整链重读
+      && !this.data.joinLoading && !this.data.hostLoading && !this.data.joinError && !this.data.hostError;
+    // ★ 身份链路不再整屏判:未登录先静默登录,身份确认失败只落页内内联错误。
+    //   玩家没有商家入口、商家注册后也不会看到这一页,整屏「登录后查看 / 没有商家身份」
+    //   只会拦到自己人(2026-09-16 裁决)。
+    this.enterConsole();
+  },
+
+  enterConsole(authRetryUsed) {
+    const version = (this._consoleVersion || 0) + 1;
+    this._consoleVersion = version;
+    const identityMemberId = String(app.getUserID() || '');
+    if (!identityMemberId) {
+      this._dataEpoch = (this._dataEpoch || 0) + 1;
+      if (this._merchantScopeKey) this.clearMerchantScopedData();
+      this._merchantScopeKey = '';
+      this._dataMemberId = '';
+      this._accessMemberId = '';
+      this.closeScene();
+      // owner 2026-10-24(app.js:142-144):游客不在打开页面时静默建号(j6 F1)。落「登录后查看」,
+      // 点「登录」才走 retryLogin;冷启动还在恢复缓存会话时,恢复完自动重进。
+      this.setData({ consoleError: '', consoleStatus: null, merchantAccess: inactiveAccess(), consoleLogin: true, consoleDenied: false });
+      waitForInitialSession(this, app, this.enterConsole);
+      return;
+    }
+    if (this.data.consoleLogin) this.setData({ consoleLogin: false });
+    const dataEpoch = (this._dataEpoch || 0) + 1;
+    this._dataEpoch = dataEpoch;
+    this._dataMemberId = identityMemberId;
+    // 同一账号回到页面:重新确认期间保留上次确认的岗位权限与入驻状态,收入区/快捷钮不先消失再出现
+    // (2026-10-22 owner 裁决:页面重载不得变形)。换账号才先 fail closed。
+    if (this._accessMemberId === identityMemberId) {
+      this.setData({ consoleError: '' });
+    } else {
+      this._accessMemberId = '';
+      this.setData({ consoleError: '', consoleStatus: null, merchantAccess: inactiveAccess(), consoleDenied: false });
+    }
+    this.loadConsoleAccess(dataEpoch, version, identityMemberId, authRetryUsed === true);
+  },
+
+  // 会话失效:静默重登一次(同一轮 onShow 内只重试一次,防死循环),成功即重走身份链路;
+  // 已经重试过或重登失败,就落页内错误态,而不是整屏「去登录」。
+  recoverConsoleSession(version, authRetryUsed) {
+    // 会话没了:旧商家的金额/项目/入口不能继续留在屏上(与旧整屏闸同一条数据纪律)。
+    if (this._merchantScopeKey) this.clearMerchantScopedData();
+    this._merchantScopeKey = '';
+    this._dataMemberId = '';
+    this._dataEpoch = (this._dataEpoch || 0) + 1;
+    this._accessMemberId = '';
+    this.closeScene();
+    this.setData({ consoleStatus: null, merchantAccess: inactiveAccess() });
+    if (authRetryUsed) {
+      this.setData({ consoleError: '登录已失效，请重新登录' });
+      return;
+    }
+    clearInvalidSession();
+    ensureSession(app, true).then((ok) => {
+      if (version !== this._consoleVersion) return;
+      if (!ok) {
+        this.setData({ consoleError: '登录失败，请重试' });
+        return;
+      }
+      this.enterConsole(true);
+    });
+  },
+
+  loadConsoleAccess(dataEpoch, version, identityMemberId, authRetryUsed) {
+    // 身份回调只认发起请求时的那一代与那个账号;会话被请求层清空(user_id 为空)也算
+    // 「同一账号的登录态失效」,不能当成迟到回调丢掉 —— 否则 401 后页面停在旧数据上。
+    const isCurrentIdentity = () => version === this._consoleVersion
+      && identityMemberId === String(app.getUserID() || '');
+    const isCurrentOrSessionCleared = () => version === this._consoleVersion
+      && (!String(app.getUserID() || '') || String(app.getUserID() || '') === identityMemberId);
+    app.sendRequest({
+      hideLoading: true,
+      silentError: true,
+      url: '/api/merchant/access/me',
+      method: 'POST',
+      success: (res) => {
+        if (authenticationFailureCode(res, 0)) {
+          if (!isCurrentOrSessionCleared()) return;
+          this.recoverConsoleSession(version, authRetryUsed);
+          return;
+        }
+        if (!isCurrentIdentity()) return;
+        // ★ 拉不到身份 ≠ 没有数据。失败关闭成页内错误态,别退回假空态。
+        if (!(res && (res.code === '200' || res.code === 200) && isRecord(res.data))) {
+          this.setData({ consoleError: isBizOk(res) ? '经营身份没能确认' : app.getRequestErrorMessage(res, '经营身份没能确认') });
+          return;
+        }
+        const access = normalizeMerchantAccess(res.data);
+        if (access.invalid) {
+          this._accessMemberId = '';
+          this.setData({ consoleError: '经营身份没能确认，请重新检查', consoleStatus: null, merchantAccess: inactiveAccess() });
+          return;
+        }
+        if (!access.active) {
+          if (this._merchantScopeKey) this.clearMerchantScopedData();
+          this._merchantScopeKey = '';
+          this._accessMemberId = identityMemberId;
+          const keepStatus = !!(this.data.consoleStatus && access.applicationState && access.applicationState !== 'NONE');
+          this.setData({ consoleError: '', consoleStatus: keepStatus ? this.data.consoleStatus : null, merchantAccess: access, consoleDenied: false });
+          // 入驻申请审核中/未通过/停用:页内显示当前状态 + 查看申请进度,不把人静默丢回会员中心
+          // (2026-09-17 拍板 #24)。access/me 只给状态枚举、不给驳回/停用原因,所以原因另行回读
+          // /api/merchant/info —— 与入驻申请页同一真源、同一投影(decorateApplication)。
+          if (access.applicationState && access.applicationState !== 'NONE') {
+            this.loadApplicationStatus(dataEpoch);
+            return;
+          }
+          // 玩家/无商家身份账号深链误入:原地说明「当前身份不能查看经营台」+ 申请入驻,不再静默退回我的。
+          this.setData({ consoleDenied: true });
+          return;
+        }
+        this.syncMerchantScope(access);
+        this._accessMemberId = identityMemberId;
+        // G-5:access/me 回读的空 Logo/空店名不覆盖已有值(刚保存的新 Logo 不能被一次空回包抹掉成白圈)
+        const accessMerchant = {};
+        Object.keys(access.merchant || {}).forEach((key) => {
+          if (access.merchant[key] !== '' && access.merchant[key] != null) accessMerchant[key] = access.merchant[key];
+        });
+        const merchantInfo = Object.assign({}, this.data.merchantInfo, accessMerchant);
+        this.setData({ consoleError: '', consoleStatus: null, merchantAccess: access, merchantInfo, consoleDenied: false });
+        this.refreshProfileHeader(merchantInfo, this._userInfo);
+        this.loadMerchantConsole(access, dataEpoch);
+      },
+      // 超时/断网:旧实现连 fail 回调都没有 —— 请求悄悄挂掉,页面永远停在假空态。
+      fail: (res, status) => {
+        if (authenticationFailureCode(res, status)) {
+          if (!isCurrentOrSessionCleared()) return;
+          this.recoverConsoleSession(version, authRetryUsed);
+          return;
+        }
+        if (!isCurrentIdentity()) return;
+        this.setData({ consoleError: '网络好像出了点小差' });
+      },
+    });
+  },
+
+  // 入驻申请状态回读:只认 /api/merchant/info 里真实存在的申请行,拿不到就落页内错误,
+  // 绝不拿 access/me 的枚举自己编状态文案(页内状态卡与申请页同一投影 decorateApplication)。
+  loadApplicationStatus(dataEpoch = this._dataEpoch || 0) {
+    const that = this;
+    app.sendRequest({
+      hideLoading: true,
+      silentError: true,
+      url: '/api/merchant/info',
+      method: 'POST',
+      success(res) {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        const resolved = resolveApplicationResponse(res);
+        if (resolved && resolved.kind === 'application') {
+          that.setData({ consoleError: '', consoleStatus: decorateApplication(resolved.data) });
+          return;
+        }
+        if (resolved && resolved.kind === 'none') {
+          // 身份链路刚说在审核、回读却说没有申请行:不摆状态,按「没有商家身份」落原地无权限态。
+          that.setData({ consoleError: '', consoleStatus: null, consoleDenied: true });
+          return;
+        }
+        that.setData({ consoleError: app.getRequestErrorMessage(res, '入驻申请状态没能确认') });
+      },
+      fail(res) {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        that.setData({ consoleError: app.getRequestErrorMessage(res, '入驻申请状态没能确认') });
+      },
+    });
+  },
+
+  goApplicationProgress() {
+    if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/pages/merchant/apply/index', complete: () => { this._navigating = false; } });
+  },
+
+  // 竞猜待答:待办汇总里的 pendingPredict 只报条数,明细与「还剩几天」在待答页。
+  goPredictInbox() {
+    if (!this.data.merchantAccess.canManageProjects || this._navigating) return; // 跳转中不响应连点
+    this._navigating = true; wx.navigateTo({ url: '/pages/merchant/predict/index', complete: () => { this._navigating = false; } });
+  },
+
+  // 2026-11-01 业主:商家页只在开通后才进得来,「开通前置检查」整块删除(接口仍保留给后台)
+  loadMerchantInfo(dataEpoch = this._dataEpoch || 0) {
+    const that = this;
+    app.sendRequest({
+      hideLoading: true,
+      url: '/api/merchant/info',
+      method: 'POST',
+      success(res) {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        if (res.code === '200' || res.code === 200) {
+          that.setData({ merchantInfo: res.data });
+          that.refreshProfileHeader(res.data, that._userInfo);
+        }
+      },
+      // L07-071:店铺资料读失败时页头沿用 access/me 摘要;不再借用收入区的错误条(它的重试只重读收入)
+    });
+  },
+
+  // L07-015(业主 11-24 默认 A):同一账号在页面打开期间只查一次,换账号才再查;结果只用来同步角色
+  loadUserInfo(dataEpoch = this._dataEpoch || 0) {
+    const that = this;
+    const memberId = String(app.getUserID() || '');
+    if (!memberId || this._userInfoMember === memberId) return;
+    app.sendRequest({
+      hideLoading: true,
+      url: '/api/user/info',
+      data: { member_id: app.getUserID() },
+      method: 'POST',
+      success(res) {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        if (res.code == '200' && res.data) {
+          if (res.data.role) app.setUserRole(res.data.role);
+          that._userInfoMember = memberId;
+          that._userInfo = res.data;
+          that.refreshProfileHeader(that.data.merchantInfo, res.data);
+        }
+      }
+    });
+  },
+
+  loadDashboard(dataEpoch = this._dataEpoch || 0) {
+    const that = this;
+    // 2026-10-22 owner 裁决:收入区没有任何加载态 UI(金额永远在位、到值就滚),不再维护 dashboardLoading。
+    that.setData({ dashboardError: '' });
+    app.sendRequest({
+      hideLoading: true,
+      url: '/api/merchant/dashboard',
+      method: 'POST',
+      retry: 2, // 只读,断网/超时自动重发两跳
+      success(res) {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        const data = res && res.data;
+        const expectsRevenue = that.data.merchantAccess.canReadFinance;
+        const revenue = data && data.revenue !== null && data.revenue !== undefined && data.revenue !== ''
+          ? Number(data.revenue) : NaN;
+        const revenueValid = expectsRevenue ? Number.isFinite(revenue) : true;
+        if ((res.code === '200' || res.code === 200) && isRecord(data) && revenueValid) {
+          // 累计收入只由 countRevenueTo 数(慢-快-慢);近 7 天流水页面不画,不再算也不写 data(2026-11-02 B-4)
+          that.setData({
+            dashboardData: {
+              revenue: expectsRevenue ? revenue.toFixed(2) : null,
+            },
+          });
+          if (expectsRevenue) { clearTimeout(that._revHoldTimer); if (that.data.pmPage) that._revHoldTimer = setTimeout(() => that.countRevenueTo(revenue), 150); else that.countRevenueTo(revenue); } // M-06:首屏还在浮上时先停 150ms 再数(同 countIn),慢起步不再耗在隐身里
+        } else {
+          that.setData({ dashboardError: app.getRequestErrorMessage(res, '经营数据加载失败') });
+        }
+        that._refreshSettled('dashboard');
+      },
+      fail(res) {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        that.setData({ dashboardError: app.getRequestErrorMessage(res, '经营数据加载失败') });
+        that._refreshSettled('dashboard');
+      },
+    });
+  },
+
+  // 组件事件会作为第一个参数传入；不能直接把 bind:action 绑到带 epoch 参数的方法。
+  reloadDashboard() { this.loadDashboard(); },
+
+  // 累计收入从「屏上当前显示值」滚到新值(慢-快-慢);减少动态效果时直接落定。
+  countRevenueTo(target) {
+    this.stopRevenueCount();
+    const from = Number(this.data.revenueShown) || 0;
+    const to = Number(target) || 0;
+    this._revenueCountStop = motion.countUp(from, to, (value) => {
+      const text = value.toFixed(2);
+      if (text !== this.data.revenueShown) this.setData({ revenueShown: text });
+    }, {
+      duration: REVENUE_COUNT_MS,
+      fps: REVENUE_COUNT_FPS,
+      decimals: 2,
+      ease: motion.easeInOutCubic,
+      reducedMotion: readReducedMotion(),
+      onDone: () => { this._revenueCountStop = null; },
+    });
+  },
+
+  stopRevenueCount() {
+    if (this._revHoldTimer) { clearTimeout(this._revHoldTimer); this._revHoldTimer = null; }
+    if (this._revenueCountStop) this._revenueCountStop();
+    this._revenueCountStop = null;
+  },
+
+  loadJoinList(dataEpoch = this._dataEpoch || 0) {
+    const that = this;
+    this._legacyJoinLoading = true;
+    this._legacyJoinError = false;
+    this.refreshJoinRequestState();
+    app.sendRequest({
+      hideLoading: true,
+      url: '/api/registration/merchant/list',
+      retry: 2, // 只读,断网/超时自动重发两跳
+      data: { status: '0' },
+      method: 'POST',
+      success(res) {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        if (res.code === '200' || res.code === 200) {
+          const list = (res.data && res.data.rows) ? res.data.rows : (res.data || []);
+          if (!isRecordList(list)) {
+            that._legacyJoinLoading = false;
+            that._legacyJoinError = true;
+            that.refreshJoinRequestState();
+            that.refreshProjectCards();
+            return;
+          }
+          const withStartDateStr = function (item) {
+            return Object.assign({}, item, { startDateStr: that.formatDate(item.startDate) });
+          };
+          // 请求 status=0 是全部；status=1 搜索项只取档期进行中，不能用于确认关系。
+          const confirmedRows = list.filter((item) => Number(item.status) === 1);
+          const today = localToday();
+          const activeRows = confirmedRows.filter((item) => !isEndedProject(item.startDate, item.endDate, today));
+          // 2026-11-01 业主:审核中的承接申请也上工作台,卡上标「待审核」(只进卡片,不进确认关系与总数)
+          const pendingRows = list.filter((item) => Number(item.status) === 0 && !isEndedProject(item.startDate, item.endDate, today));
+          const formatted = that.formatJoinCards(activeRows.concat(pendingRows).slice(0, 10).map(withStartDateStr));
+          that._legacyJoinTopicIds = new Set(activeRows
+            .map((item) => String(item.topicId))
+            .filter((topicId) => topicId && topicId !== 'undefined' && topicId !== 'null'));
+          that._legacyJoinTotal = activeRows.length;
+          that._legacyJoinLoading = false;
+          that._legacyJoinError = false;
+          that._projectList = formatted;
+          that.refreshJoinTotal();
+          that.refreshJoinRequestState();
+          that.refreshProjectCards();
+        } else {
+          that._legacyJoinLoading = false;
+          that._legacyJoinError = true;
+          that.refreshJoinRequestState();
+          that.refreshProjectCards();
+        }
+      },
+      fail(res) {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        that._legacyJoinLoading = false;
+        that._legacyJoinError = true;
+        that.refreshJoinRequestState();
+        that.refreshProjectCards();
+      }
+    });
+  },
+
+  // 自由探索的商家承接不落旧 cms_registration_merchant；工作台直接读取现有
+  // application → offer 投影，并按 topic 聚成项目卡。点卡片后仍进入既有项目页，
+  // 由 chapter-node/mine 提供点位编辑能力，不复制一套项目模型。
+  loadChapterProjectList(dataEpoch = this._dataEpoch || 0) {
+    const that = this;
+    this._chapterJoinLoading = true;
+    this._chapterJoinError = false;
+    this.refreshJoinRequestState();
+    app.sendRequest({
+      hideLoading: true,
+      url: '/api/merchant/chapter-application/mine',
+      retry: 2,
+      method: 'POST',
+      success(res) {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        if (!(res && (res.code === '200' || res.code === 200) && isRecordList(res.data))) {
+          that._chapterJoinLoading = false;
+          that._chapterJoinError = true;
+          that.refreshJoinRequestState();
+          that.refreshProjectCards();
+          return;
+        }
+        const byTopic = {};
+        res.data.forEach((row) => {
+          const topicId = row && Number(row.topicId);
+          if (!Number.isSafeInteger(topicId) || topicId <= 0 || (Number(row.status) !== 1 && !isPendingChapterInvite(row))) return;
+          const key = String(topicId);
+          if (!byTopic[key] || (isPendingChapterInvite(row) && !isPendingChapterInvite(byTopic[key]))) {
+            byTopic[key] = Object.assign({}, row, {
+              topicId,
+              projectSource: 'chapter',
+              chapterName: '',
+              _chapterNames: byTopic[key] ? byTopic[key]._chapterNames : [],
+            });
+          }
+          if (row.chapterName && byTopic[key]._chapterNames.indexOf(row.chapterName) < 0) {
+            byTopic[key]._chapterNames.push(row.chapterName);
+          }
+        });
+        const rows = Object.keys(byTopic).map((key) => {
+          const row = byTopic[key];
+          row.chapterName = row._chapterNames.join('、');
+          delete row._chapterNames;
+          return row;
+        });
+        that._chapterJoinTopicIds = new Set(rows.map((row) => String(row.topicId)));
+        that._chapterJoinLoading = false;
+        that._chapterJoinError = false;
+        // 章节承接列表只喂 refreshProjectCards 算 projectCards,自身不进 WXML ——
+        // 走 setData 会被判成死数据字段,所以留在实例字段上。
+        that._chapterProjectList = that.formatJoinCards(rows.map((row) =>
+          Object.assign({}, row, { startDateStr: that.formatDate(row.startDate) })));
+        that.refreshJoinTotal();
+        that.refreshJoinRequestState();
+        that.refreshProjectCards();
+      },
+      fail() {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        that._chapterJoinLoading = false;
+        that._chapterJoinError = true;
+        that.refreshJoinRequestState();
+        that.refreshProjectCards();
+      },
+    });
+  },
+
+  // 我主办的 = 我发的主题 + 我发的活动。走 /api/project/my 一次拿全:它本来就是
+  // 「我的项目」那页的数据源,同时下发 bizType/title/cover/state,活动和主题同一套字段
+  // ⇒ 不用为活动另开一个列表接口,也不会两个接口各自演化出两套口径。
+  loadHostProjects(dataEpoch = this._dataEpoch || 0) {
+    const that = this;
+    this.setData({ hostLoading: true, hostError: false });
+    app.sendRequest({
+      hideLoading: true,
+      url: '/api/project/my',
+      retry: 2, // 只读,断网/超时自动重发两跳
+      method: 'POST',
+      data: { pageNum: 1, pageSize: 10, scope: 'MERCHANT' },
+      success(res) {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        if (!(res && (res.code === '200' || res.code === 200) && res.data && isRecordList(res.data.rows))) {
+          that.setData({ hostLoading: false, hostError: true });
+          that.refreshProjectCards();
+          return;
+        }
+        const rows = res.data.rows.map(function (item) {
+          return Object.assign({}, item, {
+            bizType: item.bizType,
+            titleText: item.title || item.name || (item.id ? ('项目 #' + item.id) : '未命名项目'),
+            imgUrl: item.cover || item.imgUrl || '',
+            startDateStr: that.formatDate(item.startTime || item.startDate),
+          });
+        });
+        // 「全部 N」用后端下发的未结束项目总数(全量口径,2026-09-17 拍板 #39):
+        // 列表只请求一页 10 条,拿这一页数会把 30 个项目说成 10 个。判据在后端与卡片
+        // 状态签同源(isEndedProject:档期未知不算结束),前端不再自己数。
+        const activeTotal = finiteCount(res.data.activeTotal);
+        that._hostProjectList = rows;
+        that.setData({
+          hostProjectTotal: activeTotal === null ? 0 : activeTotal,
+          hostLoading: false,
+          hostError: false,
+        });
+        that.refreshProjectCards();
+      },
+      fail() {
+        if (!that.isCurrentDataEpoch(dataEpoch)) return;
+        that.setData({ hostLoading: false, hostError: true });
+        that.refreshProjectCards();
+      },
+    });
+  },
+
+  reloadProjects() {
+    this.loadJoinList();
+    this.loadChapterProjectList();
+    this.loadHostProjects();
+    this.loadTodo();
+  },
+
+  formatDate(dateVal) {
+    if (!dateVal) return '';
+    const parts = chinaParts(dateVal);
+    if (!parts) return '';
+    const days = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    return `${days[parts.weekday]} ${parts.month}月${parts.day}日`;
+  },
+
+  // 入口名「协作邀请」= 合作中心铃铛那一页(收到的/我发出的);聊天与系统通知在 ledger 的「站内消息」。旧的「消息与动态」是空兼容页(M-07)。
+  goMessages() {
+    if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/subpackageB/pages/im/list/index', complete: () => { this._navigating = false; } });
+  },
+
+  // 「我的消息」是收入到账/核销流水,按类型去各自明细;「全部」与未知类型落核销记录(同时有待结算/已入账)。
+  goEvent(e) {
+    const type = e && e.currentTarget && e.currentTarget.dataset.type;
+    if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/pages/merchant/ledger/index?view=' + (type === 'income' ? 'settlement' : 'redemptions'), complete: () => { this._navigating = false; } });
+  },
+
+  // 「我的消息」的「全部」= 站内消息收件箱(会话 + 收到的邀请)
+  goInbox() {
+    if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/subpackageB/pages/im/list/index', complete: () => { this._navigating = false; } });
+  },
+
+  // 点一条消息:会话进聊天、邀请进邀约详情(与 im/list 同一路由),经营动态仍走 goEvent。
+  openInboxItem(e) {
+    const key = String(((e && e.currentTarget && e.currentTarget.dataset) || {}).key || '');
+    const item = (this.data.inboxItems || []).find((row) => row.key === key);
+    if (!item) return; if (!this.data.msgOpen && this.data.inboxItems.length > 1) { this.setData({ msgOpen: true }); return; } // 叠着时先展开(业主 10-23:像券包一样分层叠放、点开展开)
+    if (item.kind === 'event' && item.gameActivityId) {
+      if (this._navigating) return; this._navigating = true;
+      wx.navigateTo({ url: '/pages/merchant/game-node/index?activityId=' + item.gameActivityId, complete: () => { this._navigating = false; } });
+      return;
+    }
+    if (item.kind === 'event') { this.goEvent({ currentTarget: { dataset: { type: item.type } } }); return; }
+    if (this._navigating) return;
+    let url = '';
+    if (item.kind === 'conversation') {
+      url = '/subpackageB/pages/im/chat/index?conversationId=' + item.conversationId
+        + '&name=' + encodeURIComponent(item.name || '')
+        + '&avatar=' + encodeURIComponent(item.avatar || '')
+        + '&type=' + (item.type || 1);
+    } else if (item.kind === 'invite') {
+      url = '/pages/coop/invite-detail/index?inviteId=' + item.inviteId + '&box=received';
+    }
+    if (!url) return;
+    this._navigating = true; wx.navigateTo({ url, complete: () => { this._navigating = false; } });
+  },
+
+  // 走查 v2 R02(业主 10-30):叠层展开后每条 × = 标为已读,底下「清空」= 全部标为已读。
+  // 会话走站内消息同一个 /api/im/read(失败照常 toast 一次);邀请和经营动态没有已读接口,记在本机(按账号)。
+  inboxReadStore() { return 'merchant_inbox_read_' + String((app.getUserID && app.getUserID()) || ''); },
+
+  inboxReadMap() {
+    const map = wx.getStorageSync(this.inboxReadStore());
+    return map && typeof map === 'object' ? map : {};
+  },
+
+  markInboxRead(items) {
+    const map = this.inboxReadMap();
+    const at = Date.now();
+    const unread = [];
+    items.forEach((item) => {
+      map[inboxReadKey(item)] = at;
+      if (item.kind === 'conversation' && item.unread) unread.push(item.conversationId);
+    });
+    // L07-016:一键已读逐条串行发,首个失败即停,最多一条报错提示(原先最多 50 条并发、各自 toast)
+    const next = (i) => {
+      if (i >= unread.length) return;
+      app.sendRequest({ url: '/api/im/read', method: 'POST', hideLoading: true,
+        data: { conversation_id: unread[i] },
+        success: (res) => { if (res && String(res.code) === '200') next(i + 1); } });
+    };
+    next(0);
+    const keys = Object.keys(map).sort((a, b) => map[b] - map[a]).slice(0, 300);
+    const kept = {};
+    keys.forEach((k) => { kept[k] = map[k]; });
+    wx.setStorageSync(this.inboxReadStore(), kept);
+  },
+
+  dismissInboxItem(e) {
+    const key = String(((e && e.currentTarget && e.currentTarget.dataset) || {}).key || '');
+    const item = (this.data.inboxItems || []).find((row) => row.key === key);
+    if (!item) return;
+    this.markInboxRead([item]);
+    this._inboxUnread = (this._inboxUnread || this.data.inboxItems).filter((row) => row.key !== key);
+    const items = this._inboxUnread.slice(0, 3);
+    // 展开着就一直展开到标完,最后一条也能 ×(只剩一条时不叠,× 直接露在卡上)
+    this.setData({ inboxItems: items, msgOpen: this.data.msgOpen && items.length > 0, inboxAllRead: !items.length });
+  },
+
+  clearInbox() {
+    this.markInboxRead(this._inboxUnread || this.data.inboxItems || []);
+    this._inboxUnread = [];
+    this.setData({ inboxItems: [], msgOpen: false, inboxAllRead: true });
+  },
+
+
+  _submitVerification(key, loadingTitle, options, callback) {
+    const that = this;
+    const owner = String(app.getUserID && app.getUserID() || '');
+    const target = seatTarget(options);
+    const login = captureLogin(app, wx);
+    key = target ? seatKey(owner, target) : owner + ':' + key;
+    const verificationEpoch = this._verificationEpoch || 0;
+    const scopeKey = this._merchantScopeKey || '';
+    const seatCurrent = () => loginCurrent(app, wx, login) && owner === String(app.getUserID && app.getUserID() || '') && verificationEpoch === (that._verificationEpoch || 0) && scopeKey === (that._merchantScopeKey || '');
+    if (target && !seatCurrent()) return false;
+    if (!this._verificationWorkflow) this._verificationWorkflow = createVerificationWorkflow({ deadlineMs: 15000, storage: wx, getOwner: () => app.getUserID && app.getUserID() });
+    if (!target && this._verificationWorkflow.isBusy(key)) {
+      cyToast('核销处理中，请勿重复提交');
+      return false;
+    }
+    const loadingOwner = {};
+    if (!target) {
+      if (!this._verificationLoadingOwners) this._verificationLoadingOwners = new Set();
+      this._verificationLoadingOwners.add(loadingOwner);
+      loading.show(loadingTitle);
+    }
+    const finishLoading = () => {
+      if (that._verificationLoadingOwners && that._verificationLoadingOwners.delete(loadingOwner)) loading.hide();
+    };
+    const submitted = this._verificationWorkflow.run(key, function (done) {
+      return app.sendRequest(Object.assign({}, options, {
+        autoErrorToast: false,
+        hideLoading: !!target || options.hideLoading, silentError: !!target || options.silentError,
+        success(res) { done(classifyVerificationOutcome(res, 'success', undefined, options)); },
+        fail(res, status) { done(classifyVerificationOutcome(res, 'fail', status, options)); },
+        successStatusAbnormal(res, status) {
+          done(classifyVerificationOutcome(res, 'abnormal', status, options));
+        }
+      }));
+    }, function (result) {
+      finishLoading();
+      if (target && !seatCurrent()) return;
+      if (owner !== String(app.getUserID && app.getUserID() || '')
+        || verificationEpoch !== (that._verificationEpoch || 0)
+        || scopeKey !== (that._merchantScopeKey || '')) return;
+      if (result.status === 'unknown') {
+        callback({ code: 202, msg: target ? '原席位结果待确认；再次扫描同一席位只查询结果，请勿改选席位重发' : '核销结果待确认，请勿重复核销；请先查看核销记录' }, result);
+        if (!target) offerVerificationReadback(key, that._verificationWorkflow);
+        return;
+      }
+      callback(result.response, result);
+    }, target ? seatRecovery(app, target, seatCurrent) : undefined);
+    if (!submitted) finishLoading();
+    return submitted;
+  },
+
+  goScanQR() {
+    const that = this;
+    const login = captureLogin(app, wx), scanEpoch = this._verificationEpoch || 0;
+    const scanCurrent = () => loginCurrent(app, wx, login) && scanEpoch === (that._verificationEpoch || 0);
+    this._scanOpen = true;
+    wx.scanCode({
+      complete() { that._scanOpen = false; },
+      fail(err) {
+        that._scanOpen = false;
+        if (!scanCurrent()) return;
+        if (err && /cancel/i.test(err.errMsg || '')) return;
+        cyToast('未识别到二维码，请对准后重试');
+      },
+      success(res) {
+        that._scanOpen = false;
+        if (!scanCurrent()) return;
+        const scan = resolveVerificationScan(res.result);
+        if (scan.kind === 'invalid') {
+          // 护栏不能是哑巴:码是好的,只是核销口在别处。给一条能点过去的指路,
+          // 而不是 2 秒就消失的 toast(商家会以为玩家的码坏了)。
+          if (scan.path) {
+            modal.show({
+              title: '核销入口不对',
+              content: scan.message,
+              confirmText: scan.confirmText || '我知道了',
+              cancelText: '留在这里',
+              success(r) {
+                if (r && r.confirm) wx.navigateTo({ url: scan.path });
+              },
+            });
+          } else {
+            // M-25:不是城瘾的码也走同一张结果面板,不再是 2 秒就消失的 toast。
+            that.showRejectedScan(scan.message === '二维码格式错误' ? '这不是城瘾的核销码' : scan.message);
+          }
+          return;
+        }
+        that._submitScanRoute(scan);
+      }
+    });
+  },
+
+  // 扫码与手输共用的提交与结果处理:同一把写闸(_submitVerification)、同一套选章 / 选据点 / 结果面板。
+  _submitScanRoute(scan) {
+    const that = this;
+    const action = scan.kind === 'group' || scan.kind === 'coupon' ? '核销' : '验票';
+    // 提交端点只认这四个字面量:扫码与手输的路由对象都是运行时值,这里收敛成可逐条核对的 /api 路径。
+    const url = scan.url === '/api/verify/groupcode/redeem' ? '/api/verify/groupcode/redeem'
+      : scan.url === '/api/registration/scan_dynamic_code' ? '/api/registration/scan_dynamic_code'
+        : scan.url === '/api/registration/scan_qr_code' ? '/api/registration/scan_qr_code'
+          : '/api/coupon/verification';
+    if (url !== scan.url) { this.showRejectedScan('未能识别核销码，请重试'); return; }
+    this._submitVerification(url + ':' + scan.code, scan.loadingTitle, {
+      url,
+      data: scan.kind === 'coupon'
+        ? Object.assign({}, scan.data, { scope: 'MERCHANT' })
+        : scan.data,
+      method: 'POST',
+      // [P0-2] 本页自己接管错误提示,压掉 request-client 对 code!=200 的自动 toast:
+      // 选章那条返的就是 error(核销确实没发生),不压会在弹出选章面板前先闪一条失败 toast。
+      // 真错误照旧由下面的 else 分支弹,信息不丢。
+    }, function (res) {
+      const d = res.data || {};
+      // ★ [P0-2] 判据是**载荷**不是 code —— 后端对「需要选章」永久返 error,
+      //   因为选章没完成 = 核销没发生。这里若改判 code,会把选章当成普通失败弹掉,
+      //   商家就永远核销不了(而这正是修复前的形态:只判 code==200 ⇒ 弹「验票成功」)。
+      if (d.needChapterChoice) {
+        that.openChapterSheet(scan.code, d);
+        return;
+      }
+      if (d.needStationChoice) {
+        that.openStationSheet(scan.code, d);
+        return;
+      }
+      that.showVerificationResult(res, action);
+    });
+  },
+
+  // P1-8:扫不出来时店员手输核销码。归类在服务端(只归类、不核销),之后与扫码同一条提交与结果处理。
+  goManualCode() {
+    this.closeMoreMenu();
+    if (!this.data.merchantAccess || !this.data.merchantAccess.canVerify) return;
+    const that = this;
+    const login = captureLogin(app, wx), manualEpoch = this._verificationEpoch || 0;
+    const manualCurrent = () => loginCurrent(app, wx, login) && manualEpoch === (that._verificationEpoch || 0);
+    modal.show({
+      title: '手输核销码',
+      content: '',
+      editable: true,
+      placeholderText: '核销码',
+      confirmText: '核销',
+      validate: manualCodeError,
+      success(res) {
+        if (!res || !res.confirm || !manualCurrent()) return;
+        that._resolveManualCode(String(res.content || '').trim(), manualCurrent);
+      },
+    });
+  },
+
+  _resolveManualCode(code, manualCurrent) {
+    const that = this;
+    // 归类请求不核销、可安全重试;没拿到归类结果 = 没有发生核销。
+    const unresolved = () => { if (manualCurrent()) that.showRejectedScan('网络异常，未核销，请重试'); };
+    app.sendRequest({
+      silentError: true,
+      autoErrorToast: false,
+      url: '/api/merchant/desk/redeem/resolve',
+      method: 'POST',
+      data: JSON.stringify({ code: code, mode: 'MANUAL' }),
+      header: { 'Content-Type': 'application/json' },
+      success(res) {
+        if (!manualCurrent()) return;
+        const route = manualRoute(res);
+        if (route.kind === 'redirect') {
+          modal.show({
+            title: '核销入口不对',
+            content: route.message,
+            confirmText: '去节点页',
+            cancelText: '留在这里',
+            success(r) {
+              if (r && r.confirm) wx.navigateTo({ url: route.path });
+            },
+          });
+          return;
+        }
+        if (route.kind !== 'route') { that.showRejectedScan(route.message); return; }
+        if (!route.choice) { that._submitScanRoute(route); return; }
+        that._manualRoute = route;
+        that.setData({ manualChoice: { show: true, title: route.choice.title, items: route.choice.options.map(function (o) { return o.label; }) } });
+      },
+      fail: unresolved,
+      successStatusAbnormal: unresolved,
+    });
+  },
+
+  onManualChoicePick(e) {
+    const route = chosenRoute(this._manualRoute, e && e.detail ? e.detail.index : -1);
+    this.onManualChoiceCancel();
+    if (route) this._submitScanRoute(route);
+  },
+
+  onManualChoiceCancel() {
+    this._manualRoute = null;
+    this.setData({ manualChoice: { show: false, title: '', items: [] } });
+  },
+
+  /**
+   * [P0-2] 交集 ≥2 ⇒ 让商家自己选章。
+   * 一商家在同一路线承接多章是**常态**(uk_offer_merchant_chapter 只约束一商家一章一行,
+   * 不阻止一商家多章)⇒ 这不是边界情况。后端绝不默默取第一个:选错章不可逆。
+   */
+  openChapterSheet(code, d) {
+    // chapters 带名字(后端 describeChapters)。回落 chapterIds 是为了「后端还没部署到位」的
+    // 那段窗口:宁可显示「章节 101」也不能给个空面板 —— 空面板商家会以为卡死。
+    const items = (Array.isArray(d.chapters) && d.chapters.length)
+      ? d.chapters
+      : (Array.isArray(d.chapterIds) ? d.chapterIds : []).map(function (id) { return { id: id, name: '章节' }; });
+    if (!items.length) {
+      cyToast('没有可核销的章节');
+      return;
+    }
+    this.setData({ chapterSheet: { show: true, code: code, items: items, refundUnderReview: d.refundUnderReview === true } });
+    this.openScene('merchant-chapter-picker');
+  },
+
+  onChapterSheetClose() {
+    this.closeScene();
+  },
+
+  showVerificationResult(response, action) {
+    const result = resolveVerificationResult(response, action);
+    this.setData({ verificationResult: Object.assign(result, deskReceiptView(response, result, verificationSheetView(result))) });
+    this.openScene('merchant-verification-result');
+  },
+
+  closeVerificationResult() {
+    this.closeScene();
+  },
+
+  showRejectedScan(message) {
+    const result = { state: 'rejected', title: '未核销', message: message, show: true };
+    this.setData({ verificationResult: Object.assign(result, verificationSheetView(result)) });
+    this.openScene('merchant-verification-result');
+  },
+
+  // 结果面板主按钮:能核销的账号是「继续扫码」,其余只有「完成」。
+  onVerificationPrimary() {
+    // 复核态:主按钮去核销记录核对这一笔,不接着扫下一位
+    if (this.data.verificationResult && this.data.verificationResult.review) {
+      this.closeScene();
+      wx.navigateTo({ url: '/pages/merchant/verify-records/index' });
+      return;
+    }
+    if (this.data.merchantAccess && this.data.merchantAccess.canVerify) this.continueScan();
+    else this.closeVerificationResult();
+  },
+
+  // M-23:柜台排队时一次点按就接着扫下一位。
+  continueScan() {
+    this.closeScene();
+    wx.nextTick(() => this.goScanQR());
+  },
+
+  onChapterPick(e) {
+    const id = e.currentTarget.dataset.id;
+    const code = this.data.chapterSheet.code;
+    const that = this;
+    this.closeScene();
+    this._submitVerification('/chapter:' + code + ':' + id, '核销中...', {
+      url: '/api/registration/scan_qr_code_chapter',
+      data: { code: code, chapterId: id },
+      method: 'POST',
+    }, function (r) {
+        that.showVerificationResult(r, '核销');
+    });
+  },
+
+  /** 城市定向同一路线中标多个据点时,必须由商家明确选择本次归属。 */
+  openStationSheet(code, d) {
+    const items = Array.isArray(d.stations) ? d.stations : [];
+    if (!items.length) {
+      cyToast('没有可核销的节点');
+      return;
+    }
+    this.setData({ stationSheet: { show: true, code: code, items: items } });
+    this.openScene('merchant-station-picker');
+  },
+
+  onStationSheetClose() {
+    this.closeScene();
+  },
+
+  onStationPick(e) {
+    const registrationMerchantId = e.currentTarget.dataset.registrationMerchantId;
+    const code = this.data.stationSheet.code;
+    const that = this;
+    this.closeScene();
+    this._submitVerification('/station:' + code + ':' + registrationMerchantId, '核销中...', {
+      url: '/api/registration/scan_qr_code_station',
+      data: { code: code, registrationMerchantId: registrationMerchantId },
+      method: 'POST',
+    }, function (r) {
+        that.showVerificationResult(r, '核销');
+    });
+  },
+
+  goFinance() {
+    if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/subpackageA/pages/assetcenter/earnings/index?theme=merchant', complete: () => { this._navigating = false; } }); // 2026-10-28 M-32:先进账户收益(浅色),结算明细在「更多」里
+  },
+
+  goBrandManage() {
+    if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/pages/merchant/decor/index', complete: () => { this._navigating = false; } });
+  },
+
+  // 「我的合作」进入商家关系页；订单由独立主入口承接。
+  // 首页这个按钮标的是「客户」,去处就得是客户名册。
+  // 原来 reLaunch 到 pages/merchant/relation —— 那页标题是「合作」、内容是「找新的合作对象」,
+  // 名不副实;合作仍从底部 tab「合作」进,这里不再重复给一个入口。
+  goCustomers() {
+    if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/pages/merchant/customer/index', complete: () => { this._navigating = false; } });
+  },
+
+  // 主题只按主题 ID 进入项目主页，主办/承办能力由后端 /home 投影决定。
+  goHostProject(e) {
+    const topicId = Number(e.currentTarget.dataset.topicid);
+    if (!Number.isSafeInteger(topicId) || topicId <= 0 || this._navigating) return; // 跳转中不响应连点,免得叠两层项目页
+    const pendingInvite = e.currentTarget.dataset.source === 'chapter' && (this._chapterProjectList || [])
+      .some(row => Number(row.topicId) === topicId && isPendingChapterInvite(row));
+    this._navigating = true; wx.navigateTo({ url: '/pages/topic/merchantinfo/merchantinfo?' + (pendingInvite ? 'id=' : 'topicId=') + topicId + '&scope=MERCHANT', complete: () => { this._navigating = false; } });
+  },
+
+  openProjectCard(e) {
+    const ds = e.currentTarget.dataset;
+    // 第十轮 f2 第 5 项(j2 F-01d):场次里有本店站点的卡(/api/game/session/merchant/entries)直接进本站页
+    // 接受与准备 —— 不经过报名窗口会关掉的合作中心与承接页。
+    if (ds.gameactivityid) {
+      if (this._navigating) return; this._navigating = true;
+      wx.navigateTo({ url: '/pages/merchant/game-node/index?activityId=' + ds.gameactivityid, complete: () => { this._navigating = false; } });
+      return;
+    }
+    if (ds.biztype === 'activity') {
+      if (ds.id == null || ds.id === '') return;
+      return this.openScene('play-activity-detail', { id: ds.id });
+    }
+    return this.goHostProject(e);
+  },
+
+  goPublishedProjects() {
+    if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/subpackageA/pages/myproject/index?scope=MERCHANT', complete: () => { this._navigating = false; } });
+  },
+
+
+  /* ⚠️ 2026-08-22:本页主体是整屏 <scroll-view style="height:100vh">,**页面自身永远不滚动**,
+   * 所以 app.json 的 enablePullDownRefresh + onPullDownRefresh 从来没被触发过 —— 声称有下拉刷新、
+   * 实际是死的。改用 scroll-view 自带的 refresher(refresher-enabled + bindrefresherrefresh)。
+   * onPullDownRefresh 保留做兜底:万一以后页面结构改回页面级滚动,它仍然管用。 */
+  onRefresh() {
+    if (this.data.refreshing) return;
+    this.setData({ refreshing: true });
+    // L07-070:看板与待办都回来(成功、失败或无权限跳过)才收起下拉;5s 兜底,防身份链失败时一直转圈
+    this._refreshWaiting = new Set(['dashboard', 'todo']);
+    if (this._refreshEndTimer) clearTimeout(this._refreshEndTimer);
+    this._refreshEndTimer = setTimeout(() => this._finishRefresh(), 5000);
+    this._reloadAll();
+  },
+
+  _refreshSettled(key) {
+    if (!this._refreshWaiting) return;
+    this._refreshWaiting.delete(key);
+    if (!this._refreshWaiting.size) this._finishRefresh();
+  },
+
+  _finishRefresh() {
+    this._refreshWaiting = null;
+    if (this._refreshEndTimer) { clearTimeout(this._refreshEndTimer); this._refreshEndTimer = null; }
+    if (this.data.refreshing) this.setData({ refreshing: false });
+  },
+
+  _reloadAll() {
+    this.onShow({ preserveVerification: true });
+  },
+
+  onPullDownRefresh() {
+    this._reloadAll();
+    wx.stopPullDownRefresh();
+  },
+
+  onShareAppMessage(res) {
+    const activityShare = activityShareFromEvent(res);
+    if (activityShare) return activityShare;
+    // 招募卡分享按钮触发：分享指定路线
+    if (res.from === 'button' && res.target && res.target.dataset) {
+      const { type, id, name, img } = res.target.dataset;
+      if (type === 'topic' && id) {
+        return {
+          title: `推荐路线：${name || '城瘾城市路线'}`,
+          path: `/pages/topic/index/index?id=${id}`,
+          imageUrl: img || '',
+        };
+      }
+    }
+    // 默认：分享商家公开主页(让玩家/达人看到商家资料,而非通用首页)— 报告 §6.1
+    // 分享路径一旦发出去就被卡片固化,只能是稳定 canonical:memberId + tab=about,不带主题上下文。
+    const home = merchantHomeUrl(this.data.merchantInfo && this.data.merchantInfo.memberId);
+    const mname = (this.data.merchantInfo && this.data.merchantInfo.name) || '城瘾Hub';
+    return {
+      title: home ? (mname + ' · 商家主页') : '城瘾Hub - 商家中心',
+      path: home || '/pages/index/index',
+    };
+  },
+
+  onHide() {
+    if (this._scanOpen) {
+      this._hiddenForScan = true;
+      merchantTheme.merchantPageRestore();
+      return;
+    }
+    this._hidden = true;
+    this._businessActionEpoch = (this._businessActionEpoch || 0) + 1;
+    if (this._refreshEndTimer) {
+      clearTimeout(this._refreshEndTimer);
+      this._refreshEndTimer = null;
+      this.setData({ refreshing: false });
+    }
+    this._refreshWaiting = null;
+    merchantTheme.merchantPageRestore();
+  },
+
+  onUnload() {
+    this._unloaded = true;
+    if (this._offIdentitySync) { this._offIdentitySync(); this._offIdentitySync = null; }
+    if (this._revHoldTimer) { clearTimeout(this._revHoldTimer); this._revHoldTimer = null; }
+    if (this._revenueCountStop) this._revenueCountStop();
+    this._revenueCountStop = null;
+    this._consoleVersion = (this._consoleVersion || 0) + 1;
+    this._identityEpoch = (this._identityEpoch || 0) + 1;
+    this._dataEpoch = (this._dataEpoch || 0) + 1;
+    this._verificationEpoch = (this._verificationEpoch || 0) + 1;
+    this._businessActionEpoch = (this._businessActionEpoch || 0) + 1;
+    if (this._refreshEndTimer) {
+      clearTimeout(this._refreshEndTimer);
+      this._refreshEndTimer = null;
+    }
+    this._refreshWaiting = null;
+    if (this._verificationWorkflow) {
+      this._verificationWorkflow.destroy();
+      if (this._verificationLoadingOwners) { this._verificationLoadingOwners.forEach(() => loading.hide()); this._verificationLoadingOwners.clear(); }
+    }
+    this.resetGameStationSummaries(false);
+    merchantTheme.merchantPageRestore();
+  },
+});

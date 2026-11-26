@@ -1,0 +1,181 @@
+// 主办方「我发的这条路线」视图 —— 纯展示组件,与 project-join 同构。
+const circleTheme = require('../../utils/circle-theme.js');
+const projectProgress = require('../../utils/project-progress.js');
+const recruitSum = require('../../utils/recruit-summary.js');
+function openAddress() { return require('../../../../utils/open-address.js') }
+const FREE_STATUS = ['草稿', '招募中', '待定价', '售票中', '进行中', '结算中', '已关闭', '立项待审'];
+Component({
+  options: { addGlobalClass: true },
+  properties: {
+    // 2026-10-30 走查:页面滚过封面后导航栏转实底(否则正文滑进透明栏、标题压在状态栏时间上)
+    navScrolled: { type: Boolean, value: false },
+    /* CU-C-68:主办方抽屉「本站运营」资格探不到时的可见说明(页面探、组件只渲染)。 */
+    stationOpsErrorText: { type: String, value: '' },
+    statusBarHeight: { type: Number, value: 0 },
+    navBarHeight:    { type: Number, value: 0 },
+    navHidden:       { type: Boolean, value: false }, // 打卡码弹层显示时收起导航(✕为唯一出口)
+    loadFailed:      { type: Boolean, value: false },
+    rulesOpen:       { type: Boolean, value: false },
+    quickActions:    { type: Array, value: [] },
+    clubCandidates:  { type: Object, value: { state: '', rows: [] } }, // 走查 v2 R05:主题内可邀约的俱乐部
+    regApplies:      { type: Object, value: { state: '', rows: [] } }, // 走查 v2 R06:本主题收到的商家报名
+    hostOwnerType:   { type: String, value: 'merchant' }, // club 主办不显示俱乐部协作位
+    playerSheet: { type: Object, value: {} },
+    playerFilters: { type: Array, value: [] },
+    playerActions: { type: Array, value: [] },
+    playerPick:      { type: Object, value: { can: false, selecting: false, ids: {}, off: {}, count: 0 } }, // 2026-11-01 客户名单多选
+    broadcastSheet:  { type: Object, value: {} }, // 2026-11-01 定向广播叠层
+    clubActions: { type: Array, value: [] },
+    merchantSheet: { type: Object, value: {} },
+    moreSheet:     { type: Object, value: { show: false, groups: [] } },
+    merchantActions: { type: Array, value: [] },
+    clubSheet:       { type: Object, value: { show: false, items: [] } },
+    hostTopic:       { type: Object, value: {} },
+    hostRecruit:     { type: Object, value: {} },
+    hostMerchants:   { type: Array, value: [] },
+    hostPlayers:     { type: Object, value: {} },
+    ownerChapterApplications: { type: Array, value: [] },
+    ownerChapterApplicationsState: { type: String, value: 'idle' },
+    pendingMerchantNodes: { type: Array, value: [] },
+    pendingMerchantNodesState: { type: String, value: 'idle' },
+    // BL-183:圈层供给角色抽屉。开关/提交中/后端错误归页面;勾选只在抽屉里,提交时随事件带回。
+    circleConfig:    { type: Object, value: { show: false, submitting: false, errorText: '', errorTitle: '' } },
+    // 2026-10-31 P-6:招商第三版的站点行(每站一个档位)与五个叠层的状态,都由页面组装
+    recruitStations: { type: Array, value: [] },
+    layers:          { type: Object, value: {} },
+  },
+  observers: {
+    'circleConfig.show': function (show) {
+      if (show && !this._circleConfigOpen) this.resetCircleCandidates();
+      this._circleConfigOpen = !!show;
+    },
+    // 招商顶部三格:j2 F-09 起与下面的列表同一来源(数字 = 列表行数),见 utils/recruit-summary.js
+    'recruitStations, ownerChapterApplications, hostRecruit, regApplies, hostTopic, hostMerchants': function (rows, apps, recruit, applies, topic, hostMerchants) {
+      this.setData({
+        stationSum: recruitSum.recruitSummary({ stations: rows, chapterApps: apps, recruit, applies, topic }),
+        confirmedMerchants: recruitSum.confirmedMerchants(hostMerchants),
+      });
+    },
+    // 派生量放 observer 而不是让页面再多存两个字段:它们只有这个视图用得上
+    // L06-023:原先 hostTopic/hostRecruit 被三个观察器各自 setData;状态胶囊与派生量合成一个观察器、一次 setData。
+    // L06-102:抽屉开合标记无人读取,对应观察器已删。
+    'hostRecruit, clubSheet, hostTopic, hostPlayers': function (recruit, sheet, topic, players) {
+      topic = topic || {};
+      const total = (recruit && recruit.nodeTotal) || 0;
+      const filled = (recruit && recruit.nodeFilled) || 0;
+      const done = total > 0 && filled >= total;
+      const clubs = (sheet && sheet.items) || [];
+      const accepted = clubs.filter(function (c) { return c && c.accepted; }).length;
+      const lifecycle = projectProgress.parseLifecycle(topic.lifecycle);
+      // 状态胶囊:2026-11-01 城市定向也按 lifecycle 走;招募中招满写「已招满」;没下发 lifecycle 的旧数据退回审核态口径
+      let text = '状态待确认';
+      if (projectProgress.isPublishedOrdinaryCity(topic)) text = '已发布';
+      else if (lifecycle !== null && lifecycle < FREE_STATUS.length) {
+        text = lifecycle === 1 && done && Number(topic.productType) !== 2 ? '已招满' : FREE_STATUS[lifecycle];
+      } else if (Number(topic.productType) === 2) {
+        text = '状态待确认';
+      } else if (topic.status === 1) {
+        text = done ? '已招满' : '招募中';
+      } else if (topic.status === 0) text = '待审核';
+      else if (topic.status === 2) text = '审核未通过';
+      this.setData({
+        hostStatusText: text,
+        recruitDone: done,
+        clubCount: clubs.length,
+        clubAccepted: accepted,
+        // 2026-11-01 业主:与俱乐部活动详情同一套 —— 开售后出「核销」三格,底部主键按状态变
+        showVerify: [3, 4, 5, 6].indexOf(lifecycle) >= 0,
+        hostPrimary: projectProgress.hostPrimary(topic),
+        topicStructure: [Number(topic && topic.productType) === 2 ? '自由探索' : '城市定向', total ? total + ' 站' : ''].filter(Boolean).join(' · '),
+        // 走查 v2 R04/R16:底部进度,只用这几份已有数据派生
+        hostProgress: projectProgress.buildHostSteps({
+          lifecycle: topic && topic.lifecycle,
+          productType: topic && topic.productType,
+          status: topic && topic.status,
+          userStatus: topic && topic.userStatus,
+          nodeTotal: total,
+          nodeFilled: filled,
+          pendingCount: recruit && recruit.pendingCount,
+          clubCount: accepted,
+          paidCount: players && players.paidCount,
+        }),
+      });
+    },
+  },
+  data: {
+    recruitDone: false, stationSum: { taken: 0, total: 0, open: 0, pending: 0 }, confirmedMerchants: [], clubCount: 0, clubAccepted: 0, hostProgress: [], showVerify: false, hostPrimary: { text: '', act: '', key: '', disabled: true }, topicStructure: '', hostStatusText: '状态待确认',
+    circleCandidates: [], circleConfigHint: '',
+    circleConfigActions: [{ key: 'submitCircleConfig', label: '保存供给角色' }],
+  },
+  methods: {
+    // 第九轮 m1-9:待审节点地址一点开地图
+    onAddressTap(e) { openAddress().openFromEvent(e); },
+    noop() {},
+    // 每次打开都从零开始选:没有读当前已开启候选的接口,预选任何一项都是编造。
+    resetCircleCandidates() {
+      const theme = circleTheme.themeOf((this.data.hostTopic || {}).circleThemeCode);
+      this._circlePicked = [];
+      this.setData({
+        circleCandidates: theme ? theme.candidates.map((item) => ({
+          code: item.code, name: item.name, merchant: item.merchant,
+          roleLabel: item.roleLabel, picked: false,
+        })) : [],
+        circleConfigHint: theme ? '' : '这个主题暂不支持在小程序里选择供给角色',
+      });
+    },
+    toggleCircleCandidate(e) {
+      if ((this.data.circleConfig || {}).submitting) return;
+      const code = String((e.currentTarget.dataset || {}).code || '');
+      if (!code) return;
+      const picked = (this._circlePicked || []).slice();
+      const at = picked.indexOf(code);
+      if (at >= 0) picked.splice(at, 1); else picked.push(code);
+      this._circlePicked = picked;
+      this.setData({
+        circleCandidates: this.data.circleCandidates.map((item) => Object.assign({}, item, {
+          picked: picked.indexOf(item.code) >= 0,
+        })),
+        circleConfigHint: '',
+      });
+    },
+    emitCloseCircleConfig() {
+      if ((this.data.circleConfig || {}).submitting) return;
+      this.triggerEvent('act', { act: 'closeCircleConfig', dataset: {} });
+    },
+    emitCircleConfigSubmit() {
+      const themeCode = (this.data.hostTopic || {}).circleThemeCode;
+      const codes = (this._circlePicked || []).slice();
+      const check = circleTheme.validateSelection(themeCode, codes);
+      if (!check.ok) {
+        this.setData({ circleConfigHint: check.message });
+        return;
+      }
+      this.triggerEvent('act', { act: 'submitCircleConfig', dataset: { candidateCodes: codes } });
+    },
+    emit(e) {
+      const ds = e.currentTarget.dataset || {};
+      this.triggerEvent('act', { act: ds.act, dataset: ds });
+    },
+    // 叠层里的输入框:把输入值一并带回页面(页面是唯一状态源)
+    emitInput(e) {
+      const ds = e.currentTarget.dataset || {};
+      this.triggerEvent('act', { act: ds.act, dataset: Object.assign({}, ds, { value: e.detail.value }) });
+    },
+    emitCloseClub() {
+      this.triggerEvent('act', { act: 'closeClubSheet', dataset: {} });
+    },
+    emitClosePlayer() {
+      this.triggerEvent('act', { act: 'closePlayerSheet', dataset: {} });
+    },
+    emitCloseMore() {
+      this.triggerEvent('act', { act: 'closeMoreSheet', dataset: {} });
+    },
+    emitCloseMerchant() {
+      this.triggerEvent('act', { act: 'closeMerchantSheet', dataset: {} });
+    },
+    // 抽屉外那条黑按钮:key 就是 act 名,页面白名单派发
+    emitDrawerAction(e) {
+      this.triggerEvent('act', { act: (e.detail || {}).key, dataset: {} });
+    },
+  },
+});

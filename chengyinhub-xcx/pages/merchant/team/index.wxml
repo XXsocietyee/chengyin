@@ -1,0 +1,120 @@
+<view class="tm-page dc-page theme-merchant" style="padding-top: {{statusBarHeight + navBarHeight}}px;">
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+  <cy-nav-bar />
+  <cy-page-title title="经营团队" safe-top="{{false}}" />
+
+  <view class="tm-state" wx:if="{{accessState === 'loading'}}">
+    <view class="tm-skeleton-card"><cy-skeleton type="list" count="3" /></view>
+  </view>
+  <cy-empty wx:elif="{{accessState === 'login'}}" kind="no-permission" fill size="lg" title="{{hasIncomingInvite ? '登录后查看邀请' : '登录后查看经营团队'}}" cta="登录" bind:cta="onTeamLogin" />
+  <cy-empty wx:elif="{{accessState === 'no-permission'}}" kind="no-permission" fill size="lg" title="当前身份不能查看经营团队" cta="申请入驻" bind:cta="onDenyCta" />
+  <view class="tm-state" wx:elif="{{accessState === 'error'}}">
+    <cy-inline-error load-failure="{{!accessErrorIsDenied}}" title="{{accessErrorIsDenied ? '请确认登录或经营权限' : '经营团队加载失败'}}" sub="{{accessError}}" action="重新加载" bind:action="retryAccess" />
+  </view>
+
+  <view class="tm-state" wx:elif="{{accessState === 'invite'}}">
+    <view class="tm-invite-landing">
+      
+      <view class="tm-invite-title">加入经营团队</view>
+      <view class="tm-invite-copy" wx:if="{{invitePreview}}">{{invitePreview.merchantName}} · {{invitePreview.roleName}}</view>
+      <cy-btn wx:if="{{hasIncomingInvite}}" variant="primary" loading="{{accepting}}" bind:tap="acceptIncomingInvite">接受邀请</cy-btn>
+      <cy-btn wx:else variant="secondary" bind:tap="leaveInviteLanding">返回</cy-btn>
+      <view class="tm-result {{acceptOk ? 'tm-result--ok' : 'tm-result--error'}}" wx:if="{{acceptResult}}">{{acceptResult}}</view>
+    </view>
+  </view>
+
+  <scroll-view wx:else class="tm-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+    <!-- M-18(2026-11-11 业主):经营团队照「门店信息」版式 —— 左上大标题 + 白卡行(左名右值),
+         成员行点开同一张岗位面板改岗或移除,底部一个主按钮。 -->
+    <view class="tm-content">
+      <view class="dc-card dc-fields">
+        <cy-cell title="门店" value="{{access.merchant.name || '门店'}}" arrow="{{false}}" />
+        <cy-cell title="我的岗位" value="{{access.roleName}}" arrow="{{false}}" hairline="{{false}}" />
+      </view>
+
+      <view class="dc-card dc-fields" wx:if="{{hasIncomingInvite || acceptResult}}">
+        <cy-cell wx:if="{{hasIncomingInvite}}" arrow arrow-icon="chevron-right" title="团队邀请" value="接受" hairline="{{false}}" disabled="{{accepting}}" bind:tap="acceptIncomingInvite" />
+        <view class="tm-result {{acceptOk ? 'tm-result--ok' : 'tm-result--error'}}" wx:if="{{acceptResult}}">{{acceptResult}}</view>
+      </view>
+
+      <block wx:if="{{access.canManageOperators}}">
+        <view class="dc-card tm-share-card" wx:if="{{createdInvite}}">
+          <view class="tm-share-main">
+            <text class="tm-share-title">{{createdInvite.roleName}}邀请已创建</text>
+            <text class="tm-share-sub">{{createdInvite.expiresAtText}} 前有效</text>
+          </view>
+          <button wx:if="{{canShareCreatedInvite}}" class="tm-share-btn" open-type="share" hover-class="cy-pressed" hover-stay-time="80" aria-label="立即分享团队邀请">立即分享</button>
+        </view>
+
+        <cy-inline-error load-failure wx:if="{{roleError}}" title="岗位列表暂未更新" sub="{{roleError}}"
+                         action="重试" bind:action="loadRoles" />
+
+        <view class="tm-state tm-state--section" wx:if="{{teamState === 'loading'}}">
+          <view class="tm-skeleton-card"><cy-skeleton type="list" count="3" /></view>
+        </view>
+        <view class="tm-state tm-state--section" wx:elif="{{teamState === 'error'}}">
+          <cy-error load-failure title="团队名单加载失败" sub="{{teamError}}" bind:retry="retryTeam" />
+        </view>
+        <block wx:else>
+          <view class="dc-card">
+            <view class="dc-heading tm-card-head"><text>团队成员</text><text class="dc-muted">{{operators.length || 0}} 人</text></view>
+            <view class="dc-fields tm-members" wx:if="{{operators.length}}">
+              <cy-cell wx:for="{{operators}}" wx:key="id"
+                icon="{{item.avatar || '/images/d_profile.png'}}"
+                title="{{item.nickname}}"
+                value="{{item.roleName}}"
+                arrow arrow-icon="chevron-right"
+                hairline="{{index < operators.length - 1}}"
+                data-id="{{item.id}}"
+                bind:tap="openOperatorRoleSheet"
+              />
+            </view>
+            <view class="tm-card-empty" wx:else>还没有员工</view>
+          </view>
+
+          <view class="dc-card" wx:if="{{pendingInvites.length}}">
+            <view class="dc-heading tm-card-head"><text>待接受邀请</text><text class="dc-muted">{{pendingInvites.length || 0}} 条</text></view>
+            <view class="dc-fields">
+              <cy-cell wx:for="{{pendingInvites}}" wx:key="id"
+                title="{{item.roleName}}邀请"
+                value="{{item.expiresAtText}} 失效"
+                arrow arrow-icon="chevron-right"
+                hairline="{{index < pendingInvites.length - 1}}"
+                data-id="{{item.id}}"
+                bind:tap="askRevokeInvite"
+              />
+            </view>
+          </view>
+        </block>
+
+        <cy-btn variant="primary" disabled="{{submitting}}" bind:tap="openInviteRoleSheet">邀请员工</cy-btn>
+      </block>
+
+      <cy-btn wx:else variant="primary" bind:tap="goWorkbench">进入工作台</cy-btn>
+    </view>
+  </scroll-view>
+
+  <cy-scene-sheet show="{{roleSheet.show}}" variant="half" theme="merchant" title="{{roleSheet.mode === 'operator' ? '调整岗位' : '选择邀请岗位'}}" mask-closable="{{true}}" bind:requestclose="closeRoleSheet">
+    <view class="tm-role-sheet">
+      <view class="tm-role-option {{roleSheet.operator && roleSheet.operator.roleCode === item.roleCode ? 'tm-role-option--current' : ''}}"
+            wx:for="{{roles}}" wx:key="roleCode" bindtap="onRolePick" data-role="{{item.roleCode}}"
+            aria-role="button" aria-label="选择{{item.name}}岗位" hover-class="{{submitting ? 'none' : 'cy-pressed'}}" hover-stay-time="80">
+        <view class="tm-role-option-main">
+          <text class="tm-role-option-name">{{item.name}}</text>
+          <text class="tm-role-option-copy">{{item.permissionText}}</text>
+        </view>
+        <text class="tm-role-current" wx:if="{{roleSheet.operator && roleSheet.operator.roleCode === item.roleCode}}">当前</text>
+        <cy-icon class="tm-role-chev" wx:else name="arrow-right" size="28" />
+      </view>
+      <view class="tm-role-option tm-role-option--danger" wx:if="{{roleSheet.mode === 'operator' && roleSheet.operator}}"
+            bindtap="removeFromSheet" aria-role="button" aria-label="移除{{roleSheet.operator.nickname}}" hover-class="cy-pressed" hover-stay-time="80">
+        <text class="tm-role-option-name">移除</text>
+      </view>
+    </view>
+  </cy-scene-sheet>
+
+  <!-- 危险动作三段式确认:文案来自 utils/danger-actions.js,页面只给 key -->
+  <cy-danger-confirm id="dc" bind:confirm="confirmDanger" bind:cancel="cancelDanger" />
+</view>

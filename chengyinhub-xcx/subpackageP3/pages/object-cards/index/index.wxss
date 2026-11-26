@@ -1,0 +1,196 @@
+/* 藏品册(施工文档第四版 §3.3):玩家档暗色。顶部标题 + 分类药丸 + ✦,下面整块是物品堆 canvas。 */
+
+page {
+  background: #000000; /* ds-ok: 收集册玩家深色底(x-fix2 L-1) */
+}
+
+.oc-root {
+  height: 100vh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 0 0 env(safe-area-inset-bottom);
+  background: transparent;
+  position: relative;
+  z-index: 1;
+}
+
+/* ✦:聚成一团 / 落回去。样稿里在药丸下面靠右。命中区 88rpx(44px),看得见的圆 62rpx 画在 ::before 上 */
+.oc-gather {
+  position: relative;
+  flex: none;
+  width: 88rpx;
+  height: 88rpx;
+  margin-right: -13rpx;
+}
+
+/* L09-146 */
+.oc-gather::before {
+  content: '';
+  position: absolute;
+  left: 13rpx;
+  top: 13rpx;
+  width: 62rpx;
+  height: 62rpx;
+  border-radius: 50%;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 30rpx 30rpx;
+}
+
+.oc-pile {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.oc-pile__cv {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* 放大态开着时藏起画布:canvas 会压在半屏弹层与遮罩上面(模拟器实拍),弹层是模态的,底下不必看见。
+   visibility 对它不管用(模拟器实测),只能 display:none;关弹层时页面补画一帧 */
+.oc-pile__cv.is-hidden {
+  display: none;
+}
+
+/* 点堆里一件时整块轻轻一暗:按下去有回应,放大态随后弹起 */
+
+.oc-state {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 var(--cy-space-4);
+}
+
+/* ===== 放大态(挂在 cy-sheet bottom 的面板里),信息行与当场揭晓那一屏同一套 ===== */
+.oc-big {
+  display: flex;
+  flex-direction: column;
+  padding: var(--cy-space-3) 0 var(--cy-space-5);
+}
+
+.oc-big__stage {
+  width: 100%;
+  max-width: 460rpx;
+  margin: 0 auto var(--cy-space-4);
+}
+
+.oc-big__obj {
+  display: block;
+  width: 460rpx;
+  height: 384rpx;
+}
+
+.oc-group {
+  background: var(--cy-color-bg-elevated);
+  border-radius: var(--cy-radius-lg);
+  overflow: hidden;
+}
+
+.oc-row {
+  display: flex;
+  align-items: center;
+  height: 100rpx;
+  padding: 0 31rpx;
+  font-size: var(--cy-type-body);
+  color: var(--cy-color-text-primary);
+}
+
+.oc-row + .oc-row {
+  border-top: 1rpx solid var(--cy-color-border-subtle);
+}
+
+.oc-dot {
+  width: 50rpx;
+  height: 50rpx;
+  border-radius: 50%;
+  margin-right: 21rpx;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFFFF; /* ds-ok: 行图标照视频,白线条压在彩色圆底上 */
+}
+
+.oc-dot--name { background: #9DBE74; /* ds-ok: 行图标底色照 FullPack 视频 */ }
+.oc-dot--cat { background: #4B5C57; /* ds-ok: 行图标底色照 FullPack 视频 */ }
+.oc-dot--place { background: #7C8D58; /* ds-ok: 行图标底色照 FullPack 视频 */ }
+
+.oc-k { flex: none; }
+
+.oc-v {
+  flex: 1;
+  min-width: 0;
+  margin-left: 24rpx;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.oc-v--dim { color: var(--cy-color-text-tertiary); }
+
+.oc-sec {
+  padding: 42rpx 31rpx 15rpx;
+  font-size: var(--cy-type-label);
+  color: var(--cy-color-text-tertiary);
+}
+
+.oc-big__note {
+  margin-top: var(--cy-space-3);
+  font-size: var(--cy-type-caption);
+  line-height: 1.6;
+  color: var(--cy-color-text-tertiary);
+}
+
+/* BL-79 改名半屏内容区,间距走 token */
+.oc-rename { padding: var(--cy-space-2) 0 var(--cy-space-4); }
+
+/* ===== 2026-10-30 收集册 · 藏品(业主定稿 P-3)===== */
+.alb-light .oc-gather::before { background-color: var(--cy-color-bg-surface); box-shadow: 0 2rpx 8rpx rgba(30, 40, 80, .08); /* ds-ok: 深底上的钮(x-fix2 L-1:线条改浅色) */
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20stroke%3D%22%23F2F2F4%22%20stroke-width%3D%221.5%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M9%201.5%2010.3%205.7%2014.5%207%2010.3%208.3%209%2012.5%207.7%208.3%203.5%207%207.7%205.7z%22%2F%3E%3Cpath%20d%3D%22M3.5%2011.5l.6%201.4%201.4.6-1.4.6-.6%201.4-.6-1.4-1.4-.6%201.4-.6z%22%2F%3E%3C%2Fsvg%3E"); }
+.alb-light .oc-gather.is-on::before { background-color: var(--cy-btn-solid-bg);
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20stroke%3D%22%23FFFFFF%22%20stroke-width%3D%221.5%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M9%201.5%2010.3%205.7%2014.5%207%2010.3%208.3%209%2012.5%207.7%208.3%203.5%207%207.7%205.7z%22%2F%3E%3Cpath%20d%3D%22M3.5%2011.5l.6%201.4%201.4.6-1.4.6-.6%201.4-.6-1.4-1.4-.6%201.4-.6z%22%2F%3E%3C%2Fsvg%3E"); }
+/* 「筛选」:显示当前分类的图标和名字;选了某一类变黑 */
+.oc-filter { height: 64rpx; padding: 0 var(--cy-space-3) 0 var(--cy-space-2); border-radius: var(--cy-radius-pill); display: flex; align-items: center; gap: var(--cy-space-1-5);
+  background: var(--cy-color-bg-surface); box-shadow: 0 2rpx 8rpx rgba(30, 40, 80, .06); /* ds-ok: 白胶囊浮在浅底上 */
+  font-size: var(--cy-font-label); font-weight: 600; color: var(--cy-color-text-primary); white-space: nowrap; }
+.oc-filter.is-on { background: var(--cy-btn-solid-bg); color: var(--cy-btn-solid-fg); box-shadow: none; }
+.oc-filter__ic { width: 40rpx; height: 40rpx; }
+/* 分类半屏:三列图标格,选中黑底白字 */
+.oc-cats { display: flex; flex-wrap: wrap; gap: var(--cy-space-2); padding: 0 0 var(--cy-space-4); }
+.oc-cat { width: calc((100% - 2 * var(--cy-space-2)) / 3); box-sizing: border-box; padding: var(--cy-space-3) var(--cy-space-1) var(--cy-space-2-5); border-radius: var(--cy-radius-lg);
+  display: flex; flex-direction: column; align-items: center; gap: var(--cy-space-1-5); background: var(--cy-color-bg-surface-subtle);
+  font-size: var(--cy-font-label); font-weight: 500; color: var(--cy-color-text-primary); }
+.oc-cat.is-on { background: var(--cy-btn-solid-bg); color: var(--cy-btn-solid-fg); }
+.oc-cat__ic { width: 72rpx; height: 72rpx; }
+/* 飞到中间 */
+.oc-fly { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 60; background: transparent; } /* 整屏浮层:底色由里面的 veil 渐显压暗 */
+.oc-fly__veil { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: rgba(12, 12, 14, .5); /* ds-ok: 压暗底 */ opacity: 0; transition: opacity .4s ease; }
+.oc-fly.is-on .oc-fly__veil { opacity: 1; }
+.oc-fly__img { position: absolute; border-radius: 24rpx; filter: drop-shadow(0 30rpx 50rpx rgba(0, 0, 0, .45)); /* ds-ok: 放大后的投影 */ }
+.oc-fly__img.is-cut { border-radius: 0; }
+.oc-fly__cap { position: absolute; left: 0; right: 0; top: 68%; display: flex; flex-direction: column; align-items: center; gap: 6rpx; opacity: 0; transform: translateY(16rpx); transition: opacity .3s ease .25s, transform .3s ease .25s; }
+.oc-fly.is-on .oc-fly__cap { opacity: 1; transform: none; }
+.oc-fly__name { font-family: "Songti SC", "STSong", "Noto Serif SC", serif; font-size: 40rpx; /* ds-ok: 放大后的名字 */ font-weight: 600; color: #ffffff; /* ds-ok: 暗底白字 */ }
+.oc-fly__meta { font-size: var(--cy-font-label); color: rgba(255, 255, 255, .7); /* ds-ok: 同上 */ }
+@media (prefers-reduced-motion: reduce) { .oc-fly__veil, .oc-fly__cap { transition: none; } }
+
+/* 收集册浅色逃生口:撑满整屏 */
+.alb-light { min-height: 100vh; }
+
+/* 细节打磨二期 L1/L5/L7 */
+.oc-filter { transition: var(--cy-tr-press); }
+.oc-fly__img { transition: var(--cy-tr-press); }
+.oc-cat { transition: var(--cy-tr-press); }
+.oc-row { transition: var(--cy-tr-press); }

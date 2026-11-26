@@ -1,0 +1,510 @@
+const moneyFormat = require('../../../utils/money-format.js')
+const toast = require('../../../utils/toast.js'); const modal = require('../../../utils/modal.js');
+const app = getApp();
+const { readReducedMotion } = require('../../../utils/motion-preference.js');
+
+function money(value) {
+  if (value == null || (typeof value === 'string' && !value.trim())) return '0.0';   // D-119:金额未知写 0
+  const n = Number(value);
+  return Number.isFinite(n) ? moneyFormat.decimalText(n) : '0.0';
+}
+
+// 阵容行只带 toType/toId+条款(后端 PricingResult.Lineup 无名称),列表先用类型兜底、名称异步补齐
+function termsText(row) {
+  if (row.termsMode === 'PERK') return '章节供给 · 给权益';
+  if (row.termsMode === 'TRAFFIC') return '章节供给 · 引流';
+  if (row.termsMode === 'REVSHARE') return '章节供给 · ¥' + money(row.fixedFee) + '/核销人次';
+  if (row.shareMode === 1) return '分成型 · ' + (row.shareRate != null && row.shareRate !== '' ? row.shareRate : 0) + '%';
+  if (row.shareMode === 2) return '固定 · ¥' + money(row.fixedFee) + '/人';
+  return '引流型';
+}
+
+// CU-C-70:有人带的地板价第一步就是「带队成本 ÷ 成团人数」。人数空/0 时后端把带队成本
+// 当 0 摊(或直接报错),而旧页面只拿 min>=floor 自校验 —— floor=0 时 0>=0 恒真,
+// 零价也能点「确认终价并开售」。判定收口在下面两个函数,按钮禁用态与输入提示共用。
+function teamSizeOk(subType, teamSize) {
+  if (subType !== 'guided') return true;
+  if (teamSize === '' || teamSize === null || teamSize === undefined) return false;
+  const n = Number(teamSize);
+  return Number.isFinite(n) && n > 0;
+}
+
+// 自由探索只有一张门票价，没有带队成本与成团人数：按「非有人带」处理
+function costSub(d) { return d.isFreeExplore ? 'free' : d.subType; }
+
+function teamSizeErrorText(subType, teamSize) {
+  if (subType !== 'guided' || teamSizeOk(subType, teamSize)) return '';
+  return '请填写大于 0 的成团人数';
+}
+
+Page({
+  _scope: '',
+  _platformRate: null,
+  _floorStale: false,
+  _floor: 0,
+  data: {
+    // 2026-08-05 tab 收敛:全仓最后一处手写 tab。原本是 .pg-tabs/.pg-tab 自绘的
+    // segmented 形态(容器灰底 + 选中项白底提亮),cy-tabs 的 segmented 变体同款。
+    typeTabs: [{ key: 'guided', label: '有人带' }, { key: 'self', label: '无人带' }],
+    statusBarHeight: app.globalData.statusBarHeight,
+    navBarHeight: app.globalData.navBarHeight,
+    reducedMotion: false,
+    topicId: null,
+    subType: 'guided',
+    leadCost: '',
+    teamSize: '',
+    loading: true,
+    hasPreview: false,
+    errorText: '',
+    floorText: '',   // F14a:未取到写 ¥0.00(money.amount2 空值口径),不写「—」
+    finalPrice: 0,
+    sliderMax: 100,
+    referenceText: '',
+    referencePrice: null,
+    referenceDeltaText: '',
+    saving: false,
+    submitError: '',
+    isFreeExplore: false, floorPositive: false, isFree: false, confirmBlockReason: '', feeText: '', takeHomeText: '', sliderMin: 0, saleStatusText: '', pendingRows: [],
+    canConfirmPrice: false,
+    themeClass: 'theme-merchant', phaseBlocked: false, priced: false, // P-34:priced = 已过定价阶段(终价已确认/开售后),与「还没到定价阶段」分开说
+    // CU-C-70:成团人数为空/0 时的输入提示(与按钮禁用态同一把尺子)。
+    teamSizeError: '',
+    // f-money3:自由探索主题的「无人带」(自玩票)没有结算出口,后端预览给原因,挂在终价栏下红字。
+    selfPriceError: '',
+    lineup: [], tickets: [], // 第四轮:作者的几张票逐张确认终价(≥2 张才显示逐张栏)
+  },
+
+  onLoad(options) {
+    const topicId = Number(options.topicId || options.id);
+    if (!Number.isInteger(topicId) || topicId <= 0) {
+      this.setData({ loading: false, errorText: '缺少主题信息' });
+      return;
+    }
+    this._scope = options.scope === 'MERCHANT' ? 'MERCHANT' : '';
+    this.setData({ topicId: topicId, themeClass: options.club === '1' ? 'theme-dark' : 'theme-merchant' }); // 第十二轮 k4(j2 N-15):俱乐部主理人进来用深色
+    // PG-028:深色进来时状态栏前景同步切白(index.json 默认 black 只配浅色商家态)
+    if (options.club === '1' && wx.setNavigationBarColor) wx.setNavigationBarColor({ frontColor: '#ffffff', backgroundColor: '#000000', fail() {} }); /* ds-ok 微信 API 只收这两个字面色(PG-028 深色定价页状态栏前景同步) */
+    this.preview();
+  },
+
+  onShow() {
+    const reducedMotion = readReducedMotion();
+    if (this.data.reducedMotion !== reducedMotion) this.setData({ reducedMotion });
+  },
+
+  onUnload() {
+    this._unloaded = true;
+    if (this._goBackTimer) clearTimeout(this._goBackTimer);
+    if (this._recalcTimer) clearTimeout(this._recalcTimer);
+  },
+
+  goBack() {
+    if (getCurrentPages().length > 1) {
+      wx.navigateBack({ delta: 1 });
+      return;
+    }
+    if (this.data.topicId) {
+      wx.redirectTo({ url: '/pages/topic/index/index?id=' + this.data.topicId });
+      return;
+    }
+    wx.switchTab({ url: '/pages/template/index' });
+  },
+
+  preview() {
+    const that = this;
+    const seq = (this._previewSeq || 0) + 1;
+    this._previewSeq = seq;
+    this.setData({ loading: true, errorText: '' });
+    const rev = this._inputRev || 0;
+    const body = { topicId: this.data.topicId, subType: this.data.subType };
+    if (this._scope) body.scope = this._scope;
+    if (costSub(this.data) === 'guided') {
+      body.leadCost = this.data.leadCost === '' ? null : Number(this.data.leadCost);
+      body.teamSize = this.data.teamSize === '' ? null : Number(this.data.teamSize);
+    }
+    app.sendRequest({
+      hideLoading: true,
+      silentError: true,
+      url: '/api/topic/pricing/preview',
+      method: 'POST',
+      data: JSON.stringify(body),
+      header: { 'Content-Type': 'application/json' },
+      success(res) {
+        if (that._previewSeq !== seq) return;
+        if (res.code != '200' || !res.data) {
+          that.setData({ errorText: app.getRequestErrorMessage(res, '定价信息加载失败') });
+          return;
+        }
+        const floor = Number(res.data.priceMin);
+        if (res.data.priceMin == null || res.data.priceMin === '' || !Number.isFinite(floor)) {
+          that.setData({ errorText: '定价信息不完整，请稍后重试' });
+          return;
+        }
+        const reference = res.data.cityReferencePrice == null ? null : Number(res.data.cityReferencePrice);
+        const isFreeExplore = res.data.productType != null && Number(res.data.productType) === 2;
+        const subType = isFreeExplore ? 'free' : that.data.subType;
+        const min = Math.ceil(floor); const current = res.data.currentPrice == null ? NaN : Number(res.data.currentPrice);
+        // 作者在本页拖过滑块就保留他选的价（只要不低于新地板）；否则从已填价起步，低于地板价才回落
+        const kept = that._priceTouched && Number(that.data.finalPrice) >= min ? Number(that.data.finalPrice) : NaN;
+        const start = Number.isFinite(kept) ? kept : (Number.isFinite(current) && current >= min ? current : min);
+        const platformRate = res.data.platformRate == null || res.data.platformRate === '' ? null : Number(res.data.platformRate);
+        const stale = rev !== (that._inputRev || 0);
+        const stateAfter = Object.assign({}, that.data, { isFreeExplore, subType });
+        const sliderMax = Math.max(min + 100, Math.ceil(floor * 2), reference ? Math.ceil(reference * 1.5) : 0, Math.ceil(start * 1.5));
+        const sample = Number(res.data.cityReferenceSampleSize || 0);
+        const city = res.data.cityReferenceLabel || '同城';
+        const lineup = Array.isArray(res.data.lineup)
+          ? res.data.lineup.filter(function (row) { return row && row.toType && row.toId; })
+              .map(function (row) {
+                return {
+                  lineupKey: row.offerId ? 'offer:' + row.offerId : row.toType + ':' + row.toId,
+                  chapterId: row.chapterId,
+                  toType: row.toType,
+                  toId: row.toId,
+                  name: '',
+                  termsText: termsText(row),
+                };
+              })
+          : [];
+        const selfPriceError = subType === 'self' ? (res.data.selfPriceError || '') : '';
+        that._floor = floor;
+        that._platformRate = Number.isFinite(platformRate) && platformRate >= 0 ? platformRate : null;
+        that._floorStale = stale;
+        that.setData({
+          hasPreview: true,
+          errorText: '',
+          selfPriceError: selfPriceError,
+          isFreeExplore: isFreeExplore,
+          isFree: start === 0,
+          subType: subType,
+          confirmBlockReason: res.data.confirmBlockReason || '主题还没进入定价阶段',
+          sliderMin: min,
+          // MC-037:自由探索有下限(floor>0)时滑杆下照样摆地板行,让人知道为什么拖不到更低。
+          floorPositive: floor > 0,
+          lineup: lineup,
+          floorText: money(res.data.priceMin),
+          finalPrice: start,
+          // CU-M-32:未到定价阶段(canConfirm===false)事先置灰;老后端不带该字段时仍由服务端拦。
+          phaseBlocked: res.data.canConfirm === false, priced: res.data.priced === true, tickets: ticketRows(subType, res.data.tickets, floor),
+          // CU-C-70:floor=0(例:带队成本被静默摊成 0)时 min>=floor 恒真,旧式自校验放行零价。
+          // 人数这道条件必须参与,不然按钮点得动而价格是 0。
+          canConfirmPrice: pricesOk(ticketRows(subType, res.data.tickets, floor), start, floor) && res.data.canConfirm !== false
+            && teamSizeOk(costSub(stateAfter), that.data.teamSize) && !selfPriceError && !stale,
+          teamSizeError: that._teamTouched ? teamSizeErrorText(costSub(stateAfter), that.data.teamSize) : '', // p3 F6:动过人数或点了确认才报
+          sliderMax: sliderMax,
+          referencePrice: reference,
+          referenceText: reference && sample > 0
+            ? city + '同类已开售均价 ¥' + money(reference) + '（' + sample + ' 个样本）'
+            : '',   // 第十二轮 k3(p3 N11):没有参考价就不画参考价框,不写「样本不足」
+        });
+        that.updateDelta(start);
+        that.updateFee(start);
+        if (res.data.priced === true) that.loadSaleStatus();
+        if (isFreeExplore) that.loadPendingSettlements();
+        that.loadLineupNames();
+      },
+      fail(res) {
+        if (that._previewSeq !== seq) return;
+        that.setData({ errorText: app.getRequestErrorMessage(res, '网络异常，请稍后重试') });
+      },
+      complete() {
+        if (that._previewSeq === seq) that.setData({ loading: false });
+      },
+    });
+  },
+
+  // 阵容行没有名称字段,逐个用公开档案接口补名(阵容通常 2-6 行,结果按 toType:toId 缓存)
+  loadLineupNames() {
+    const that = this;
+    const cache = this._nameCache || (this._nameCache = {});
+    this.data.lineup.forEach(function (row, idx) {
+      // L06-122:本页会话内读过的(含读不到名字、读失败的)都不再重复请求;预览每次重算不再触发 N 个档案请求
+      if (Object.prototype.hasOwnProperty.call(cache, row.lineupKey)) {
+        that.applyLineupName(idx, row.lineupKey, cache[row.lineupKey]);
+        return;
+      }
+      cache[row.lineupKey] = '';
+      app.sendRequest({
+        hideLoading: true,
+        silentError: true,
+        url: row.toType === 'club' ? '/api/club/detail' : '/api/merchant/public-detail',
+        method: 'POST',
+        data: JSON.stringify({ id: row.toId }),
+        header: { 'Content-Type': 'application/json' },
+        success(res) {
+          const name = (res && res.code == '200' && res.data && res.data.name) || '';
+          cache[row.lineupKey] = name;
+          that.applyLineupName(idx, row.lineupKey, name);
+        },
+      });
+    });
+  },
+
+  applyLineupName(idx, lineupKey, name) {
+    const row = this.data.lineup[idx];
+    if (!name || !row || row.lineupKey !== lineupKey) return;
+    this.setData({ ['lineup[' + idx + '].name']: name });
+  },
+
+  goPartner(e) {
+    const row = this.data.lineup[Number(e.currentTarget.dataset.idx)];
+    if (!row) return;
+    if (row.chapterId) {
+      wx.navigateTo({ url: '/pages/topic/merchantinfo/merchantinfo?topicId=' + this.data.topicId });
+      return;
+    }
+    wx.navigateTo({
+      url: '/pages/topic/pricing/partner/index?topicId=' + this.data.topicId
+        + '&toType=' + row.toType + '&toId=' + row.toId
+        + (this.data.themeClass === 'theme-dark' ? '&club=1' : ''),
+    });
+  },
+
+  chooseType(e) {
+    if (this.data.isFreeExplore) return;
+    const type = (e.detail && e.detail.key) !== undefined ? e.detail.key : e.currentTarget.dataset.type;
+    if (type === this.data.subType) return;
+    this.setData({
+      subType: type, hasPreview: false, errorText: '', tickets: [], selfPriceError: '',
+      teamSizeError: this._teamTouched ? teamSizeErrorText(type, this.data.teamSize) : '',
+    });
+    this.preview();
+  },
+
+  onTicketPriceInput(e) {
+    const idx = Number(e.currentTarget.dataset.idx);
+    const row = this.data.tickets[idx];
+    if (!row) return;
+    const tickets = this.data.tickets.slice();
+    tickets[idx] = Object.assign({}, row, { price: e.detail.value, error: ticketPriceError(e.detail.value, this._floor) }, ticketFee(e.detail.value, this._platformRate));
+    this.setData({ tickets, submitError: '', canConfirmPrice: this._canConfirmPrice({ tickets }) });
+  },
+
+  // 改成本/人数后地板价即失效：先置灰确认，停手 0.6 秒自动重算（也可手点「重新计算地板」）
+  _markStale() {
+    this._floorStale = true;
+    this._inputRev = (this._inputRev || 0) + 1;
+    if (this._recalcTimer) clearTimeout(this._recalcTimer);
+    this._recalcTimer = setTimeout(() => { this._recalcTimer = null; if (!this._unloaded) this.preview(); }, 600);
+  },
+
+  onCostInput(e) {
+    this._markStale();
+    this.setData({ leadCost: e.detail.value, canConfirmPrice: false });
+  },
+
+  onTeamInput(e) {
+    const teamSize = e.detail.value;
+    this._teamTouched = true;
+    // CU-C-70:成团人数就地参与可提交判定 —— 改成 0 后不重算也能点确认的那条路必须堵上。
+    this._markStale();
+    this.setData({
+      teamSize,
+      teamSizeError: teamSizeErrorText(this.data.subType, teamSize),
+      canConfirmPrice: false,
+    });
+  },
+
+  recalculate() {
+    if (this._recalcTimer) { clearTimeout(this._recalcTimer); this._recalcTimer = null; }
+    this.preview();
+  },
+
+  // 可提交判定的唯一判据:终价不低于地板、主题已在定价阶段、有人带时人数为正。
+  _canConfirmPrice(patch) {
+    const data = Object.assign({}, this.data, patch || {});
+    return pricesOk(data.tickets, data.finalPrice, this._floor) && !data.phaseBlocked && !this._floorStale
+      && teamSizeOk(costSub(data), data.teamSize) && !data.selfPriceError;
+  },
+
+  onSliderChange(e) {
+    const value = Number(e.detail.value);
+    this._priceTouched = true;
+    this.setData({ finalPrice: value, isFree: value === 0, canConfirmPrice: this._canConfirmPrice({ finalPrice: value }) });
+    this.updateDelta(value);
+    this.updateFee(value);
+  },
+
+  // D-23：锁价后的真实状态（已锁价待运营开售 / 审核中 / 在售），页面重进也能看到
+  loadSaleStatus() {
+    const that = this;
+    app.sendRequest({
+      hideLoading: true, silentError: true, url: '/api/topic/pricing/sale-status', method: 'GET',
+      data: { topicId: this.data.topicId, scope: this._scope || undefined },
+      success(res) {
+        if (that._unloaded) return;
+        if (!res || res.code != '200' || !res.data) {
+          toast(app.getRequestErrorMessage(res, '开售状态加载失败，请重试'));
+          return;
+        }
+        that.setData({ saleStatusText: res.data.message || '' });
+      },
+      fail(res) {
+        if (!that._unloaded) toast(app.getRequestErrorMessage(res, '开售状态加载失败，请重试'));
+      }
+    });
+  },
+
+  // D-19：跨俱乐部 / 四店探店日场次暂无结算路径，主办方可见「结算待处理」及原因
+  loadPendingSettlements() {
+    const that = this;
+    app.sendRequest({
+      hideLoading: true, silentError: true, url: '/api/topic/pricing/settlement-pending', method: 'GET',
+      // L06-133:带上 topicId 让服务端过滤;客户端按 topicId 再筛一次兜底(旧 jar 忽略该参数)
+      data: { scope: this._scope || undefined, topicId: this.data.topicId || undefined },
+      success(res) {
+        if (that._unloaded) return;
+        if (!res || res.code != '200' || !Array.isArray(res.data)) {
+          toast(app.getRequestErrorMessage(res, '待处理结算加载失败，请重试'));
+          return;
+        }
+        const topicId = String(that.data.topicId);
+        const pendingRows = res.data.filter(function (r) { return r && String(r.topicId) === topicId; }).map(function (r) {
+          return { key: String(r.activityId), name: r.activityName || '场次', state: r.state || '结算待处理',
+            reason: r.reason || '', money: r.money == null ? '' : '¥' + money(r.money) };
+        });
+        that.setData({ pendingRows: pendingRows });
+      },
+      fail(res) {
+        if (!that._unloaded) toast(app.getRequestErrorMessage(res, '待处理结算加载失败，请重试'));
+      }
+    });
+  },
+
+  // 平台服务费与预计到手（按平台费率，平台费四舍五入到分，到手 = 价 - 费）
+  // FE-G24:多票种时逐张算服务费与到手(写在每张票下面),底部单价那行不出
+  updateFee(value) {
+    const rate = this._platformRate;
+    const tickets = this.data.tickets || [];
+    if (tickets.length > 1) {
+      this.setData({ feeText: '', takeHomeText: '', tickets: tickets.map(function (r) { return Object.assign({}, r, ticketFee(r.price, rate)); }) });
+      return;
+    }
+    const fee = ticketFee(value, rate);
+    this.setData({ feeText: fee.feeText, takeHomeText: fee.takeHomeText });
+  },
+
+  // 灰按钮被点时给一句为什么(cy-btn 在禁用态吞 tap、补发 disabledtap)。
+  // 人数那块页内已有常挂提示,但按钮在屏幕底部,不给回应的灰按钮在本仓是记过过的死交互。
+  onConfirmDisabledTap() {
+    if (this.data.saving) return;
+    // P-34:开售后人数提示已无意义,先说终价已确认
+    // 第四轮(业主:输入问题只在字段下方红字说):人数/票价不对时回执就是那一栏下的红字,不再在底部另起提示框。
+    // f-money3:原因已在终价栏下红字常挂,这里不再另起提示。
+    if (!this.data.priced && this._floorStale) { toast('正在按新成本重算最低价'); return; }
+    if (!this.data.priced && this.data.selfPriceError) { this.setData({ submitError: '' }); return; }
+    const teamSizeError = teamSizeErrorText(this.data.subType, this.data.teamSize);
+    if (!this.data.priced && teamSizeError) {
+      this._teamTouched = true;
+      this.setData({ teamSizeError, submitError: '' });
+      return;
+    }
+    if (!this.data.priced && !pricesOk(this.data.tickets, this.data.finalPrice, this._floor)) {
+      this.setData({ tickets: this.data.tickets.map(function (r) {
+        return Object.assign({}, r, { error: ticketPriceError(r.price, this._floor) });
+      }, this), submitError: '' });
+      return;
+    }
+    const reason = this.data.priced ? '终价已确认' : (this.data.phaseBlocked ? '主题还没进入定价阶段' : '');
+    if (reason) this.setData({ submitError: reason });
+  },
+
+  updateDelta(value) {
+    const reference = this.data.referencePrice;
+    if (!reference) { this.setData({ referenceDeltaText: '' }); return; }
+    const pct = Math.round((value - reference) / reference * 100);
+    this.setData({ referenceDeltaText: pct > 0 ? '高于同城参考 ' + pct + '%' : '未高于同城参考价' });
+  },
+
+  confirmPrice() {
+    // L06-034:确认成功后到自动返回前的 2.5 秒里不能再点出第二次确认
+    if (!this.data.canConfirmPrice || this.data.saving || this._priceConfirmed) return;
+    const body = { topicId: this.data.topicId };
+    if (this._scope) body.scope = this._scope;
+    if (this.data.isFreeExplore || this.data.subType === 'guided') {
+      body.guidedPrice = this.data.finalPrice;
+      if (this.data.tickets.length > 1) {
+        // 第四轮:逐张写各自终价;guidedPrice 给最低那张(服务端按逐张价重算,不信它)。
+        body.ticketPrices = this.data.tickets.map(function (r) { return { ticketId: r.ticketId, price: toCents(r.price) }; });
+        body.guidedPrice = Math.min.apply(null, body.ticketPrices.map(function (r) { return r.price; }));
+      }
+      if (!this.data.isFreeExplore) {
+        body.leadCost = this.data.leadCost === '' ? null : Number(this.data.leadCost);
+        body.teamSize = this.data.teamSize === '' ? null : Number(this.data.teamSize);
+      }
+    } else {
+      body.selfPrice = this.data.finalPrice;
+    }
+    const that = this;
+    this.setData({ saving: true, submitError: '' });
+    app.sendRequest({
+      hideLoading: true,
+      silentError: true,
+      url: '/api/topic/pricing/confirm', method: 'POST',
+      data: JSON.stringify(body), header: { 'Content-Type': 'application/json' },
+      success(res) {
+        if (res.code == '200') {
+          that._priceConfirmed = true;
+          that.setData({ submitError: '' });
+          // B-04:后端确认只推进到 PRICING(ApiPricingController:"终价已确认，请等待开售审核"),
+          // SELLING 要运营在后台提交开售审 —— toast 不能谎报「已开售」。
+          const msg = res.msg || '终价已确认，请等待开售审核';
+          // P-01:非平台主题开售后暂不能在线收款,后端在 msg 里写明;toast 放不下,用弹窗让主办方看全。
+          if (msg.indexOf('支付资质') >= 0) {
+            modal.show({ title: '终价已确认', content: msg, showCancel: false, confirmText: '知道了',
+              complete() { that.goBack(); } });
+            return;
+          }
+          // 第十二轮 k3(p3 N14):原来 0.5 秒就返回,下一步(等开售审核)读不完。
+          toast.success(msg, { duration: 2500 });
+          that._goBackTimer = setTimeout(function () { if (!that._unloaded) that.goBack(); }, 2500);
+        } else that.setData({ submitError: (res && res.msg) || '确认失败，请重试' });
+      },
+      fail(res) { that.setData({ submitError: app.getRequestErrorMessage(res, '网络异常，请稍后重试') }); },
+      complete() { that.setData({ saving: false }); },
+    });
+  },
+});
+
+// 第四轮(业主:多票价)。函数声明会提升,放在文件尾不挪动上面已登记的行号。
+// 后端只在城市定向「有人带」档、作者自己发的票上给 tickets;只有一张票时页面照旧用滑块。
+function ticketRows(subType, list, floor) {
+  if (subType !== 'guided' || !Array.isArray(list)) return [];
+  const rows = list.filter(function (t) { return t && t.ticketId; }).map(function (t) {
+    const price = t.price == null || t.price === '' || !Number.isFinite(Number(t.price)) ? '' : String(Number(t.price));
+    return { ticketId: t.ticketId, name: t.name || '', price: price, error: ticketPriceError(price, floor) };
+  });
+  return rows.length > 1 ? rows : [];
+}
+
+function ticketPriceError(value, floor) {
+  if (value === '' || value == null) return '请填写终价';
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return '请填写正确的价格';
+  if ((String(value).trim().split('.')[1] || '').length > 2) return '最多两位小数';
+  if (n < Number(floor)) return '不能低于最低价 ¥' + money(floor);
+  return '';
+}
+
+// 可提交的价格判据:逐张时每张都不低于地板;单价时终价不低于地板(原判据)。
+// 平台服务费与预计到手:平台费四舍五入到分,到手 = 价 - 费;没有费率或价不合法时两项都空
+function ticketFee(value, rate) {
+  const price = toCents(value);
+  if (rate == null || !Number.isFinite(price) || price <= 0) return { feeText: '', takeHomeText: '' };
+  const fee = Math.round(price * rate * 100) / 100;
+  const pct = Math.round(rate * 10000) / 100;
+  return { feeText: '¥' + money(fee) + '（' + pct + '%）', takeHomeText: '¥' + money(price - fee) };
+}
+
+// 票价按分取整(提交与服务费都用取整后的价)
+function toCents(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : NaN;
+}
+
+function pricesOk(tickets, finalPrice, floor) {
+  if (Array.isArray(tickets) && tickets.length > 1) {
+    return tickets.every(function (r) { return !ticketPriceError(r.price, floor); });
+  }
+  return Number(finalPrice) >= Number(floor);
+}

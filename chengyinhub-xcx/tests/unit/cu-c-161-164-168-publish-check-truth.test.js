@@ -1,0 +1,363 @@
+// 走查 2026-09-25 · 批次 flow-club:「发布前检查」这张弹层在说实话吗?
+//
+// CU-C-168 两条假绿:
+//   ① 发布钮置灰时点它(onPublishDisabledTap)根本没跑过 AI 预检,却传了空 skipLabel ——
+//      而 _showPublishCheck 里 `precheckOk = !skipLabel && !issues.length`,空串 + 空数组
+//      正好等于「跑过了且没问题」。于是弹层一边列着「还差封面/还差节点」,
+//      一边绿着「内容安全预检通过」。
+//   ② 「已配置 N 种票单」只数数组长度:一张名称、集合时间、集合地点全空的默认票
+//      既能以缺项身份出现在「还差什么」里,又被算进「自动检查已通过 · N 项」。
+//      同一张空票既红又绿。
+//
+// CU-C-164 「配置模板」开关态不入库(nodesForm.showTemplate 是纯 UI 态,真源是 templateId)。
+//   从玩法编辑器点「放弃未保存的玩法」返回时没人回传 ⇒ 开关停在 true 而 templateId 还是 0,
+//   下面只给「选择或创建玩法模板」,是个点了必落空的假已配置。
+//
+// CU-C-161 节点卡的地点空态写着「自由探索可稍后补」,这半句是自由探索那一档的规则,
+//   城市定向的节点也照着它显示 ⇒ 看起来像可以跳过(实际两种模式发布时都硬性要坐标)。
+//
+// 三条的共同点:**判据只许有一份**。票填没填全 = _ticketBlockReason();
+// 开关开没开 = !!templateId;预检状态 = 三值(未跑 / 跳过 / 通过),不许用空串冒充「通过」。
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const { createRequire } = require('node:module');
+
+const ROOT = path.resolve(__dirname, '../..');
+const FABU_JS = 'pages/publish/fabu/index.js';
+const FABU_WXML = 'pages/publish/fabu/index.wxml';
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+
+const noop = () => {};
+const makeWx = () => ({
+  getStorageSync: () => '', setStorageSync: noop, removeStorageSync: noop,
+  getSystemInfoSync: () => ({ windowWidth: 375, statusBarHeight: 20 }),
+  showToast: noop, hideLoading: noop, showLoading: noop, showModal: noop,
+  createSelectorQuery: () => ({ select: () => ({ boundingClientRect: () => ({ exec() {} }) }), exec() {} }),
+  pageScrollTo: noop, nextTick: (cb) => cb(),
+});
+
+// src 传入**改写过的源码字符串** —— 负控靠这条才能真跑到病灶形态那一版。
+// 依赖全部走 createRequire(页目录):判据函数(cityOrientationScheduleIssues 等)
+// 必须是真的,否则「一张票填没填全」这件事在测试里就又被复刻了一遍。
+function loadFabu(src) {
+  const app = {
+    globalData: { statusBarHeight: 20, navBarHeight: 44 },
+    getUserID: () => 42,
+    sendRequest: noop,
+    chooseImage: noop,
+    chooseDocument: noop,
+    tips: noop,
+    getRequestErrorMessage: (err, fallback) => (err && err.errMsg) || fallback,
+  };
+  global.getApp = () => app;
+  global.wx = makeWx();
+  const file = path.resolve(ROOT, FABU_JS);
+  let definition;
+  vm.runInNewContext(src || read(FABU_JS), {
+    getApp: () => app,
+    Page(p) { definition = p; },
+    Component(p) { definition = p; },
+    getCurrentPages: () => [{}],
+    require: createRequire(file),
+    setTimeout(fn) { if (fn) fn(); return 1; },
+    clearTimeout: noop, setInterval: () => 1, clearInterval: noop,
+    console, Date, JSON, wx: makeWx(),
+  }, { filename: file });
+
+  const page = Object.assign({}, definition, {
+    data: {},
+    setData(patch, callback) {
+      Object.keys(patch).forEach((key) => {
+        if (key.indexOf('.') < 0) { page.data[key] = patch[key]; return; }
+        const segs = key.split('.');
+        let cursor = page.data;
+        segs.slice(0, -1).forEach((seg) => {
+          if (!cursor[seg] || typeof cursor[seg] !== 'object') cursor[seg] = {};
+          cursor = cursor[seg];
+        });
+        cursor[segs[segs.length - 1]] = patch[key];
+      });
+      if (callback) callback.call(page);
+    },
+    // 本地缺项判定另有 tests/unit/publish-precheck-blind-field-contract.test.js 钉住,
+    // 这里只关心「预检状态」和「票数」这两件事说的对不对,给个空壳即可。
+    buildPublishCheck: () => ({ blocking: [], advisory: [] }),
+    _buildPublishPreview: () => null,
+    setEditorState: noop,
+  });
+  page.data.formData = {
+    name: '城市漫游', imgUrl: 'https://cdn/cover.png', description: '一条真实简介',
+    productType: 1, chapters: [{ name: '第一章', nodes: [{ id: 1 }] }], tickets: [],
+  };
+  page.data.completionRuleMode = 'ALL';
+  page.data.identityRegistered = true;
+  return page;
+}
+
+// 取页面真实方法(loadFabu 里某些方法被换成空壳)
+function definitionOf(name) {
+  let definition;
+  vm.runInNewContext(read(FABU_JS), {
+    getApp: () => ({ globalData: {} }), Page(p) { definition = p; }, Component(p) { definition = p; },
+    getCurrentPages: () => [{}], require: createRequire(path.resolve(ROOT, FABU_JS)),
+    setTimeout: noop, clearTimeout: noop, setInterval: () => 1, clearInterval: noop, console, Date, JSON, wx: makeWx(),
+  }, { filename: path.resolve(ROOT, FABU_JS) });
+  return definition[name];
+}
+
+const labels = (items) => (items || []).map((item) => item.label);
+const precheckLine = (passed) => labels(passed).find((label) => /内容安全预检/.test(label));
+const ticketLine = (passed) => labels(passed).find((label) => /种票单/.test(label));
+
+// 2026-10-31 P-4:原「点灰钮」路径改成票务页「预览」—— 打开剧情预览这一步同样没跑内容安全预检。
+// 票务页必填都齐、实名已登记时才会真的打开那一层,这里把两项摆齐,量的是「没跑预检」这一件事。
+function openPreview(page) {
+  page.data.identityRegistered = true;
+  page._buildValidationBag = () => ({ errors: {}, isValid: () => true, firstMessage: () => '' });
+  page.openStoryPreview();
+  assert.equal(page.data.publishCheck.show, true, '前提:预览已打开');
+}
+
+// ============================================================ CU-C-168 ①预检状态
+test('CU-C-168 没跑过预检时,「内容安全预检通过」不得出现在已通过那一栏', () => {
+  const page = loadFabu();
+  openPreview(page);
+
+  assert.equal(precheckLine(page.data.publishCheck.passed), undefined,
+    `打开预览这条路径没发过请求，却报通过: ${JSON.stringify(labels(page.data.publishCheck.passed))}`);
+  assert.equal(page._publishPrecheckOk, false);
+  assert.ok(labels(page.data.publishCheck.advisory).some((label) => /预检还没跑/.test(label)),
+    '没跑过要说成人家听得懂的话，别只留一条空白');
+});
+
+test('CU-C-168 真跑过预检且没问题时仍算通过 —— 修这个不能把它修成永远红', () => {
+  const page = loadFabu();
+  page._showPublishCheck([], '');
+  assert.ok(/内容安全预检通过/.test(String(precheckLine(page.data.publishCheck.passed))));
+  assert.equal(page._publishPrecheckOk, true);
+});
+
+// ============================================================ CU-C-168 ②票数
+test('CU-C-168 「已配置 N 种票单」只数填全了的票', () => {
+  const page = loadFabu();
+  page.data.formData.tickets = [
+    { name: '标准票', mode: 2 },                                  // 填全
+    { name: '', mode: 2 },                                        // 缺名称
+    { name: '集合票', mode: 1, startTime: '', meetingPoint: '' }, // 缺集合时间 + 地点
+  ];
+  const passed = page._buildPublishPassed(true);
+  assert.equal(ticketLine(passed), '已配置 1 种票单',
+    `两张空票不该被算成配好了: ${JSON.stringify(labels(passed))}`);
+});
+
+test('CU-C-168 没填全的差额要在摘要里如实报出来,不能悄悄消失', () => {
+  const page = loadFabu();
+  page.data.formData.tickets = [
+    { name: '标准票', mode: 2 },
+    { name: '', mode: 2 },
+    { name: '集合票', mode: 1, startTime: '', meetingPoint: '' },
+  ];
+  const summary = page._buildPublishSummary().join(' ');
+  assert.match(summary, /当前配置 1 种票单，另有 2 种没填完/, summary);
+});
+
+test('CU-C-168 票全填完时摘要不多余那句「另有没填完」', () => {
+  const page = loadFabu();
+  page.data.formData.tickets = [{ name: '标准票', mode: 2 }];
+  const summary = page._buildPublishSummary().join(' ');
+  assert.match(summary, /当前配置 1 种票单。/, summary);
+  assert.doesNotMatch(summary, /没填完/, summary);
+});
+
+test('CU-C-168 保存票种的可用态与「填没填全」共用同一条判据', () => {
+  const page = loadFabu();
+  page.data.editingTicket = { name: '标准票', mode: 1, startTime: '09:00', endTime: '10:00', meetingPoint: '' };
+  page.refreshTicketSaveState();
+  assert.equal(page.data.canSaveTicket, false, '集合地点没选就不该能保存');
+  assert.equal(page._ticketSaveBlockReason(), '请选择集合地点');
+
+  // 2026-10-31 开售前定价:城市定向发布即开卖,票价是「填全」的一项(空价不能当免费);自由探索才可留空
+  page.data.editingTicket = { name: '标准票', mode: 1, price: '', startTime: '09:00', endTime: '10:00', meetingPoint: '某某书店' };
+  page.refreshTicketSaveState();
+  assert.equal(page.data.canSaveTicket, false, '城市定向没填票价不该能保存');
+  assert.equal(page._ticketSaveBlockReason(), '请填写票价');
+
+  page.data.editingTicket = { name: '标准票', mode: 1, price: 0, startTime: '09:00', endTime: '10:00', meetingPoint: '某某书店' };
+  page.refreshTicketSaveState();
+  assert.equal(page.data.canSaveTicket, true, '填全了必须放行人 —— 闸不能改过头');
+  assert.equal(page._ticketSaveBlockReason(), '');
+});
+
+// ============================================================ CU-C-164 开关态
+test('CU-C-164 放弃玩法编辑返回时,开关跟着 templateId 落回关闭', () => {
+  const page = loadFabu();
+  page.setData({
+    popChapterNodes: true,
+    nodesForm: { showTemplate: true, templateId: 0 },
+  });
+  page.onShow();
+  assert.equal(page.data.nodesForm.showTemplate, false,
+    'templateId=0 意味着没有玩法，开关绿着就是假已配置');
+});
+
+test('CU-C-164 玩法在的时候开关不许被派生动到', () => {
+  const page = loadFabu();
+  page.setData({ popChapterNodes: true, nodesForm: { showTemplate: false, templateId: 7 } });
+  page.onShow();
+  assert.equal(page.data.nodesForm.showTemplate, true);
+});
+
+test('CU-C-164 节点抽屉没开着时不碰表单项(返回页可能正停在别的 Tab)', () => {
+  const page = loadFabu();
+  page.setData({ popChapterNodes: false, nodesForm: { showTemplate: true, templateId: 0 } });
+  page.onShow();
+  assert.equal(page.data.nodesForm.showTemplate, true, '不在眼前的一表单不该被顺手改写');
+});
+
+// ============================================================ CU-C-161 文案
+function assertNodeAddressCopy(wxml) {
+  // 10-28 原型 A e-node：地点是分组列表（L1 cy-list-row）里的一行「地点 · 滨江路 12 号 ›」，整行点去选点；
+  // 已选显示地址，空态只显示可点的「选择节点」，不显示伪造地址或说明小字。
+  const picker = wxml.match(/<cy-list-row[^>]*title="地点" value="\{\{nodesForm\.address \|\| '([^']*)'\}\}"[^>]*bind:press="choosePoiForNode"/);
+  assert.ok(picker, '已选节点的地址必须显示，空态必须有可点击的节点选择动作');
+  assert.match(picker[1], /选择节点/);
+  assert.doesNotMatch(picker[1], /自由探索/, '城市定向不能借用自由探索可稍后补文案');
+  return wxml;
+}
+
+test('CU-C-161 节点仅显示已选地址，空态不显示说明小字', () => {
+  assertNodeAddressCopy(read(FABU_WXML));
+});
+
+// ============================================================ 负控
+function mutate(src, from, to, label) {
+  assert.ok(src.indexOf(from) >= 0, `负控锚点失效(源码已改动?): ${label}`);
+  const out = src.replace(from, to);
+  assert.notEqual(out, src, `负控锚点失效(替换没生效): ${label}`);
+  return out;
+}
+
+test('negative control:把 skipLabel 改回空串,「没跑预检」立刻又变假绿', () => {
+  const broken = mutate(read(FABU_JS),
+    "this._showPublishCheck([], '内容安全预检还没跑');",
+    "this._showPublishCheck([], '');",
+    'openStoryPreview');
+  const page = loadFabu(broken);
+  openPreview(page);
+  assert.equal(precheckLine(page.data.publishCheck.passed), '内容安全预检通过',
+    '摘掉修复后没复现假绿 ⇒ 这条断言没量到东西');
+  assert.equal(page._publishPrecheckOk, true);
+});
+
+test('negative control:票数改回数组长度,空票立刻又被算成已配置', () => {
+  const broken = mutate(read(FABU_JS),
+    'const readyTickets = (fd.tickets || []).filter((t) => !this._ticketBlockReason(t));',
+    'const readyTickets = (fd.tickets || []);',
+    '_buildPublishPassed 票数');
+  const page = loadFabu(broken);
+  page.data.formData.tickets = [
+    { name: '标准票', mode: 2 }, { name: '', mode: 2 },
+    { name: '集合票', mode: 1, startTime: '', meetingPoint: '' },
+  ];
+  assert.equal(ticketLine(page._buildPublishPassed(true)), '已配置 3 种票单',
+    '摘掉修复后票数没回到 3 ⇒ 这条断言没量到东西');
+
+  const brokenSummary = mutate(read(FABU_JS),
+    'const ticketCount = allTickets.filter((t) => !this._ticketBlockReason(t)).length;',
+    'const ticketCount = allTickets.length;',
+    '_buildPublishSummary 票数');
+  const page2 = loadFabu(brokenSummary);
+  page2.data.formData.tickets = [
+    { name: '标准票', mode: 2 }, { name: '', mode: 2 },
+    { name: '集合票', mode: 1, startTime: '', meetingPoint: '' },
+  ];
+  const summary = page2._buildPublishSummary().join(' ');
+  assert.equal(summary.indexOf('没填完'), -1, `摘要没复现「差额消失」: ${summary}`);
+  assert.match(summary, /当前配置 3 种票单/, summary);
+});
+
+test('negative control:摘掉 onShow 里的重派生,返回后开关又停在假的开', () => {
+  const broken = mutate(read(FABU_JS),
+    '    this.syncNodeGameSwitchWithTemplate();\n',
+    '',
+    'onShow 重派生');
+  const page = loadFabu(broken);
+  page.setData({ popChapterNodes: true, nodesForm: { showTemplate: true, templateId: 0 } });
+  page.onShow();
+  assert.equal(page.data.nodesForm.showTemplate, true,
+    '摘掉修复后开关没停在错误态 ⇒ 这条断言没量到东西');
+});
+
+test('negative control:节点地点文案退回共用一行,CU-C-161 检查器必须判红', () => {
+  const broken = mutate(read(FABU_WXML),
+    "{{nodesForm.address || '选择节点'}}",
+    "{{nodesForm.address || '自由探索可稍后补'}}",
+    '节点地点空态');
+  assert.throws(() => assertNodeAddressCopy(broken), assert.AssertionError);
+});
+
+// 2026-10-31 业主「开售前定价要修」(Q7):自由探索的票价可以留空,预览写「开售前定价」;城市定向空价写「—」并挡发布
+test('开售前定价:自由探索空价预览写「开售前定价」,城市定向空价写「—」', () => {
+  const page = loadFabu();
+  // loadFabu 把预览换成了空壳,这里要真的那一份
+  page._buildPublishPreview = definitionOf('_buildPublishPreview');
+  page.calculateTotalStats = () => ({});
+  page.data.formData.productType = 2;
+  page.data.formData.tickets = [{ name: '探索票', mode: 2, price: '', totalStock: 50 }];
+  let row = page._buildPublishPreview([]).ticketRows[0];
+  assert.equal(row.v, '开售前定价 · 50 张');
+
+  page.data.formData.productType = 1;
+  page.data.formData.tickets = [{ name: '集合票', mode: 1, price: '', totalStock: 50 }];
+  row = page._buildPublishPreview([]).ticketRows[0];
+  assert.equal(row.v, '— · 50 张');
+});
+
+// L03-059 业主默认 A(2026-11-24):预览列出全部票种,第二种的问题标在第二种上,不再标到第一种
+test('L03-059:两种票、第二种缺价 → 预览两种都列出,标红落在第二种的票种行', () => {
+  const page = loadFabu();
+  page._buildPublishPreview = definitionOf('_buildPublishPreview');
+  page.calculateTotalStats = () => ({});
+  page.data.formData.productType = 1;
+  page.data.formData.tickets = [
+    { name: '早鸟票', mode: 1, price: '39.9', totalStock: 20 },
+    { name: '双人票', mode: 1, price: '', totalStock: 10 },
+  ];
+  const p = page._buildPublishPreview([{ label: '第2个票务：请填写票价', field: 'ticketPrice1' }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(p.ticketRows.map((r) => r.key))), ['name', 'validity', 'sale', 'name1', 'validity1', 'sale1']);
+  assert.deepEqual(JSON.parse(JSON.stringify(p.ticketRows.filter((r) => /^name/.test(r.key)).map((r) => [r.k, r.v]))), [['早鸟票', '¥39.9 · 20 张'], ['双人票', '— · 10 张']]);
+  assert.equal(p.ticketFlagRow, 'name1');
+  // 不带尾号的票务字段(全局售票时间)仍标到首种
+  assert.equal(page._buildPublishPreview([{ label: '售票开始日期无效', field: 'saleStartTime' }]).ticketFlagRow, 'sale');
+  // 尾号越界(票种已删)退回首种,不让标红消失
+  assert.equal(page._buildPublishPreview([{ label: 'x', field: 'ticketPrice5' }]).ticketFlagRow, 'name');
+});
+
+// L03-171 业主默认 A(2026-11-24):库存输入可删空,保存时库存 < 1 拦下;建议组队留空 / 0 都存 0 = 不限
+test('L03-171:库存删空不再弹回 0,填 0 不能保存,空库存按占位 100 存,组队 0 = 不限', () => {
+  const page = loadFabu();
+  page.saveTicket = definitionOf('saveTicket');
+  page.refreshRouteGraph = () => {};
+  page.refreshPrimaryActionState = () => {};
+  page.data.formData.productType = 1;
+  page.data.formData.tickets = [];
+  page.data.editingTicket = { name: '标准票', mode: 1, price: 10, startTime: '09:00', endTime: '10:00', meetingPoint: '某某书店', totalStock: 100, teamSize: 0, editIndex: -1 };
+  const type = (field, value) => page.onEditTicketChange({ currentTarget: { dataset: { field } }, detail: { value } });
+  type('totalStock', '');
+  assert.equal(page.data.editingTicket.totalStock, '', '删空就是空,不弹回 0');
+  type('totalStock', '0');
+  assert.equal(page.data.canSaveTicket, false);
+  assert.equal(page._ticketSaveBlockReason(), '库存至少 1 张');
+  page.saveTicket();
+  assert.equal(page.data.formData.tickets.length, 0, '0 张的票不准存');
+  type('totalStock', '');
+  type('teamSize', '');
+  assert.equal(page.data.canSaveTicket, true);
+  page.saveTicket();
+  assert.equal(page.data.formData.tickets.length, 1);
+  assert.equal(page.data.formData.tickets[0].totalStock, 100, '空库存按占位 100');
+  assert.equal(page.data.formData.tickets[0].teamSize, 0, '组队留空 = 0 = 不限');
+});

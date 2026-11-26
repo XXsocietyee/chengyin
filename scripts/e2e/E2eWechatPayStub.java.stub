@@ -1,0 +1,264 @@
+package com.chengyinhub.e2e;
+
+import com.chengyinhub.business.domain.CmsRegistration;
+import com.chengyinhub.business.service.ICmsRegistrationService;
+import com.chengyinhub.business.service.IClubMembershipService;
+import com.chengyinhub.business.service.ICoopInviteService;
+import com.chengyinhub.business.service.IMerchantCommerceService;
+import com.chengyinhub.common.config.WxPayConfig;
+import org.springframework.beans.factory.ObjectProvider;
+import com.chengyinhub.business.service.IWechatPayService;
+import com.chengyinhub.business.service.RefundRequestResult;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.context.annotation.Primary;
+import org.springframework.stereotype.Component;
+
+import java.math.BigDecimal;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/**
+ * ★桩:支付可用性(环境依赖)。只存在于本地 e2e 运行时的 exploded jar 里,仓库产品码一行都没有。
+ *
+ * <p>桩掉的只有【外部支付通道】这一层:商户凭据、SDK 构造、官方验签、预下单。
+ * 「支付成功」仍然走【真实回调入口】 POST /api/registration/callback →
+ * 会员、商城、押金或报名的真实业务服务,因此金额冻结校验
+ * (matchesFrozenWechatAmount)、订单状态机、entitlement 等业务侧一条都没被绕过。
+ * 绝不直接改 payment_status。
+ */
+@Component
+@Primary
+public class E2eWechatPayStub implements IWechatPayService {
+
+    private static final ObjectMapper JSON = new ObjectMapper();
+    // 用 @Lazy 字段注入而不是构造注入:产品码里 CmsTopicServiceImpl 也注入 IWechatPayService,
+    // 构造注入会形成 stub → registrationService → … → wechatPayService → stub 的循环。
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private ICmsRegistrationService registrationService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private ObjectProvider<IClubMembershipService> clubMembershipServiceProvider;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private IMerchantCommerceService merchantCommerceService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private ICoopInviteService coopInviteService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.chengyinhub.business.service.impl.WechatVerifiedPaymentFactService depositPaymentFacts;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private WxPayConfig wxPayConfig;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.chengyinhub.business.service.impl.WechatVerifiedPaymentFactService verifiedPaymentFacts;
+
+    @Override
+    public String resolveBusinessOrderNo(String wxOutTradeNo) {
+        // 夹具没有真实支付尝试，不伪造持久化订单映射。
+        return null;
+    }
+
+    @Override
+    public boolean isReady() {
+        return true;
+    }
+
+    @Override
+    public boolean isAppReady() {
+        return true;
+    }
+
+    @Override
+    public Map<String, String> createOrder(CmsRegistration registration) {
+        Map<String, String> params = new LinkedHashMap<String, String>();
+        params.put("appId", "e2e-stub-appid");
+        params.put("timeStamp", "0");
+        params.put("nonceStr", "e2estub");
+        params.put("package", "prepay_id=e2e-stub");
+        params.put("signType", "RSA");
+        params.put("paySign", "e2e-stub");
+        return params;
+    }
+
+    @Override
+    public Map<String, String> createAppOrder(CmsRegistration registration) {
+        return createOrder(registration);
+    }
+
+    @Override
+    public Map<String, String> createGenericAppOrder(String outTradeNo, BigDecimal amountYuan,
+                                                     String description) {
+        return createOrder(null);
+    }
+
+    @Override
+    public Map<String, String> createGenericOrder(String outTradeNo, BigDecimal amountYuan,
+                                                  String description, String openid) {
+        return createOrder(null);
+    }
+
+    /** 受控参数从 body 直读(明文 JSON),再交给真实业务回调处理。 */
+    @Override
+    public String handlePayCallback(String requestBody, Map<String, String> headers) {
+        try {
+            JsonNode root = JSON.readTree(requestBody);
+            Map<String, String> resultMap = new HashMap<String, String>();
+            resultMap.put("out_trade_no", root.path("out_trade_no").asText(null));
+            resultMap.put("transaction_id", root.path("transaction_id").asText(null));
+            resultMap.put("trade_state", root.path("trade_state").asText(null));
+            if (root.hasNonNull("total")) {
+                resultMap.put("total", String.valueOf(root.path("total").asInt()));
+            }
+            // 原始可信事实的引用与渠道身份只做透传:真实回调按 verified_fact_id/hash 回读已存在的 VERIFIED 行逐项核对,
+            // 桩不造事实,也不替业务侧判断它对不对。
+            for (String key : new String[]{"verified_fact_id", "verified_fact_hash", "wx_out_trade_no",
+                    "mchid", "appid", "trade_type", "currency"}) {
+                if (root.hasNonNull(key)) resultMap.put(key, root.path(key).asText());
+            }
+            String outTradeNo = resultMap.get("out_trade_no");
+            String transactionId = resultMap.get("transaction_id");
+            Integer total = root.hasNonNull("total") ? root.path("total").asInt() : null;
+            String result;
+            IClubMembershipService membership = clubMembershipServiceProvider == null
+                    ? null : clubMembershipServiceProvider.getIfAvailable();
+            if (outTradeNo != null && outTradeNo.startsWith("CLM")) {
+                boolean paid = "SUCCESS".equals(resultMap.get("trade_state"));
+                result = paid && membership != null && membership.supportsOutTradeNo(outTradeNo)
+                        && membership.handlePaidInvoice(outTradeNo, paid, total, transactionId, verifiedReference(root,outTradeNo,total,transactionId))
+                        ? "SUCCESS" : "FAIL";
+            } else if (merchantCommerceService.supportsOutTradeNo(outTradeNo)) {
+                boolean paid = "SUCCESS".equalsIgnoreCase(resultMap.get("trade_state"));
+                result = paid && merchantCommerceService.handlePaidOrder(outTradeNo, paid, total, transactionId, verifiedReference(root,outTradeNo,total,transactionId))
+                        ? "SUCCESS" : "FAIL";
+            } else if (outTradeNo != null && outTradeNo.startsWith("DEP")) {
+                boolean paid = "SUCCESS".equalsIgnoreCase(resultMap.get("trade_state"));
+                result = "FAIL";
+                if (paid && total != null && "CNY".equals(root.path("currency").asText(null))
+                        && wxPayConfig.getMerchantId() != null
+                        && wxPayConfig.getMerchantId().equals(root.path("mchid").asText(null))
+                        && depositPaymentFacts != null) {
+                    // The fake channel never creates VERIFIED facts; only an already trusted original may be consumed.
+                    var original = depositPaymentFacts.findPaymentSuccess(wxPayConfig.getMerchantId(), outTradeNo, transactionId);
+                    if (original != null && outTradeNo.equals(original.facts().businessOutTradeNo())
+                            && "CNY".equals(original.facts().currency())
+                            && original.facts().totalFen() == total.longValue()
+                            && original.facts().amountFen() == total.longValue()
+                            && coopInviteService.markDepositPaid(outTradeNo, total.longValue(), transactionId, original.reference()))
+                        result = "SUCCESS";
+                }
+            } else {
+                result = registrationService.handleWechatPayCallback(resultMap);
+            }
+            if (!"SUCCESS".equalsIgnoreCase(result)) {
+                return "{\"code\": \"FAIL\",\"message\": \"" + result + "\"}";
+            }
+            return "{\"code\": \"SUCCESS\",\"message\": \"成功\"}";
+        } catch (Exception e) {
+            return "{\"code\": \"FAIL\",\"message\": \"" + e.getClass().getSimpleName() + "\"}";
+        }
+    }
+
+    /** Fixture consumes an explicitly stored original Reference; never creates proof from plaintext. */
+    private com.chengyinhub.business.domain.dto.WechatVerifiedPaymentFact.Reference verifiedReference(
+            JsonNode root,String no,Integer fen,String tx) {
+        var ref=new com.chengyinhub.business.domain.dto.WechatVerifiedPaymentFact.Reference(
+                root.path("verified_fact_id").asLong(0),root.path("verified_fact_hash").asText(null));
+        var stored=verifiedPaymentFacts.requireVerified(ref);var fact=stored.facts();
+        if(!ref.equals(stored.reference()) || !ref.hash().equals(fact.factHash())
+                || fact.kind()!=com.chengyinhub.business.domain.dto.WechatVerifiedPaymentFact.Kind.PAYMENT
+                || !no.equals(fact.businessOutTradeNo()) || fen==null || fact.totalFen()!=fen.longValue()
+                || !tx.equals(fact.transactionId()))throw new IllegalArgumentException("original fixture payment required");
+        return ref;
+    }
+
+    @Override
+    public String handleRefundCallback(String requestBody, Map<String, String> headers) {
+        return "{\"code\": \"FAIL\",\"message\": \"e2e stub 不处理退款回调\"}";
+    }
+
+    @Override
+    public String queryRefundStatus(String outRefundNo) {
+        return "UNKNOWN";
+    }
+
+    @Override
+    public Map<String, String> queryRefundFacts(String outRefundNo) {
+        return new LinkedHashMap<String, String>();
+    }
+
+    @Override
+    public String refreshPayoutFromWx(String outRefundNo) {
+        return "UNKNOWN";
+    }
+
+    @Override
+    public Map<String, String> queryOrderStatus(String outTradeNo) {
+        return new LinkedHashMap<String, String>();
+    }
+
+    @Override
+    public boolean closeOrder(String outTradeNo) {
+        return false;
+    }
+
+    @Override
+    public boolean closePaymentAttempt(String businessOutTradeNo, String observedWxOutTradeNo) {
+        return false;
+    }
+
+    @Override
+    public boolean lockPaymentAttemptForUpdate(String businessOutTradeNo, String observedWxOutTradeNo) {
+        // This fixture has no verified payment attempt or business-row lock.
+        return false;
+    }
+
+    @Override
+    public RefundRequestResult submitRefund(String outTradeNo, String outRefundNo, BigDecimal refundAmount,
+                                            BigDecimal totalAmount, String reason) {
+        return RefundRequestResult.DEFINITIVE_FAILED;
+    }
+
+    @Override
+    public RefundRequestResult submitRefund(com.chengyinhub.business.domain.dto.WechatVerifiedPaymentFact.Reference originalPayment,
+                                            String outTradeNo, String outRefundNo, BigDecimal refundAmount,
+                                            BigDecimal totalAmount, String reason) {
+        // No original provider proof or real refund client in this E2E fixture.
+        return RefundRequestResult.UNKNOWN;
+    }
+
+    @Override
+    public Map<String, String> queryTransferResult(String outBatchNo, String outDetailNo) {
+        return new LinkedHashMap<String, String>();
+    }
+
+    @Override
+    public Map<String, String> transferToBalance(String outBatchNo, String outDetailNo, BigDecimal amountYuan,
+                                                 String openid, String remark, String appid) {
+        return new LinkedHashMap<String, String>();
+    }
+
+    @Override
+    public Map<String, String> transferToBalance(com.chengyinhub.business.domain.dto.CashWithdrawTransferIntent intent) {
+        return java.util.Map.of("ok", "false", "ambiguous", "true", "error", "No real immutable transfer client in E2E fixture");
+    }
+
+    @Override
+    public Map<String, String> queryTransferResult(com.chengyinhub.business.domain.dto.CashWithdrawTransferIntent intent) {
+        return java.util.Map.of("result", "UNKNOWN", "error", "No real transfer detail evidence in E2E fixture");
+    }
+    @Override
+    public Map<String,String> queryRefundFacts(com.chengyinhub.business.domain.dto.WechatVerifiedPaymentFact.Reference originalPayment, String outRefundNo) {
+        // The fixture has no original provider/client proof; it must not authorize a financial query result.
+        return null;
+    }
+
+    @Override public boolean lockClosablePaymentAttemptForUpdate(String businessNo,String observedWxNo) { return false; }
+
+}

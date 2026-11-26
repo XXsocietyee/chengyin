@@ -1,0 +1,15 @@
+{
+  "component": true,
+  "usingComponents": {
+    "cy-sheet": "/components/cy/sheet/index",
+    "cy-btn": "/components/cy/btn/index",
+    "cy-dropdown": "/components/cy/dropdown/index",
+    "cy-icon": "/components/cy/icon/index",
+    "cy-switch": "/components/cy/switch/index",
+    "cy-inline-error": "/components/cy/inline-error/index",
+    "cy-date-field": "/components/cy/date-field/index",
+    "cy-upload": "/components/cy/upload/index",
+    "cy-consent-check": "/components/cy/consent-check/index",
+    "cy-merchant-cards": "/pages/topic/components/cy/merchant-cards/index"
+  }
+}

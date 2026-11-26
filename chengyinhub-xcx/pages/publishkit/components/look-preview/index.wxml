@@ -1,0 +1,15 @@
+<!-- 画面风格预览:常驻在画面风格面板顶部的示例画面,随作者切换风格 / 预设即时变化(2026-10-30 业主)。
+     两个调用方都是常驻用法,原先的底部弹出半屏(看转场 + 使用这个风格)无人用,已删(L04-029)。 -->
+<view class="lp lp--embedded">
+  <view class="lp__frame lpv {{cls}}">
+    <canvas type="2d" id="lpfx" class="lp__fx"></canvas>
+    <view class="lp__tex"></view>
+    <view class="lp__body">
+      <text class="lp__kick">{{sample.kick}}</text>
+      <text class="lp__title">{{sample.title}}</text>
+      <view class="lp__story tfx tfx--{{fx}} {{fxIn ? 'is-in' : ''}}"><text wx:if="{{chars}}" wx:for="{{chars}}" wx:for-item="c" wx:key="i" class="tfx__c {{c.raw ? 'is-raw' : ''}}" style="--i:{{c.i}};--r:{{c.r}};--dx:{{c.dx}}px;--dy:{{c.dy}}px">{{c.ch}}</text><block wx:if="{{!chars}}">{{sample.story}}</block></view>
+      <view class="lp__opt" wx:if="{{sample.opt}}"><text class="lp__opt-k">A</text><text>{{sample.opt}}</text></view>
+    </view>
+    <canvas type="2d" id="lpfront" class="lp__fx lp__fx--front"></canvas>
+  </view>
+</view>

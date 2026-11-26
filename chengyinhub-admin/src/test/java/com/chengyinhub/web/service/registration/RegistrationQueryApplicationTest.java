@@ -1,0 +1,252 @@
+package com.chengyinhub.web.service.registration;
+
+import com.chengyinhub.business.domain.*;
+import com.chengyinhub.business.domain.vo.ExploreCompletionVO;
+import com.chengyinhub.business.service.*;
+import com.chengyinhub.common.constant.PurchaseKind;
+import com.chengyinhub.common.core.domain.AjaxResult;
+import com.chengyinhub.common.core.page.TableDataInfo;
+import com.chengyinhub.web.controller.api.ApiRegistrationController;
+import com.chengyinhub.web.controller.api.RegistrationQueryTestFixtures;
+import com.github.pagehelper.Page;
+import com.github.pagehelper.PageHelper;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
+import java.util.Collections;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+/** Actual application/HTTP adapter, with leaf readers mocked. No Java/MySQL execution claim. */
+class RegistrationQueryApplicationTest {
+    private RegistrationQueryApplication application(ICmsRegistrationService registrations) {
+        RegistrationQueryApplication application = new RegistrationQueryApplication();
+        ReflectionTestUtils.setField(application, "registrationService", registrations);
+        return application;
+    }
+
+    @Test void allSixApplicationEntriesRejectAnonymousBeforeAnyReader() {
+        ICmsRegistrationService registrations = mock(ICmsRegistrationService.class);
+        RegistrationQueryApplication app = application(registrations);
+        for (AjaxResult response : new AjaxResult[] { app.getRegistrationDetail(0L, "1"), app.exploreCompletion(0L, "1"),
+                app.getJoinRegistrationDetail(0L, "99"), app.countByDate(0L, "1", "1"),
+                app.myRegistrationList(0L, "3", "0", null), app.myJoined(0L) }) {
+            assertEquals(500, response.get("code")); assertEquals("请先登录", response.get("msg"));
+            assertFalse(response.containsKey("data"));
+        }
+        verifyNoInteractions(registrations);
+    }
+
+    // 1122 复核(订单详情 RISK):已申请开票的单回填 invoiceStatus / invoiceApplicationId / invoiceNo;读失败不拦详情。
+    @Test void detailInvoiceStateIsFilledFromTheCallersOccupiedApplication() {
+        RegistrationQueryApplication app = application(mock(ICmsRegistrationService.class));
+        IUserInvoiceService invoices = mock(IUserInvoiceService.class);
+        ReflectionTestUtils.setField(app, "userInvoiceService", invoices);
+        java.util.Map<String, Object> state = new java.util.LinkedHashMap<>();
+        state.put("invoiceStatus", "ISSUED"); state.put("invoiceApplicationId", "41"); state.put("invoiceNo", "INV-9");
+        when(invoices.registrationInvoiceState(7L, 500L)).thenReturn(state);
+        CmsRegistration reg = new CmsRegistration(); reg.setId(500L); reg.setMemberId(7L);
+        app.attachInvoiceState(reg, 7L);
+        assertEquals("ISSUED", reg.getInvoiceStatus()); assertEquals("41", reg.getInvoiceApplicationId()); assertEquals("INV-9", reg.getInvoiceNo());
+
+        CmsRegistration other = new CmsRegistration(); other.setId(501L);
+        when(invoices.registrationInvoiceState(7L, 501L)).thenThrow(new RuntimeException("db"));
+        assertDoesNotThrow(() -> app.attachInvoiceState(other, 7L));
+        assertNull(other.getInvoiceStatus()); assertNull(other.getInvoiceApplicationId());
+    }
+
+    @Test void ownedDetailCannotReadForeignRegistrationOrAnyEnrichment() {
+        ICmsRegistrationService registrations = mock(ICmsRegistrationService.class);
+        CmsRegistration foreign = new CmsRegistration(); foreign.setId(1L); foreign.setMemberId(8L);
+        when(registrations.selectCmsRegistrationById(1L)).thenReturn(foreign);
+        RegistrationQueryApplication app = application(registrations);
+        ICmsTopicService topics = mock(ICmsTopicService.class); IRefundService refunds = mock(IRefundService.class);
+        ReflectionTestUtils.setField(app, "topicService", topics); ReflectionTestUtils.setField(app, "refundService", refunds);
+        AjaxResult response = app.getRegistrationDetail(7L, "1");
+        assertEquals(500, response.get("code")); assertEquals("无权查看该报名信息", response.get("msg"));
+        verifyNoInteractions(topics, refunds); assertNull(foreign.getCmsTopic()); assertNull(foreign.getRefundApplication());
+    }
+
+    @Test void ignoredJoinMemberParameterCannotReplaceTheActor() {
+        ICmsRegistrationService registrations = mock(ICmsRegistrationService.class);
+        when(registrations.selectCmsRegistrationList(any())).thenReturn(Collections.emptyList());
+        AjaxResult response = application(registrations).getJoinRegistrationDetail(7L, "9999");
+        assertEquals(200, response.get("code")); assertNull(response.get("data"));
+        ArgumentCaptor<CmsRegistration> query = ArgumentCaptor.forClass(CmsRegistration.class);
+        verify(registrations).selectCmsRegistrationList(query.capture());
+        assertEquals(Long.valueOf(7L), query.getValue().getMemberId());
+        assertEquals(Integer.valueOf(2), query.getValue().getRegistrationStatus());
+    }
+
+    @Test void completionScopeUsesOwnedOriginalRegistrationAndExistingActivityBeforeTheReadPort() {
+        ICmsRegistrationService registrations = mock(ICmsRegistrationService.class);
+        CmsRegistration row = new CmsRegistration(); row.setId(1L); row.setMemberId(7L); row.setOwnerId(20L);
+        row.setPurchaseKind(PurchaseKind.EXPLORE_PASS);
+        when(registrations.selectCmsRegistrationById(1L)).thenReturn(row);
+        ICmsActivityService activities = mock(ICmsActivityService.class);
+        CmsActivity activity = new CmsActivity(); activity.setId(20L); activity.setTopicId(30L);
+        when(activities.selectCmsActivityById(20L)).thenReturn(activity);
+        IExploreCompletionReadService completion = mock(IExploreCompletionReadService.class);
+        ExploreCompletionVO projection = new ExploreCompletionVO(); when(completion.read(1L, 7L, 30L, 20L)).thenReturn(projection);
+        RegistrationQueryApplication app = application(registrations);
+        ReflectionTestUtils.setField(app, "activityService", activities); ReflectionTestUtils.setField(app, "exploreCompletionReadService", completion);
+        AjaxResult response = app.exploreCompletion(7L, "1");
+        assertEquals(200, response.get("code"));
+        assertSame(projection, response.get("data"));
+        org.mockito.InOrder order = inOrder(registrations, activities, completion);
+        order.verify(registrations).selectCmsRegistrationById(1L); order.verify(activities).selectCmsActivityById(20L);
+        order.verify(completion).read(1L, 7L, 30L, 20L); order.verifyNoMoreInteractions();
+    }
+
+
+    @Test void completionRejectsInvalidRegistrationIdsBeforeReading() {
+        ICmsRegistrationService registrations = mock(ICmsRegistrationService.class);
+        RegistrationQueryApplication app = application(registrations);
+        for (String id : new String[] { null, "", "abc", "0", "-1" }) {
+            AjaxResult response = app.exploreCompletion(7L, id);
+            assertEquals(400, response.get("code"));
+            assertEquals("参数不合规", response.get("msg"));
+            assertFalse(response.containsKey("data"));
+        }
+        verifyNoInteractions(registrations);
+    }
+
+    @Test void completionDistinguishesMissingForeignAndNonApplicableRegistrationsBeforeEnrichment() {
+        ICmsRegistrationService registrations = mock(ICmsRegistrationService.class);
+        RegistrationQueryApplication app = application(registrations);
+        ICmsActivityService activities = mock(ICmsActivityService.class);
+        IExploreCompletionReadService completion = mock(IExploreCompletionReadService.class);
+        ReflectionTestUtils.setField(app, "activityService", activities);
+        ReflectionTestUtils.setField(app, "exploreCompletionReadService", completion);
+        AjaxResult missing = app.exploreCompletion(7L, "1");
+        assertEquals(404, missing.get("code"));
+        assertEquals("报名记录不存在", missing.get("msg"));
+        CmsRegistration row = new CmsRegistration(); row.setId(1L); row.setMemberId(8L);
+        when(registrations.selectCmsRegistrationById(1L)).thenReturn(row);
+        AjaxResult foreign = app.exploreCompletion(7L, "1");
+        assertEquals(403, foreign.get("code"));
+        assertEquals("无权查看该报名信息", foreign.get("msg"));
+        row.setMemberId(7L);
+        for (Integer kind : new Integer[] { null, PurchaseKind.GUIDED_TICKET, PurchaseKind.SELF_PLAY_PASS, 99 }) {
+            row.setPurchaseKind(kind);
+            AjaxResult notApplicable = app.exploreCompletion(7L, "1");
+            assertEquals(409, notApplicable.get("code"));
+            assertEquals("该订单没有自由探索完局面", notApplicable.get("msg"));
+            assertFalse(notApplicable.containsKey("data"));
+        }
+        verifyNoInteractions(activities, completion);
+    }
+
+    @Test void completionReadPortUnexpectedFailureStillPropagatesForAnOwnedExplorePass() {
+        ICmsRegistrationService registrations = mock(ICmsRegistrationService.class);
+        CmsRegistration row = new CmsRegistration(); row.setId(1L); row.setMemberId(7L);
+        row.setPurchaseKind(PurchaseKind.EXPLORE_PASS);
+        when(registrations.selectCmsRegistrationById(1L)).thenReturn(row);
+        RegistrationQueryApplication app = application(registrations);
+        IExploreCompletionReadService completion = mock(IExploreCompletionReadService.class);
+        ReflectionTestUtils.setField(app, "exploreCompletionReadService", completion);
+        IllegalStateException failure = new IllegalStateException("fixture projection unavailable");
+        when(completion.read(1L, 7L, null, null)).thenThrow(failure);
+        assertSame(failure, assertThrowsExactly(IllegalStateException.class, () -> app.exploreCompletion(7L, "1")));
+    }
+    @Test void originalDetailAndCompletionExceptionBoundariesRemainDifferent() {
+        ICmsRegistrationService registrations = mock(ICmsRegistrationService.class);
+        IllegalStateException storage = new IllegalStateException("fixture reader unavailable");
+        when(registrations.selectCmsRegistrationById(1L)).thenThrow(storage);
+        RegistrationQueryApplication app = application(registrations);
+        AjaxResult detail = app.getRegistrationDetail(7L, "1");
+        assertEquals(500, detail.get("code")); assertEquals("fixture reader unavailable", detail.get("msg"));
+        assertSame(storage, assertThrowsExactly(IllegalStateException.class, () -> app.exploreCompletion(7L, "1")));
+    }
+
+    @Test void rawListRemainsOnTheHttpThreadAndOnlyTheControllerCreatesTheOriginalPageEnvelope() {
+        PageHelper.clearPage();
+        ICmsRegistrationService registrations = mock(ICmsRegistrationService.class);
+        IRefundService refunds = mock(IRefundService.class);
+        Page<CmsRegistration> rows = new Page<>(1, 20); rows.setTotal(37);
+        CmsRegistration row = new CmsRegistration(); row.setId(1L); row.setMemberId(7L); row.setOwnerType(2L);
+        row.setOwnerId(20L); row.setRegistrationStatus(1); rows.add(row);
+        Thread httpThread = Thread.currentThread();
+        int[] calls = {0};
+        boolean[] outerPagination = {false};
+        when(registrations.selectCmsRegistrationList(any())).thenAnswer(call -> {
+            assertSame(httpThread, Thread.currentThread());
+            calls[0]++;
+            if (!outerPagination[0]) assertNull(PageHelper.getLocalPage());
+            else {
+                Page<?> requested = PageHelper.getLocalPage();
+                assertNotNull(requested); assertEquals(1, requested.getPageNum()); assertEquals(10, requested.getPageSize());
+                // The real PageHelper interceptor clears this after the Mapper read; this mock must do the same.
+                PageHelper.clearPage();
+            }
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive()); return rows;
+        });
+        when(refunds.selectRefundList(any())).thenReturn(Collections.emptyList());
+        ApiRegistrationController controller = new ApiRegistrationController() { @Override public Long getAppUserId() { return 7L; } };
+        ReflectionTestUtils.setField(RegistrationQueryTestFixtures.application(controller), "registrationService", registrations);
+        ReflectionTestUtils.setField(RegistrationQueryTestFixtures.application(controller), "activityService", mock(ICmsActivityService.class));
+        ReflectionTestUtils.setField(RegistrationQueryTestFixtures.application(controller), "refundService", refunds);
+        RegistrationQueryApplication app = RegistrationQueryTestFixtures.application(controller);
+        try {
+            assertSame(rows, app.myRegistrationList(7L, "3", "0", null).get("data"));
+            // The original controller intentionally does not enable startPage; wrapping is its only added effect.
+            AjaxResult response = controller.myRegistrationList("3", "0", null);
+            assertEquals(200, response.get("code")); TableDataInfo page = (TableDataInfo) response.get("data");
+            assertSame(rows, page.getRows()); assertEquals(37L, page.getTotal()); assertEquals(200, page.getCode());
+            assertEquals("查询成功", page.getMsg()); assertNull(PageHelper.getLocalPage());
+            // Preserve the positive PageHelper assertions for a real pre-existing HTTP-thread page context.
+            outerPagination[0] = true;
+            PageHelper.startPage(1, 10);
+            AjaxResult pagedResponse = controller.myRegistrationList("3", "0", null);
+            assertEquals(200, pagedResponse.get("code"));
+            TableDataInfo paged = (TableDataInfo) pagedResponse.get("data");
+            assertSame(rows, paged.getRows()); assertEquals(37L, paged.getTotal()); assertEquals(200, paged.getCode());
+            assertEquals("查询成功", paged.getMsg()); assertNull(PageHelper.getLocalPage());
+            assertEquals(3, calls[0]);
+        } finally {
+            PageHelper.clearPage();
+        }
+        assertNull(RegistrationQueryApplication.class.getAnnotation(Transactional.class));
+        for (java.lang.reflect.Method method : RegistrationQueryApplication.class.getDeclaredMethods())
+            assertNull(method.getAnnotation(Transactional.class), method.getName());
+    }
+    // OR-029：同一活动在一次列表里只查一次；列表不分页(registration-query-application-source 合同)，整表原样返回。
+    @Test void listLoadsEachOwnerOnceWithoutEnablingPagination() {
+        PageHelper.clearPage();
+        ICmsRegistrationService registrations = mock(ICmsRegistrationService.class);
+        ICmsActivityService activities = mock(ICmsActivityService.class);
+        IRefundService refunds = mock(IRefundService.class);
+        when(refunds.selectRefundList(any())).thenReturn(Collections.emptyList());
+        java.util.List<CmsRegistration> rows = new java.util.ArrayList<>();
+        for (long id = 1; id <= 3; id++) {
+            CmsRegistration row = new CmsRegistration(); row.setId(id); row.setMemberId(7L); row.setOwnerType(2L);
+            row.setOwnerId(20L); row.setRegistrationStatus(1); rows.add(row);
+        }
+        boolean[] pagedDuringQuery = {true};
+        when(registrations.selectCmsRegistrationList(any())).thenAnswer(call -> {
+            pagedDuringQuery[0] = PageHelper.getLocalPage() != null;
+            return rows;
+        });
+        CmsActivity activity = new CmsActivity(); activity.setId(20L);
+        when(activities.selectCmsActivityById(20L)).thenReturn(activity);
+        RegistrationQueryApplication app = application(registrations);
+        ReflectionTestUtils.setField(app, "activityService", activities);
+        ReflectionTestUtils.setField(app, "refundService", refunds);
+        try {
+            AjaxResult response = app.myRegistrationList(7L, "3", "0", null);
+            assertEquals(200, response.get("code"));
+            assertFalse(pagedDuringQuery[0], "列表不得开启分页");
+            assertSame(rows, response.get("data"));
+            verify(activities, times(1)).selectCmsActivityById(20L);
+            for (CmsRegistration row : rows) assertSame(activity, row.getCmsActivity());
+            assertNull(PageHelper.getLocalPage());
+        } finally {
+            PageHelper.clearPage();
+        }
+    }
+}

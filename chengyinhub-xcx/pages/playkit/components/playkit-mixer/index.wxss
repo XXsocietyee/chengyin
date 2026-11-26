@@ -1,0 +1,84 @@
+@import "/pages/playkit/style/play-surface.wxss";
+
+/* cy-playkit-mixer · 调音台(2026-11-24 业主批准原型 stage-vocal-restore)。
+   行的样子照问答选项行:细线文字行,选中 = 软底 + 加粗 + 实心小方块;静音行整体变淡、波形划虚线、开关旁写「静音」。 */
+.mx { color: var(--ink); text-align: left; align-items: stretch; }
+.mx__title { font-size: var(--cy-type-sheet-title); font-weight: 800; line-height: 1.4; }
+.mx__list { width: 100%; margin-top: var(--cy-space-5); border-top: 1rpx solid var(--soft); }
+.mx__row {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-3);
+  padding: 0 var(--cy-space-3);
+  border-bottom: 1rpx solid var(--soft);
+  color: var(--sub);
+  transition: color .18s ease, background .18s ease;
+}
+.mx__row.is-on { color: var(--ink); background: var(--soft); }
+.mx__pick {
+  flex: 1;
+  min-width: 0;
+  min-height: 96rpx;
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-3);
+  font-size: var(--cy-type-body);
+  font-weight: 500;
+}
+.mx__row.is-on .mx__pick { font-weight: 700; }
+.mx__dot { flex: none; width: 16rpx; height: 16rpx; border-radius: var(--cy-radius-sm); box-shadow: inset 0 0 0 2rpx currentColor; }
+.mx__row.is-on .mx__dot { background: currentColor; }
+.mx__name { flex: none; width: 96rpx; overflow: hidden; white-space: nowrap; }
+.mx__wave { position: relative; flex: 1; min-width: 0; height: 72rpx; display: flex; align-items: center; gap: 4rpx; }
+.mx__bar { flex: 1; min-width: 2rpx; background: var(--ink); opacity: .82; transition: opacity .18s ease; }
+.mx__strike { position: absolute; left: 0; right: 0; top: 50%; border-top: 2rpx dashed var(--sub); opacity: 0; transition: opacity .18s ease; }
+.mx__row.is-muted .mx__bar { opacity: .22; }
+.mx__row.is-muted .mx__strike { opacity: 1; }
+.mx__sw { flex: none; min-height: 96rpx; display: flex; align-items: center; gap: var(--cy-space-2); font-size: var(--cy-type-label); font-weight: 600; color: var(--ink); }
+.mx__row.is-muted .mx__sw { color: var(--sub); }
+.mx__state { padding: 2rpx var(--cy-space-2); border: 2rpx solid currentColor; border-radius: var(--cy-radius-sm); line-height: 1.5; }
+.mx__track { position: relative; width: 88rpx; height: 52rpx; border-radius: var(--cy-radius-pill); background: var(--ink); box-shadow: inset 0 0 0 3rpx var(--ink); transition: background .18s ease, box-shadow .18s ease; }
+.mx__thumb { position: absolute; left: 6rpx; top: 6rpx; width: 40rpx; height: 40rpx; border-radius: var(--cy-radius-pill); background: var(--bg); transform: translateX(36rpx); transition: transform .18s ease, background .18s ease; }
+.mx__row.is-muted .mx__track { background: transparent; box-shadow: inset 0 0 0 3rpx var(--sub); }
+.mx__row.is-muted .mx__thumb { transform: none; background: var(--sub); }
+.mx__press { opacity: .88; }
+.mx__fb { margin-top: var(--cy-space-3); font-size: var(--cy-type-body); font-weight: 600; line-height: 1.7; color: var(--accent); }
+
+/* 答错:四边一圈柔和红光,只改透明度,约 0.5 秒淡出;不抖 */
+.mx__edge {
+  position: absolute;
+  left: 0; right: 0; top: 0; bottom: 0;
+  z-index: 6;
+  pointer-events: none;
+  box-shadow: inset 0 0 64rpx 8rpx var(--cy-color-status-danger);
+  opacity: 0;
+  transition: opacity .5s ease-out;
+}
+.mx__edge.is-on { opacity: .55; transition: opacity .12s ease-out; }
+/* 「通过」章:点任意处继续 —— 透明的一整层压在章上 */
+.mx__catch { position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: var(--cy-z-modal); }
+
+/* 复原前 / 复原后 */
+.ab { width: 100%; margin-top: var(--cy-space-5); }
+.ab__seg { display: flex; border: 1rpx solid var(--soft); border-radius: var(--cy-radius-md); overflow: hidden; align-self: flex-start; }
+.ab__s { min-width: 176rpx; min-height: 88rpx; padding: 0 var(--cy-space-4); display: flex; align-items: center; justify-content: center; font-size: var(--cy-type-body); font-weight: 600; color: var(--ink); transition: background .18s ease, color .18s ease; }
+.ab__s.is-on { background: var(--ink); color: var(--bg); font-weight: 800; }
+.ab__viz { position: relative; margin-top: var(--cy-space-4); height: 168rpx; display: flex; align-items: center; gap: 4rpx; }
+.ab__bar { flex: 1; min-width: 2rpx; background: var(--ink); opacity: .45; transition: opacity .18s ease; }
+.ab__viz.is-after .ab__bar { opacity: .82; }
+/* 播放头:一整条与波形同宽的轨道按百分比平移(transform,不动布局),竖线贴在轨道左缘 */
+.ab__track { position: absolute; left: 0; right: 0; top: -6rpx; bottom: -6rpx; pointer-events: none; }
+.ab__track.is-run { transition: transform .25s linear; }
+.ab__head { position: absolute; left: 0; top: 0; bottom: 0; width: 3rpx; margin-left: -1rpx; background: var(--accent); }
+.ab__cap { margin-top: var(--cy-space-4); min-height: 48rpx; font-size: var(--cy-type-body); line-height: 1.7; color: var(--ink); }
+
+.mx--reduced .mx__row,
+.mx--reduced .mx__bar,
+.mx--reduced .mx__strike,
+.mx--reduced .mx__track,
+.mx--reduced .mx__thumb,
+.mx--reduced .ab__s,
+.mx--reduced .ab__bar,
+.mx--reduced .ab__track.is-run,
+.mx__edge--reduced,
+.mx__edge--reduced.is-on { transition: none; }

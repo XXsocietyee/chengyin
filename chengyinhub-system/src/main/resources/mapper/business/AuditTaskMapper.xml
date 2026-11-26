@@ -1,0 +1,273 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.chengyinhub.business.mapper.AuditTaskMapper">
+
+    <resultMap type="AuditTask" id="AuditTaskResult">
+        <result property="id" column="id" />
+        <result property="bizType" column="biz_type" />
+        <result property="bizId" column="biz_id" />
+        <result property="submitterId" column="submitter_id" />
+        <result property="sourceType" column="source_type" />
+        <result property="riskLevel" column="risk_level" />
+        <result property="status" column="status" />
+        <result property="currentAssignee" column="current_assignee" />
+        <result property="submittedAt" column="submitted_at" />
+        <result property="deadlineAt" column="deadline_at" />
+        <result property="snapshotJson" column="snapshot_json" />
+        <result property="version" column="version" />
+        <result property="createBy" column="create_by" />
+        <result property="createTime" column="create_time" />
+        <result property="updateBy" column="update_by" />
+        <result property="updateTime" column="update_time" />
+        <result property="remark" column="remark" />
+    </resultMap>
+
+    <sql id="selectAuditTaskVo">
+        select id, biz_type, biz_id, submitter_id, source_type, risk_level, status,
+               current_assignee, submitted_at, deadline_at, snapshot_json, version,
+               create_by, create_time, update_by, update_time, remark
+        from audit_task
+    </sql>
+
+    <select id="selectAuditTaskById" parameterType="Long" resultMap="AuditTaskResult">
+        <include refid="selectAuditTaskVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectAuditTaskByIdForUpdate" parameterType="Long" resultMap="AuditTaskResult">
+        <include refid="selectAuditTaskVo"/>
+        where id = #{id} for update
+    </select>
+
+    <select id="selectTopicPublicationTasksForUpdate" resultMap="AuditTaskResult">
+        <include refid="selectAuditTaskVo"/>
+        where biz_id = #{topicId} and biz_type in ('TOPIC', 'TOPIC_PROJECT_REVIEW', 'TOPIC_SALE_REVIEW')
+          and status in (0, 3)
+        order by id for update
+    </select>
+    <select id="selectLatestTopicPublicationTask" resultMap="AuditTaskResult">
+        <include refid="selectAuditTaskVo"/>
+        where biz_id = #{topicId} and biz_type in ('TOPIC', 'TOPIC_PROJECT_REVIEW', 'TOPIC_SALE_REVIEW')
+        order by id desc limit 1
+    </select>
+    <update id="cancelTopicPublicationTaskCas">
+        update audit_task set status = 4, risk_level = 'SUPPLY_REPLACEMENT',
+            version = version + 1, update_time = now()
+        where id = #{id} and version = #{version} and status in (0, 3)
+          and biz_type in ('TOPIC', 'TOPIC_PROJECT_REVIEW', 'TOPIC_SALE_REVIEW')
+    </update>
+    <!-- 内容审核槽(open_guard=1)的未结单;举报单在独立槽(open_guard=2),不在此返回(AUDIT-INT-5) -->
+    <select id="selectOpenAuditTaskForUpdate" resultMap="AuditTaskResult">
+        <include refid="selectAuditTaskVo"/>
+        where biz_type = #{bizType} and biz_id = #{bizId} and status in (0, 3)
+          and not (source_type &lt;=&gt; 'report' and biz_type in ('TOPIC', 'TEMPLATE', 'TEMPLATE_LIBRARY', 'ACTIVITY'))
+        order by id desc limit 1 for update
+    </select>
+
+    <sql id="auditTaskListWhere">
+        <where>
+            <if test="bizType != null and bizType != ''"> and biz_type = #{bizType}</if>
+            <if test="bizId != null"> and biz_id = #{bizId}</if>
+            <if test="submitterId != null"> and submitter_id = #{submitterId}</if>
+            <if test="status != null"> and status = #{status}</if>
+            <if test="riskLevel != null and riskLevel != ''"> and risk_level = #{riskLevel}</if>
+        </where>
+    </sql>
+
+    <!-- 内部"取最新一单"语义(get(0)=最新),供开售/立项状态源、供给作废等读取,勿改排序 -->
+    <select id="selectAuditTaskList" parameterType="AuditTask" resultMap="AuditTaskResult">
+        <include refid="selectAuditTaskVo"/>
+        <include refid="auditTaskListWhere"/>
+        order by submitted_at desc, id desc
+    </select>
+
+    <!-- 工作台队列:最紧急(deadline 最早)在前,无 deadline 的历史单垫底;id 兜底保证分页稳定 -->
+    <select id="selectAuditTaskQueue" parameterType="AuditTask" resultMap="AuditTaskResult">
+        <include refid="selectAuditTaskVo"/>
+        <include refid="auditTaskListWhere"/>
+        order by deadline_at is null, deadline_at asc, submitted_at asc, id asc
+    </select>
+
+    <!-- Dedicated workbench read; guard scope comes only from authenticated server configuration. -->
+    <select id="selectWorkbenchQueueWithGuardScope" resultMap="AuditTaskResult">
+        <include refid="selectAuditTaskVo"/>
+        <where>
+            <if test="filter != null">
+                <if test="filter.bizType != null and filter.bizType != ''"> and biz_type = #{filter.bizType}</if>
+                <if test="filter.bizId != null"> and biz_id = #{filter.bizId}</if>
+                <if test="filter.submitterId != null"> and submitter_id = #{filter.submitterId}</if>
+                <if test="filter.status != null"> and status = #{filter.status}</if>
+                <if test="filter.riskLevel != null and filter.riskLevel != ''"> and risk_level = #{filter.riskLevel}</if>
+            </if>
+            and (biz_type is null or biz_type != 'play_arrive_guard'
+            <if test="guardTopicIds != null and guardTopicIds.size() > 0">
+                or (biz_type = 'play_arrive_guard' and source_type = 'appeal' and exists (
+                    select 1 from audit_appeal ga
+                    inner join play_arrive_guard_log gl on gl.id = ga.biz_id and gl.member_id = ga.member_id
+                    where ga.task_id = audit_task.id and ga.biz_type = audit_task.biz_type
+                      and ga.biz_id = audit_task.biz_id and ga.member_id = audit_task.submitter_id
+                      and gl.topic_id in
+                      <foreach collection="guardTopicIds" item="topicId" open="(" separator="," close=")">#{topicId}</foreach>
+                ))
+            </if>
+            )
+        </where>
+        order by deadline_at is null, deadline_at asc, submitted_at asc, id asc
+    </select>
+
+    <insert id="insertAuditTask" parameterType="AuditTask" useGeneratedKeys="true" keyProperty="id">
+        insert into audit_task
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="bizType != null">biz_type,</if>
+            <if test="bizId != null">biz_id,</if>
+            <if test="submitterId != null">submitter_id,</if>
+            <if test="sourceType != null">source_type,</if>
+            <if test="riskLevel != null">risk_level,</if>
+            <if test="status != null">status,</if>
+            <if test="currentAssignee != null">current_assignee,</if>
+            <if test="submittedAt != null">submitted_at,</if>
+            <if test="deadlineAt != null">deadline_at,</if>
+            <if test="snapshotJson != null">snapshot_json,</if>
+            <if test="version != null">version,</if>
+            <if test="createBy != null">create_by,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="remark != null">remark,</if>
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="bizType != null">#{bizType},</if>
+            <if test="bizId != null">#{bizId},</if>
+            <if test="submitterId != null">#{submitterId},</if>
+            <if test="sourceType != null">#{sourceType},</if>
+            <if test="riskLevel != null">#{riskLevel},</if>
+            <if test="status != null">#{status},</if>
+            <if test="currentAssignee != null">#{currentAssignee},</if>
+            <if test="submittedAt != null">#{submittedAt},</if>
+            <if test="deadlineAt != null">#{deadlineAt},</if>
+            <if test="snapshotJson != null">#{snapshotJson},</if>
+            <if test="version != null">#{version},</if>
+            <if test="createBy != null">#{createBy},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="remark != null">#{remark},</if>
+        </trim>
+    </insert>
+
+    <update id="updateAuditTaskReviewCas">
+        update audit_task
+        set status = #{status},
+            current_assignee = #{assignee},
+            version = version + 1,
+            update_time = #{updateTime}
+        where id = #{id}
+          and status = #{expectedStatus}
+          and version = #{version}
+    </update>
+
+    <!-- O5b-3:举报首响时钟带进处置单 —— 只收紧未结单的 deadline,不放宽、不改版本号 -->
+    <update id="tightenOpenDeadline">
+        update audit_task
+        set deadline_at = #{deadline}
+        where id = #{id}
+          and status in (0, 3)
+          and (deadline_at is null or deadline_at &gt; #{deadline})
+    </update>
+
+    <!-- 认领:仅未被认领的待审单可认领,条件更新防并发双认领 -->
+    <update id="claimAuditTask">
+        update audit_task
+        set current_assignee = #{assignee},
+            update_time = #{updateTime}
+        where id = #{id}
+          and current_assignee is null
+          and status = 0
+    </update>
+
+    <update id="revertAuditTaskDecisionCas">
+        update audit_task
+        set status = 0,
+            current_assignee = null,
+            version = version + 1,
+            update_time = #{updateTime}
+        where id = #{id}
+          and status = #{expectedStatus}
+          and version = #{expectedVersion}
+          and update_time is not null
+          and update_time &gt;= #{cutoff}
+    </update>
+
+    <update id="refreshPendingSnapshot">
+        update audit_task
+        set snapshot_json = #{snapshotJson}, submitter_id = #{submitterId},
+            submitted_at = #{submittedAt}, update_time = #{submittedAt}, version = version + 1
+        where id = #{id} and status = 0
+    </update>
+
+    <update id="updateTaskSnapshot">
+        update audit_task set snapshot_json = #{snapshotJson}, update_time = now() where id = #{id}
+    </update>
+
+    <update id="cancelOpenAuditTaskCas">
+        update audit_task set status = 4, version = version + 1, update_time = now()
+        where id = #{id} and version = #{version} and status in (0, 3)
+    </update>
+
+    <!-- 申诉单不在此撤销(AUDIT-INT-9):调用方先经 IAuditTaskService#withdrawOpenAppeal 以 WITHDRAWN 结案并通知作者;
+         举报单裁决的是已公开内容,作者改/撤模板不能顺手撤掉别人的举报(AUDIT-INT-5) -->
+    <update id="cancelOpenTemplateTasks">
+        update audit_task set status = 4, version = version + 1, update_time = now()
+        where biz_type = #{bizType} and biz_type in ('TEMPLATE', 'TEMPLATE_LIBRARY')
+          and biz_id = #{bizId} and status in (0, 3)
+          and (source_type is null or source_type not in ('appeal', 'report'))
+    </update>
+
+    <update id="refreshOpenAuditSnapshot">
+        update audit_task
+        set snapshot_json = #{snapshotJson}, submitter_id = #{submitterId}, source_type = #{sourceType},
+            submitted_at = #{submittedAt}, update_time = #{submittedAt}, version = version + 1
+        where id = #{id} and biz_type = #{bizType} and status in (0, 3)
+    </update>
+
+    <!-- SLA 监控:待审积压 / 超期 计数 -->
+    <select id="countPendingBacklog" resultType="int">
+        select count(*) from audit_task
+        where status = 0 and submitted_at &lt; #{cutoff}
+    </select>
+
+    <select id="countPendingOverdue" resultType="int">
+        select count(*) from audit_task
+        where status = 0 and deadline_at is not null and deadline_at &lt; #{now}
+    </select>
+
+    <select id="samplePendingBacklogIds" resultType="java.lang.Long">
+        select id from audit_task
+        where status = 0 and submitted_at &lt; #{cutoff}
+        order by id asc limit 20
+    </select>
+    <select id="samplePendingOverdueIds" resultType="java.lang.Long">
+        select id from audit_task
+        where status = 0 and deadline_at is not null and deadline_at &lt; #{now}
+        order by id asc limit 20
+    </select>
+
+    <!-- 举报限频:某提交人在时间窗内新建的举报单条数(走 idx_audit_submitter) -->
+    <select id="countRecentReportsBySubmitter" resultType="int">
+        select count(*) from audit_task
+        where submitter_id = #{submitterId}
+          and source_type = 'report'
+          and submitted_at &gt;= #{since}
+    </select>
+
+    <!-- O-05 #2:该内容所有开放审核单(含举报槽)上的去重举报人数,供风险重算。 -->
+    <select id="countOpenReportersByBiz" resultType="int">
+        select count(distinct r.operator_id)
+        from audit_record r join audit_task t on t.id = r.task_id
+        where t.biz_type = #{bizType} and t.biz_id = #{bizId} and t.status in (0, 3) and r.action = 'REPORT'
+    </select>
+
+    <!-- O-05 #2:开放单风险只升不降;按读到的旧值 CAS,不动 version(不打断审核员手上的版本化裁决)。 -->
+    <update id="escalateOpenRiskLevel">
+        update audit_task set risk_level = #{riskLevel}, update_time = now()
+        where id = #{id} and status in (0, 3) and risk_level &lt;=&gt; #{expectedRiskLevel}
+    </update>
+</mapper>

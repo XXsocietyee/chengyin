@@ -1,0 +1,155 @@
+package com.chengyinhub.business.util;
+
+import com.chengyinhub.business.domain.CmsRegistration;
+import com.chengyinhub.business.domain.OmsTicket;
+import com.chengyinhub.business.domain.vo.PublicTicketVO;
+import com.chengyinhub.common.constant.PurchaseKind;
+import org.junit.jupiter.api.Test;
+
+import java.util.Date;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * 5.9 场次票退款**文案**(产品拍板 2026-09-15):「集合前 24 小时可全额退;之后或未到场不退」。
+ *
+ * <p>文案只有两处来源,且都从 {@link RefundPolicy#SESSION_REFUND_RULE_TEXT} 出:
+ * <ul>
+ *   <li>购买页票种行:{@link PublicTicketVO#refundRule}(带队场次票覆写,其他票种原样);</li>
+ *   <li>订单页退款卡:{@link RegistrationDetailDisplay#refundDeadlineDisplay}(判决 + 该句规则)。</li>
+ * </ul>
+ * 自玩通行证(ownerType=1)与自由探索票(mode=2,快照钟)不得被改。
+ */
+class SessionRefundCopyTest {
+
+    private static final long H = 3600_000L;
+    private final Date now = new Date(1_700_000_000_000L);
+
+    private OmsTicket ticket(long ownerType, Integer mode, String publisherRule) {
+        OmsTicket t = new OmsTicket();
+        t.setId(1L);
+        t.setOwnerType(ownerType);
+        t.setMode(mode);
+        t.setName("城市定向票");
+        t.setRefundRule(publisherRule);
+        return t;
+    }
+
+    /** 购买页:带队场次票(ownerType=2 且非自由探索)统一出平台规则,压掉发布者的自由文本。 */
+    @Test
+    void guidedActivityTicketGetsPlatformRuleText() {
+        PublicTicketVO vo = PublicTicketVO.from(ticket(2L, 1, "老旧自由文本"), null);
+        assertEquals(RefundPolicy.SESSION_REFUND_RULE_TEXT, vo.getRefundRule());
+    }
+
+    /** mode 缺省(存量派生列未落)按带队处理 —— 退款钟对 ownerType=2 一律 24h,文案不能反着来。 */
+    @Test
+    void activityTicketWithNullModeAlsoGetsPlatformRuleText() {
+        PublicTicketVO vo = PublicTicketVO.from(ticket(2L, null, null), null);
+        assertEquals(RefundPolicy.SESSION_REFUND_RULE_TEXT, vo.getRefundRule());
+    }
+
+    /** 自由探索票(mode=2)走的是快照钟(票有效期),文案不得覆写成 24h 规则。 */
+    @Test
+    void freeExploreActivityTicketKeepsPublisherRule() {
+        PublicTicketVO vo = PublicTicketVO.from(ticket(2L, 2, "以票面有效期为准"), null);
+        assertEquals("以票面有效期为准", vo.getRefundRule());
+    }
+
+    /** 主题票(ownerType=1)不在本次范围 —— 自玩/经典定向的口径一个都不动。 */
+    @Test
+    void topicTicketKeepsPublisherRule() {
+        PublicTicketVO vo = PublicTicketVO.from(ticket(1L, 1, "主题自有规则"), null);
+        assertEquals("主题自有规则", vo.getRefundRule());
+    }
+
+    private String display(long ownerType, Integer purchaseKind) {
+        CmsRegistration r = new CmsRegistration();
+        r.setOwnerType(ownerType);
+        r.setPurchaseKind(purchaseKind);
+        r.setPaymentStatus(2);
+        RefundPolicy.Verdict v = new RefundPolicy.Verdict(true, "可全额退款，原路退回(预计1-3个工作日)",
+                new Date(now.getTime() + 3 * H));
+        return RegistrationDetailDisplay.refundDeadlineDisplay(v, r);
+    }
+
+    /** 订单页:带队场次单的可退展示 = 规则句 + 本单截止点。 */
+    @Test
+    void guidedSessionOrderDisplayCarriesRuleTextAndDeadline() {
+        String text = display(2L, PurchaseKind.GUIDED_TICKET);
+        assertTrue(text.contains(RefundPolicy.SESSION_REFUND_RULE_TEXT), "实际:" + text);
+        assertTrue(text.contains("可免费取消至"), "实际:" + text);
+    }
+
+    /** F-W5-07:¥0 免费单只说「免费报名,可免费取消至…」,不挂收费票的全额退/未到场不退规则;收费单不变。 */
+    @Test
+    void freeZeroYuanOrderShowsOnlyFreeCancelWording() {
+        CmsRegistration r = new CmsRegistration();
+        r.setOwnerType(2L);
+        r.setPurchaseKind(PurchaseKind.GUIDED_TICKET);
+        r.setPaymentStatus(2);
+        r.setPayableAmount(java.math.BigDecimal.ZERO);
+        Date deadline = new Date(now.getTime() + 3 * H);
+        RefundPolicy.Verdict v = new RefundPolicy.Verdict(true, "可全额退款", deadline);
+        java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("M月d日 HH:mm");
+        fmt.setTimeZone(java.util.TimeZone.getTimeZone("Asia/Shanghai"));
+
+        assertEquals("免费报名，可免费取消至 " + fmt.format(deadline), RegistrationDetailDisplay.refundDeadlineDisplay(v, r));
+
+        r.setPayableAmount(new java.math.BigDecimal("19.90"));
+        String paid = RegistrationDetailDisplay.refundDeadlineDisplay(v, r);
+        assertTrue(paid.startsWith(RefundPolicy.SESSION_REFUND_RULE_TEXT), "收费单不变:" + paid);
+
+        r.setPayableAmount(java.math.BigDecimal.ZERO);
+        r.setPointUsed(100L);
+        assertTrue(RegistrationDetailDisplay.refundDeadlineDisplay(v, r).startsWith(RefundPolicy.SESSION_REFUND_RULE_TEXT),
+                "积分全额抵扣不是免费单");
+    }
+
+    /** 存量单购买类型缺失 ⇒ 仍按场次票(ownerType=2)展示,别把老单的承诺吞掉。 */
+    @Test
+    void legacyActivityOrderAlsoCarriesRuleText() {
+        String text = display(2L, null);
+        assertTrue(text.contains(RefundPolicy.SESSION_REFUND_RULE_TEXT), "实际:" + text);
+    }
+
+    /** ③ 自由探索票(快照钟)的展示保持原样,不加 24h 规则句。 */
+    @Test
+    void explorePassOrderDisplayStaysDeadlineOnly() {
+        String text = display(2L, PurchaseKind.EXPLORE_PASS);
+        assertFalse(text.contains(RefundPolicy.SESSION_REFUND_RULE_TEXT), "实际:" + text);
+        assertTrue(text.contains("可免费取消至"), "实际:" + text);
+    }
+
+    /** 主题单(ownerType=1)的展示保持原样。 */
+    @Test
+    void topicOrderDisplayStaysDeadlineOnly() {
+        String text = display(1L, PurchaseKind.GUIDED_TICKET);
+        assertFalse(text.contains(RefundPolicy.SESSION_REFUND_RULE_TEXT), "实际:" + text);
+    }
+
+    /** 2026-11-02 退款档位:开始后才拒绝,理由说「已开始」;24 小时内是退 50%,不再是拒绝。 */
+    @Test
+    void missedSessionRefusalReasonSaysStarted() {
+        RefundPolicy.Verdict v = RefundPolicy.evaluate(2L, 2, 0, null, null, null,
+                new Date(now.getTime() - H), now);
+        assertFalse(v.refundable);
+        assertEquals("场次已开始，不可退款", v.reason);
+        RefundPolicy.Verdict late = RefundPolicy.evaluate(2L, 2, 0, null, null, null,
+                new Date(now.getTime() + H), now);
+        assertTrue(late.partial());
+        assertTrue(late.reason.contains("50%"), "实际:" + late.reason);
+    }
+
+    /** 快照单(③)错过时给通用截止口径,不再说「活动开始」—— 它的钟是票面有效期。 */
+    @Test
+    void missedSnapshotOrderUsesGenericDeadlineReason() {
+        RefundPolicy.Verdict v = RefundPolicy.evaluate(1L, 2, 0, 2, null, null, null,
+                PurchaseKind.EXPLORE_PASS, new Date(now.getTime() - H), now);
+        assertFalse(v.refundable);
+        assertFalse(v.reason.contains("活动开始"), "实际:" + v.reason);
+        assertTrue(v.reason.contains("退款截止"), "实际:" + v.reason);
+    }
+}

@@ -1,0 +1,52 @@
+<view class="mo {{compact ? 'mo--compact' : ''}} {{reducedMotion ? 'mo--reduced-motion' : ''}} {{_closing ? 'mo--closing' : ''}} {{_keepMask ? 'mo--keep-mask' : ''}} {{_handoffIn ? 'mo--handoff-in' : ''}}" wx:if="{{_render}}" catchtouchmove="noop" aria-hidden="{{!show || _closing}}">
+  <view class="mo__mask" bindtap="onMask" aria-role="button" aria-label="关闭当前面板" hover-class="cy-pressed" hover-stay-time="80"></view>
+  <view class="mo__card">
+    <!-- 统一右上角 X(用户规则:各类弹层关闭一律放右上角,底部按钮继续各自动作语义)。
+         ✕ 走 cancel 这条出口 = 「放弃这次弹窗」，不替用户按下任何带业务后果的确认键;
+         请求在途(loading)时整颗不出,和底部按钮一起锁住,不给半路退出。 -->
+    <view class="mo__close" wx:if="{{!loading}}" bindtap="onClose" data-testid="modal-close"
+          aria-role="button" aria-label="{{title ? '关闭' + title : '关闭当前弹窗'}}"
+          hover-class="cy-pressed" hover-stay-time="80"><cy-icon name="close-sm" size="44" /></view>
+    <view class="mo__title" wx:if="{{title}}">{{title}}</view>
+    <!-- 正文是卡片里唯一的滚动区(2026-10-23):说明偏长时在这里滚,按钮固定在卡片底部 -->
+    <scroll-view class="mo__content" scroll-y enhanced show-scrollbar="{{false}}" bounces="{{false}}">
+      <text wx:if="{{content}}">{{content}}</text>
+      <slot wx:else></slot>
+    </scroll-view>
+    <!-- 后果清单(照 Revolut 185 / Threads 78):一行一个 icon + 一句人话,讲会发生什么。
+         没传 consequences 时整块不渲染,老调用点行为不变。 -->
+    <view class="mo__consq" wx:if="{{consequences.length}}">
+      <view class="mo__consq-row" wx:for="{{consequences}}" wx:key="text">
+        <cy-icon class="mo__consq-icon" name="{{item.icon || 'info'}}" size="36" />
+        <text class="mo__consq-text">{{item.text}}</text>
+      </view>
+    </view>
+    <!-- 2026-09-18 用户定:全站弹窗按钮不再纵向排列,一律「取消左 / 确认右」横排。
+         stacked(危险确认)只改变替代方案的摆法:更轻的替代方案独占上方一行、解释跟在下方,
+         主行仍是并排两颗;取消键从 45% 透明白的 ghost 提回 secondary 填充(原来看不清)。 -->
+    <view class="mo__btns">
+      <!-- L10-035(业主 2026-11-24 默认项 A):原条件读未声明的 stacked 属性,替代方案从未显示;
+           9 个带替代方案的危险动作调用处全部接好 bind:alt 后开启,只有危险确认会传 alt-text -->
+      <view class="mo__alt-col" wx:if="{{altText}}">
+        <view class="mo__btn mo__btn--alt mo__btn--secondary" bindtap="onAlt"
+              aria-role="button" aria-label="{{altText}}" hover-class="cy-pressed" hover-stay-time="80">{{altText}}</view>
+        <view class="mo__alt-hint" wx:if="{{altHint}}">{{altHint}}</view>
+      </view>
+      <view class="mo__btn-row">
+        <view class="mo__btn mo__btn--cancel mo__btn--secondary" wx:if="{{showCancel}}"
+              bindtap="onCancel" aria-role="button" aria-label="{{cancelText}}"
+              hover-class="cy-pressed" hover-stay-time="80">{{cancelText}}</view>
+        <view class="mo__btn mo__btn--act {{danger ? 'mo__btn--danger' : 'mo__btn--primary'}} {{loading ? 'is-loading' : ''}}"
+              bindtap="onConfirm" aria-role="button" aria-label="{{loading ? '处理中' : confirmText}}" aria-busy="{{loading}}"
+              hover-class="cy-pressed" hover-stay-time="80">
+          <!-- 忙碌态保留可见文字与静态图形替代。 -->
+          <view wx:if="{{loading}}" class="mo__spinner" aria-hidden="true"></view>
+          <text wx:if="{{loading}}" aria-role="status" aria-live="polite">处理中</text>
+          <text class="{{loading ? 'mo__btn-copy--hidden' : ''}}" aria-hidden="{{loading}}">{{confirmText}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+  <!-- G-2 物理返回 / 侧滑守卫(utils/native-back-guard.js):0 尺寸、无遮罩,只有最上层弹层挂 -->
+  <page-container show="{{_backGuard}}" duration="{{0}}" overlay="{{false}}" custom-style="width:0;height:0;background:transparent;pointer-events:none" bind:afterleave="_onBackGuardLeave" />
+</view>

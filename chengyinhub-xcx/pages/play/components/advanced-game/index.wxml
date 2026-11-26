@@ -1,0 +1,65 @@
+<block wx:if="{{show && (!hidePanel || error || unknown)}}">
+<view class="ag-mask" catchtouchmove="noop" bindtap="close" aria-role="button" aria-label="关闭高级玩法" hover-class="cy-pressed" hover-stay-time="80"></view>
+<view class="ag">
+  <view class="ag__grab"></view>
+  <view class="ag__head"><view><text class="ag__title">{{node.gameTitle || node.name}}</text></view><view class="ag__close" bindtap="close" aria-role="button" aria-label="关闭高级玩法" hover-class="cy-pressed" hover-stay-time="80"><cy-icon name="close-sm" size="44" /></view></view>
+  <scroll-view scroll-y class="ag__scroll">
+    <view class="ag__loading" wx:if="{{loading}}">正在准备玩法…</view>
+    <!-- 只重放持久化原意图，版本和幂等键不变。 -->
+    <view class="ag__status" wx:if="{{unknown}}" bindtap="resolveUnknown" aria-role="button" aria-label="{{unknownText}}" hover-class="ag__press" hover-stay-time="80">
+      <view class="ag__status-dot"></view>
+      <view class="ag__status-body">
+        <text class="ag__status-text">{{readingBack ? '正在确认结果…' : unknownText}}</text>
+        <text class="ag__status-act" wx:if="{{!readingBack}}">再确认一次</text>
+      </view>
+    </view>
+    <cy-btn wx:if="{{unknown && photoRetryable}}" variant="secondary" disabled="{{readingBack || acting}}" bindtap="retryOriginalPhoto">重试原照片</cy-btn>
+    <view class="ag__error" wx:if="{{error && !unknown}}" bindtap="start" hover-class="ag__press" hover-stay-time="80">{{error}} · 点击重新读取</view>
+    <block wx:if="{{state}}">
+      <!-- 状态行给玩家看的是中文,不露 RUNNING / COMPLETED 这类内部状态名;没得分时不挂「得分 0」(实走 A15 复核) -->
+      <view class="ag__meta"><text class="ag__meta-text">{{state.status === 'RUNNING' ? '进行中' : (state.status === 'COMPLETED' ? '已完成' : (state.status === 'FAILED' ? '未通过' : (state.status === 'EXPIRED' ? '已超时' : '')))}}</text><text class="ag__meta-text" wx:if="{{remainingSeconds !== null}}">剩余 {{remainingSeconds || 0}} 秒</text><text class="ag__meta-text" wx:if="{{state.score > 0}}">得分 {{state.score}}</text></view>
+
+      <view class="ag-card" wx:if="{{state.config.random.enabled}}">
+        <text class="ag-card__title">随机卡</text><text class="ag-card__sub">已翻开 {{state.draws.length || 0}} / {{state.config.random.drawCount}}</text>
+        <view class="ag-draw" wx:for="{{state.draws}}" wx:key="id">
+          <view class="ag-draw__copy"><text class="ag-draw__label">{{item.label}}</text><text>{{item.content}}</text></view>
+          <view wx:if="{{item.audioUrl}}" class="ag-draw__audio" data-id="{{item.id}}" data-url="{{item.audioUrl}}" bindtap="toggleDrawAudio" aria-role="button" aria-label="{{playingDrawId === item.id ? '暂停' : '播放'}}{{item.label}}" hover-class="cy-pressed" hover-stay-time="80">
+            {{playingDrawId === item.id ? '暂停' : '播放'}}
+          </view>
+        </view>
+        <cy-btn variant="primary" disabled="{{acting || unknown || state.draws.length >= state.config.random.drawCount}}" bindtap="draw">{{acting ? '翻开中…' : '翻开一张'}}</cy-btn>
+      </view>
+
+      <view class="ag-card" wx:if="{{state.config.branch.enabled && currentStep}}">
+        <text class="ag-card__title">{{currentStep.title || '分支剧情'}}</text><text class="ag-card__body">{{currentStep.body}}</text>
+        <view class="ag-option" wx:for="{{currentStep.options}}" wx:key="id" data-id="{{item.id}}" bindtap="choose" hover-class="cy-pressed" hover-stay-time="80">{{item.label}}<text wx:if="{{item.score}}"> {{item.score > 0 ? '+' : ''}}{{item.score}}</text></view>
+        <view class="ag-terminal" wx:if="{{currentStep.terminal}}">这一段剧情已抵达终点</view>
+      </view>
+
+      <view class="ag-card" wx:if="{{state.config.multiplayer.enabled}}">
+        <text class="ag-card__title">多人协作</text><text class="ag-card__sub">已完成 {{state.multiplayer.completedUnitIds.length || 0}} / {{state.config.multiplayer.requiredTurns || 1}} 轮</text>
+        <text class="ag-card__sub">我的角色：{{state.multiplayer.myRoleLabel || state.multiplayer.myRole || '待分配'}}</text>
+        <view class="ag-member" wx:for="{{members}}" wx:key="memberId" wx:for-item="member">
+          <image class="ag-member__avatar" src="{{member.avatar || '/images/d_profile.png'}}" mode="aspectFill" /><text class="ag-member__name">{{member.name}}</text><text class="ag-member__role">{{member.roleText}}</text>
+          <view class="ag-role" wx:if="{{state.config.multiplayer.assignment === 'LEADER'}}">
+            <text class="ag-role__option" wx:for="{{state.config.multiplayer.roles}}" wx:key="id" wx:for-item="role" data-memberid="{{member.memberId}}" data-roleid="{{role.id}}" bindtap="assignRole" hover-class="cy-pressed" hover-stay-time="80">{{role.label}}</text>
+          </view>
+        </view>
+        <cy-btn variant="primary" disabled="{{acting || unknown}}" bindtap="completeUnit">{{acting ? '提交中…' : '完成我的当前轮次'}}</cy-btn>
+      </view>
+
+      <view class="ag-card" wx:if="{{state.config.leaderboard.enabled}}">
+        <view class="ag-card__row"><text class="ag-card__title">排行榜</text><text class="ag-refresh" bindtap="loadLeaderboard" hover-class="cy-pressed" hover-stay-time="80">{{leaderboardLoading ? '刷新中…' : '刷新'}}</text></view>
+        <view class="ag-rank" wx:for="{{leaderboard}}" wx:key="ownerId"><text>{{item.rank}}</text><text class="ag-rank__name">{{item.displayName || '玩家'}}</text><text>{{item.metricValue}}</text></view>
+        <view class="ag__error" wx:if="{{leaderboardError}}">榜单暂时读不到 · 点「刷新」再试</view>
+        <cy-empty wx:elif="{{!leaderboard.length}}" size="sm" title="还没有排名数据" />
+      </view>
+      <cy-btn wx:if="{{state.canRetry === true && (state.status === 'FAILED' || state.status === 'EXPIRED')}}" variant="secondary" disabled="{{loading || acting || unknown}}" bindtap="retry">{{state.ownerType === 2 ? '队长重新开始本次玩法' : '重新开始本次玩法'}}</cy-btn>
+    </block>
+    <view class="ag__pad"></view>
+  </scroll-view>
+  <!-- 外壳(2026-11-21):玩的时候底部不再摆一颗灰掉的死按钮(和上面玩法自己的钮抢主按钮);
+       玩完(readyForBase)才从底边升起继续钮(故事流里由页面传「继续故事」)。没玩完时不可见、不可点、读屏跳过。 -->
+  <view class="ag__footer {{state.readyForBase ? 'is-ready' : ''}} {{reducedMotion ? 'ag__footer--still' : ''}}" wx:if="{{state}}" aria-hidden="{{!state.readyForBase}}"><cy-btn variant="primary" disabled="{{!state.readyForBase}}" bindtap="continueBase">{{continueLabel || '继续基础任务'}}</cy-btn></view>
+</view>
+</block>

@@ -1,0 +1,67 @@
+'use strict'
+
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const test = require('node:test')
+
+const ROOT = path.resolve(__dirname, '../..')
+const WXML = path.join(ROOT, 'pages/publish/fabu/index.wxml')
+const WXSS = path.join(ROOT, 'pages/publish/fabu/index.wxss')
+
+function rule(source, selector) {
+  const clean = source.replace(/\/\*[\s\S]*?\*\//g, '')
+  const bodies = []
+  for (const match of clean.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    const selectors = match[1].split(',').map((item) => item.trim())
+    if (selectors.includes(selector)) bodies.push(match[2])
+  }
+  assert.ok(bodies.length, `缺少 ${selector}`)
+  return bodies.join('\n')
+}
+
+function assertContract(overrides = {}) {
+  const wxml = overrides.wxml === undefined ? fs.readFileSync(WXML, 'utf8') : overrides.wxml
+  const wxss = overrides.wxss === undefined ? fs.readFileSync(WXSS, 'utf8') : overrides.wxss
+
+  // 2026-11-10 r2-create:故事流顶栏换成 X Articles 式(.sx-*);l-editor:工具栏换成顶部添加栏(.sx-add__i),
+  // 章节卡「预览弹窗」(.ed-cap__pv)、分支卡动作(.story-branch__act)、去向筹码(.ed-chip)、版式格(.sx-il__opt)
+  for (const selector of ['.sx-top__text', '.sx-top__pill', '.sx-add__i', '.ed-cap__pv', '.story-branch__act', '.ed-chip', '.sx-il__opt', '.sx-br__add', '.sx-br__pv', '.node-pill', '.node-sheet__done']) {
+    assert.match(rule(wxss, selector), /(min-)?height:\s*var\(--cy-btn-h\)/, `${selector} 高度不足 44px`)
+  }
+  // AUDIT-1122 L03-096/070:.pd-round-back(文字说明二级页)与 .modal-close(旧类别弹框)随标记删除
+  for (const selector of ['.story-block-x', '.sx-top__icon', '.sx-sheet__close', '.ed-cap__x', '.sx-br__x']) {
+    const cssRule = rule(wxss, selector)
+    assert.match(cssRule, /width:\s*var\(--cy-btn-h\)/, `${selector} 宽度不足 44px`)
+    assert.match(cssRule, /height:\s*var\(--cy-btn-h\)/, `${selector} 高度不足 44px`)
+  }
+
+  for (const label of [
+    '更多', '完成故事流编辑', '拖动或移动这一块', '在文末继续写', '预览章节开始弹窗', '预览章节结束弹窗', '预览分支弹窗', '选图', '换这一格的图', '添加分支', '删除这条分支',
+    '删除文字块', '删除图片块', '删除图片组', '删除分支任务', '删除节点块', // AUDIT-1122 L03-096:无入口的「文字说明」二级页已删,其关闭键名一并去掉
+   
+    // 10-28 原型 A e-node：地点、玩法模板两行改用 L1 cy-list-row，可读名称由组件按「名称 + 当前值」生成。
+    '完成节点编辑', '确认创作模式', // r2-create a5-v3-47:玩法模板选择的顶部「完成」撤掉,确定只在底部
+    // AUDIT-1122 L03-070:「关闭类别选择」随旧类别多选弹框整删
+    '添加章节音频', '移除章节音频',
+  ]) {
+    assert.match(wxml, new RegExp(`aria-label="${label}"`), `缺少可读名称：${label}`)
+  }
+}
+
+test('发布故事流、节点弹层和叙事返回动作均为 44px 且语义明确', () => {
+  assertContract()
+})
+
+test('负控：故事块删除退回 48rpx 会判红', () => {
+  const wxss = fs.readFileSync(WXSS, 'utf8').replace(
+    /(\.story-block-x\s*\{[^}]*?)width:\s*var\(--cy-btn-h\);\s*height:\s*var\(--cy-btn-h\);/s,
+    '$1width:48rpx; height:48rpx;',
+  )
+  assert.throws(() => assertContract({ wxss }), /宽度不足/)
+})
+
+test('负控：章节音频移除键名称丢失会判红', () => {
+  const wxml = fs.readFileSync(WXML, 'utf8').replace(' aria-label="移除章节音频"', '')
+  assert.throws(() => assertContract({ wxml }), /移除章节音频/)
+})

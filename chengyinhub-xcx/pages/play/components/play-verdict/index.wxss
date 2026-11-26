@@ -1,0 +1,121 @@
+/* cy-play-verdict · 全局判定屏(原型真源:模板编辑页 v2 · playkit liquidWin / failScreen)
+ *
+ * 两张,不是十九张:凡是「猜中了」走 win,其余(时间到 / 次数用完)走 fail。
+ * 颜色隔着桌子就看得出来,不靠文字 —— 所以 fail 屏上只有两个字。
+ *
+ * 2026-11-24 业主:不要晃动 —— 液面 / 浪尖 / 气泡撤掉,底色淡入;判负只闪一下淡红。
+ */
+.pv {
+  position: absolute;
+  left: 0; right: 0; top: 0; bottom: 0;
+  z-index: 9;
+  overflow: hidden;
+  border-radius: var(--pk-verdict-radius, 0); /* ds-ok 整屏为 0;故事流内嵌时由外层给圆角,不再是一块直角绿砖 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* 底色淡入(2026-11-24 业主:不要晃动的效果 —— 原来从底下涌上来的液面、浪尖、气泡全撤)。 */
+.pv__fill {
+  position: absolute;
+  left: 0; right: 0; top: 0; bottom: 0;
+  opacity: 0;
+  transition: opacity var(--cy-motion-read-transition, 320ms) var(--cy-ease);
+}
+.pv--on .pv__fill { opacity: 1; }
+.pv--win .pv__fill { background: var(--cy-color-status-success); }
+.pv--fail .pv__fill { background: var(--cy-color-bg-surface-strong); }   /* 判负不再整屏铺红:中性底,红只闪一下(.pv__flash) */
+.pv--fail .pv__word { color: var(--cy-color-status-danger); }   /* 业主 2026-11-24「失败一律红」:中性底上「失败 / 时间到」两个字是红的 */
+/* 答错 / 判负:四周一圈淡红一闪(色同 --cy-color-status-danger #E5484D),挂上即亮、摘掉 420ms 淡出(不加 keyframes;减弱动态不闪) */
+.pv__flash {
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none;
+  box-shadow: inset 0 0 160rpx rgba(229, 72, 77, .55);   /* ds-ok 答错淡红闪 */
+  background: rgba(229, 72, 77, .10);                    /* ds-ok 同上 */
+  opacity: 0; transition: opacity 420ms var(--cy-ease);
+}
+.pv--flash .pv__flash { opacity: 1; transition: none; }
+.pv--neutral .pv__fill { background: var(--cy-color-bg-surface-strong); }
+
+
+
+.pv__body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cy-space-3);
+  padding: 0 var(--cy-space-6);
+  text-align: center;
+  opacity: 0;
+  transition: opacity var(--cy-motion-read-fade, 160ms) var(--cy-ease) var(--cy-motion-read-fade, 160ms);
+}
+.pv--on .pv__body { opacity: 1; }
+
+/* 判定图位:赢是「通过」章(下一段),输是底座 cy-illus 的「失败」插图(自带进场 / 待机);
+   rising 为真才挂上,进场就跟着液面一起来(wx:if 重挂 = 重播)。 */
+.pv__art { display: flex; align-items: center; justify-content: center; min-height: 240rpx; }
+
+/* 「通过」章(2026-11-23):印章色一律成功绿(2026-11-24 业主:通过绿、失败红,不跟外观色);圆角 / 字体仍跟外观(--lk-r / --lk-fd);
+  台面里整屏成功色底上 = 白。落章是跟着 .pv--on 的一次过渡(不加 keyframes、不循环),减弱动态直接就位。 */
+.pv__stamp {
+  --pv-stamp: #fff;                       /* ds-ok 整屏成功色底上的白章,同 .pv__word */
+  width: 208rpx; height: 208rpx; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center;
+  border: 8rpx solid var(--pv-stamp); border-radius: var(--lk-r, var(--cy-radius-md));
+  color: var(--pv-stamp); opacity: 0; transform: rotate(-8deg) scale(1.5);
+  transition: opacity var(--cy-motion-read-fade, 160ms) var(--cy-ease) var(--cy-motion-read-fade, 160ms), transform var(--cy-motion-read-transition, 320ms) cubic-bezier(.2, .9, .3, 1.2) var(--cy-motion-read-fade, 160ms);
+}
+.pv--on .pv__stamp { opacity: .92; transform: rotate(-8deg) scale(1); }
+.pv__stamp-in {
+  width: 168rpx; height: 168rpx; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center;
+  border: 2rpx solid var(--pv-stamp); border-radius: var(--lk-r, var(--cy-radius-md));
+  font-family: var(--lk-fd, inherit); font-size: var(--cy-type-display); font-weight: 900; letter-spacing: 8rpx; text-indent: 8rpx;
+}
+/* 2026-11-24 业主:通过一律绿、失败一律红,所有玩法都一样,不跟路线外观色 */
+.pv--closable .pv__stamp { --pv-stamp: var(--cy-color-status-success); }
+.pv--reduced .pv__stamp { transition: none; opacity: .92; transform: rotate(-8deg); }
+
+/* 失败:两个字,别的什么都没有 */
+.pv__word {
+  font-size: var(--cy-type-display);
+  font-weight: 900;
+  letter-spacing: 6rpx;
+  color: #fff;                            /* ds-ok 同上:整屏红底上的白字 */
+}
+.pv__text {
+  max-width: 22em;
+  font-size: var(--cy-type-body);
+  line-height: 1.75;
+  color: rgba(255, 255, 255, .92);        /* ds-ok 同上 */
+  /* 结果反馈是作者写的故事话,用故事流同一个字(主题选的宋 / 楷 / 黑走 --cy-story-font,否则手写 CyStoryHand) */
+  font-family: var(--cy-story-font, 'CyStoryHand', -apple-system, "PingFang SC", "Noto Sans SC", sans-serif); /* ds-ok 字族名同 story-font.js */
+}
+.pv__remember { margin-top: var(--cy-space-3); font-size: var(--cy-type-caption); color: rgba(255, 255, 255, .72); letter-spacing: .04em; } /* ds-ok 整屏色块上的弱白字 */
+
+/* 减动效:不淡入、不闪,直接是结果那一屏。
+   ⚠️ 用类兜底不用 @media (prefers-reduced-motion):小程序里那条媒体查询不生效,
+   系统开关要走 wx.getSystemInfo 的 theme/无障碍设置 —— 仓内统一由 reduced-motion
+   behavior 读出来挂 --reduced 类。写成媒体查询等于**看着有兜底,实际一直在动**。 */
+.pv--reduced .pv__fill { transition: none; opacity: 1; }
+.pv--reduced .pv__body { transition: none; opacity: 1; }
+
+/* 结果反馈配图与「继续」(2026-10-22):图最多 3 张一行排开;独立弹出时整屏可点 */
+/* 压过玩法台面(台面走 --cy-z-sheet);判定屏是全屏结果,与居中弹窗同档 */
+.pv--closable { pointer-events: auto; position: fixed; z-index: var(--cy-z-modal); }
+.pv__imgs { display: flex; gap: var(--cy-space-2); justify-content: center; flex-wrap: wrap; }
+.pv__img { width: 180rpx; height: 180rpx; border-radius: var(--cy-radius-md); background: rgba(255, 255, 255, .18); } /* ds-ok 整屏色块上的图片占位 */
+
+/* 第十二轮 k8 N7:独立弹出的结果反馈(玩家端作者回话、编辑页预览)走玩家端暗底,不再整屏饱和红 / 绿。
+   判定只落在对勾、两个字的颜色上;作者的话用正文色。台面里嵌着的判定屏不受影响。 */
+/* 外壳(2026-11-21):底色跟主题外观(--pk-embed-*,宿主 .pk-lookhost 上由 look-tokens.wxss 给);没有外观 = 玩家端暗底,与原来一致 */
+.pv--closable .pv__fill { background: var(--pk-embed-bg, var(--cy-color-bg-page)); }
+.pv--closable .pv__word { color: var(--cy-color-status-danger); }
+.pv--closable .pv__text { color: var(--pk-embed-ink, var(--cy-color-text-primary)); }
+.pv--closable .pv__remember { color: var(--pk-embed-sub, var(--cy-color-text-secondary)); }
+.pv--closable .pv__img { background: var(--cy-color-bg-surface); }
+/* 淡出回到故事:只动透明度(过渡,不加 keyframes);减弱动态在 JS 里直接收起,不走这条 */
+.pv { transition: opacity var(--cy-motion-fade-swap) var(--cy-ease-out); }
+.pv--leaving { opacity: 0; pointer-events: none; }

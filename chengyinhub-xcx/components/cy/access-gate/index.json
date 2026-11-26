@@ -1,0 +1,8 @@
+{
+  "component": true,
+  "styleIsolation": "isolated",
+  "usingComponents": {
+    "cy-result-sheet": "/components/cy/result-sheet/index",
+    "cy-empty": "/components/cy/empty/index"
+  }
+}

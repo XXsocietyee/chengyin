@@ -1,0 +1,3318 @@
+@import "./runtime-editor.wxss";
+@import "./look-tokens.wxss"; /* 游戏内外观变量 --lk-*(与 pages/play/look-tokens.wxss 逐字相同,l-editor-look-tokens-sync 锁住):弹窗预览用 */
+@import "../styles/photo-grid.wxss";
+
+.fabu .tab2 {
+  border-top: 2rpx solid var(--cy-border-card);
+  background: var(--cy-bg-card);
+}
+
+.fabu .tab2.steps {
+  padding: 24rpx 38rpx; /* ds-ok: 未被 wxml 引用的历史遗留样式,不渲染,不追求量表精度 */
+}
+
+.fabu .tab2 .step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* 移除时间轴竖线(原 common.wxss 绘制的 ::before / ::after) */
+
+/* 地址弹窗 */
+
+/* 节点编辑 */
+.pop-chapter {
+  color: var(--cy-text-title);
+}
+
+.pop-chapter .pop-cont-games {
+  padding-top: var(--cy-space-1);
+}
+
+/* 2026-09-08:.david_tk* 五条随三个文本编辑弹窗一起撤(那三个弹窗全仓没有入口,是死 UI)。 */
+
+/* 2026-09-05 按 Figma:章节名改「标签 + 填充输入框」。 */
+.chapter-name-field {
+  margin-top: var(--cy-space-2-5);
+}
+
+.chapter-name-field__label {
+  display: block;
+  margin-bottom: var(--cy-space-1-5);
+  color: var(--cy-color-text-secondary);
+  font-size: var(--cy-font-label);
+}
+
+.chapter-name-field__input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 104rpx;
+  padding: 0 var(--cy-space-3);
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-subtitle);
+  font-weight: 700;
+}
+
+.chapter-name-field__ph {
+  color: var(--cy-color-text-placeholder);
+  font-weight: 700;
+}
+
+/* 删除章节:从一行红字提成整宽按钮。稿子把它放在弹窗底部当一颗动作,
+   一行裸红字既不像按钮、触达也只有文字那么宽。 */
+.chapter-settings-delete {
+  min-height: var(--cy-btn-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: var(--cy-space-4);
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-color-status-danger-soft);
+  color: var(--cy-color-status-danger);
+  font-size: var(--cy-type-body);
+  font-weight: 600;
+}
+
+.chapter-settings-body {
+  box-sizing: border-box;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  height: auto;
+  padding-bottom: calc(var(--cy-space-4) + env(safe-area-inset-bottom));
+}
+.pop-chapter-settings { max-height: min(var(--cy-comp-sheet-full), var(--cy-comp-sheet-max-h, var(--cy-comp-sheet-max-height))); color: var(--cy-color-text-primary); }
+.pop-chapter-settings.show { display: flex; flex-direction: column; }
+.pop-chapter-settings::before { background: var(--cy-color-bg-surface); border-top-color: var(--cy-color-border-subtle); backdrop-filter: none; }
+.pop-chapter-settings .pop-top { flex: none; padding: var(--cy-space-3) 0; color: var(--cy-color-text-primary); }
+.pop-chapter-settings .pop-top button { color: var(--cy-color-text-primary); }
+/* CU-C-156:左上的「取消」换成右上角一颗 ✕(热区整档 88rpx,字形-only)。
+   这颗是 view 不是 button,上面那条 button 色管不到它,单独给一次。 */
+.cs-close {
+  width: 88rpx;
+  height: var(--cy-btn-h);
+  margin-right: calc(var(--cy-space-1) * -1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cy-color-text-secondary);
+}
+/* 2026-10-10 主人:章节设置页头改「左 退出(文字) / 右 完成」。 */
+.cs-close.cs-exit { width: auto; min-width: 88rpx; margin-right: 0; margin-left: calc(var(--cy-space-1) * -1); padding: 0 var(--cy-space-1); justify-content: flex-start; color: var(--cy-color-text-primary); font-size: var(--cy-type-button); font-weight: 600; }
+
+/* 2026-09-08 用户逐屏走查:发布确认也要白底。它和章节设置共用 style/common.wxss 的
+   .pop-model —— 那条是全站遗留的深色玻璃(rgba(10,9,13,.85) + color:#fff),
+   改它会波及所有还在用 .pop-model 的页面,所以照章节设置的先例在本页就地覆盖。 */
+
+.chapter-merchant-config {
+  margin-top: var(--cy-space-3-5);
+  --cy-comp-card-pad: var(--cy-space-3);
+  --cy-comp-card-radius: var(--cy-radius-md);
+}
+
+.chapter-merchant-config--muted {
+  color: var(--cy-color-text-secondary);
+  font-size: var(--cy-type-caption);
+  line-height: 1.6;
+}
+
+.chapter-merchant-config__heading {
+  margin-bottom: var(--cy-space-3);
+}
+
+.chapter-merchant-config__title,
+.chapter-merchant-config__label {
+  display: block;
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-type-label);
+  font-weight: 700;
+}
+
+.chapter-merchant-config__hint,
+.chapter-merchant-config__helper {
+  display: block;
+  margin-top: var(--cy-space-1);
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-type-caption);
+  line-height: 1.5;
+}
+
+.chapter-merchant-config__field {
+  margin-top: var(--cy-space-3);
+}
+
+.chapter-merchant-config__input {
+  width: 100%;
+  height: 76rpx;
+  margin-top: var(--cy-legacy-14);
+  padding: 0 var(--cy-legacy-18);
+  box-sizing: border-box;
+  border: 2rpx solid var(--cy-color-border-subtle);
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-color-bg-surface);
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-type-body);
+}
+
+.chapter-merchant-config__required {
+  display: flex;
+  min-height: 76rpx;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cy-space-2-5);
+  padding: 0 var(--cy-legacy-18);
+  border: 2rpx solid var(--cy-color-border-subtle);
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-color-bg-surface);
+}
+
+.chapter-terms-options {
+  display: flex;
+  gap: var(--cy-legacy-14);
+  margin-top: var(--cy-legacy-14);
+}
+
+.chapter-terms-option {
+  flex: 1;
+  min-height: 94rpx;
+  padding: var(--cy-space-2);
+  box-sizing: border-box;
+  border: 2rpx solid var(--cy-color-border-subtle);
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-color-bg-surface);
+}
+
+.chapter-terms-option.is-active {
+  border-color: var(--cy-color-selection);
+  background: var(--cy-color-brand-soft);
+}
+
+.chapter-terms-option text:first-child {
+  display: block;
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-type-label);
+  font-weight: 700;
+}
+
+.chapter-terms-option text:last-child {
+  display: block;
+  margin-top: var(--cy-legacy-6);
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-type-caption);
+}
+
+/* 多选弹框样式 */
+/* 2026-09-02:原 999/1000 越过 token 档(还压过 celebrate 990)。这是居中弹窗 = modal 档。 */
+
+/* 2026-09-05 按品牌手册 T3(全屏弹窗)重做:面板底从纯白改成 bg-surface-subtle,
+   行从「白底 + 分隔线」改成一张张白卡 —— 白底上再画白行,分隔线是唯一的边界,
+   行与面板读起来是一层;卡与浅灰面板之间才有真正的层次。 */
+
+.modal-close {
+  width: var(--cy-btn-h);
+  height: var(--cy-btn-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--cy-font-display);
+  color: var(--cy-text-secondary);
+}
+
+.category-name {
+  font-size: var(--cy-font-body);
+  color: var(--cy-text-title);
+}
+
+/* 选中状态样式 */
+.li.selected .item {
+  position: relative;
+  background: var(--cy-color-action-primary-bg);
+  color: var(--cy-color-action-primary-fg);
+  border-radius: 0px;
+}
+
+/* 地址列表样式 */
+
+.topic-list .list{ overflow: hidden;}
+/* 节点行:去掉时间轴预留的左缩进 */
+/* 定高自包含卡片(为 movable-view 铺路) */
+/* 序号 chip:卡片内左上角,正常流(取消 common 的绝对定位与外圈) */
+/* 拖拽手柄:48rpx 触摸区,按住进入 movable-view 拖拽态 */
+/* movable-view 拖拽重排:movable-area 高度=nodes*rowHpx(随内容增长),各行用 y 绝对定位 */
+/* 拖拽中的行抬起:加重阴影提示(token,不新硬编码色) */
+/* 选中节点行高亮(地图 marker 同步放大变蓝) */
+
+/* 居中准星(加点/移点态) */
+
+/* 时间选择器样式 */
+.time-picker-content {
+  --cy-comp-card-pad: var(--cy-space-4);
+  --cy-comp-card-radius: var(--cy-radius-md);
+}
+
+.time-picker-content__inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.time-section {
+  flex: 1;
+  text-align: center;
+}
+
+.time-label {
+  font-size: var(--cy-font-body);
+  color: var(--cy-text-body);
+  margin-bottom: var(--cy-space-2-5);
+}
+
+.time-selector {
+  height: 600rpx;
+}
+
+.time-picker-view {
+  height: 100%;
+}
+
+.picker-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--cy-space-7);
+  font-size: var(--cy-font-subtitle);
+}
+
+.time-separator {
+  margin: 0 var(--cy-space-4);
+  font-size: var(--cy-font-subtitle);
+  color: var(--cy-text-title);
+  font-weight: bold;
+}
+
+/* ===== 通用设置 新版卡片 UI ===== */
+
+.gen-page {
+  background: var(--cy-bg-page);
+  padding: 24rpx 24rpx 200rpx 24rpx; /* ds-ok: 底部滚动净空,刻意留白非随手数值 */
+  box-sizing: border-box;
+  min-height: 100vh;
+}
+
+/* —— 发布前检查弹层(M4·A) —— */
+.pc-actions {
+  margin-top: var(--cy-space-4);
+}
+/* 两颗并排各占一半(E2:全站按钮位置统一) */
+
+/* —— 发布者实名一节(2026-09-19 RUN-52)——
+ * 字段直接走 cy-field:空态白底 + 灰描边、填写后 #EFEFEF + 深描边,是创建域(浅色)既有口径,
+ * 这里不再自造一套表单皮肤。报错用 cy-inline-error 软红整块,不给输入框描红边。 */
+.pc-identity { display: flex; flex-direction: column; gap: var(--cy-space-3); }
+.pc-identity.node-card { margin-bottom: 0; }
+.pc-identity__consent { margin-top: var(--cy-space-1); }
+.pc-identity__foot {
+  font-size: var(--cy-font-label);
+  color: var(--cy-text-secondary);
+  line-height: var(--cy-leading-normal);
+}
+.pc-identity__err { display: block; margin-top: var(--cy-space-2); }
+/* 「在本层填写」是一句指路,不是一颗可点的按钮 —— 不要用可点项那套颜色 */
+
+/* —— 发布确认页(2026-09-05):检查结果 + 玩家看到的样子 —— */
+/* 标题居中:左右各一个等宽空位(右上角 ✕ 按 2026-10-22 业主裁决撤掉) */
+/* 发布确认的遮罩:点它 = 返回修改;catchtouchmove 锁住下层编辑器。层级紧贴 .pop-model(333)之下。 */
+
+/* ===== Slopes 风格专业主题编辑器 ===== */
+page { background: var(--cy-btn-solid-bg); }
+
+.slopes {
+  min-height: 100vh;
+  background: var(--cy-btn-solid-bg);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 用户 2026-08-11 定:点「地图」= 看路线,地图【铺满全屏】。
+   原来只给 42vh、下面 58vh 还压着内容 sheet —— 顶上一条地图既看不清整条路线,
+   也没法缩放挪动(手一拖就碰到 sheet)。想回内容点左下角那个图标,不必留半截。 */
+.slopes-map-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+}
+
+.slopes-map {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.slopes-icon-cv { position: absolute; width: 54px; height: 54px; left: -9999px; top: -9999px; } /* ds-ok 离屏画布,同 cy-free-map .iconcv */
+
+/* 状态栏保护层:.slopes-map-wrap 是 fixed top:0,地图瓦片直接铺到系统状态栏底下;
+   状态栏前景是白字,压在浅色瓦片上就看不见。这里在状态栏区域盖一层由深到透明的 scrim。
+   --cy-scrim-statusbar 由 wxml 注入 = 系统状态栏实高:满色段严格覆盖到状态栏底边,
+   再用一档 space token 的距离淡出,所以刘海机 / Android 小状态栏都是对的,不靠百分比猜。
+   单层 --cy-comp-scrim(.46)压在纯白瓦片上,白字对比度只有约 3.5:1;两层同色叠加后
+   顶部实际 1-(1-.46)²≈.71(白字约 8.8:1),最浅的地图底色下也能读。
+   (叠两层是因为 tokens.wxss 属共享样式层、本轮不由本线改,加不了更深的 scrim token;
+    若日后 --cy-comp-scrim 被调浅,这里的对比度会静默下降 —— 待共享样式线补一个向下的
+    scrim 渐变 token 后换掉。)
+   scrim 用的是主题无关 token(照片遮罩/白字那一层,tokens.wxss 单点定义、各 theme 均未覆写),
+   所以不会出现「换主题后遮罩变浅」的反向问题。
+   返回键(statusBarHeight+8)与步骤条(+18)落在淡出段中部、约 .4 不透明:两者本身是白字 /
+   深色胶囊,压深只增不减可读性;pointer-events:none 保证不吃点击。 */
+.slopes-status-scrim {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(var(--cy-scrim-statusbar, 0px) + var(--cy-space-5));
+  z-index: 2;
+  pointer-events: none;
+  background:
+    linear-gradient(to bottom, var(--cy-comp-scrim) 0, var(--cy-comp-scrim) var(--cy-scrim-statusbar, 0px), transparent 100%),
+    linear-gradient(to bottom, var(--cy-comp-scrim) 0, var(--cy-comp-scrim) var(--cy-scrim-statusbar, 0px), transparent 100%);
+}
+
+/* 同 .pd-step-progress--map:从地图的 cover-view 里提到页面级,故 fixed。
+   压在地图上时(--on-map)用 oncover 前景色,压在 sheet 上时用常规文字色。 */
+/* 稿子(4028:13649)是 40px 白色圆钮 + 阴影。白底自带对比度,压在地图瓦片上也读得出来,
+   所以不再需要原来那套 --on-map 翻成 oncover 前景色的分支。 */
+.slopes-back {
+  position: fixed;
+  left: var(--cy-page-x);
+  z-index: 20;
+  width: var(--cy-btn-h);
+  height: var(--cy-btn-h);
+  border-radius: var(--cy-radius-pill);
+  color: var(--cy-color-text-primary);
+  background: var(--cy-color-bg-surface);
+  /* 稿子画的是投影;本域(theme-topic-editor)的表面规范是「零投影、留描边」
+     (tokens.wxss §表面规范:起层手段二选一,--cy-shadow-card 在这里恒为 none),
+     所以起层改用描边。写 box-shadow 在这里等于没写。 */
+  border: 2rpx solid var(--cy-color-border-subtle);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.slopes-back__ico {
+  width: 20rpx;
+  height: 20rpx;
+  margin-left: 6rpx;
+  box-sizing: border-box;
+  border-left: 4rpx solid currentColor;
+  border-bottom: 4rpx solid currentColor;
+  transform: rotate(45deg);
+}
+
+/* 不带 --full = 地图视图。地图既然铺满全屏,这张内容 sheet 就整体滑出屏幕,
+   ⚠️ 用 transform 而不是改 top/height:scroll-view 高度归零会把滚动位置一起清掉,
+   切回「内容」时人就被弹回列表最顶上,刚才看到哪儿全丢了。
+   pointer-events 必须一起关,否则一层看不见的 sheet 仍然吃掉地图上的拖拽和缩放。 */
+.slopes-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: 28vh;
+  transform: translateY(105%);
+  pointer-events: none;
+  z-index: 10;
+  background: var(--cy-color-bg-elevated);
+  border-radius: var(--cy-comp-sheet-radius) var(--cy-comp-sheet-radius) 0 0;
+  box-sizing: border-box;
+  /* ⚠️ 只让开底栏【实心的那一段】,不是整条。底栏是 220rpx 高的渐变带,下 55%(≈120rpx,
+     安全区已包含在内)是实底、上面 45% 化开 —— 内容要能滚进那段渐隐区才有"从下面透出来"
+     的效果,这正是稿子(4034:14718)的样子。原来这里留 240rpx + 安全区 ≈ 308rpx,比整条
+     底栏还高:内容在够到渐变之前就先被 padding 顶住,于是底部一大块死灰、没有任何渐隐,
+     最后一张章节卡被整齐切掉。 */
+  padding-bottom: 120rpx; /* ds-ok: 与底栏渐变实心段等高,不套用间距量表 */
+}
+
+/* 没有地图的两步(路线/设置):sheet 顶到状态栏下方,让出的 28vh 全给列表。
+   顶部仍留出返回钮 + 步骤条的高度,否则内容会钻到它们底下。 */
+.slopes-sheet--full {
+  transform: none;
+  pointer-events: auto;
+  /* --cy-sheet-chrome-top = 胶囊底 + 间隙(px,由 wxml 注入),内容从这里开始。
+     ⚠️ 2026-08-10:原先还 +112rpx,那是给【顶部两格步骤条】留的位置 —— 步骤条在
+     59fd3d6aa 已经删了,这档留白就成了纯空档:实拍返回钮与主题名之间空出一大截,
+     整页像被压扁往下推。删掉那一项,标题紧跟在返回钮下面(稿子 4028:13649 的
+     TopBar pb=14 + Heading 就是这个节奏)。 */
+  /* P-33(2026-11-02):满屏态从胶囊下方开始,而不是用 padding 顶开 —— padding 属于滚动内容,
+     一滚动标题与卡片就钻到状态栏和返回钮底下(票务设置页实拍)。顶端这段留给页面底色与返回钮。 */
+  top: var(--cy-sheet-chrome-top, 0px);
+  padding-top: 0;
+  border-radius: 0;
+}
+
+/* P-33 第三轮:sheet 让出胶囊区后,顶端露出的是 .slopes 根的深色底(一条黑带)。
+   满屏态根换成页面底色,状态栏区与页面同色。 */
+.fabu.slopes--full { background: var(--cy-color-bg-page); }
+
+/* 满屏态没有地图可抓,grabber 只是个装饰横条,去掉省一行空间 */
+.slopes-sheet--full .slopes-grabber {
+  display: none;
+}
+
+.slopes-sheet-anchor {
+  height: 1rpx;
+}
+
+.slopes-grabber {
+  width: var(--cy-legacy-72);
+  height: var(--cy-space-1);
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-bg-surface-strong);
+  margin: 16rpx auto 8rpx;
+}
+
+.slopes-chevron {
+  display: flex;
+  align-items: center;
+  color: #636366; /* ds-ok 原有值未改:删掉上方死规则后 diff 对齐成新增行(AUDIT-1122 L03-114) */
+  flex-shrink: 0;
+}
+
+.slopes-section {
+  padding: 0 32rpx 27rpx;
+}
+
+/* 区块标题 ↔ 下一张卡:16rpx → 27rpx。step3 的 .pd-section-title 早就是 27rpx(F1 补充二),
+   这一处当时漏了,两页的同一个关系用两个数。 */
+.slopes-section-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 27rpx;
+}
+
+.slopes-section-tit {
+  font-size: var(--cy-font-subtitle);
+  font-weight: 800;
+  color: #fff;
+}
+
+/* 圆角与 .pd-list / .pd-entry-card 取齐 lg:2026-08-10 页底改灰后卡片真的浮出来了,
+   同屏三种卡再用两档圆角会看出来参差 */
+.slopes-empty-card {
+  --cy-comp-card-radius: var(--cy-radius-lg);
+  --cy-comp-card-pad: var(--cy-legacy-36) var(--cy-space-3-5);
+  margin-bottom: var(--cy-space-1-5);
+}
+
+.slopes-empty-txt {
+  font-size: var(--cy-font-label);
+  color: #8e8e93;
+  line-height: 1.5;
+}
+
+/* ⚠️ 别按「底栏 220rpx 高就留 220rpx」来加这个值 —— 我 2026-09-05 这么改过一次,当场
+   把渐变效果改没了,用户第一眼就看出来「底部 sheet 不一样了」。
+   原因是尾部留白**不止这一处**:承载滚动的 .slopes-sheet 自己还有 padding-bottom:120rpx
+   (= 底栏渐变带里【实心的那一段】)。两处加起来才是内容的实际净空。
+   底栏 220rpx 里只有下 55%(≈120rpx)是实底,上面 45% 是化开的 —— 内容本来就该滚进那段
+   渐隐区,那正是稿子要的「从底栏下面透出来」。留白给到整条底栏的高度,内容在够到渐变之前
+   就被顶住,底部一大块死灰、没有任何渐隐(与上面 .slopes-sheet 注释里记的是同一个坑)。 */
+/* 2026-09-08 用户裁决:「按钮不被压住」。
+   ⇒ 尾部净空补到**整条底栏**的高度:.slopes-sheet 自己的 padding-bottom 120rpx
+     + 这里 100rpx = 220rpx = .slopes-tabbar 的高。滚到底时最后一颗按钮正好压在底栏上沿。
+   ★ 和 2026-09-05 那次改坏渐变的区别在于「加到多少」,不是「加不加」:
+     那次我把**这一处**直接写成 220rpx,连同 sheet 的 120rpx 一共 340rpx —— 内容还没够到
+     渐隐区就被顶住,底部一大块死灰。现在两处相加正好等于底栏高度,中途滚动照旧从
+     渐变里透出来,只有终点被抬到底栏之上。 */
+.slopes-sheet-bottom {
+  height: calc(160rpx + env(safe-area-inset-bottom)); /* x-fix4 A-3:票务页最后一行「添加票种/收起」被整宽完成钮压住,尾部净空再抬 60rpx */
+}
+/* 「节点已删除 / 撤销」条出现期间,尾部再让出一条撤销条的高度,滚到底时最后一张卡不被它盖住 */
+.slopes-sheet-bottom--undo {
+  height: calc(160rpx + var(--cy-btn-h) + var(--cy-space-2) + env(safe-area-inset-bottom));
+}
+
+/* 章节块 + 嵌套节点 */
+.slopes-chapter-block {
+  --cy-comp-card-radius: var(--cy-radius-lg);
+  --cy-comp-card-pad: 0;
+  border-radius: var(--cy-radius-lg);
+  margin-bottom: var(--cy-space-2-5);
+  overflow: hidden;
+}
+
+/* 稿子(4028:13725)里标题行和标签行之间【没有分隔线】—— 卡内唯一一条线在标签行和
+   「编辑故事流」之间(.slopes-chapter-divider)。原来这里的 border-bottom 让一张卡出现
+   两条线,把"标题 + 标签"这一组硬切成两块。 */
+.slopes-chapter-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 88rpx;
+  box-sizing: border-box;
+  padding: var(--cy-space-4) var(--cy-space-4) 0;
+}
+
+.slopes-chapter-hd:active {
+  opacity: 0.85;
+}
+
+.slopes-chapter-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.slopes-chapter-name {
+  font-size: var(--cy-font-subtitle);
+  font-weight: 800;
+  color: #fff;
+  line-height: 1.25;
+}
+
+.slopes-chapter-offer {
+  display: flex;
+  gap: var(--cy-space-1-5);
+  margin-top: var(--cy-space-1);
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-type-caption);
+}
+
+.slopes-chapter-offer text + text {
+  padding-left: var(--cy-space-1-5);
+  border-left: 2rpx solid var(--cy-color-border-subtle);
+}
+
+.slopes-nodes {
+  padding: 16rpx var(--cy-space-2-5) var(--cy-space-1-5);
+}
+
+/* ⚠️ 行几何是拖拽重排的真源:内容 120rpx + 间距 16rpx = 136rpx,必须与 index.js 的
+   ROW_H_RPX 同值。改这里就要改那里,否则松手后落点会算偏一整行。 */
+.slopes-node-row {
+  display: flex;
+  align-items: stretch;
+  height: 120rpx;
+  box-sizing: border-box;
+  margin-bottom: var(--cy-space-2);
+  /* 拖起/放下的抬起感走一段按压时长,不在一帧里跳(系统减动效由 app.wxss 全局压到 0) */
+  transition: transform var(--cy-motion-press) var(--cy-ease-out), box-shadow var(--cy-motion-press) var(--cy-ease-out);
+}
+
+.slopes-nodes-area {
+  position: relative;
+  width: 100%;
+}
+
+.slopes-node-movable {
+  width: 100%;
+  height: 136rpx;
+}
+
+/* 拖起来的那行浮到别人上面,并给一点抬起感,免得看不出正在拖谁 */
+.slopes-node-movable.is-dragging {
+  z-index: 5;
+}
+
+.slopes-node-movable.is-dragging .slopes-node-row {
+  transform: scale(1.02);
+  /* 拖拽中的「抬起」反馈,只在手指按住的那一瞬存在,不是主题分层用的卡片投影;
+     --cy-shadow-card 在浅色主题是 .04 的极淡投影,拖起来根本看不出离开了队列。 */
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.18); /* ds-ok: 拖拽抬起态的临时投影,非主题分层 */
+  border-radius: var(--cy-radius-sm);
+}
+
+/* 手柄:序号下面压三条短横,长按起拖 */
+.slopes-node-rail--handle {
+  justify-content: flex-start;
+  gap: var(--cy-legacy-6);
+}
+
+.slopes-node-more {
+  width: 88rpx;
+  height: 88rpx;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cy-color-text-tertiary);
+}
+
+.slopes-node-more:active {
+  opacity: 0.6;
+}
+
+.slopes-node-rail {
+  width: 56rpx;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: var(--cy-space-1);
+}
+
+.slopes-node-num {
+  font-size: var(--cy-font-body);
+  font-weight: 800;
+  color: #fff;
+  line-height: 1;
+}
+
+.slopes-node-fields {
+  flex: 1;
+  display: flex;
+  gap: var(--cy-space-1-5);
+  min-width: 0;
+}
+
+/* 缩略图按节点照片的裁剪比例(4:3)取景,免得刚裁好的横图在这里被方框再切一次 */
+.slopes-node-photo {
+  width: 160rpx;
+  height: 120rpx;
+  border-radius: var(--cy-radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--cy-color-bg-elevated);
+  border: 2rpx dashed #48484a;
+}
+
+.slopes-node-photo:active {
+  opacity: 0.85;
+}
+
+.slopes-node-photo-img {
+  width: 100%;
+  height: 100%;
+}
+
+.slopes-node-photo-empty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.slopes-node-photo-plus {
+  display: flex;
+  align-items: center;
+  color: var(--cy-color-action-primary-bg);
+}
+
+.slopes-node-photo-txt {
+  font-size: var(--cy-font-caption);
+  color: #8e8e93;
+  margin-top: var(--cy-legacy-6);
+}
+
+.slopes-node-loc {
+  flex: 1;
+  min-width: 0;
+  background: var(--cy-color-bg-elevated);
+  border-radius: var(--cy-radius-sm);
+  padding: 16rpx var(--cy-space-2-5);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: 2rpx solid #3a3a3c;
+}
+
+.slopes-node-loc:active {
+  opacity: 0.85;
+  border-color: var(--cy-color-action-primary-bg);
+}
+
+.slopes-node-loc-name {
+  font-size: var(--cy-font-body);
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slopes-node-loc-addr {
+  font-size: var(--cy-font-caption);
+  color: #8e8e93;
+  margin-top: var(--cy-space-1);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slopes-node-loc-hint {
+  font-size: var(--cy-font-caption);
+  color: #636366;
+  margin-top: var(--cy-space-1);
+  line-height: 1.35;
+  /* ★ 2026-09-08:少了这三行,提示文字会折成两行,而 .slopes-node-row 是**定高 120rpx**
+     (定高不是排版偏好,是 movable-view 拖拽落点计算的前提,见 JS 里的 ROW_H_RPX),
+     于是第二行被当场切掉 —— 用户走查第一眼看到的就是这个。同行的 -addr 本来就有这三行。 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 步骤 2：剧情内容 / 玩法配置 */
+
+.slopes-story-placeholder {
+  color: #636366;
+}
+
+/* 第三步：票务配置（深色） */
+.slopes-info-page {
+  background: transparent !important;
+  padding: 0 32rpx calc(240rpx + env(safe-area-inset-bottom)) !important; /* ds-ok: 底部滚动净空,刻意留白非随手数值 */
+  min-height: auto !important;
+}
+
+.slopes-info-page .g-req,
+.g-req {
+  color: var(--cy-color-action-danger-bg);
+  margin-left: var(--cy-legacy-4);
+}
+
+/* 类名沿用 --map 是历史包袱:这条步骤条原先画在 <map> 的 cover-view 里,地图只在「剧情」
+   这步出现后就提到了页面级(fixed),三步都在。下面 8 条 .pd-step* 规则全挂在这个类上,
+   改名要一起动,不值当 —— 名字先留着,位置语义以本注释为准。 */
+
+/* 2026-09-05 按 Figma:与主标题同一条左沿(38rpx),下方与内容留 27rpx。 */
+.pd-section-title {
+  display: block;
+  padding: var(--cy-legacy-22) var(--cy-space-4) 27rpx 38rpx; /* ds-ok 38rpx 与主标题同左沿;27rpx=14px 是「区块标题↔卡」的固定节奏,量表里没有这一档 */
+  color: var(--cy-text-title);
+  font-size: var(--cy-font-subtitle);
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+/* CU-C-167:页级标题(cy-page-title)下面第一个区块标题只吃组件自己那档 space-2(16rpx)的下距,
+   不再叠区块之间那 22rpx 顶距 —— 两档相加会把「标题→首块」拉成 38rpx,读起来像隔了一个新区块。
+   写在宿主节点上(不穿组件内部),与 coop/invite 的 `cy-page-title + .card` 同一手法。 */
+.slopes-info-page cy-page-title + .pd-section-title { padding-top: 0; }
+
+.pd-list {
+  margin: 0 32rpx var(--cy-space-3-5);
+  --cy-comp-card-radius: var(--cy-radius-lg);
+  --cy-comp-card-pad: 0;
+  border-radius: var(--cy-radius-lg);
+  overflow: hidden;
+}
+
+/* 章节级商家承接工作台：独立于整主题商家池，按章节集中配置。 */
+
+.pd-row {
+  min-height: 106rpx;
+  padding: var(--cy-space-2-5) 24rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--cy-legacy-18);
+  border-bottom: 1rpx solid rgba(255,255,255,0.09);
+}
+
+.pd-row:last-child {
+  border-bottom: 0;
+}
+
+.pd-row:active {
+  background: rgba(255,255,255,0.04);
+}
+
+.pd-row-chevron {
+  display: flex;
+  align-items: center;
+  color: var(--cy-text-title);
+  opacity: 0.72;
+  flex-shrink: 0;
+}
+
+/* 横版封面是多图画廊,不走「缩略图 + 箭头」那套单图行,整行让给 pd-row-main */
+
+.pd-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cy-space-2);
+  margin-top: var(--cy-space-2-5);
+}
+
+.pd-gitem {
+  position: relative;
+  width: 160rpx;
+  height: 90rpx;   /* 16:9,跟裁剪比例一致 */
+}
+
+.pd-gimg {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--cy-radius-sm);
+}
+
+.pd-gdel {
+  position: absolute;
+  top: calc(var(--cy-legacy-36) * -1);
+  right: calc(var(--cy-legacy-36) * -1);
+  width: 88rpx;
+  height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pd-gdel__surface {
+  width: var(--cy-legacy-36);
+  height: var(--cy-legacy-36);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, .6);
+  color: #fff;
+  border-radius: 50%;
+}
+
+/* 缩略图形状要跟裁剪比例一致,否则「标签说竖、缩略图是方」会误导:
+   --portrait = 竖版封面 3:4(86 × 3/4 ≈ 65);--wide = 横版封面 16:9 的示意宽框 */
+
+/* 2026-08-11 用户定:保存按钮跟着内容走,不吸底。
+   吸底那版还带一层不透明底,把最后一张卡切掉了一半(实拍「集合地点」那行被压住)。
+   票种是逐项必填、跳不过去的,不存在"填一半就想提交"的场景,常驻按钮只是挡内容。 */
+.pd-ticket-editor-footer {
+  position: static;
+  padding: var(--cy-space-4) 0 var(--cy-space-6);
+  background: transparent;
+  box-sizing: border-box;
+}
+
+.slopes-info-page .pd-list switch {
+  transform: scale(.82);
+  transform-origin: right center;
+}
+
+.fabu.slopes .time-label,
+.fabu.slopes .time-separator,
+.fabu.slopes .picker-item {
+  color: #ffffff;
+}
+
+.fabu.slopes .slopes-time-picker {
+  background: #2c2c2e;
+}
+
+.pop-chapter .pop-cont-games {
+  padding-top: var(--cy-space-1);
+}
+
+.slopes-chevron--sm {
+  font-size: var(--cy-font-subtitle);
+}
+
+/* 节点卡缩略图「共N张」角标 */
+.slopes-node-photo {
+  position: relative;
+}
+.slopes-node-photo-badge {
+  position: absolute;
+  right: var(--cy-legacy-6);
+  bottom: var(--cy-legacy-6);
+  padding: 0 var(--cy-legacy-10);
+  height: var(--cy-space-4);
+  line-height: 32rpx; /* ds-ok: 行高不是间距,不复用 space token */
+  border-radius: var(--cy-radius-sm);
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: var(--cy-type-micro);
+}
+
+/* P0.5 publishCheck 奖励总览 */
+ /* ds-ok: 深色发布检查弹层内的既有低强调奖励总览 */
+
+/* 主题创建域使用白底黑字的编辑器语言。旧 Slopes 页面保留给其他发布场景，
+ * 只在 .theme-topic-editor 下翻转其表面与文字，不影响原有深色流程。 */
+.fabu.theme-topic-editor {
+  /* PR #539 把内容容器迁进 isolated cy-card；组件钩子在暗色 page{} 已求值，
+   * 必须在页面主题根重新声明，才能恢复迁移前的浅色卡片底。 */
+  --cy-comp-card-bg: var(--cy-color-bg-surface);
+  
+}
+
+.theme-topic-editor .slopes-sheet {
+  background: var(--cy-color-bg-page);
+}
+
+.theme-topic-editor .slopes-sheet {
+  border-top: 1rpx solid var(--cy-color-border-subtle);
+}
+/* V3-45(2026-11-09 业主「上面有一条线 看起来不对」):满屏态 sheet 与页面同底色、从返回钮下方开始,
+   这条顶边线只剩一道多余的横线。地图态(浮在地图上)保留。 */
+.theme-topic-editor .slopes-sheet--full { border-top: 0; }
+
+.theme-topic-editor .slopes-grabber {
+  background: var(--cy-color-border-strong);
+}
+
+.theme-topic-editor .slopes-section-tit, .theme-topic-editor .slopes-chapter-name, .theme-topic-editor .slopes-node-num, .theme-topic-editor .slopes-node-loc-name, .theme-topic-editor .pd-section-title {
+  color: var(--cy-color-text-primary);
+}
+
+.theme-topic-editor .slopes-empty-txt, .theme-topic-editor .slopes-node-photo-txt, .theme-topic-editor .slopes-node-loc-addr, .theme-topic-editor .slopes-node-loc-hint, .theme-topic-editor .slopes-story-placeholder {
+  color: var(--cy-color-text-tertiary);
+}
+
+.theme-topic-editor .slopes-chapter-hd, .theme-topic-editor .pd-row {
+  border-color: var(--cy-color-border-subtle);
+}
+
+.theme-topic-editor .slopes-node-photo, .theme-topic-editor .slopes-node-loc {
+  background: var(--cy-color-bg-surface-subtle) !important;
+  border-color: var(--cy-color-border-subtle) !important;
+  color: var(--cy-color-text-primary) !important;
+}
+
+.theme-topic-editor .pd-row-chevron,
+.theme-topic-editor .slopes-chevron {
+  color: var(--cy-color-text-tertiary);
+}
+
+.theme-topic-editor .pd-row:active {
+  background: var(--cy-color-state-pressed);
+}
+
+/* ⚠️ 原来这四条写的是 `.theme-topic-editor .fabu.slopes X`(后代选择器),而
+   theme-topic-editor 和 fabu.slopes 是【同一个节点】上的三个类(见 index.wxml 根:
+   class="fabu slopes theme-topic-editor")—— 后代选择器要求祖先关系,所以这四条
+   从来没有匹配上任何元素。结果是上面 .fabu.slopes .picker-item{color:#fff} 一直生效,
+   浅色日期面板里滚轮是白字深块,几乎读不出来(2026-08-11 实拍)。改成同节点连写。 */
+.fabu.slopes.theme-topic-editor .time-label,
+.fabu.slopes.theme-topic-editor .time-separator,
+.fabu.slopes.theme-topic-editor .picker-item {
+  color: var(--cy-color-text-primary);
+}
+
+.fabu.slopes.theme-topic-editor .slopes-time-picker {
+  background: var(--cy-color-bg-surface);
+}
+
+/* AI 真实商家方案入口:独立于发布第三步，只负责生成与草稿选择。 */
+
+/* ===== 章节玩法边界:允许的验证方式(多选 chip) ===== */
+/* 复用 .pd-recruit-row 的分隔线与内边距,只把布局改成上下堆叠 —— 一行放不下五个 chip */
+
+/* ===== 2026-08-10 平铺形态(去三步向导)新增 ===== */
+
+/* 主题名:第一屏第一个元素,占位符本身就是输入框(参考 Trip Way 的 Activity Name) */
+/* 2026-09-05 按 Figma:标题左沿 38rpx,比卡片(32rpx)外凸 6rpx —— 这是稿子的光学内缩,
+   不是错位。文字没有卡片的圆角与投影,左沿对齐时视觉上反而会显得往里缩。 */
+/* 底边距 8rpx → 27rpx → 48rpx(用户 2026-09-05 连提两次「间距大一点」「还不够」)。
+   48rpx = 25px = --cy-space-5。L1 标题与它下面第一张卡的距离,本来就该比
+   「区块标题 ↔ 卡」(27rpx)再大一档 —— 那是两个层级,不是同一档节奏。 */
+.pd-title-field {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-1);
+  padding: var(--cy-space-2) 38rpx var(--cy-space-5); /* ds-ok 38rpx=20px 主标题左沿,比卡片(--cy-page-x=16px)有意外凸 4px,见 F1 补充二 */
+}
+
+.pd-title-input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  /* 用 page-title 而不是已标废弃的 --cy-font-display:这就是本页的 L1 标题 */
+  font-size: var(--cy-font-page-title);
+  font-weight: 800;
+  /* 1.2 行高在 58rpx 的中文字上会把上下各削一刀(「患」的横、竖钩都超出 em box);
+     <input> 又不会像 <text> 那样被内容撑开,削掉就是削掉了。 */
+  line-height: 1.35;
+  min-height: 84rpx;
+  color: var(--cy-color-text-primary);
+}
+
+.pd-title-input__ph {
+  color: var(--cy-color-text-placeholder);
+  font-weight: 800;
+}
+
+/* 发布动作常驻右上;返回钮在左,两者共用 chrome.actionTop 做胶囊避让 */
+
+/* 章节剧情正文:在节点列表之上,auto-height 让它随内容长,写长故事不用挤在小框里 */
+
+/* 空态卡:只说明「还没有章节」。主动作是下方那条虚线 .slopes-add-chapter,
+   不在卡里再放一颗 —— 两颗并排出现过一次(2026-08-10 实拍)。 */
+
+/* 被选中的节点(点序号定位后)在列表里也要有回应,否则只有地图那边亮、列表这边没反馈 */
+.slopes-node-rail--handle.is-selected .slopes-node-num {
+  color: var(--cy-color-action-primary-bg);
+}
+
+/* ===== 2026-08-10 两页结构 ===== */
+
+/* 主题详情入口卡:一个入口 → 一个弹窗 */
+/* 内边距走组件钩子,不在宿主上另写 padding —— 宿主 padding 会和 .cy-card 自己的
+   --cy-comp-card-pad 叠加成双层内边距。 */
+/* 卡间距 24rpx → 32rpx(用户 2026-09-05:「主题详情下面卡片上下间距也松一点」)。
+   下面的 .pd-modecards 用同一个值,两处必须一起改,不然卡列的节奏会一段紧一段松。 */
+.pd-entry-card {
+  --cy-comp-card-pad: var(--cy-space-3) var(--cy-space-3-5);
+  margin: 0 var(--cy-page-x) var(--cy-space-4);
+}
+
+/* 横排在 slot 内容自己这一层做(宿主是 isolated 组件,flex 挂宿主对 slot 无效) */
+.pd-entry-card__row {
+  display: flex;
+  align-items: center;
+}
+
+.pd-entry-card__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.pd-entry-card__title {
+  display: block;
+  font-size: var(--cy-font-body);
+  font-weight: 700;
+  color: var(--cy-color-text-primary);
+}
+
+.pd-entry-card__sub {
+  display: block;
+  margin-top: var(--cy-legacy-6);
+  font-size: var(--cy-font-caption);
+  color: var(--cy-color-text-tertiary);
+}
+
+/* ===== 创作引导卡(四步清单,非向导)=====
+   卡壳与 .pd-entry-card 同规格;每步 = 序号圈 + 标题/说明 + 「去做」。
+   完成态只换序号圈样式与隐藏「去做」,不加进度条(那是被删掉的隐喻)。 */
+
+/* 弹窗内的主题详情:去掉卡片外边距,让它贴合 sheet 自己的内边距 */
+.pd-topic-detail .pd-list {
+  margin-left: 0;
+  margin-right: 0;
+}
+.pd-completion-rule { display: flex; align-items: center; gap: var(--cy-space-2); padding: var(--cy-space-3) var(--cy-space-4); color: var(--cy-color-text-primary); font-size: var(--cy-font-body); }
+.pd-completion-rule__input { width: 120rpx; height: 72rpx; text-align: center; border: 2rpx solid var(--cy-color-border-strong); border-radius: var(--cy-radius-md); background: var(--cy-color-bg-surface-subtle); }
+.pd-completion-rule__input.is-error { border-color: var(--cy-color-status-danger); background: var(--cy-color-status-danger-soft); }
+/* 宾果九宫格:九行「名称 + 文案 + 券」。用行不用 3×3 网格 —— 手机上格子里放不下这三样。 */
+.pd-completion-rule__error { display: block; margin: 0 var(--cy-space-4) var(--cy-space-3); }
+
+/* 章节卡上的状态标记(取代全局「推荐下一步」) */
+.slopes-chapter-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cy-space-2);
+  padding: var(--cy-space-3) var(--cy-space-4);
+}
+
+/* 2026-09-07 按稿 P2 补状态图标(✓ / ⚠):颜色之外再给一个非色觉的信号,
+   色盲与深色环境下也读得出「这条是好了还是缺着」。图标随 currentColor,跟着下面三档走。 */
+.slopes-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6rpx;
+  padding: var(--cy-legacy-6) var(--cy-space-1);
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-font-label);
+}
+
+/* 状态不能只靠颜色 —— 文案本身已经写明「缺剧情/待选地点」,配色只做强化。
+   稿子(4028:13649)把两档分开:待选地点=琥珀(可以带着继续做),缺剧情=红(拦发布)。 */
+.slopes-tag.is-warn {
+  background: var(--cy-color-status-warning-soft);
+  color: var(--cy-color-status-warning);
+}
+
+.slopes-tag.is-danger {
+  background: var(--cy-color-status-danger-soft);
+  color: var(--cy-color-status-danger);
+}
+
+.slopes-tag.is-ok {
+  color: var(--cy-color-text-secondary);
+}
+
+/* 标签行与「编辑故事流」之间的通栏分隔线(稿子 4028:13743)。卡片 pad 为 0,
+   所以这条线本来就是通栏的,不用负 margin 去撑。 */
+.slopes-chapter-divider {
+  height: 2rpx;
+  background: var(--cy-color-border-subtle);
+}
+
+/* 两颗并排(稿 P2/C2):左「编辑故事流」右「编辑章节」。 */
+.slopes-chapter-cta {
+  display: flex;
+  gap: var(--cy-space-2);
+  padding: var(--cy-space-3) var(--cy-space-4) var(--cy-space-4);
+}
+
+/* 章节卡底部双动作:左编辑章节、右创建节点 */
+.slopes-chapter-actions {
+  display: flex;
+  gap: var(--cy-space-2);
+  padding: var(--cy-space-2) var(--cy-space-2-5) var(--cy-space-2-5);
+}
+
+/* 添加章节:列表最下方,不在右上角。
+   稿子(4028:13849)是白底 + 虚线描边的大卡,不是一条透明虚线框 —— 它跟上面几张
+   章节卡是同一族(同宽同圆角同底),虚线只表示"这张还不存在"。 */
+.slopes-chapter-create-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-3);
+  margin: var(--cy-space-2) var(--cy-page-x) 0;
+}
+
+.slopes-add-chapter {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88rpx;
+  box-sizing: border-box;
+  gap: var(--cy-space-1-5);
+  padding: var(--cy-space-4) 0;
+  border-radius: var(--cy-radius-xl);
+  border: 4rpx dashed var(--cy-color-border-strong);
+  background: var(--cy-color-bg-surface);
+  color: var(--cy-color-text-primary);
+}
+
+.slopes-add-chapter:active {
+  opacity: 0.7;
+}
+
+.slopes-add-chapter__ico {
+  display: flex;
+  align-items: center;
+}
+
+.slopes-add-chapter__txt {
+  font-size: var(--cy-font-body);
+  font-weight: 700;
+}
+
+/* 章节弹窗里的剧情正文(唯一编辑入口) */
+.chapter-story-field {
+  padding: var(--cy-space-2) 0;
+}
+
+.chapter-story-field__label {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-1-5);
+  margin-bottom: var(--cy-space-1-5);
+  font-size: var(--cy-font-caption);
+  color: var(--cy-color-text-secondary);
+}
+
+.chapter-story-field__req {
+  color: var(--cy-color-text-tertiary);
+}
+
+.chapter-story-field__input {
+  width: 100%;
+  min-height: 200rpx;
+  box-sizing: border-box;
+  padding: var(--cy-space-2-5);
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-color-bg-surface-subtle);
+  font-size: var(--cy-font-body);
+  line-height: 1.6;
+  color: var(--cy-color-text-primary);
+}
+
+/* 待编排区：node/place 只在页面态存在，补齐坐标并归章后才离开这里。 */
+/* 2026-09-05:这层不再是一张卡,只是「区块标题 + 若干张素材卡」的容器。
+   ⚠️ 它在 .slopes-section 里面,而那层已经给了 32rpx 的横向 padding。
+   再叠一层 page-x margin 就比同列的章节卡窄一整圈(实拍如此)。只留下边距。 */
+.pending-materials {
+  display: block;
+  margin: 0 0 var(--cy-space-2-5);
+}
+
+.pending-materials__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--cy-space-2);
+}
+
+.pending-materials__title, .pending-materials__count, .pending-material__kind, .pending-material__name, .pending-material__desc, .pending-material__state {
+  display: block;
+}
+
+.pending-materials__title {
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-subtitle);
+  font-weight: 800;
+}
+
+.pending-materials__count {
+  margin-top: var(--cy-legacy-6);
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-font-caption);
+}
+
+.pending-materials__continue {
+  min-height: var(--cy-btn-h);
+  display: flex;
+  align-items: center;
+  color: var(--cy-color-action-primary-bg);
+  font-size: var(--cy-font-caption);
+  font-weight: 700;
+}
+
+.pending-material {
+  --cy-comp-card-radius: var(--cy-radius-xl);
+  --cy-comp-card-pad: var(--cy-space-3);
+  position: relative;
+  display: block;
+  margin-top: var(--cy-space-2-5);
+  border-radius: var(--cy-radius-xl);
+}
+
+/* 删除素材:每张卡自己的右上角 ✕。原来是第四颗与「补内容」平级的红字按钮,
+   读起来像"这一步也是编排流程的一环",而它其实是丢弃。 */
+.pending-material__x {
+  position: absolute;
+  z-index: 1;
+  top: var(--cy-space-1-5);
+  right: var(--cy-space-1-5);
+  width: var(--cy-btn-h);
+  height: var(--cy-btn-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cy-color-text-tertiary);
+}
+
+/* 2026-09-05:素材行补缩略图,与故事流节点卡同一档尺寸。 */
+.pending-material__head {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2);
+}
+
+.pending-material__thumb {
+  width: 190rpx;
+  height: 138rpx;
+  flex: none;
+  border-radius: var(--cy-radius-md);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-placeholder);
+}
+
+.pending-material__img { width: 100%; height: 100%; }
+
+.pending-material__head .pending-material__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.pending-material__kind {
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-type-micro);
+}
+
+.pending-material__name {
+  margin-top: var(--cy-legacy-6);
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-body);
+  font-weight: 700;
+}
+
+.pending-material__desc,
+.pending-material__state {
+  margin-top: var(--cy-legacy-6);
+  color: var(--cy-color-text-secondary);
+  font-size: var(--cy-font-caption);
+  line-height: 1.5;
+}
+
+.pending-material__state.is-warn {
+  color: var(--cy-color-status-warning);
+}
+
+.pending-material__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cy-space-1-5);
+  margin-top: var(--cy-space-2);
+}
+
+.pending-material__action {
+  min-height: var(--cy-btn-h);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--cy-space-2);
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-secondary);
+  font-size: var(--cy-font-caption);
+  font-weight: 700;
+}
+
+/* 页面级撤销条(删章节 / 票种 / 角色):角色是在整屏面板里删的,要压过面板才看得见 */
+.pending-undo.pending-undo--page { z-index: calc(var(--cy-z-sheet) + 1); }
+
+.pending-undo {
+  position: fixed;
+  z-index: 280;
+  left: var(--cy-page-x);
+  right: var(--cy-page-x);
+  /* 停在底栏(.slopes-tabbar,min-height 210rpx,已含安全区)上沿之上:原来按「按钮高 + 间距 + 安全区」
+     算,无安全区的机型只抬到 152rpx,整条压在底栏的内容/地图切换和主按钮上。 */
+  bottom: calc(210rpx + var(--cy-space-2)); /* ds-ok: 210rpx = .slopes-tabbar 的 min-height */
+  min-height: var(--cy-btn-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--cy-space-3);
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-color-bg-elevated);
+  color: var(--cy-color-text-primary);
+  box-shadow: var(--cy-shadow-card);
+  font-size: var(--cy-font-caption);
+}
+
+.pending-undo__action {
+  min-height: var(--cy-btn-h);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--cy-space-3);
+  margin-right: calc(var(--cy-space-3) * -1);
+  color: var(--cy-color-action-primary-bg);
+  font-weight: 800;
+}
+
+.pending-node-description {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--cy-space-2-5);
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-body);
+}
+
+.pending-node-description {
+  min-height: 160rpx;
+  line-height: 1.6;
+}
+
+/* 全屏故事流编辑器 */
+/* ===== 故事流编辑器(Figma 4028:13330) =====
+   形态改为底部半屏 sheet(原是全屏页):留出上方一截,创作者始终看得见自己在编哪一章。
+   ⚠️ 节点块【没有拖拽手柄】—— 稿子里画了,但 2026-08-10 用户裁决不做拖拽
+   (小程序原生 textarea 渲染层级在 web 层之上,movable-view 拖过去必然抽风)。
+   改顺序走「删除 → 待编排区 → 重新插入」。这是有意省略,别照稿补回来。 */
+.story-editor { position: fixed; inset: 0; z-index: 240; }
+
+/* 叠层(用户 2026-09-05 定):编辑章节从故事流「下一步」进来时,故事流留在下层被压暗。
+   pop-model 的 z-index(333)本来就在 story-editor(240)之上,所以这里只管下层的观感。 */
+.story-editor.is-stacked .story-editor__sheet { filter: brightness(.82); }
+
+.story-editor__backdrop { position: absolute; inset: 0; background: var(--cy-color-overlay); }
+
+.story-editor__sheet {
+  position: absolute;
+  /* top 由 wxml 注入 chrome.sheetTop(胶囊底 +5px);这里的 136rpx 只是拿不到胶囊时的兜底,
+     行内 style 会盖掉它。原来写死 136rpx,在刘海屏上「完成」正好顶到胶囊边上。 */
+  left: 0; right: 0; bottom: 0; top: 136rpx;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--cy-comp-sheet-radius) var(--cy-comp-sheet-radius) 0 0;
+  background: var(--cy-color-bg-surface);
+  overflow: hidden;
+}
+
+.story-editor__grabber {
+  flex: 0 0 auto;
+  width: 72rpx; height: 8rpx;
+  margin: var(--cy-space-2) auto 0;
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-border-strong);
+}
+
+.story-editor__scroll { flex: 1; min-height: 0; }
+
+.story-editor__pending {
+  margin: var(--cy-space-3) var(--cy-space-4) 0;
+  padding: var(--cy-space-2-5) var(--cy-space-3);
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-color-brand-soft);
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-caption);
+  line-height: 1.55;
+}
+
+/* 左侧导引线把文字块与节点块串成一条时间轴 —— 「位置即时序」在视觉上得成立。 */
+.story-editor__rail { position: relative; padding-bottom: var(--cy-space-5); }
+
+.story-editor__rail::before {
+  content: '';
+  position: absolute;
+  left: 54rpx; top: 0; bottom: var(--cy-space-5);
+  width: 4rpx;
+  background: var(--cy-color-border-subtle);
+}
+
+/* 文字块:无边框直接写,左侧一颗小圆点挂在导引线上。 */
+.story-text-block { position: relative; padding: 12rpx var(--cy-space-4) 12rpx 88rpx; }
+
+.story-text-block::before {
+  content: '';
+  position: absolute;
+  left: 48rpx; top: 40rpx;
+  width: 16rpx; height: 16rpx;
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-text-placeholder);
+}
+
+/* ⚠️ <textarea auto-height> 的**首次渲染**是微信组件自身的默认高,不是内容高
+   ——实测一行文字量到 136px,再渲染一次才收敛到 56px。**CSS 改不动它**
+   (height:auto / min-height 都试过,无效),只能在 JS 里补一次渲染,
+   见 index.js#_reflowStoryTextareas。 */
+.story-text-block__input {
+  width: 100%;
+  min-height: 108rpx;
+  box-sizing: border-box;
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-body);
+  line-height: 1.7;
+}
+
+/* 媒体块(图片 / 音频):与文字块同一条 88rpx 左缩进,导引线上不挂序号圈 ——
+   序号是节点的语义,图片和音频不占站点编号。 */
+/* 右内距按插入缝横线的右端给(40rpx),不是 --cy-space-4(32rpx)——
+   差这 8rpx 会让音频块的灰底比横线右端多出 4px(2026-09-06 用户实拍指出)。 */
+.story-media-block { position: relative; padding: 12rpx 40rpx 12rpx 88rpx; }
+
+.story-media-block__img {
+  width: 100%;
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-color-bg-surface-subtle);
+}
+
+/* 图片块与节点卡:删除键挂**右上角**(2026-09-06 用户裁决 + Figma 定稿)。
+   文字块与音频块仍垂直居中 —— 只有这两种块高到会让居中的图标压住画面/卡片正中。
+   图片档 right/top 按【图片自己的角】内缩 16rpx 反算:
+     水平 40rpx(块右内距)+ 16rpx = 56rpx;
+     垂直 命中区 88rpx、图标 48rpx ⇒ 图标顶 = top + 20rpx,要它等于 12rpx(块上内距)+ 16rpx,
+          所以 top = 8rpx。 */
+.story-media-block--image .story-block-x {
+  top: 8rpx;
+  right: 56rpx;
+  transform: none;
+}
+
+/* 音频块:与图片块同一套占位语言(灰底框),只是矮一档 —— 音频没有画面要撑。
+   ⚠️ 灰底在**内层**,和 __img 一样 —— 画在外层会连 88rpx 左内距一起铺满,
+   左边压过导引线、右边越过插入缝的横线(2026-09-06 用户实拍指出)。 */
+.story-media-block__audio {
+  min-height: 104rpx;
+  box-sizing: border-box;
+  padding: 0 var(--cy-space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2);
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-secondary);
+}
+
+/* 播放键:白色圆底 + 图标(2026-09-06 Figma 定稿)。灰底框上直接放一个裸三角,
+   读起来像装饰而不是「可以点」;白圆把它托成一颗按钮。 */
+.story-media-block__audio-play {
+  flex: none;
+  width: 48rpx; height: 48rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-bg-surface);
+}
+
+/* 播放中:白圆转主题强调底、图标反色 —— 复用现有 token 表达"正在播",不新造皮肤。 */
+.story-media-block__audio-play.is-playing {
+  background: var(--cy-color-brand);
+  color: var(--cy-color-text-inverse);
+}
+
+/* 空态:还没选文件。比已上传态高一档(稿 P8),居中一行「▶ 上传音频」——
+   它是个可点的上传入口,不是一条已经有内容的行,所以不左对齐、不占文件名的版式。 */
+.story-media-block__audio--empty {
+  min-height: 176rpx;
+  justify-content: center;
+  gap: var(--cy-space-1-5);
+  color: var(--cy-color-text-tertiary);
+}
+
+.story-media-block__audio-empty-label { font-size: var(--cy-font-body); }
+
+.story-media-block__audio-meta { flex: 1; min-width: 0; }
+
+.story-media-block__audio-name {
+  display: block;
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-body);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.story-media-block__audio-dur {
+  display: block;
+  margin-top: 4rpx;
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-font-caption);
+}
+
+/* 插入变量(契约 §3.1):常驻在文字块下沿。44px 命中区(与插入缝同一档),
+   可见部分只有一行小字 —— 它不是主路径,是一颗安静的工具键。 */
+.story-var-entry.is-on { color: var(--cy-color-text-primary); font-weight: 600; } /* 有条件的这一段:条件读得出来 */
+.story-var-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cy-space-1);
+  min-height: var(--cy-btn-h);
+  margin-top: var(--cy-space-1);
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-font-caption);
+}
+
+/* 梦块(契约 §3.2):图单不套灰色外框,直接用一列行 —— 每一行本身就是一张图的
+   内容,再套一层框会和图片块的长相撞车。 */
+.story-dream-block { position: relative; padding: 12rpx 40rpx 12rpx 88rpx; }
+
+/* 氛围块:正文流里的一行标记,不占版面。与梦块同一条左缩进,读起来是同一层。 */
+.story-mood-block { position: relative; padding: 12rpx 40rpx 12rpx 88rpx; }
+
+.story-mood-block__body {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2);
+  padding: var(--cy-space-1-5) var(--cy-space-2);
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-color-bg-surface-subtle); /* L03-125:主题编辑器未重定义旧别名,统一用语义 token */
+}
+
+.story-mood-block__tag {
+  padding: 2rpx var(--cy-space-1-5);
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-color-brand-soft);
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-caption);
+  font-weight: 700;
+}
+
+.story-mood-block__name {
+  flex: 1;
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-body);
+}
+
+/* 结局的条件行。与正文里的念头/氛围块同一个视觉(同样是「一个标签 + 一个当前值 + 箭头」),
+   复用 .story-mood-block__tag / __name,这里只补外框。 */
+
+.story-dream-block__head {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2);
+  padding-bottom: var(--cy-space-1);
+}
+
+.story-dream-block__count { color: var(--cy-color-text-tertiary); font-size: var(--cy-font-caption); }
+
+.story-dream-block__row {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2);
+  margin-top: var(--cy-space-2);
+  padding: var(--cy-space-1) var(--cy-space-2);
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-color-bg-surface-subtle);
+}
+
+.story-dream-block__thumb {
+  flex: none;
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-color-bg-surface-strong);
+}
+
+.story-dream-block__line {
+  flex: 1;
+  min-width: 0;
+  height: 88rpx;
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-body);
+}
+
+/* 单张删除:命中区 44px,图标只有 28 —— 手指够得到,画面不吵。 */
+.story-dream-block__del {
+  flex: none;
+  width: var(--cy-btn-h);
+  height: var(--cy-btn-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cy-color-text-tertiary);
+}
+
+.story-dream-block__empty {
+  margin-top: var(--cy-space-2);
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-font-caption);
+}
+
+.story-dream-block__add {
+  min-height: var(--cy-btn-h);
+  margin-top: var(--cy-space-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cy-space-1);
+  box-sizing: border-box;
+  border: 2rpx dashed var(--cy-color-border-subtle);
+  border-radius: var(--cy-radius-md);
+  color: var(--cy-color-text-secondary);
+  font-size: var(--cy-font-label);
+}
+
+/* 变量列表:贴在故事流底栏上的一层,不遮住正在编的那一段(最高 46vh,内部滚动)。 */
+
+/* 节点块:序号圈压在导引线上,右侧一张浅灰卡装名称与地址。 */
+.story-node-block { position: relative; padding: 12rpx var(--cy-space-4) 12rpx 88rpx; }
+
+.story-node-block__num {
+  position: absolute;
+  left: 28rpx; top: 50%;
+  transform: translateY(-50%);
+  width: 56rpx; height: 56rpx;
+  border-radius: var(--cy-radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--cy-btn-solid-bg);
+  color: var(--cy-btn-solid-fg);
+  font-size: var(--cy-font-label);
+  font-weight: 700;
+}
+
+.story-node-block.is-blank .story-node-block__num {
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-tertiary);
+}
+
+.story-node-block__card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2);
+  /* 右内距 84rpx 不是排版偏好,是给删除键让位(2026-09-06 用户裁决「节点卡右边留出位置」):
+     图标占卡右 20rpx–68rpx,再留 16rpx 间隙 = 84rpx。删除键改挂右上角后压的是标题行,
+     这块留白照留。常驻留白而不是选中时才让 —— 选中一下就重排,比压住文字更难看。 */
+  padding: var(--cy-space-3) 84rpx var(--cy-space-3) var(--cy-space-3-5);
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-color-bg-page);
+}
+
+/* ⚠️ 节点块的删除键挂在 __card 里(card 是 position:relative),所以它的 right 量的是
+   【卡片右沿】而不是块右沿 —— 照全局那 52rpx 摆会往左偏。卡片右沿比块内容右沿多 4px,
+   所以这里收到 20rpx,图标右沿才和另外三种块同在 364 那条线上。
+   top:0 让它贴卡片右上角(图标顶距卡顶 10px),与图片档同一套语言。 */
+.story-node-block__card .story-block-x {
+  top: 0;
+  right: 20rpx;
+  transform: none;
+}
+
+.story-node-block__body { flex: 1; min-width: 0; }
+
+.story-node-block__name {
+  display: block;
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-body);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.story-node-block.is-blank .story-node-block__name { color: var(--cy-color-text-tertiary); }
+
+.story-node-block__meta {
+  display: block;
+  padding-top: 4rpx;
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-font-label);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 底部固定双按钮 = 在末尾那个缝插入的快捷路径,长文档不必滚到底。 */
+
+.story-editor__bottom { height: var(--cy-space-6); }
+
+/* ── 文章式编辑(2026-11-09 qx-a5d)。一章是一篇连续的文章:段落之间不画框、不画插入缝、
+   不挂导引线圆点;插入的玩法/图片/音频/分割线/地点是文章里的卡片。长按任何块可拖动。 */
+.story-article::before { display: none; }
+.story-article { padding-top: var(--cy-space-2); }
+.story-article .story-block { position: relative; transition: transform .18s ease; }
+.story-article .story-block.is-lifted {
+  z-index: 5;
+  transition: none;
+  background: var(--cy-color-bg-surface);
+  border-radius: var(--cy-radius-sm);
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.18); /* ds-ok: 拖拽抬起态的临时投影,非主题分层(同 .slopes-node-movable.is-dragging) */
+}
+.story-article .story-text-block { padding: 10rpx var(--cy-space-4); }
+.story-article .story-text-block.is-selected { padding-right: 112rpx; }
+.story-article .story-text-block::before { display: none; }
+.story-article .story-text-block__input { min-height: 0; padding: 6rpx 0; }
+.story-article .story-media-block,
+.story-article .story-dream-block,
+.story-article .story-mood-block { padding: var(--cy-space-2) var(--cy-space-4); }
+.story-article .story-node-block { padding: var(--cy-space-2) var(--cy-space-4); }
+.story-article .story-node-block__num {
+  left: calc(var(--cy-space-4) + 12rpx); top: calc(var(--cy-space-2) + 12rpx);
+  transform: none; z-index: 1;
+  width: 40rpx; height: 40rpx;
+}
+
+.story-divider-block { position: relative; display: flex; align-items: center; justify-content: center; min-height: var(--cy-btn-h); padding: 0 var(--cy-space-4); }
+.story-divider-block__rule { width: 30%; height: 2rpx; background: var(--cy-color-border-strong); }
+
+/* 文末空白:点它继续写;空章时显示占位,看起来就是一篇还没写的文章 */
+.story-tail { min-height: 96rpx; padding: 6rpx var(--cy-space-4) 0; }
+.story-tail__placeholder { color: var(--cy-color-text-placeholder); font-size: var(--cy-font-body); line-height: 1.7; }
+
+/* 顶部插入栏:不输入时贴在标题下方;键盘弹起时贴到键盘上沿(bottom 由 wxml 按键盘高度注入) */
+
+
+/* ── X Articles 式编辑器(2026-11-10 r2-create):顶栏 草稿·保存状态 / 预览 / 完成 / ⋯;
+   工具栏 B I S · 段落样式 · 引用 · 列表 · 编号 · 表情 · 插入▾ · 信息 + 字数;
+   封面 5:2 → 大标题 → 作者行 → 正文。每块左侧一枚把手,长按块或把手即可拖动。 */
+.sx-top {
+  flex: 0 0 auto;
+  height: 104rpx;
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2);
+  padding: 0 var(--cy-space-3) 0 var(--cy-space-4);
+}
+.sx-top__state { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--cy-color-text-secondary); font-size: var(--cy-font-label); }
+.sx-top__draft { color: var(--cy-color-text-primary); font-weight: 600; }
+.sx-top__text { min-height: var(--cy-btn-h); display: flex; align-items: center; padding: 0 var(--cy-space-2); color: var(--cy-color-text-primary); font-size: var(--cy-type-button); font-weight: 600; }
+.sx-top__pill {
+  position: relative;
+  isolation: isolate;
+  height: var(--cy-btn-h); /* 点按区 88rpx,看得见的药丸 64rpx(::before) */
+  padding: 0 var(--cy-space-4);
+  display: flex; align-items: center;
+  color: var(--cy-btn-solid-fg);
+  font-size: var(--cy-type-button);
+  font-weight: 700;
+}
+.sx-top__pill::before {
+  content: '';
+  position: absolute; left: 0; right: 0; top: 12rpx; bottom: 12rpx; z-index: -1;
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-btn-solid-bg);
+}
+.sx-top__icon { width: var(--cy-btn-h); height: var(--cy-btn-h); display: flex; align-items: center; justify-content: center; color: var(--cy-color-text-primary); }
+
+/* 表情键:CSS 画的笑脸(全站禁止 emoji 充当图标) */
+ /* ds-ok: 上线波次原型逐值(装饰 / 品牌色块) */
+
+/* 封面:宽 5:2,空态是浅底 + 图标 + 「添加封面」 */
+
+/* 正文:左侧留出把手位(56rpx);段落样式与段内格式 */
+.story-article .story-block { padding-left: 24rpx; }
+.story-article.is-preview .story-block { padding-left: 0; }
+.story-grip {
+  position: absolute; left: 0; top: 0; bottom: 0; z-index: 2;
+  width: 56rpx;
+  display: flex; justify-content: center;
+  padding-top: 26rpx;
+  box-sizing: border-box;
+}
+.story-grip__dots {
+  width: 14rpx; height: 24rpx;
+  background-image: radial-gradient(circle, var(--cy-color-text-placeholder) 2.5rpx, transparent 3rpx);
+  background-size: 7rpx 8rpx;
+  opacity: .8;
+}
+.story-article .story-block.is-lifted .story-grip__dots { opacity: 1; }
+.story-article.is-dragging .story-block { transition: transform .2s ease; }
+.story-article .story-block.is-lifted {
+  transition: none;
+  box-shadow: 0 16rpx 40rpx rgba(0, 0, 0, 0.18); /* ds-ok: 拖拽抬起态的临时投影,同上 */
+}
+
+.sx-para { display: flex; align-items: flex-start; }
+.sx-para .story-text-block__input, .sx-para .sx-rich { flex: 1; min-width: 0; }
+.sx-rich { padding: 6rpx 0; color: var(--cy-color-text-primary); font-size: var(--cy-font-body); line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
+.sx-seg.is-b { font-weight: 700; }
+.sx-seg.is-i { font-style: italic; }
+.sx-seg.is-s { text-decoration: line-through; }
+.sx-para--h1 .story-text-block__input, .sx-para--h1 .sx-rich { font-size: var(--cy-font-title); font-weight: 800; line-height: 1.4; }
+.sx-para--h2 .story-text-block__input, .sx-para--h2 .sx-rich { font-size: var(--cy-font-subtitle); font-weight: 700; line-height: 1.5; }
+.story-article .sx-para--quote { position: relative; padding-left: calc(var(--cy-space-4) + 28rpx); }
+.sx-para--quote::after { content: ''; position: absolute; left: var(--cy-space-4); top: 14rpx; bottom: 14rpx; width: 6rpx; border-radius: var(--cy-radius-pill); background: var(--cy-color-border-strong); }
+.sx-para--quote .story-text-block__input, .sx-para--quote .sx-rich { color: var(--cy-color-text-secondary); }
+.sx-para__bullet { flex: none; width: 40rpx; padding-top: 6rpx; color: var(--cy-color-text-primary); font-size: var(--cy-font-body); line-height: 1.7; }
+.sx-para__bullet--num { font-variant-numeric: tabular-nums; }
+
+/* 插入 / 表情 / 本章:编辑器内的小浮层(peek 档,≤30% 高),关闭键右上角 */
+.sx-sheet-mask { position: absolute; inset: 0; z-index: 20; background: var(--cy-color-overlay); }
+.sx-sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 21;
+  max-height: 60%;
+  padding: 0 var(--cy-space-4) calc(var(--cy-space-3) + var(--cy-safe-bottom));
+  box-sizing: border-box;
+  border-radius: var(--cy-comp-sheet-radius) var(--cy-comp-sheet-radius) 0 0;
+  background: var(--cy-color-bg-surface);
+  overflow-y: auto;
+}
+.sx-sheet__head { height: 104rpx; display: flex; align-items: center; justify-content: space-between; }
+.sx-sheet__tit { color: var(--cy-color-text-primary); font-size: var(--cy-comp-sheet-title-size); font-weight: 700; }
+.sx-sheet__close { width: var(--cy-btn-h); height: var(--cy-btn-h); margin-right: calc(-1 * var(--cy-space-2)); display: flex; align-items: center; justify-content: center; color: var(--cy-color-text-secondary); }
+.sx-menu__row { min-height: var(--cy-btn-h); padding: var(--cy-space-1) 0; display: flex; align-items: center; gap: var(--cy-space-3); color: var(--cy-color-text-primary); font-size: var(--cy-font-body); border-bottom: 2rpx solid var(--cy-color-border-subtle); }
+.sx-menu__row:last-child { border-bottom: 0; }
+
+
+.chapter-story-entry-hint {
+  margin-top: var(--cy-space-3);
+  color: var(--cy-color-text-secondary);
+  font-size: var(--cy-font-caption);
+  line-height: 1.55;
+}
+
+/* 本站玩法开关行:标题与开关同排,提示语单起一行(关态说明"走到即完成")。 */
+/* 通关勋章:左侧 1:1 上传方块 + 右侧名称,与玩法模板页的勋章配置同形。
+   未传图时是虚线加号框(空态可点),传了图整块换成缩略图,右侧出现「清除」。 */
+/* ===== 创作页按 Figma 4028:13649 / 4028:13880 重排 ===== */
+
+/* 模式 / 票务两张并排卡。取代原来那行「当前：城市定向  切换模式 ›」纯文字 ——
+   一行小字承载不了"这是本主题最重要的两个开关"。 */
+.pd-modecards {
+  display: flex;
+  gap: var(--cy-space-3);
+  padding: 0 var(--cy-space-4) var(--cy-space-4);
+}
+
+/* 2026-09-05 按 Figma 放宽:卡 263rpx 高(原 220),内距 34/34/38/34;
+   图标底从圆角方块改成正圆(用户裁决),尺寸 69rpx。 */
+.pd-modecard {
+  flex: 1;
+  min-width: 0;
+  min-height: 263rpx;
+  padding: 34rpx 34rpx 38rpx;
+  box-sizing: border-box;
+  border-radius: var(--cy-radius-xl);
+  background: var(--cy-color-bg-surface);
+}
+
+.pd-modecard__ico {
+  width: 69rpx;
+  height: 69rpx;
+  margin-bottom: 34rpx;
+  border-radius: var(--cy-radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--cy-color-bg-page);
+  color: var(--cy-color-text-primary);
+}
+
+/* 眉标说「这张卡管什么」(模式 / 票务),和右卡词性对齐。 */
+.pd-modecard__eyebrow {
+  display: block;
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-font-caption);
+}
+
+.pd-modecard__name {
+  display: block;
+  padding-top: var(--cy-legacy-6);
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-body);
+  font-weight: 700;
+}
+
+.pd-modecard__action {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-1);
+  padding-top: var(--cy-space-1);
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-font-label);
+}
+
+/* 底部导航条:左 tab 换页、右药丸提交。两件事分开,不再用「下一步」把换页伪装成流程。 */
+.slopes-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  /* 稿子(4034:14718)这条是 110px 高的【渐变带】:下 55% 是实底、往上化开,
+     内容从渐变里透出来,所以它不是一条"占位的实心栏"。
+     ⚠️ 原来 padding-bottom = 48rpx + 安全区(≈68rpx)= 116rpx,比稿子的 28px 高一倍,
+     实拍就是底部空一大截、最后一张章节卡被顶出屏幕。安全区已经把 home indicator 那段
+     让开了,不必再叠一档设计间距。 */
+  min-height: 210rpx;   /* Figma 4959:13535 = 110px @393 */
+  box-sizing: border-box;
+  padding: var(--cy-space-2) 53rpx;   /* 稿 px-28 */
+  padding-bottom: calc(env(safe-area-inset-bottom) + var(--cy-space-1));
+  /* x-fix6 R4-4:渐变上半透明,身后「编辑章节」透出来成重影;改整条实底 */
+  background: var(--cy-color-bg-page);
+}
+
+.pd-edit-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 240;
+  box-sizing: border-box;
+  padding: calc(var(--cy-safe-top) + var(--cy-space-4)) var(--cy-page-x) calc(var(--cy-safe-bottom) + var(--cy-space-4));
+  background: var(--cy-bg-page);
+}
+
+.pd-edit-gate__panel {
+  min-height: 100%;
+  padding-top: var(--cy-space-5);
+}
+
+/* E2:回填失败时的唯一出路钉在底部整宽(稿 S15 的 error-bottom-bar,359 宽、离底 63)。 */
+.pd-edit-gate__bottom {
+  position: absolute;
+  left: var(--cy-page-x);
+  right: var(--cy-page-x);
+  bottom: calc(env(safe-area-inset-bottom) + var(--cy-space-4));
+}
+
+.slopes-submit-error {
+  display: block;
+  margin: var(--cy-space-3) var(--cy-page-x) 0;
+}
+
+.slopes-tabbar__tabs {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 42rpx;   /* 稿 22px */
+}
+
+.slopes-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10rpx;   /* 稿 5px */
+  color: var(--cy-color-text-tertiary);
+}
+
+.slopes-tab.is-on { color: var(--cy-color-text-primary); }
+
+/* 圆点恒占位,只在选中时上色 —— 否则切 tab 时图标会上下跳 2rpx。
+   稿 4959:13542 是 4px 见方、圆角 2px 的小方点(不是正圆)。 */
+.slopes-tab__dot {
+  width: 8rpx;
+  height: 8rpx;
+  border-radius: 4rpx; /* ds-ok 稿 4959:13542 是 4px 方点圆角 2px;圆角量表最小档 16rpx,装不下 */
+  background: transparent;
+}
+
+.slopes-tab.is-on .slopes-tab__dot { background: var(--cy-color-text-primary); }
+
+/* 稿 4959:13549:高 48px(92rpx)、内距 0/28(53rpx)、r999。
+   ⚠️ cy-btn 是 isolated 组件,页面选择器够不到它内部的 .btn —— 只能靠**自定义属性**
+   (custom property 会沿继承链穿过 styleIsolation)。.btn 的高与内距本来就读
+   --cy-btn-h / --cy-btn-pad-x,在宿主上覆盖这两个变量即可,且只作用于这一颗。
+   ⚠️ 高度**不覆盖**:稿子写 48px,但仓库有一条 D25「全站 cy-btn 统一按钮高度」的审计
+   (还带负控:任一页面把 cy-btn 改回自定义高度就判红)。88rpx=46px 与稿子差 2px,
+   不值得为它破一条全站规则 —— 只取内距与药丸圆角。 */
+.slopes-tabbar__cta {
+  flex: none;
+  --cy-btn-pad-x: 53rpx;
+  --cy-comp-btn-radius: var(--cy-radius-pill);
+}
+
+/* 「保存草稿」与「发布」同一条底栏、同一套药丸形状,次级样式区分轻重。 */
+.slopes-tabbar__draftCta {
+  flex: none;
+  margin-right: var(--cy-space-2);
+  --cy-btn-pad-x: 40rpx;
+  --cy-comp-btn-radius: var(--cy-radius-pill);
+}
+
+/* 第 2 页(票务)的「完成」。2026-08-11 用户定:两页平铺、没有先后,不用返回箭头 ——
+   「完成」说的是这一页编完了,不是"退回上一步"。
+   2026-09-05 按稿 P11 / C11 改成【整宽黑色药丸】:原来是左下角一行小字,与稿子差很远,
+   而且票务页左槽没有视图切换,整条底栏本来就该交给这一颗收尾动作。 */
+
+/* 主题名:稿子是一整行大标题,不是表单里的一个输入框。 */
+.pd-title-input {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--cy-font-page-title);
+  font-weight: 700;
+  letter-spacing: -1rpx;
+}
+
+/* 主题详情入口行与章节卡统一到 20px 圆角。 */
+.pd-entry-card,
+.slopes-chapter-block,
+.slopes-empty-card { border-radius: var(--cy-radius-xl); }
+
+/* 空态(Figma 4028:13880):居中 + 图标 + 药丸按钮。
+   原来是左对齐纯文字铺在一张大白卡上,读起来像"加载失败"而不是"等你建第一章"。 */
+.slopes-empty-card__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: var(--cy-space-5) var(--cy-space-3);
+}
+
+.slopes-empty-ico {
+  width: 104rpx;
+  height: 104rpx;
+  margin-bottom: var(--cy-space-3);
+  border-radius: var(--cy-radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-tertiary);
+}
+
+.slopes-empty-txt {
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-subtitle);
+  font-weight: 700;
+}
+
+.slopes-empty-cta { margin-top: var(--cy-space-4); }
+
+/* ===== 节点编辑弹窗(Figma 4029:14152) =====
+   三张白卡(地点 / 配置模板 / 照片)+ 一张红字删除卡,壳子是 cy-sheet 的 bottom 变体。
+   卡内两段式:上段「圆图标 + 标题 + 右侧动作」,下段隔一条线放次要信息/次要动作。
+   颜色一律走 --cy-* :cy-sheet 的 .sh__panel 会把 role 档整组重声明,写死色号会在
+   玩家深色弹窗里翻车(2026-08-07 白卡白字那一族的成因)。 */
+/* 2026-10-10 主人裁定(取代 CU-M-159):编辑页头统一「左 退出(文字) / 右 完成」,✕ 不能代替退出。
+   .node-sheet__close 保留类名但渲染成左侧文字「退出」;只有退出没有完成的层(伏笔)退出单独居左。
+   原 CU-M-159(2026-09-24):✕ 固定落右上角(全仓统一),主操作「完成」紧贴其左。
+   原来这行是 space-between 的「左 ✕ / 右 完成」,和相邻弹层的右上 ✕ 反向,
+   人在同一个发布流程里找关闭要来回换方向。
+   「上一步」那颗仍留最左:它退一层,不是关闭,和 cy-sheet 的 canBack + ✕ 同一分工。 */
+.node-sheet__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cy-space-2);
+  padding: var(--cy-space-4) 0 var(--cy-space-3);
+}
+
+.node-sheet__back {
+  margin-right: auto;
+  width: 88rpx;
+  height: 88rpx;
+  margin-left: calc(var(--cy-space-1) * -1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cy-color-text-secondary);
+}
+
+/* 外框 88rpx 是触达下限,里面那颗 72rpx 才是稿子画的圆 —— 两者分开,
+   缩视觉不缩热区。 */
+.node-sheet__close {
+  min-width: 88rpx;
+  height: 88rpx;
+  margin-left: calc(var(--cy-space-1) * -1);
+  padding: 0 var(--cy-space-1);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-type-button);
+  font-weight: 600;
+}
+
+.node-sheet__close-circle {
+  width: 72rpx;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cy-color-text-secondary);
+  /* ✕纯字形无圆底(2026-09-18 终裁);热区由 .node-sheet__close 88rpx 承担 */
+}
+
+.node-sheet__done {
+  min-width: 128rpx;
+  height: var(--cy-btn-h);
+  padding: 0 var(--cy-space-4);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-action-primary-bg);
+  color: var(--cy-color-action-primary-fg);
+  font-size: var(--cy-type-button);
+  font-weight: 700;
+}
+
+/* 节点名不是表单里的一个字段,它就是这张弹窗的标题(稿子 4029:14281) */
+.node-sheet__titlebar {
+  padding: var(--cy-space-1) 0 var(--cy-space-5);
+  text-align: center;
+}
+
+.node-sheet__eyebrow {
+  display: block;
+  font-size: var(--cy-font-label);
+  color: var(--cy-color-text-tertiary);
+}
+
+.node-sheet__name {
+  margin-top: var(--cy-space-1);
+  /* 稿值 22px = 44rpx。字阶原本在 card-title(32) 与 page-title(58) 之间是空的,
+     已补 --cy-type-sheet-title 这一档(节点/主题两张弹窗都用它)。 */
+  font-size: var(--cy-font-sheet-title);
+  font-weight: 700;
+  color: var(--cy-color-text-primary);
+  text-align: center;
+}
+
+.node-sheet__name-ph { color: var(--cy-color-text-placeholder); }
+
+.node-card {
+  margin-bottom: var(--cy-space-2-5);
+  padding: var(--cy-space-3-5);
+  box-sizing: border-box;
+  border-radius: var(--cy-radius-xl);
+  background: var(--cy-color-bg-surface);
+}
+
+.node-card__row {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-3);
+}
+
+.node-card__ico {
+  width: 64rpx;
+  height: 64rpx;
+  flex: none;
+  border-radius: var(--cy-radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-primary);
+}
+
+.node-card__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.node-card__title {
+  display: block;
+  font-size: var(--cy-font-body);
+  font-weight: 700;
+  color: var(--cy-color-text-primary);
+}
+
+.node-card__value {
+  display: block;
+  margin-top: var(--cy-legacy-4);
+  font-size: var(--cy-font-caption);
+  color: var(--cy-color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node-card__value--wrap { white-space: normal; }
+
+.node-card__rv {
+  flex: none;
+  max-width: 55%;
+  margin-left: auto;
+  text-align: right;
+  font-size: var(--cy-font-body);
+  color: var(--cy-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-card__rv.is-empty { color: var(--cy-color-text-tertiary); }
+
+.node-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cy-space-2);
+  margin-top: var(--cy-space-2-5);
+  padding-top: var(--cy-space-2);
+  border-top: 2rpx solid var(--cy-color-border-subtle);
+}
+
+.node-binding { margin-top: var(--cy-space-3); padding-top: var(--cy-space-3); border-top: 2rpx solid var(--cy-color-border-subtle); }
+.node-binding__row { display: flex; align-items: center; gap: var(--cy-space-3); margin-top: var(--cy-space-3); }
+.node-binding__label { font-size: var(--cy-font-label); color: var(--cy-color-text-primary); }
+.fe-visit__radius { margin-top: var(--cy-space-3); }
+.node-binding__error { display: block; margin-top: var(--cy-space-2); font-size: var(--cy-font-caption); color: var(--cy-color-status-danger); }
+.node-shared { margin-top: 0; }
+.node-shared__site { display: block; margin-top: var(--cy-space-1); }
+.node-shared__row {
+  display: flex; align-items: center; gap: var(--cy-space-2);
+  min-height: var(--cy-btn-h);
+  border-top: 1rpx solid var(--cy-color-border-subtle);
+  color: var(--cy-color-text-tertiary);
+}
+.node-shared__row-t { flex: 1; min-width: 0; font-size: var(--cy-type-body); color: var(--cy-color-text-primary); }
+.node-shared__row-t.is-link { color: var(--cy-color-status-info); font-weight: 600; }
+.node-shared__row-v { flex: none; font-size: var(--cy-font-label); color: var(--cy-color-text-secondary); }
+
+/* 10-28 原型 A e-node / e-quest：分组列表用 L1 的 cy-list-group / cy-list-row，这里只补行内输入框和组内的附加内容。 */
+.node-grp__input { flex: 1; min-width: 0; text-align: right; font-size: var(--cy-font-body); color: var(--cy-color-text-primary); }
+.node-grp-extra { padding: 0 var(--cy-space-4); background: var(--cy-color-bg-surface); }
+.node-grp-extra:empty { display: none; }
+.pgrid.node-grp-extra { padding-top: var(--cy-space-2); padding-bottom: var(--cy-space-3); }
+.rt-row-input { flex: 1; min-width: 0; text-align: right; font-size: var(--cy-font-body); color: var(--cy-color-text-primary); }
+
+.node-card__addr {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--cy-font-caption);
+  color: var(--cy-color-text-tertiary);
+}
+
+.node-pill {
+  flex: none;
+  max-width: 60%;
+  height: var(--cy-btn-h);
+  padding: 0 var(--cy-space-3);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-1);
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-label);
+  font-weight: 700;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.node-pill:active { opacity: 0.7; }
+
+.node-badge {
+  flex: none;
+  padding: var(--cy-legacy-6) var(--cy-space-2);
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-font-label);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 2026-09-05 按 Figma:删除节点从一行裸红字提成整宽按钮 —— 和删除章节同一档,
+   两个「删除 X」在不同弹窗里长得不一样是没道理的。 */
+.node-card--danger {
+  min-height: var(--cy-btn-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--cy-space-3);
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-color-status-danger-soft);
+  color: var(--cy-color-status-danger);
+  font-size: var(--cy-font-body);
+  font-weight: 700;
+}
+
+.node-sheet .pending-node-description {
+  width: 100%;
+  margin-top: var(--cy-space-3);
+  font-size: var(--cy-font-body);
+  color: var(--cy-color-text-primary);
+}
+
+/* 九宫格在这张卡里是三列、82px 高的方格(稿子 4029:14257),
+   和共享 styles/photo-grid.wxss 的 200rpx 大格不同 —— 只在本弹窗内覆盖,不动共享文件。 */
+.node-sheet .pgrid {
+  margin-top: var(--cy-space-3);
+  gap: var(--cy-space-2);
+}
+
+.node-sheet .pgrid-cell {
+  width: calc((100% - var(--cy-space-4)) / 3);
+  height: 164rpx;
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-color-bg-surface-subtle);
+}
+
+.node-sheet .pgrid-add {
+  background: transparent;
+  border: 4rpx dashed var(--cy-color-border-strong);
+  box-sizing: border-box;
+}
+
+.node-sheet .pgrid-add-plus {
+  display: flex;
+  align-items: center;
+  color: var(--cy-color-text-tertiary);
+}
+
+.node-sheet .pgrid-del__glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ——— 主题详情弹窗复用节点弹窗的卡片语言(设计源码:编辑主题弹窗.dc.html) ——— */
+
+/* 卡内分隔线。稿子是 1px #EFEFF1,通栏到卡内边距为止(不是全出血)。 */
+.node-card__hr {
+  height: 2rpx;
+  margin: var(--cy-space-2-5) 0;
+  background: var(--cy-color-border-subtle);
+}
+
+/* 主动作药丸(稿子里「＋ 上传 3:4」是黑的,「＋ 上传 16:9」是灰的 —— 竖版封面必填、横版选填) */
+.node-pill--solid {
+  gap: var(--cy-space-1);
+  background: var(--cy-color-action-primary-bg);
+  color: var(--cy-color-action-primary-fg);
+}
+
+/* 圆图标位放缩略图/头像时不再是「图标底」,而是图片本身 */
+.node-card__ico--media {
+  overflow: hidden;
+  background: var(--cy-color-bg-surface-subtle);
+}
+
+.pd-pill-thumb {
+  width: 36rpx;
+  height: 48rpx;
+  border-radius: var(--cy-radius-sm);
+  flex: none;
+}
+
+.node-sheet__name--static { display: block; }
+
+/* 卡内就地输入:稿子那一行是「副文」的位置,这里换成可写的输入框,
+   字号/颜色跟副文一致,不让它看起来像另起一层表单。 */
+
+.pd-card-textarea {
+  width: 100%;
+  margin-top: var(--cy-space-3);
+  padding: var(--cy-space-2-5);
+  box-sizing: border-box;
+  min-height: 160rpx;
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-color-bg-surface-subtle);
+  font-size: var(--cy-font-body);
+  color: var(--cy-color-text-primary);
+}
+
+/* V-23c:主题描述(详情页头图短简介)最多 20 字,编辑时显示字数 */
+.pd-card-count {
+  display: block;
+  margin-top: var(--cy-space-2);
+  text-align: right;
+  font-size: var(--cy-font-label);
+  color: var(--cy-color-text-secondary);
+}
+
+.node-card .pd-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cy-space-2);
+  margin-top: var(--cy-space-3);
+}
+
+.node-card .pd-gitem {
+  position: relative;
+  width: calc((100% - var(--cy-space-4)) / 3);
+  height: 164rpx;
+  border-radius: var(--cy-radius-md);
+  overflow: hidden;
+  background: var(--cy-color-bg-surface-subtle);
+}
+
+.node-card .pd-gimg { width: 100%; height: 100%; }
+
+/* 弹窗正文底色。cy-sheet 的面板底走 role-glass,在本主题里是纯白(#FFFFFF),
+   而卡片底 role-surface 也是纯白 —— 白卡贴白面板 = 卡片边界整个消失,一屏字全糊在
+   一张白纸上(设计源码里面板是 #F7F7F8、卡是 #FFF,靠这一层差把卡分出来)。
+   面板在组件内部(isolated),页面样式够不着,所以在 slot 这一层负边距出血铺 page 底色。 */
+/* 2026-10-12 按 Figma P4/P9:这类弹层整块是页面灰底、白卡左右各留 page-x。
+   原来靠 .node-sheet 负外边距把灰底撑到面板边,但全高弹层的 .sh__body 是滚动容器,
+   左侧负边距被裁成白条、右侧溢出成横向可拖 —— 看上去被截断。改成让面板本身就是灰底。 */
+.node-sheet-host {
+  --cy-comp-sheet-role-glass: var(--cy-comp-sheet-role-page);
+}
+
+.node-sheet {
+  padding-bottom: var(--cy-space-3);
+}
+
+.node-route-entry:active { opacity: 0.7; }
+
+.route-mapping-sheet {
+  padding-bottom: calc(var(--cy-space-4) + env(safe-area-inset-bottom));
+}
+
+.route-mapping-sheet__titlebar { padding-bottom: var(--cy-space-4); }
+
+.route-mapping-card { padding: 0 var(--cy-space-3-5); }
+
+.route-mapping-row {
+  flex-wrap: wrap;
+  min-height: var(--cy-btn-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cy-space-3);
+  border-bottom: 2rpx solid var(--cy-color-border-subtle);
+}
+
+.route-mapping-row:last-child { border-bottom: 0; }
+
+.route-mapping-rules { flex: 0 0 100%; min-width: 0; }
+
+.route-mapping-row__label {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-body);
+  font-weight: 700;
+}
+
+.route-mapping-row__hint {
+  display: block;
+  margin-top: var(--cy-legacy-4);
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-font-caption);
+}
+
+.route-mapping-row__picker {
+  flex: 0 1 58%;
+  min-width: 0;
+}
+
+.route-mapping-row__target {
+  min-height: var(--cy-btn-h);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--cy-space-2);
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-label);
+  font-weight: 700;
+}
+
+.route-mapping-row__target text:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-mapping-row--fallback { padding: var(--cy-space-2) 0; }
+
+.route-mapping-row__fallback {
+  flex: none;
+  color: var(--cy-color-text-secondary);
+  font-size: var(--cy-font-label);
+}
+
+/* 10-28 原型 A e-route：头部用 L1 的 cy-sheet-nav；结果行点开就地展开（灰底上放去往与条件 / 效果的分组）。 */
+.route-mapping-sheet__eyebrow { display: block; padding: 0 var(--cy-space-4) var(--cy-space-1); font-size: var(--cy-font-caption); color: var(--cy-color-text-secondary); }
+.route-mapping-row .route-mapping-row__target { color: var(--cy-color-text-secondary); font-weight: 400; }
+.route-mapping-row__chev { display: flex; color: var(--cy-color-text-tertiary); transition: transform 0.2s; }
+.route-mapping-row__chev.is-open { transform: rotate(90deg); }
+.route-mapping-open { margin: 0 calc(var(--cy-space-3-5) * -1); padding: var(--cy-space-2) var(--cy-space-3-5) var(--cy-space-3); background: var(--cy-color-bg-surface-subtle); }
+.route-mapping-dest { border-radius: var(--cy-radius-lg); overflow: hidden; }
+
+/* 故事流节点块的实拍缩略图(用户 2026-08-10 定)。没传图时放一个占位图标,
+   而不是让这一格塌掉 —— 塌掉会让"有图/没图"两种节点块高度不一,列表读起来是锯齿。 */
+/* 2026-09-05 按 Figma 改成横图:88rpx 见方的小方块认不出是哪个点,
+   190×138 能看清门脸。没传图时仍走占位图标,保持有图/没图等高。 */
+.story-node-block__thumb {
+  width: 190rpx;
+  height: 138rpx;
+  flex: none;
+  margin-right: var(--cy-space-2);
+  border-radius: var(--cy-radius-md);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--cy-color-bg-surface);
+  color: var(--cy-color-text-placeholder);
+}
+
+.story-node-block__img { width: 100%; height: 100%; }
+
+/* ✕ 删除:只在选中的块上出现(用户 2026-08-10 定)。原来是常驻的红色「删除 / 删除文字块」,
+   两行文案比它删的那个块还长,而且一屏里每块都挂一个,红字比正文还抢眼。 */
+/* 选中块上的删除键。2026-09-06 用户在 Figma 上定稿:选中态不画描边,
+   删除是一枚**裸的红色垃圾桶图标**(不套底色圆)—— 它出现本身就是「这一块被选中了」。
+   ⚠️ right 取 52rpx 而不是各块自己的右内距(媒体 40rpx / 文字 32rpx):四种块的图标
+   右沿要落在同一条竖线(364)上,那条线是插入缝横线右端再内缩 16rpx。 */
+.story-block-x {
+  position: absolute;
+  right: 52rpx;
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--cy-btn-h);
+  height: var(--cy-btn-h);
+}
+
+.story-block-x__glyph {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48rpx;
+  height: 48rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cy-color-status-danger);
+}
+
+/* 玩法卡在这张弹窗里的收口:共享的 .temp-list 是给整屏列表页写的(266rpx 大图),
+   放进弹窗里图一旦为空就是一大片纯白空档,标题被挤到很下面(实拍如此)。
+   这里只在本弹窗内压小并给底色 —— 空图时看到的是一个占位方块,不是一个洞。 */
+/* ===== 票务页 / 票种编辑器(Figma 2770:13325 自由探索档 · 2770:11762 城市定向档) =====
+   稿子的配色是另一套(slate + 蓝/绿/橙),这里只搬【信息结构与控件形态】,
+   颜色一律回到创作域这套中性语言 —— 一个编辑器里出现第二套色系,才是真的不统一。 */
+
+.tk-field { padding: var(--cy-space-1) 0; }
+
+.tk-label {
+  display: block;
+  margin-bottom: var(--cy-space-2);
+  font-size: var(--cy-font-label);
+  font-weight: 500;
+  color: var(--cy-color-text-secondary);
+}
+
+.tk-input {
+  width: 100%;
+  height: 88rpx;
+  padding: 0 var(--cy-space-3);
+  box-sizing: border-box;
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-color-bg-surface-subtle);
+  font-size: var(--cy-font-body);
+  color: var(--cy-color-text-primary);
+}
+
+/* 票单价格 / 发行数量 稿子是并排两列,不是上下两行 —— 它们是一组参数,竖排会被
+   中间的分隔线切成两件事。 */
+.tk-grid {
+  display: flex;
+  gap: var(--cy-space-3);
+}
+
+.tk-grid .tk-field {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 稿子的提示条是橙底橙字。橙色在本域的语义是「待办 / 还差点什么」(章节卡的
+   待选地点标签就是它),这里的两句都是说明而不是待办,所以走中性说明色。 */
+
+.tk-subhead {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2);
+  color: var(--cy-color-text-primary);
+  font-size: var(--cy-font-body);
+  font-weight: 700;
+}
+
+/* 保存按钮在头部和底部各一颗:头部那颗是"随手存",底部那颗是稿子上的主动作。
+   禁用态要看得出来,否则点不动会被当成卡死。 */
+.node-sheet__done.is-disabled {
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-placeholder);
+}
+
+/* 玩法两段改横滑(用户 2026-08-11 定)。竖着铺网格时,两段加起来能把整屏吃满,
+   人要滚很久才走到「自己建一个玩法」;横滑之后两段各占一行高,整页一屏能看完。
+   ⚠️ scroll-view 横滑必须 white-space: nowrap + inline-block 子项,
+   用 flex 会被 scroll-view 的内容宽度算成一屏、滑不动。 */
+
+/* r2-create(a5-v3-46 业主「可以横向滑动的 可以漏出来右边没有显示完整的正方形 让玩家知道可以滑动」):
+   方卡加宽到一屏两张整 + 第三张露出约四分之一;横滑轨向右出血到屏幕边,露出的那一截贴着屏幕边被截断。 */
+.temp-foot { display: block; }
+.node-sheet__top-spacer { width: var(--cy-btn-h); }
+
+/* 2026-09-05 按 Figma:横向缩略图(260×168)改成正方形卡。横图在横滑轨里一屏只塞得下
+   一张半,读起来像"一条被截断的列表";方卡一屏三张,才像一个可挑选的库。 */
+
+/* 选中态用描边,不用换底色:卡上本来就有图,换底色在深浅不一的图下面根本看不出来。
+   V3-50(2026-11-09 业主「选中的描边样式也不对」):外扩描边会被横滑轨裁掉一边(首张卡左缘缺一截)。
+   改成套件的选中样式 —— 盖在图上的内描边(--cy-color-selection)+ 右上角选中标记(同 .mode-opt__mark.is-on)。 */
+
+/* V3-47:「自己建一个」卡 —— 与其他模板卡同尺寸同圆角,图是发布菜单同一套 3D「互动」图 */
+
+.mode-opt__mark { flex: none; align-self: center; width: 40rpx; height: 40rpx; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border: 2rpx solid var(--cy-color-border-strong); border-radius: var(--cy-radius-pill); }
+.mode-opt__mark.is-on { background: var(--cy-color-text-primary); border-color: var(--cy-color-text-primary); }
+.mode-opt__mark.is-on::after { content: ''; width: var(--cy-space-1-5); height: var(--cy-space-1-5); border-radius: var(--cy-radius-pill); background: var(--cy-color-text-inverse); }
+
+/* 玩法选择的两段小标题(公共玩法库 / 我的模板)。分段是为了让人一眼分清
+   「这是平台的」还是「这是我自己建的」—— 混在一个列表里,选错了也看不出来。
+   ⚠️ 这一段 2026-08-11 00:36 被并行会话的写入吞掉过一次(wxml 还引用着、wxss 里没了,
+   于是两段标题挤成一坨)。补回时一并加大上边距:横滑轨道自己不留下边距,
+   两段之间只靠这里撑开,24rpx 时「我的模板」会贴着上一张卡的「2–6人 | 15分钟」。 */
+.temp-seg {
+  display: flex;
+  align-items: baseline;
+  gap: var(--cy-space-2);
+  padding: var(--cy-space-5) 0 var(--cy-space-2);
+}
+
+.temp-seg:first-child { padding-top: var(--cy-space-2); }
+
+.temp-seg__tit {
+  font-size: var(--cy-font-body);
+  font-weight: 700;
+  color: var(--cy-color-text-primary);
+}
+
+.temp-seg__sub {
+  font-size: var(--cy-font-caption);
+  color: var(--cy-color-text-tertiary);
+}
+
+/* 票种编辑器就地展开(2026-08-11):不再是 position:fixed 的整屏覆盖。
+   这一页常常本身就是从主题编辑器里进来的,再盖一层就成了「弹窗的弹窗」,
+   返回钮也跟着叠两个 —— 现在它只是票种列表里长出来的一段。 */
+/* 2026-09-08 用户走查:「外面一个灰色,里面选框还是灰色很奇怪 —— 整体白色,
+   里面选框灰色就好」。外壳改白;内层 .node-card 不再另铺白(白压白看不出层),
+   真正的灰只留给输入框本身。 */
+.tk-editor {
+  margin-bottom: var(--cy-space-3);
+  padding: var(--cy-space-3) 0 var(--cy-space-1);
+  border-radius: var(--cy-radius-xl);
+  background: var(--cy-color-bg-surface);
+}
+
+.tk-editor .node-card { background: transparent; }
+
+.tk-editor .node-card { margin: 0 var(--cy-space-2-5) var(--cy-space-2-5); }
+
+.tk-editor__hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--cy-space-4) var(--cy-space-3);
+}
+
+.tk-editor__label {
+  font-size: var(--cy-font-body);
+  font-weight: 700;
+  color: var(--cy-color-text-primary);
+}
+
+.tk-editor .pd-ticket-editor-footer { padding: 0 var(--cy-space-2-5) var(--cy-space-3); }
+.tk-editor__delete { margin-top: var(--cy-space-2); min-height: 88rpx; display: flex; align-items: center; justify-content: center; color: var(--cy-color-status-danger); font-size: var(--cy-font-body); }
+/* 商家承接段(2026-09-05 用户裁决装回章节弹窗):与「章节配色」「章节音频」同一组头部规格。 */
+.chapter-recruit{ margin-top:var(--cy-space-4); }
+.chapter-recruit__head{ margin-bottom:var(--cy-legacy-18); font-size:var(--cy-type-body); color:var(--cy-comp-sheet-role-text-secondary); }
+.chapter-recruit__num{ flex:none; width:150rpx; text-align:right; font-size:var(--cy-type-body); color:var(--cy-comp-sheet-role-text); }
+.chapter-recruit__ph{ color:var(--cy-comp-sheet-role-muted); }
+
+/* 章节音频(2026-09-04):一章一段的背景旁白,与「章节配色」同一组视觉规格 */
+.chapter-audio{ margin-top:var(--cy-space-4); }
+.chapter-audio__head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:var(--cy-legacy-18); font-size:var(--cy-type-body); color:var(--cy-comp-sheet-role-text-secondary); }
+.chapter-audio__empty{ display:flex; align-items:center; justify-content:center; gap:var(--cy-space-2); height:104rpx; border-radius:var(--cy-radius-md); border:2rpx dashed var(--cy-comp-sheet-role-divider); font-size:var(--cy-type-body); color:var(--cy-comp-sheet-role-text-secondary); }
+.chapter-audio__file{ display:flex; align-items:center; gap:var(--cy-space-3); height:104rpx; padding:0 var(--cy-space-3); box-sizing:border-box; border-radius:var(--cy-radius-md); background:var(--cy-comp-sheet-role-card); }
+.chapter-audio__play{ flex:none; padding:0 var(--cy-space-3); height:60rpx; display:flex; align-items:center; border-radius:var(--cy-radius-pill); background:var(--cy-comp-sheet-role-elevated); font-size:var(--cy-type-caption); color:var(--cy-comp-sheet-role-text); }
+.chapter-audio__meta{ flex:1; min-width:0; display:flex; flex-direction:column; gap:4rpx; }
+.chapter-audio__name{ font-size:var(--cy-type-body); color:var(--cy-comp-sheet-role-text); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.chapter-audio__dur{ font-size:var(--cy-type-micro); color:var(--cy-comp-sheet-role-muted); }
+.chapter-audio__del{ flex:none; font-size:var(--cy-type-caption); color:var(--cy-comp-sheet-role-muted); }
+
+.chapter-atmosphere{ margin-top:var(--cy-space-4); }
+.pop-chapter-settings .pop-top .tit{ color:var(--cy-comp-sheet-role-text); }
+.pop-chapter-settings .chapter-story-entry-hint{ color:var(--cy-comp-sheet-role-muted); }
+.chapter-atmosphere__head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:var(--cy-legacy-18); font-size:var(--cy-type-body); color:var(--cy-comp-sheet-role-text-secondary); }
+.chapter-atmosphere__list{ width:100%; white-space:nowrap; }
+.chapter-atmosphere__track{ display:inline-flex; gap:var(--cy-space-2); padding:var(--cy-legacy-4) var(--cy-legacy-4) var(--cy-space-2); }
+.chapter-atmosphere__item{ width:154rpx; min-height:112rpx; box-sizing:border-box; display:flex; flex-direction:column; justify-content:flex-end; padding:var(--cy-legacy-18); border:3rpx solid transparent; border-radius:var(--cy-radius-md); color:#fff; box-shadow:inset 0 0 0 1rpx rgba(255,255,255,.16); } /* ds-ok 固定氛围卡上用常量白 */
+.chapter-atmosphere__item.is-on{ border-color:var(--cy-comp-sheet-role-text); box-shadow:0 0 0 3rpx var(--cy-comp-sheet-role-page); }
+.chapter-atmosphere__name{ font-size:var(--cy-type-body); font-weight:700; }
+.chapter-atmosphere__item.atmosphere-swatch--white{ box-shadow:inset 0 0 0 1rpx rgba(0,0,0,.12); } /* ds-ok 白卡在浅底上要有边界才看得见 */
+.chapter-atmosphere__note{ margin-top:4rpx; font-size:var(--cy-type-micro); opacity:.78; }
+/* 2026-09-06 用户拍板:黑 / 蓝 / 红 / 黄 / 白,**纯色,没有渐变**(原来五档都是 145° 线性渐变)。 */
+.atmosphere-swatch--default{ background:#0A0A0A; } /* ds-ok 固定章节配色色板 */
+.atmosphere-swatch--blue{ background:#1A2620; } /* ds-ok 固定章节配色色板 */
+.atmosphere-swatch--red{ background:#4E1C24; } /* ds-ok 固定章节配色色板 */
+.atmosphere-swatch--yellow{ background:#4E4114; } /* ds-ok 固定章节配色色板 */
+/* 白档是唯一的浅色:卡内文字要翻黑,否则白底白字 */
+.atmosphere-swatch--white{ background:#F5F6F8; color:#111318; } /* ds-ok 固定章节配色色板 */
+
+.tk-segment {
+  display: flex;
+  gap: var(--cy-space-2);
+  margin-top: var(--cy-space-2);
+}
+
+.tk-segment__item {
+  flex: 1;
+  padding: var(--cy-space-2);
+  border: 1rpx solid var(--cy-color-border-subtle);
+  border-radius: var(--cy-radius-sm);
+  color: var(--cy-color-text-secondary);
+  text-align: center;
+}
+
+.tk-segment__item.is-active {
+  border-color: var(--cy-color-action-primary-bg);
+  color: var(--cy-color-action-primary-bg);
+}
+/* 故事路线沿用 node-sheet / node-card；这里仅补表单和高级规则所需的结构。 */
+
+/* ===== 2026-09-07 对稿 TE · Screens 补的四处 ===== */
+
+/* 稿 S32/33/34:文本编辑弹窗的字数上限。右对齐,不抢输入区的注意力。 */
+
+/* 稿 S16:发布失败下面那条可展开的「为什么会这样」。 */
+.submit-error-why {
+  margin: var(--cy-space-1-5) var(--cy-space-4) 0;
+}
+
+.submit-error-why__toggle {
+  min-height: var(--cy-btn-h);
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-1);
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-font-caption);
+}
+
+.submit-error-why__body {
+  display: block;
+  padding-bottom: var(--cy-space-2);
+  color: var(--cy-color-text-secondary);
+  font-size: var(--cy-font-caption);
+  line-height: 1.7;
+}
+
+/* 稿 S36:下一站弹层顶部那句"这一页只决定玩完之后去哪"。 */
+.route-mapping-sheet__note {
+  display: block;
+  padding: 0 var(--cy-space-4) var(--cy-space-3);
+  color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-font-caption);
+  line-height: 1.6;
+}
+
+/* 初始状态复用专业主题配置的浅色卡片与顶栏。 */
+.story-initial { --cy-comp-field-shadow: none; }
+.story-thought { --cy-color-input-idle-bg: var(--cy-color-input-filled-bg); }
+.story-initial__row { display: flex; align-items: center; justify-content: space-between; gap: var(--cy-space-3); min-height: var(--cy-btn-h); font-size: var(--cy-type-body); color: var(--cy-color-text-primary); }
+.story-initial__choices { padding: var(--cy-space-3) var(--cy-space-4); }
+.story-initial__heading { display: block; margin-bottom: var(--cy-space-3); font-size: var(--cy-type-section-title); font-weight: 600; color: var(--cy-color-text-primary); }
+.story-initial__options { display: grid; grid-template-columns: 1fr 1fr; gap: var(--cy-space-2); }
+.story-initial__option { min-height: var(--cy-btn-h); padding: var(--cy-space-3); border-radius: var(--cy-radius-lg); background: var(--cy-color-bg-surface); }
+.story-initial__option-top { display: flex; align-items: center; justify-content: space-between; gap: var(--cy-space-2); font-size: var(--cy-type-body); font-weight: 600; color: var(--cy-color-text-primary); }
+.story-initial__option-mark { font-size: var(--cy-type-caption); color: var(--cy-color-text-tertiary); }
+.story-initial__example { display: block; margin-top: var(--cy-space-1); font-size: var(--cy-type-caption); color: var(--cy-color-text-secondary); }
+
+/* 思维阁的念头清单(2026-09-22):与初始状态并排的第二个入口,面板复用 node-card 外壳。 */
+
+/* 视觉 56rpx 不变,透明 ::after 把触控区抬到 88rpx(X12 最小命中区),同 cy-btn 的写法。 */
+
+/* 筛选型 chip(DESIGN:筛选 = chip);选中 = 反色中性,不引入品牌色。 */
+
+.story-thought__err {
+  display: block;
+  margin-top: var(--cy-space-2);
+  color: var(--cy-danger);
+  font-size: var(--cy-font-caption);
+}
+
+/* 结局章(2026-09-24):章节卡名字后面一枚小标签,和普通章一眼分开 */
+.slopes-chapter-ending { margin-left: var(--cy-space-2); padding: 2rpx 14rpx; border-radius: var(--cy-radius-pill);
+  font-size: var(--cy-type-caption); font-weight: 600; color: var(--cy-color-text-secondary); background: var(--cy-color-bg-surface-subtle); }
+.chapter-setting-row { margin-top: var(--cy-space-3); }
+
+@import "./game-rules.wxss"; /* 玩法规则编辑层（协调者设计） */
+@import "./initial-carry.wxss"; /* 初始状态 · 开局带着 */
+
+/* 章节弹窗里的规则分区(2026-10-12,版式照 Figma J3 5221:19016):
+   粗体小标题 + 同行灰字说明;控件是整宽灰药丸(高 = 按钮高,圆角药丸)。 */
+.ch-sec { margin-top: var(--cy-space-4); }
+.ch-sec__head { display: flex; align-items: baseline; gap: var(--cy-space-2); margin-bottom: var(--cy-legacy-18); overflow: hidden; }
+.ch-sec__title { flex: none; font-size: var(--cy-font-subtitle); font-weight: 700; line-height: 1.25; color: var(--cy-color-text-primary); }
+.ch-sec__note { display: block; margin-top: var(--cy-space-2); font-size: var(--cy-font-caption); line-height: 1.6; color: var(--cy-color-text-tertiary); }
+.ch-pill-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--cy-space-3);
+  min-height: var(--cy-btn-h); padding: 0 var(--cy-space-4); box-sizing: border-box;
+  border-radius: var(--cy-radius-pill); background: var(--cy-color-bg-surface-subtle);
+  font-size: var(--cy-font-body); font-weight: 700; color: var(--cy-color-text-primary);
+}
+.ch-pill-row + .ch-pill-row, cy-dropdown + .ch-pill-row { margin-top: var(--cy-space-2); } /* 药丸行本身是 flex,不能被改成 block(否则「至少完成几站」标签和输入框上下叠开) */
+.ch-pill-row + cy-dropdown, cy-dropdown + cy-dropdown { margin-top: var(--cy-space-2); display: block; }
+.ch-pill-row__value { display: flex; align-items: center; gap: var(--cy-space-1); min-width: 0; font-weight: 400; color: var(--cy-color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-pill-row__input { width: 200rpx; text-align: right; font-weight: 400; font-size: var(--cy-font-body); color: var(--cy-color-text-primary); }
+.ch-pill-btn {
+  display: flex; align-items: center; justify-content: center; gap: var(--cy-space-1); height: var(--cy-btn-h); margin-top: var(--cy-space-2);
+  border-radius: var(--cy-radius-pill); background: var(--cy-color-bg-surface-subtle);
+  font-size: var(--cy-font-body); font-weight: 700; color: var(--cy-color-text-primary);
+}
+.ch-group { margin-top: var(--cy-space-2); }
+.ch-group__head { display: flex; align-items: center; justify-content: space-between; font-size: var(--cy-font-label); color: var(--cy-color-text-secondary); }
+.ch-group__del { padding: var(--cy-space-1) 0 var(--cy-space-1) var(--cy-space-3); color: var(--cy-color-text-tertiary); }
+.node-chips { display: flex; flex-wrap: wrap; gap: var(--cy-space-2); margin-top: var(--cy-space-2); }
+.node-chip {
+  padding: var(--cy-space-2) var(--cy-space-3); border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-bg-surface-subtle); color: var(--cy-color-text-secondary); font-size: var(--cy-font-label);
+}
+.node-chip.is-on { background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg); font-weight: 700; }
+
+/* 故事流站点块上的计入方式标记:计入完成(默认,淡)/ 额外站点 / 机动(反色)。 */
+.story-node-role-wrap { align-self: flex-start; margin-top: var(--cy-space-1); }
+.story-node-role {
+  width: fit-content; padding: var(--cy-legacy-6) var(--cy-space-2);
+  border-radius: var(--cy-radius-pill); background: var(--cy-color-bg-surface); color: var(--cy-color-text-tertiary);
+  font-size: var(--cy-font-caption);
+}
+.story-node-role.is-on { background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg); font-weight: 700; }
+
+/* 标题旁保存状态胶囊(云端草稿自动保存):已存云端用中性灰,其余(本机/保存中/失败/待确认)用提示黄。 */
+.pd-save-state {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: var(--cy-space-2);
+  padding: var(--cy-space-1) var(--cy-space-2-5);
+  min-height: var(--cy-space-6);
+  box-sizing: border-box;
+  border-radius: var(--cy-radius-pill);
+  font-size: var(--cy-type-caption);
+  line-height: 1.2;
+  white-space: nowrap;
+  /* 自动保存每轮在「保存中 / 已存云端」间切换,底色字色过渡一下,不闪 */
+  transition: background-color var(--cy-motion-fast) var(--cy-ease-out), color var(--cy-motion-fast) var(--cy-ease-out);
+}
+.pd-save-state--saved { background: var(--cy-topic-save-saved-bg); color: var(--cy-topic-save-saved-text); }
+.pd-save-state--unsaved { background: var(--cy-topic-save-unsaved-bg); color: var(--cy-topic-save-unsaved-text); }
+/* x-fix4 A-3:长标题不再被右侧保存状态胶囊挤成「自由探索草稿 · 付…」——输入框独占一行,胶囊换到下一行靠左 */
+.pd-title-field { flex-wrap: wrap; row-gap: var(--cy-space-1); }
+.pd-title-field .pd-title-input { flex: 1 1 calc(100% - 48rpx); width: auto; }
+.pd-title-field__error { flex: 1 1 100%; width: 100%; }
+.pd-title-field .pd-save-state { margin-left: 0; }
+.pd-title-input--wrap { height: auto; min-height: 84rpx; word-break: break-all; } /* x-fix5 A-3 折行显示全文,不再单行截断 */
+
+/* 文档二 L1:可玩时段选「自定义」时,底部选择卡里展开开始 / 结束 +「完成」 */
+.pw-custom { margin-top: var(--cy-space-3); }
+.pw-custom__grp { border-radius: var(--cy-radius-lg); overflow: hidden; background: var(--cy-color-bg-page); }
+.pw-custom__row { position: relative; display: flex; align-items: center; gap: 20rpx; min-height: 100rpx; padding: 0 var(--cy-space-4); color: var(--cy-color-text-tertiary); }
+.pw-custom__row--hr::before { content: ""; position: absolute; left: var(--cy-space-4); right: 0; top: 0; height: 1px; background: var(--cy-color-border-subtle); }
+.pw-custom__t { flex: 1; font-size: var(--cy-type-body); color: var(--cy-color-text-primary); }
+.pw-custom__v { font-size: var(--cy-type-body); font-variant-numeric: tabular-nums; }
+.pw-custom__done { margin-top: var(--cy-space-3); height: 100rpx; border-radius: var(--cy-radius-lg); display: flex; align-items: center; justify-content: center; font-size: var(--cy-type-button); font-weight: 700; background: var(--cy-color-action-primary-bg); color: var(--cy-color-action-primary-fg); }
+@import "./look-sheet.wxss"; /* 画面风格 */
+
+/* ===== P-4 / V-25(2026-10-31):必填缺项红字 + 剧情预览(原发布确认那一层) ===== */
+.pd-sec-hd { display: flex; align-items: baseline; justify-content: space-between; gap: var(--cy-space-2); }
+.req-left { flex: none; display: inline-flex; align-items: center; min-height: 88rpx; padding-right: 8rpx; color: var(--cy-color-action-danger-bg); font-size: var(--cy-font-label); }
+.req-left__star { font-weight: 700; }
+/* V3-45:主题详情与票务两处「还有 N 项未填」同一套字号/颜色/间距,不带箭头 */
+.pd-entry-card__sub.pd-missing, .pd-modecard__action.pd-missing { display: block; margin-top: 0; padding-top: var(--cy-space-1); font-size: var(--cy-font-caption); line-height: 1.4; color: var(--cy-color-action-danger-bg); }
+.sp { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: var(--cy-z-sheet); background: var(--cy-color-bg-page); color: var(--cy-color-text-primary); }
+.sp-scroll { height: 100%; }
+.sp-hero { position: relative; height: 800rpx; overflow: hidden; }
+.sp-hero__img { width: 100%; height: 100%; display: block; }
+.sp-hero__img--empty { display: flex; align-items: center; justify-content: center; background: var(--cy-color-bg-elevated); color: var(--cy-color-text-tertiary); }
+.sp-hero::after { content: ""; position: absolute; left: 0; right: 0; top: 0; bottom: 0; background: linear-gradient(180deg, rgba(0, 0, 0, .4) 0%, rgba(0, 0, 0, 0) 28%, rgba(0, 0, 0, .2) 55%, rgba(0, 0, 0, .72) 100%); } /* ds-ok P-9 封面压暗:浅色页上标题仍压在暗处 */
+.sp-hero__copy { position: absolute; left: 36rpx; right: 36rpx; bottom: 32rpx; z-index: 1; display: flex; flex-direction: column; color: #FFFFFF; } /* ds-ok 封面上的白字 */
+.sp-title { font-size: 68rpx; font-weight: 800; line-height: 1.1; } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-meta { display: flex; flex-wrap: wrap; gap: 12rpx; margin-top: 20rpx; }
+.sp-chip { padding: 8rpx 20rpx; border-radius: var(--cy-radius-pill); background: rgba(255, 255, 255, .22); font-size: var(--cy-type-label); font-weight: 600; } /* ds-ok 封面上的玻璃标签 */
+.sp-pad { padding: 0 32rpx; }
+.sp-issues { margin-top: 24rpx; border-radius: 28rpx; overflow: hidden; background: var(--cy-color-bg-elevated); } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-issue { display: flex; align-items: center; gap: 8rpx; min-height: 116rpx; padding: 0 28rpx; color: var(--cy-color-action-danger-bg); font-size: var(--cy-type-body); }
+.sp-issue + .sp-issue { border-top: 1rpx solid var(--cy-color-border-subtle); }
+.sp-issue__star { font-weight: 700; }
+.sp-issue__t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sp-issue__w { margin-top: 4rpx; font-size: var(--cy-type-label); color: var(--cy-color-text-tertiary); }
+.sp-issue__go { flex: none; font-size: 26rpx; font-weight: 700; } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-issue--warn { color: var(--cy-color-status-warning); } /* warning 档:不拦发布 */
+.sp-desc { margin-top: 24rpx; font-size: 30rpx; line-height: 1.7; color: var(--cy-color-text-secondary); } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-sec { margin: 52rpx 4rpx 16rpx; font-size: 26rpx; font-weight: 700; color: var(--cy-color-text-tertiary); } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-group { border-radius: var(--cy-radius-lg); overflow: hidden; background: var(--cy-color-bg-elevated); }
+.sp-row { display: flex; align-items: center; gap: 20rpx; min-height: 100rpx; padding: 0 24rpx 0 28rpx; }
+.sp-row + .sp-row { border-top: 1rpx solid var(--cy-color-border-subtle); }
+.sp-row__i { flex: none; width: 60rpx; height: 60rpx; border-radius: var(--cy-radius-sm); display: flex; align-items: center; justify-content: center; background: var(--cy-color-bg-surface-strong); }
+.sp-row__k { flex: none; font-size: 30rpx; } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-row__v { flex: 1; min-width: 0; text-align: right; font-size: var(--cy-type-body); color: var(--cy-color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-row.is-flag, .sp-chrow.is-flag { box-shadow: inset 6rpx 0 0 var(--cy-color-action-danger-bg); }
+.sp-row.is-flag .sp-row__v, .sp-chrow.is-flag .sp-chrow__m { color: var(--cy-color-action-danger-bg); font-weight: 600; }
+.sp-swrow { min-height: 116rpx; }
+.sp-swrow__t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sp-swrow__d { margin-top: 4rpx; font-size: var(--cy-type-label); color: var(--cy-color-text-tertiary); }
+.sp-lock { flex: none; width: 88rpx; height: 88rpx; display: flex; align-items: center; justify-content: center; color: var(--cy-color-text-tertiary); }
+.sp-fixed { flex: none; font-size: 26rpx; font-weight: 600; color: var(--cy-color-text-secondary); } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-look { display: flex; flex-direction: column; gap: 16rpx; }
+.sp-look__pv { display: block; border-radius: var(--cy-radius-lg); overflow: hidden; }
+.sp-story { border-radius: var(--cy-radius-lg); overflow: hidden; background: var(--cy-color-bg-elevated); }
+.sp-chrow { display: flex; align-items: center; gap: 24rpx; min-height: 116rpx; padding: 0 24rpx 0 28rpx; border-bottom: 1rpx solid var(--cy-color-border-subtle); }
+.sp-chrow__no { flex: none; width: 52rpx; height: 52rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--cy-color-text-primary); color: var(--cy-color-bg-page); font-size: 26rpx; font-weight: 800; } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-chrow__t { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: var(--cy-type-card-title); font-weight: 700; }
+.sp-chrow__m { margin-top: 4rpx; font-size: var(--cy-type-label); font-weight: 400; color: var(--cy-color-text-tertiary); }
+.sp-read { margin: 24rpx; height: 92rpx; border-radius: var(--cy-radius-pill); display: flex; align-items: center; justify-content: center; background: var(--cy-color-text-primary); color: var(--cy-color-bg-page); font-size: 30rpx; font-weight: 700; } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-end { margin-top: 52rpx; padding: 36rpx; border-radius: var(--cy-radius-lg); background: var(--cy-color-bg-elevated); display: flex; align-items: center; gap: 28rpx; color: var(--cy-color-status-warning); }
+.sp-end__t { display: block; font-size: var(--cy-type-label); color: var(--cy-color-text-tertiary); }
+.sp-end__n { display: block; margin-top: 4rpx; font-size: var(--cy-type-section-title); font-weight: 700; color: var(--cy-color-text-primary); }
+.sp-bottom { height: calc(80rpx + env(safe-area-inset-bottom)); }
+.sp-top { background: var(--cy-color-bg-page); position: absolute; left: 0; right: 0; top: 0; z-index: 2; height: 88rpx; box-sizing: content-box; display: flex; align-items: center; justify-content: space-between; padding-left: 24rpx; padding-right: 204rpx; }
+.sp-x { width: 88rpx; height: 88rpx; display: flex; align-items: center; justify-content: center; }
+.sp-x__c { width: 68rpx; height: 68rpx; border-radius: 50%; background: var(--cy-color-bg-glass); display: flex; align-items: center; justify-content: center; }
+/* 剧情弹窗:与编辑器同一套浅色(浅灰底 + 白色图卡) */
+.sp-pop { position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 3; pointer-events: none; }
+.sp-pop__mask { position: absolute; left: 0; right: 0; top: 0; bottom: 0; background: var(--cy-color-overlay); opacity: 0; transition: opacity .3s; }
+.sp-pop__panel { position: absolute; left: 0; right: 0; bottom: 0; height: 90%; display: flex; flex-direction: column; border-radius: 44rpx 44rpx 0 0; background: var(--cy-color-bg-page); transform: translateY(100%); transition: transform .36s cubic-bezier(.2, .8, .2, 1); } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-pop.is-open { pointer-events: auto; }
+.sp-pop.is-open .sp-pop__mask { opacity: 1; }
+.sp-pop.is-open .sp-pop__panel { transform: none; }
+.sp-pop__grab { flex: none; height: 40rpx; display: flex; align-items: center; justify-content: center; }
+.sp-pop__grab::after { content: ""; width: 76rpx; height: 10rpx; border-radius: 6rpx; background: var(--cy-color-border-strong); } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-pop__hd { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 24rpx 12rpx 36rpx; font-size: 34rpx; font-weight: 800; } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-pop__x { width: 88rpx; height: 88rpx; display: flex; align-items: center; justify-content: center; }
+.sp-pop__body { flex: 1; min-height: 0; padding: 0 36rpx; box-sizing: border-box; }
+.sp-ch { padding-top: 28rpx; }
+.sp-ch + .sp-ch { margin-top: 52rpx; border-top: 1rpx solid var(--cy-color-border-subtle); }
+.sp-ch__h { font-size: 52rpx; font-weight: 800; line-height: 1.2; } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-ch__meta { display: flex; align-items: center; gap: 8rpx; margin-top: 12rpx; font-size: var(--cy-type-label); color: var(--cy-color-text-tertiary); }
+.sp-say { margin-top: 20rpx; font-size: 30rpx; line-height: 1.75; color: var(--cy-color-text-secondary); } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-say.is-flag { padding: 20rpx 24rpx; border-radius: var(--cy-radius-md); box-shadow: inset 0 0 0 3rpx var(--cy-color-action-danger-bg); }
+.sp-say__flag { display: block; margin-bottom: 8rpx; font-size: var(--cy-type-label); font-weight: 700; color: var(--cy-color-action-danger-bg); }
+.sp-stop { margin-top: 44rpx; }
+.sp-stop__no { text-align: center; font-size: var(--cy-type-body); font-style: italic; color: var(--cy-color-text-tertiary); }
+.sp-card { margin-top: 28rpx; border-radius: 36rpx; overflow: hidden; background: var(--cy-color-bg-elevated); } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-card__img { position: relative; height: 360rpx; }
+.sp-card__pic { width: 100%; height: 100%; display: block; }
+.sp-card__game { position: absolute; left: 0; right: 0; bottom: 0; padding: 44rpx 28rpx 20rpx; background: linear-gradient(180deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, .78)); font-size: var(--cy-type-card-title); font-weight: 700; color: #FFFFFF; } /* ds-ok 图上压字 */
+.sp-card__foot { display: flex; align-items: center; gap: 24rpx; padding: 24rpx 28rpx 28rpx; }
+.sp-card__copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8rpx; }
+.sp-card__at { font-size: var(--cy-type-label); color: var(--cy-color-text-tertiary); }
+.sp-card__shop { font-size: 34rpx; font-weight: 700; line-height: 1.3; } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+.sp-card__play { font-size: var(--cy-type-label); font-weight: 600; color: var(--cy-color-text-secondary); }
+.sp-card__route { flex: none; width: 68rpx; height: 68rpx; border-radius: 18rpx; display: flex; align-items: center; justify-content: center; background: var(--cy-color-text-primary); color: var(--cy-color-bg-page); } /* ds-ok P-9 原型尺寸(业主批准稿,逐字照搬) */
+
+.chapter-media-error { display: block; color: var(--cy-danger); font-size: var(--cy-font-caption); margin-top: var(--cy-space-2); }
+
+/* r2-create(a5-v3-29 业主「发布者实名看起来怎么还是没有对齐 标题不应该是在下面白色边缘的页边距吗」):
+   票务页(第 2 页)区块标题的左沿对齐下面白卡的左沿 —— 页容器已经留了页边距,标题不再额外缩进 38rpx。
+   只作用于票务页容器 .gen-page。 */
+.slopes-info-page.gen-page .pd-section-title { padding-left: 0; padding-right: 0; }
+
+/* ── 拖进段落中间(l-editor,2026-11-10 编辑器原型 v2):那一段临时显示成「上半 · 槽 · 下半」 ── */
+.story-split { display: block; }
+.story-split__half { display: block; color: var(--cy-color-text-primary); font-size: var(--cy-font-body); line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+.story-split__half:empty { display: none; }
+/* 槽:与被拖的块同高;高度不过渡(棘轮不放布局动画),只让里面那条线淡入 */
+.story-split__slot { position: relative; box-sizing: border-box; margin: 16rpx 0; border-radius: var(--cy-radius-md); background: var(--cy-color-brand-soft); overflow: hidden; }
+.story-split__line { position: absolute; left: 20rpx; right: 20rpx; top: 20rpx; height: 4rpx; border-radius: 2rpx; background: var(--cy-color-brand); opacity: 1; transition: opacity var(--cy-motion-fast) var(--cy-ease-out); } /* ds-ok: 上线波次原型逐值(装饰 / 品牌色块) */
+/* 故事编辑器没有底栏:撤销条贴在安全区之上,而不是沿用编辑页底栏的高度悬在章节结束卡上;
+   滚动尾部按撤销条高度留白,滚到底时章节结束卡完整露在撤销条上方。 */
+.story-undo { z-index: 260; bottom: calc(var(--cy-space-3) + env(safe-area-inset-bottom)); }
+.story-editor__bottom { height: calc(var(--cy-btn-h) + var(--cy-space-3) * 2 + env(safe-area-inset-bottom)); }
+
+/* ═══════ 故事编辑器 · 编辑器原型 v2(l-editor,2026-11-10 业主批准):顶部添加栏 / 章节开始结束卡 / 卡片式块 / 图片组 / 分支任务 ═══════ */
+/* 顶部「添加」栏:六格等分,图标在上、字在下;没有格式工具 */
+.sx-add { flex: 0 0 auto; display: flex; align-items: stretch; padding: 0 var(--cy-space-2) var(--cy-space-2); border-bottom: 2rpx solid var(--cy-color-border-subtle); }
+.sx-add__i { flex: 1; min-width: 0; min-height: var(--cy-btn-h); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4rpx; border-radius: var(--cy-radius-sm); color: var(--cy-color-text-primary); }
+.sx-add__t { color: var(--cy-color-text-secondary); font-size: var(--cy-font-micro); line-height: 1.2; }
+
+/* 页底色:卡片式块要有一层浅底才看得出是卡 */
+.story-editor__scroll { background: var(--cy-color-bg-page); }
+
+/* 章节开始 / 结束卡:固定在首尾的两张卡,不参与拖动 */
+.ed-cap { position: relative; margin: var(--cy-space-3) var(--cy-space-3) 0; border-radius: var(--cy-radius-lg); background: var(--cy-color-bg-surface); overflow: hidden; }
+.ed-cap--end { margin-top: var(--cy-space-2); }
+.ed-cap__cover { position: relative; height: 280rpx; background: var(--cy-color-bg-surface-subtle); }
+.ed-cap__cover.has-img::after { content: ''; position: absolute; left: 0; right: 0; top: 0; bottom: 0; background: linear-gradient(180deg, rgba(0, 0, 0, .05), rgba(0, 0, 0, .45)); } /* ds-ok 封面压暗,给白字垫底 */
+.ed-cap__img { width: 100%; height: 100%; display: block; }
+.ed-cap__empty { position: absolute; left: 0; right: 0; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; gap: var(--cy-space-2); color: var(--cy-color-text-secondary); font-size: var(--cy-font-label); }
+.ed-cap__tag { position: absolute; left: var(--cy-space-3); top: var(--cy-space-3); z-index: 1; padding: 6rpx 16rpx; border-radius: var(--cy-radius-sm); background: var(--cy-color-bg-surface); color: var(--cy-color-text-primary); font-size: var(--cy-font-micro); font-weight: 700; letter-spacing: .08em; }
+.ed-cap__tag--end { position: static; background: var(--cy-color-text-primary); color: var(--cy-color-text-inverse); }
+.ed-cap__x { position: absolute; right: var(--cy-space-2); top: var(--cy-space-2); z-index: 1; width: var(--cy-btn-h); height: var(--cy-btn-h); display: flex; align-items: center; justify-content: center; color: var(--cy-color-text-inverse); }
+/* 「预览弹窗」:点按区 88rpx,看得见的药丸 56rpx(::before),与顶栏药丸同一套做法 */
+.ed-cap__pv { position: absolute; right: var(--cy-space-2); bottom: 0; z-index: 1; isolation: isolate; min-height: var(--cy-btn-h); padding: 0 var(--cy-space-3); display: flex; align-items: center; gap: 6rpx; color: var(--cy-color-text-primary); font-size: var(--cy-font-caption); font-weight: 600; }
+.ed-cap__pv::before { content: ''; position: absolute; left: 0; right: 0; top: 16rpx; bottom: 16rpx; z-index: -1; border-radius: var(--cy-radius-pill); background: var(--cy-color-bg-surface); }
+.ed-cap__pv--flat { position: relative; right: auto; bottom: auto; margin-right: calc(-1 * var(--cy-space-2)); }
+.ed-cap__pv--flat::before { background: var(--cy-color-bg-surface-subtle); }
+.ed-cap__head { display: flex; align-items: center; justify-content: space-between; padding: var(--cy-space-3) var(--cy-space-3) 0; }
+.ed-cap__body { padding: var(--cy-space-3) var(--cy-space-4) var(--cy-space-4); }
+.ed-cap__name { width: 100%; min-height: 60rpx; color: var(--cy-color-text-primary); font-size: var(--cy-font-subtitle); font-weight: 700; line-height: 1.4; }
+.ed-cap__name--read { display: block; }
+.ed-cap__ph { color: var(--cy-color-text-placeholder); }
+.ed-cap__ta { width: 100%; min-height: 88rpx; margin-top: var(--cy-space-2); padding: var(--cy-space-2-5) var(--cy-space-3); box-sizing: border-box; border-radius: var(--cy-radius-md); background: var(--cy-color-bg-surface-subtle); color: var(--cy-color-text-primary); font-size: var(--cy-font-label); line-height: 1.65; }
+.ed-cap__ta--read { display: block; white-space: pre-wrap; word-break: break-word; }
+/* 内层 textarea 不带内距(auto-height 量的是内容高,内距放在外层容器上) */
+.ed-cap__ta-in { display: block; width: 100%; min-height: 48rpx; color: var(--cy-color-text-primary); font-size: inherit; line-height: inherit; }
+.ed-cap__row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--cy-space-2); margin-top: var(--cy-space-3); }
+.ed-cap__k { width: 64rpx; color: var(--cy-color-text-secondary); font-size: var(--cy-font-caption); }
+/* 筹码:点按区 88rpx,看得见的胶囊 56rpx(::before) */
+.ed-chip { position: relative; isolation: isolate; display: inline-flex; align-items: center; gap: 6rpx; min-height: var(--cy-btn-h); padding: 0 var(--cy-space-3); color: var(--cy-color-text-primary); font-size: var(--cy-font-caption); }
+.ed-chip::before { content: ''; position: absolute; left: 0; right: 0; top: 16rpx; bottom: 16rpx; z-index: -1; border-radius: var(--cy-radius-pill); background: var(--cy-color-bg-surface-subtle); }
+.ed-chip.is-on { color: var(--cy-color-text-inverse); }
+.ed-chip.is-on::before { background: var(--cy-color-text-primary); }
+
+/* 块 = 卡片:白底圆角,右侧六点把手,选中时蓝圈 + 右上角 ✕;导引线与段首圆点撤掉 */
+.story-editor__rail { padding: var(--cy-space-2) var(--cy-space-3) 0; }
+.story-editor__rail::before { display: none; }
+.story-article .story-block { position: relative; margin-bottom: var(--cy-space-2); border-radius: var(--cy-radius-lg); background: var(--cy-color-bg-surface); }
+.story-article .story-block.is-lifted { box-shadow: 0 16rpx 40rpx rgba(0, 0, 0, 0.18); } /* ds-ok 拖拽抬起态的临时投影 */
+.story-text-block::before { display: none; }
+.story-text-block, .story-media-block, .story-dream-block, .story-mood-block, .story-divider-block, .story-node-block, .story-gallery, .story-branch { padding: var(--cy-space-3) 72rpx var(--cy-space-3) var(--cy-space-4); }
+.story-node-block { padding-left: var(--cy-space-4); }
+.story-divider-block { padding-top: var(--cy-space-2); padding-bottom: var(--cy-space-2); }
+.story-article .story-block.is-divider { background: transparent; }
+.sx-para--quote::after { left: var(--cy-space-2); }
+.story-grip { left: auto; right: 0; width: 64rpx; padding-top: 0; align-items: center; }
+.story-grip__dots { opacity: .6; }
+.story-text-block.is-selected { box-shadow: none; }
+.story-article .story-block.is-selected { box-shadow: inset 0 0 0 3rpx var(--cy-color-text-primary); }
+.story-block-x { right: -8rpx; top: -8rpx; transform: none; z-index: 3; }
+.story-block-x__glyph { right: 0; top: 0; transform: none; width: 44rpx; height: 44rpx; border-radius: var(--cy-radius-pill); background: var(--cy-color-status-danger); color: var(--cy-color-text-inverse); }
+.story-block-x__glyph .cy-icon { transform: scale(.6); }
+
+/* 图片组:1 单图(16:10)/ 2 双图 / 3 三图(左大右两小)/ 4 四宫格;整组是一个块 */
+.story-gallery__grid { display: grid; gap: 6rpx; border-radius: var(--cy-radius-md); overflow: hidden; }
+.story-gallery__grid--1 { grid-template-columns: minmax(0, 1fr); }
+.story-gallery__grid--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.story-gallery__grid--3 { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); grid-template-rows: 1fr 1fr; }
+.story-gallery__grid--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.story-gallery__cell { width: 100%; min-width: 0; height: auto; box-sizing: border-box; aspect-ratio: 1 / 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4rpx; background: var(--cy-color-bg-surface-subtle); color: var(--cy-color-text-secondary); font-size: var(--cy-font-caption); }
+.story-gallery__grid--1 .story-gallery__cell { aspect-ratio: 16 / 10; }
+.story-gallery__grid--3 .story-gallery__cell:first-child { grid-row: 1 / 3; aspect-ratio: auto; }
+.story-gallery__cell--empty { border: 2rpx dashed var(--cy-color-border-strong); box-sizing: border-box; }
+.story-gallery__cell--img { position: relative; overflow: hidden; }
+.story-gallery__img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+.story-gallery__cap { width: 100%; min-height: 48rpx; margin-top: var(--cy-space-2); color: var(--cy-color-text-secondary); font-size: var(--cy-font-caption); }
+.story-gallery__cap--read { display: block; }
+
+/* 分支任务卡 */
+.story-branch__head { display: flex; align-items: center; gap: 8rpx; margin-bottom: var(--cy-space-2); color: var(--cy-color-text-secondary); font-size: var(--cy-font-caption); font-weight: 600; }
+.story-branch__tag { flex: 1; }
+.story-branch__act { min-height: var(--cy-btn-h); display: inline-flex; align-items: center; padding: 0 var(--cy-space-2); color: var(--cy-color-text-primary); font-weight: 600; }
+.story-branch__head { margin-bottom: 0; }
+.story-branch__q { display: block; margin-bottom: var(--cy-space-2); color: var(--cy-color-text-primary); font-size: var(--cy-font-body); font-weight: 600; }
+.story-branch__q.is-ph, .story-branch__t.is-ph { color: var(--cy-color-text-placeholder); font-weight: 400; }
+.story-branch__opt { display: flex; align-items: center; gap: var(--cy-space-2); padding: var(--cy-space-2) 0; border-top: 2rpx solid var(--cy-color-border-subtle); font-size: var(--cy-font-label); }
+.story-branch__k { flex: none; width: 44rpx; height: 44rpx; display: flex; align-items: center; justify-content: center; border-radius: var(--cy-radius-pill); background: var(--cy-color-text-primary); color: var(--cy-color-text-inverse); font-size: var(--cy-font-micro); font-weight: 700; }
+.story-branch__t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--cy-color-text-primary); }
+.story-branch__to { flex: none; color: var(--cy-color-text-secondary); font-size: var(--cy-font-caption); }
+
+/* 图片组版式弹层 */
+.sx-il { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--cy-space-2-5); padding: var(--cy-space-2) 0 var(--cy-space-4); }
+.sx-il__opt { min-height: var(--cy-btn-h); display: flex; flex-direction: column; align-items: center; gap: var(--cy-space-2); padding: var(--cy-space-3) var(--cy-space-1); border-radius: var(--cy-radius-md); background: var(--cy-color-bg-surface-subtle); }
+.sx-il__pic { width: 112rpx; height: 88rpx; display: grid; gap: 6rpx; }
+.sx-il__c { border-radius: 6rpx; background: var(--cy-color-text-primary); opacity: .85; } /* ds-ok: 上线波次原型逐值(装饰 / 品牌色块) */
+.sx-il__pic--1 { grid-template-columns: 1fr; }
+.sx-il__pic--2, .sx-il__pic--4 { grid-template-columns: 1fr 1fr; }
+.sx-il__pic--3 { grid-template-columns: 2fr 1fr; grid-template-rows: 1fr 1fr; }
+.sx-il__pic--3 .sx-il__c:first-child { grid-row: 1 / 3; }
+.sx-il__t { color: var(--cy-color-text-primary); font-size: var(--cy-font-caption); font-weight: 600; }
+
+/* 分支任务弹层 */
+.sx-sheet--tall { max-height: 80vh; display: flex; flex-direction: column; }
+.sx-br { flex: 1; min-height: 0; max-height: calc(80vh - 104rpx); }
+.sx-br__k { display: block; margin: var(--cy-space-3) 0 var(--cy-space-2); color: var(--cy-color-text-secondary); font-size: var(--cy-font-caption); font-weight: 600; }
+.sx-br__ta { width: 100%; min-height: 96rpx; padding: var(--cy-space-2-5) var(--cy-space-3); box-sizing: border-box; border-radius: var(--cy-radius-md); background: var(--cy-color-bg-surface-subtle); color: var(--cy-color-text-primary); font-size: var(--cy-font-body); line-height: 1.5; }
+.sx-br__opt { margin-bottom: var(--cy-space-2-5); padding: var(--cy-space-2-5) var(--cy-space-3); border-radius: var(--cy-radius-md); background: var(--cy-color-bg-surface-subtle); }
+.sx-br__line { display: flex; align-items: center; gap: var(--cy-space-2); }
+.sx-br__in { flex: 1; min-width: 0; height: 72rpx; padding: 0 var(--cy-space-2-5); border-radius: var(--cy-radius-sm); background: var(--cy-color-bg-surface); color: var(--cy-color-text-primary); font-size: var(--cy-font-label); }
+.sx-br__x { width: var(--cy-btn-h); height: var(--cy-btn-h); margin-right: calc(-1 * var(--cy-space-2)); display: flex; align-items: center; justify-content: center; color: var(--cy-color-text-tertiary); }
+.sx-br__tos { display: flex; align-items: center; flex-wrap: wrap; gap: var(--cy-space-1-5, 12rpx); margin-top: var(--cy-space-2); }
+.sx-br__tos .ed-chip::before { background: var(--cy-color-bg-surface); }
+.sx-br__tos .ed-chip.is-on::before { background: var(--cy-color-text-primary); }
+.sx-br__tos { gap: 0 var(--cy-space-1); margin-top: 0; }
+.sx-br__tok { margin-right: 4rpx; color: var(--cy-color-text-secondary); font-size: var(--cy-font-caption); }
+.sx-br__add { min-height: var(--cy-btn-h); display: flex; align-items: center; justify-content: center; gap: 6rpx; border: 2rpx dashed var(--cy-color-border-strong); border-radius: var(--cy-radius-md); color: var(--cy-color-text-primary); font-size: var(--cy-font-label); font-weight: 600; }
+.sx-br__pv { min-height: var(--cy-btn-h); margin-top: var(--cy-space-3); display: flex; align-items: center; justify-content: center; gap: 6rpx; border-radius: var(--cy-radius-md); background: var(--cy-color-bg-surface-subtle); color: var(--cy-color-text-primary); font-size: var(--cy-font-label); font-weight: 600; }
+.sx-br__pad { height: var(--cy-space-6); }
+
+/* ═══════ 玩家端弹窗预览(编辑器原型 v2 · preview.js):主题开始 / 章节开始 / 章节结束 / 玩法开始 / 玩法结束 / 分支选择,按画面风格着色 ═══════ */
+.pvl { position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 40; display: flex; flex-direction: column; background: var(--lk-bg); color: var(--lk-ink); overflow: hidden; }
+.pvl__scene { position: absolute; left: 0; right: 0; top: 0; bottom: 0; width: 100%; height: 100%; opacity: .55; }
+.pvl__dim { position: absolute; left: 0; right: 0; top: 0; bottom: 0; background: linear-gradient(180deg, rgba(var(--lk-shade-rgb), .35), rgba(var(--lk-shade-rgb), .7)); }
+.pvl__top { position: relative; z-index: 1; flex: 0 0 auto; display: flex; align-items: center; gap: var(--cy-space-2); padding: var(--cy-space-2) var(--cy-space-2); }
+.pvl__x { width: var(--cy-btn-h); height: var(--cy-btn-h); display: flex; align-items: center; justify-content: center; color: var(--lk-ink); }
+.pvl__ttl { color: var(--lk-mute); font-size: var(--cy-font-caption); font-weight: 600; letter-spacing: .06em; }
+.pvl__mid { position: relative; z-index: 1; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0 var(--cy-space-5); }
+.pv-card { width: 100%; max-width: 620rpx; }
+.pv-card__in { padding: var(--cy-space-6) var(--cy-space-5) var(--cy-space-5); display: flex; flex-direction: column; align-items: center; text-align: center; }
+.pv-kick { font-size: var(--cy-font-micro); letter-spacing: .14em; font-weight: 700; }
+.pv-title { margin-top: var(--cy-space-2); font-size: var(--cy-font-title); line-height: 1.25; }
+.pv-body { margin-top: var(--cy-space-3); font-size: var(--cy-font-body); line-height: 1.75; white-space: pre-wrap; word-break: break-word; }
+.pv-meta { margin-top: var(--cy-space-3); font-size: var(--cy-font-caption); }
+.pv-mark { width: 120rpx; height: 120rpx; margin: var(--cy-space-3) 0 var(--cy-space-1); display: flex; align-items: center; justify-content: center; border-radius: var(--lk-rb); clip-path: var(--lk-cut); }
+.pv-mark.is-ok { background: var(--lk-ok); color: #FFFFFF; } /* ds-ok 成功绿上的白字 */
+.pv-mark.is-bad { background: rgba(var(--lk-ink-rgb), .12); color: var(--lk-ink); border: 1rpx solid rgba(var(--lk-ink-rgb), .3); }
+.pv-opts { width: 100%; margin-top: var(--cy-space-4); display: flex; flex-direction: column; gap: var(--cy-space-2); }
+.pv-opt { justify-content: flex-start; text-align: left; }
+.pv-opt__k { flex: none; width: 44rpx; height: 44rpx; display: flex; align-items: center; justify-content: center; border-radius: var(--lk-rb); clip-path: var(--lk-cut); background: var(--lk-ink); color: var(--lk-bg); font-size: var(--cy-font-micro); font-weight: 700; }
+.pv-go { width: 100%; margin-top: var(--cy-space-5); }
+.pvl__seg, .pvl__looks, .pvl__pals { position: relative; z-index: 1; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: var(--cy-space-2); padding: 0 var(--cy-space-4) var(--cy-space-2); }
+.pvl__strip { position: relative; z-index: 1; flex: 0 0 auto; white-space: nowrap; padding: 0 0 var(--cy-space-2); }
+.pvl__strip-in { display: inline-flex; gap: var(--cy-space-2); padding: 0 var(--cy-space-4); }
+.pvl__strip .lk-chip, .pvl__seg .lk-chip { min-height: var(--cy-btn-h); }
+/* 选中的筹码在星尘 / 末世下也要反白:外观文件给 .lk-chip 的玻璃 / 锈底会盖掉 .is-on 的实底(跨线提醒 qx-base) */
+.pvl .lk-chip.is-on { background: var(--lk-ink); background-image: none; color: var(--lk-bg); border-color: var(--lk-ink); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.pvl__look { min-height: var(--cy-btn-h); padding: 0 var(--cy-space-2); display: flex; align-items: center; gap: 8rpx; color: var(--lk-mute); font-size: var(--cy-font-caption); }
+.pvl__look.is-on { color: var(--lk-ink); font-weight: 700; }
+.pvl__look .look-sw { width: 28rpx; height: 28rpx; }
+.pvl__pals { padding-bottom: calc(var(--cy-space-4) + env(safe-area-inset-bottom)); }
+.pvl__palk { color: var(--lk-mute); font-size: var(--cy-font-caption); margin-right: 4rpx; }
+.pvl__pal { width: var(--cy-btn-h); height: var(--cy-btn-h); display: flex; align-items: center; justify-content: center; }
+.pvl__pal::before { content: ''; width: 36rpx; height: 36rpx; border-radius: var(--cy-radius-pill); background: var(--lk-bg); box-shadow: 0 0 0 2rpx rgba(var(--lk-ink-rgb), .35); }
+.pvl__pal.is-on::before { box-shadow: 0 0 0 3rpx var(--lk-a), 0 0 0 6rpx rgba(var(--lk-ink-rgb), .25); }
+
+/* ═══════ 玩法模板选择 · 列表式(编辑器原型 v2 · 4,l-editor):一行一个模板,不再横滑卡 ═══════ */
+.pk-list { margin: 0 var(--cy-space-4); border-radius: var(--cy-radius-lg); background: var(--cy-color-bg-surface); overflow: hidden; }
+.pk-row { position: relative; min-height: 120rpx; padding: var(--cy-space-2) var(--cy-space-3); display: flex; align-items: center; gap: var(--cy-space-3); }
+.pk-row + .pk-row::before { content: ''; position: absolute; left: var(--cy-space-3); right: 0; top: 0; height: 2rpx; background: var(--cy-color-border-subtle); }
+.pk-row.is-on { background: var(--cy-color-bg-surface-subtle); }
+.pk-row.is-reviewing .pk-row__pic,
+.pk-row.is-reviewing .pk-row__m { opacity: .5; }
+.pk-row.is-reviewing .pk-row__ck { visibility: hidden; }
+.pk-row__pic { flex: none; width: 88rpx; height: 88rpx; border-radius: var(--cy-radius-md); background: var(--cy-color-bg-surface-subtle); }
+.pk-row__pic--new { display: flex; align-items: center; justify-content: center; color: var(--cy-color-text-secondary); }
+.pk-row__pic--new { color: var(--cy-color-text-primary); }
+.pk-row__m { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4rpx; }
+.pk-row__t { color: var(--cy-color-text-primary); font-size: var(--cy-font-label); font-weight: 600; }
+.pk-row__i { color: var(--cy-color-text-secondary); font-size: var(--cy-font-caption); }
+.pk-row__mode { flex: none; padding: 4rpx 12rpx; border-radius: var(--cy-radius-sm); background: var(--cy-color-bg-surface-subtle); color: var(--cy-color-text-secondary); font-size: var(--cy-font-micro); }
+.pk-row__ck { flex: none; width: 44rpx; height: 44rpx; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border-radius: var(--cy-radius-pill); border: 3rpx solid var(--cy-color-border-strong); color: transparent; }
+.pk-row.is-on .pk-row__ck { background: var(--cy-color-text-primary); border-color: var(--cy-color-text-primary); color: var(--cy-color-text-inverse); }
+
+/* 细节打磨二期 L1/L5/L7 */
+.pd-modecard { transition: var(--cy-tr-press); }
+.pending-materials__continue { transition: var(--cy-tr-press); }
+.pending-material__x { transition: var(--cy-tr-press); }
+.pending-material__action { transition: var(--cy-tr-press); }
+.slopes-chapter-hd { transition: var(--cy-tr-press); }
+.slopes-node-rail { transition: var(--cy-tr-press); }
+.slopes-node-rail--handle { transition: var(--cy-tr-press); }
+.slopes-node-photo { transition: var(--cy-tr-press); }
+.slopes-node-loc { transition: var(--cy-tr-press); }
+.slopes-node-more { transition: var(--cy-tr-press); }
+.slopes-add-chapter { transition: var(--cy-tr-press); }
+.submit-error-why__toggle { transition: var(--cy-tr-press); }
+.story-editor__backdrop { transition: var(--cy-tr-press); }
+.sx-top__text { transition: var(--cy-tr-press); }
+.sx-top__pill { transition: var(--cy-tr-press); }
+.sx-top__icon { transition: var(--cy-tr-press); }
+.sx-add__i { transition: var(--cy-tr-press); }
+.ed-cap__x { transition: var(--cy-tr-press); }
+.ed-cap__pv { transition: var(--cy-tr-press); }
+.story-grip { transition: var(--cy-tr-press); }
+.story-block-x { transition: var(--cy-tr-press); }
+.story-gallery__cell { transition: var(--cy-tr-press); }
+.story-gallery__cell--img { transition: var(--cy-tr-press); }
+.story-gallery__cell--empty { transition: var(--cy-tr-press); }
+.story-branch__act { transition: var(--cy-tr-press); }
+.story-media-block__audio { transition: var(--cy-tr-press); }
+.story-media-block__audio--empty { transition: var(--cy-tr-press); }
+.story-dream-block__del { transition: var(--cy-tr-press); }
+.story-dream-block__add { transition: var(--cy-tr-press); }
+.story-mood-block__body { transition: var(--cy-tr-press); }
+.story-var-entry { transition: var(--cy-tr-press); }
+.story-node-block { transition: var(--cy-tr-press); }
+.story-tail { transition: var(--cy-tr-press); }
+.ed-cap__pv--flat { transition: var(--cy-tr-press); }
+.pvl__x { transition: var(--cy-tr-press); }
+.pvl__look { transition: var(--cy-tr-press); }
+.pvl__pal { transition: var(--cy-tr-press); }
+.pending-undo__action { transition: var(--cy-tr-press); }
+.sx-sheet__close { transition: var(--cy-tr-press); }
+.sx-il__opt { transition: var(--cy-tr-press); }
+.ed-chip { transition: var(--cy-tr-press); }
+.sx-br__add { transition: var(--cy-tr-press); }
+.sx-br__pv { transition: var(--cy-tr-press); }
+.slopes-tab { transition: var(--cy-tr-press); }
+.modal-close { transition: var(--cy-tr-press); }
+.node-sheet__close { transition: var(--cy-tr-press); }
+.node-sheet__done { transition: var(--cy-tr-press); }
+.node-shared__row { transition: var(--cy-tr-press); }
+.node-card { transition: var(--cy-tr-press); }
+.node-card--danger { transition: var(--cy-tr-press); }
+.pk-row { transition: var(--cy-tr-press); }
+.route-mapping-row { transition: var(--cy-tr-press); }
+.cs-close { transition: var(--cy-tr-press); }
+.ch-group__del { transition: var(--cy-tr-press); }
+.node-chip { transition: var(--cy-tr-press); }
+.ch-pill-btn { transition: var(--cy-tr-press); }
+.chapter-audio__empty { transition: var(--cy-tr-press); }
+.chapter-audio__play { transition: var(--cy-tr-press); }
+.chapter-audio__del { transition: var(--cy-tr-press); }
+.chapter-atmosphere__item { transition: var(--cy-tr-press); }
+.node-card__row { transition: var(--cy-tr-press); }
+.tk-segment__item { transition: var(--cy-tr-press); }
+.chapter-settings-delete { transition: var(--cy-tr-press); }
+.sp-issue { transition: var(--cy-tr-press); }
+.sp-issue--warn { transition: var(--cy-tr-press); }
+.sp-row { transition: var(--cy-tr-press); }
+.sp-lock { transition: var(--cy-tr-press); }
+.sp-look { transition: var(--cy-tr-press); }
+.sp-chrow { transition: var(--cy-tr-press); }
+.sp-read { transition: var(--cy-tr-press); }
+.sp-x { transition: var(--cy-tr-press); }
+.sp-pop__x { transition: var(--cy-tr-press); }
+.sp-say { transition: var(--cy-tr-press); }
+.sp-card { transition: var(--cy-tr-press); }
+.pw-custom__done { transition: var(--cy-tr-press); }
+.story-initial__option { transition: var(--cy-tr-press); }
+.slopes-node-num, .story-dream-block__count, .story-node-block__num, .node-card__value, .chapter-recruit__num { font-variant-numeric: tabular-nums; }
+.sp-card,
+.sp-card__route { box-shadow: var(--cy-depth-rest); }
+
+/* F10 自由探索开售票价区:沿用编辑器卡片 token */
+.fe-pricing { margin: var(--cy-space-2) var(--cy-page-x) 0; padding: var(--cy-space-3); border-radius: var(--cy-radius-lg); background: var(--cy-bg-card); border: 1rpx solid var(--cy-border-card); }
+.fe-pricing__head { display: flex; align-items: center; justify-content: space-between; gap: var(--cy-space-2); margin-bottom: var(--cy-space-2); }
+.fe-pricing__title { font-size: var(--cy-font-body); font-weight: 700; color: var(--cy-text-title); }
+.fe-pricing__hint { font-size: var(--cy-font-caption); color: var(--cy-gold); }
+.fe-pricing__row { display: flex; align-items: center; gap: var(--cy-space-1); min-height: var(--cy-btn-h); border-top: 1rpx solid var(--cy-border-card); }
+.fe-pricing__row.is-disabled { opacity: .5; }
+.fe-pricing__name { flex: 1; min-width: 0; font-size: var(--cy-font-body); color: var(--cy-text-body); }
+.fe-pricing__unit { font-size: var(--cy-font-body); color: var(--cy-text-secondary); }
+.fe-pricing__input { width: 200rpx; min-height: var(--cy-btn-h); text-align: right; font-size: var(--cy-font-body); color: var(--cy-text-title); font-variant-numeric: tabular-nums; }
+.fe-pricing__cta { display: block; margin-top: var(--cy-space-2); }
+@import "./cast.wxss"; /* 角色(cast-contract-1119) */

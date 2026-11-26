@@ -1,0 +1,250 @@
+package com.chengyinhub.framework.config;
+
+import com.chengyinhub.business.service.support.AppMediaReferenceGuard;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+class AppMediaOutputConfigurationTest {
+    private AppMediaReferenceGuard guard;
+    private ObjectMapper mapper;
+
+    @BeforeEach void setUp() {
+        guard = mock(AppMediaReferenceGuard.class);
+        when(guard.visibleUrl(anyString(), isNull())).thenAnswer(call -> call.getArgument(0).equals("media-asset:1")
+                ? "https://real/upload/approved?signature=stable" : "");
+        Jackson2ObjectMapperBuilder builder = new Jackson2ObjectMapperBuilder();
+        new ApplicationConfig().jacksonObjectMapperCustomization().customize(builder);
+        new AppMediaOutputConfiguration(guard).reviewedMediaOutput().customize(builder);
+        mapper = builder.build();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
+    }
+    @AfterEach void clearRequest() { RequestContextHolder.resetRequestAttributes(); }
+
+    @Test void onlyTheServerCaptchaTopLevelJpegBypassesUploadedMediaProjection() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setServletPath("/captchaImage");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        com.chengyinhub.common.core.domain.AjaxResult result = com.chengyinhub.common.core.domain.AjaxResult.success();
+        result.put("captchaEnabled", true);
+        result.put("img", "/9j/server-generated-jpeg");
+        result.put("imgUrl", "https://unknown/upload.jpg");
+        result.put("data", Map.of("img", "/9j/user-content"));
+        com.fasterxml.jackson.databind.JsonNode output = mapper.readTree(mapper.writeValueAsString(result));
+        assertEquals("/9j/server-generated-jpeg", output.path("img").asText());
+        assertEquals("", output.path("imgUrl").asText());
+        assertEquals("", output.path("data").path("img").asText());
+        verify(guard, never()).visibleUrl(eq("/9j/server-generated-jpeg"), any());
+        verify(guard).visibleUrl("https://unknown/upload.jpg", null);
+        verify(guard).visibleUrl("/9j/user-content", null);
+    }
+
+    @Test void CaptchaShapedUploadResponseAndForwardedHeaderCannotBypassReview() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setServletPath("/api/template");
+        request.addHeader("X-Forwarded-Uri", "/captchaImage");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        com.chengyinhub.common.core.domain.AjaxResult result = com.chengyinhub.common.core.domain.AjaxResult.success();
+        result.put("captchaEnabled", true);
+        result.put("img", "/9j/unreviewed-upload");
+        assertEquals("", mapper.readTree(mapper.writeValueAsString(result)).path("img").asText());
+        verify(guard).visibleUrl("/9j/unreviewed-upload", null);
+    }
+
+    @Test void officialPlaceGalleryJsonIsProjectedPerImageLikeTheCover() throws Exception {
+        String json = mapper.writeValueAsString(Map.of("galleryJson", "[\"media-asset:1\",\"chengyin-test/raw.jpg\"]",
+                "coverImg", "chengyin-test/raw.jpg"));
+        com.fasterxml.jackson.databind.JsonNode out = mapper.readTree(json);
+        com.fasterxml.jackson.databind.JsonNode gallery = mapper.readTree(out.path("galleryJson").asText());
+        assertEquals("https://real/upload/approved?signature=stable", gallery.get(0).asText());
+        assertEquals("", gallery.get(1).asText());
+        assertEquals("", out.path("coverImg").asText());
+    }
+
+    /** M-29:门店相册存 JSON 字符串数组,逐张投影且保持数组形状,不能按分隔符切碎。 */
+    @Test void merchantGalleryJsonArrayKeepsShapeAndHidesUnknownImages() throws Exception {
+        String json = mapper.writeValueAsString(Map.of("gallery", "[\"media-asset:1\",\"https://unknown/a.jpg\"]",
+                "albumPics", "media-asset:1;https://unknown/b.jpg"));
+        com.fasterxml.jackson.databind.JsonNode out = mapper.readTree(json);
+        com.fasterxml.jackson.databind.JsonNode gallery = mapper.readTree(out.path("gallery").asText());
+        assertEquals(2, gallery.size());
+        assertEquals("https://real/upload/approved?signature=stable", gallery.get(0).asText());
+        assertEquals("", gallery.get(1).asText());
+        assertEquals("https://real/upload/approved?signature=stable;", out.path("albumPics").asText());
+        assertEquals("", mapper.readTree(mapper.writeValueAsString(Map.of("gallery", "[\"broken"))).path("gallery").asText());
+    }
+
+    @Test void canonicalArraysAndRealMapFieldsShareTheRegistryGateAndKeepOrdinaryText() throws Exception {
+        String json = mapper.writeValueAsString(Map.of("avatar", "https://unregistered/photo.png",
+                "frames", List.of("media-asset:1", "media-asset:2"), "url", "https://normal/navigation",
+                "description", "long text https://unregistered/photo.png is just text", "name", "https://nickname"));
+        assertEquals("", mapper.readTree(json).path("avatar").asText());
+        assertEquals("https://real/upload/approved?signature=stable", mapper.readTree(json).path("frames").get(0).asText());
+        assertEquals("", mapper.readTree(json).path("frames").get(1).asText());
+        assertTrue(json.contains("https://normal/navigation"));
+        assertTrue(json.contains("long text https://unregistered/photo.png is just text"));
+        assertTrue(json.contains("https://nickname"));
+    }
+
+    @Test void namedGameJsonUsesExactFieldsAndAlbumPathWithoutGuessingNavigationUrls() throws Exception {
+        String config = "{\"qa\":{\"options\":[{\"fbImgs\":[\"media-asset:1\",\"https://unknown/a.jpg\"]}]},"
+                + "\"photoCheck\":{\"frameUrl\":\"https://unknown/frame.png\"},"
+                + "\"album\":{\"images\":[{\"url\":\"https://unknown/album.jpg\",\"line\":\"原配文\"}]},"
+                + "\"navigation\":{\"url\":\"https://normal/link\"},\"label\":\"原名字\"}";
+        String result = mapper.readTree(mapper.writeValueAsString(Map.of("advancedConfigJson", config))).path("advancedConfigJson").asText();
+        assertFalse(result.contains("https://unknown"));
+        assertTrue(result.contains("signature=stable"));
+        assertTrue(result.contains("https://normal/link"));
+        assertTrue(result.contains("原配文"));
+        assertTrue(result.contains("原名字"));
+    }
+
+    @Test void requestCacheAvoidsRepeatQueriesAndNeverCrossesARequest() throws Exception {
+        mapper.writeValueAsString(Map.of("avatar", "media-asset:1", "cover", "media-asset:1"));
+        verify(guard, times(1)).visibleUrl("media-asset:1", null);
+        mapper.writeValueAsString(Map.of("avatar", "https://real/upload/approved?signature=stable"));
+        verify(guard, times(1)).visibleUrl(anyString(), isNull());
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
+        mapper.writeValueAsString(Map.of("avatar", "media-asset:1"));
+        verify(guard, times(2)).visibleUrl("media-asset:1", null);
+    }
+
+    @Test void ordinaryJsonAndBundleAssetsAreUnchangedAndExactUrnIsAProtocolValue() throws Exception {
+        String ordinary = "{\"imageUrl\":\"https://normal/link\",\"description\":\"原文本\"}";
+        String json = mapper.writeValueAsString(Map.of("preferences", ordinary, "avatar", "/images/avatar/default.png",
+                "name", "media-asset:1", "description", "prefix media-asset:1 suffix"));
+        assertEquals(ordinary, mapper.readTree(json).path("preferences").asText());
+        assertEquals("/images/avatar/default.png", mapper.readTree(json).path("avatar").asText());
+        assertEquals("https://real/upload/approved?signature=stable", mapper.readTree(json).path("name").asText());
+        assertEquals("prefix media-asset:1 suffix", mapper.readTree(json).path("description").asText());
+    }
+    @Test void thirtyFiveActualDomainSchemasResolveApprovedAndHideUnknownMedia() throws Exception {
+        String[][] fields = {
+            {"Club", "logo"}, {"ClubLeader", "avatar"}, {"ClubPost", "images"},
+            {"CmsActivity", "imgUrl"}, {"CmsBetaGame", "imgUrl"}, {"CmsMemberTemplate", "imgUrl"},
+            {"CmsTemplateLibrary", "imgUrl"}, {"CmsTopic", "imgUrl"}, {"CmsTopicChapter", "audioUrl"},
+            {"CmsTopicNode", "imgUrl"}, {"CmsPresetRoute", "previewImg"}, {"CmsPresetRouteNode", "imgUrl"},
+            {"CmsPresetThemeStyle", "coverImg"}, {"CmsRegistrationMerchant", "picUrl"},
+            {"CreatorProfile", "avatarUrl"}, {"IpCharacter", "avatarUrl"}, {"IpCityChapter", "coverUrl"},
+            {"IpWorld", "coverUrl"}, {"MmsMerchant", "logo"}, {"NpcProfile", "avatar"},
+            {"OfficialEvent", "coverImg"}, {"OmsOrderItem", "pic"}, {"PlayerNodeProgress", "picUrl"},
+            {"PmsGift", "picUrl"}, {"PmsProduct", "pic"}, {"PmsSku", "pic"},
+            {"RoamHangout", "coverUrl"}, {"RoamPoi", "coverImg"}, {"RoamStamp", "picUrl"},
+            {"UmsComment", "imgArr"}, {"UmsCreativeSquare", "pics"}, {"UmsMember", "avatar"},
+            {"PlayerObjectCard", "sourceUrl"}, {"GrowthBadge", "iconUrl"}, {"PlayerBadge", "iconUrl"}
+        };
+        assertEquals(35, fields.length);
+        for (String[] schema : fields) {
+            Class<?> type = Class.forName("com.chengyinhub.business.domain." + schema[0]);
+            Object bean = type.getDeclaredConstructor().newInstance();
+            java.lang.reflect.Field field = type.getDeclaredField(schema[1]);
+            field.setAccessible(true);
+            field.set(bean, "https://unregistered/unsafe.jpg");
+            assertFalse(mapper.writeValueAsString(bean).contains("https://unregistered"), schema[0]);
+            field.set(bean, "media-asset:1");
+            assertTrue(mapper.writeValueAsString(bean).contains("signature=stable"), schema[0]);
+        }
+    }
+    @Test void actualJsonNodeOutputAndPixelPresetsUseTheSameSchema() throws Exception {
+        com.fasterxml.jackson.databind.JsonNode tree = new ObjectMapper().readTree(
+                "{\"album\":{\"images\":[{\"url\":\"https://unknown/album.jpg\"}]},\"fbImgs\":[\"media-asset:1\"],\"url\":\"https://normal/navigation\"}");
+        String result = mapper.writeValueAsString(Map.of("config", tree, "avatar", "px1:p01"));
+        assertFalse(result.contains("https://unknown"));
+        assertTrue(result.contains("signature=stable"));
+        assertTrue(result.contains("https://normal/navigation"));
+        assertTrue(result.contains("px1:p01"));
+    }
+    @Test void chapterBlockNarrationVoiceIsSignedLikeBlockMediaInMapAndJsonNodeOutput() throws Exception {
+        String raw = "[{\"type\":\"text\",\"content\":\"https://ordinary/text\",\"voice\":\"media-asset:1\"},"
+                + "{\"type\":\"cap\",\"cap\":\"open\",\"content\":\"开场\",\"voice\":\"https://unknown/n.m4a\"},"
+                + "{\"type\":\"voice\",\"who\":\"心\",\"content\":\"内心\"}]";
+        List<Object> blocks = new ObjectMapper().readValue(raw, new com.fasterxml.jackson.core.type.TypeReference<List<Object>>() { });
+        for (String json : new String[]{mapper.writeValueAsString(Map.of("blocks", blocks)),
+                mapper.writeValueAsString(Map.of("chapter", new ObjectMapper().readTree("{\"blocks\":" + raw + "}")))}) {
+            com.fasterxml.jackson.databind.JsonNode out = mapper.readTree(json);
+            com.fasterxml.jackson.databind.JsonNode rows = out.has("blocks") ? out.path("blocks") : out.path("chapter").path("blocks");
+            assertEquals("https://real/upload/approved?signature=stable", rows.get(0).path("voice").asText());
+            assertEquals("https://ordinary/text", rows.get(0).path("content").asText());
+            assertEquals("", rows.get(1).path("voice").asText());
+            assertEquals("心", rows.get(2).path("who").asText());
+        }
+        verify(guard, atLeastOnce()).visibleUrl("https://unknown/n.m4a", null);
+    }
+    @Test void stockRhythmAliasesSurviveStringAndJsonNodeProjectionButRemoteAndUnknownDoNot() throws Exception {
+        for (String prefix : new String[]{"/audio/merchant-games/","/pages/play/audio/merchant-games/"}) {
+            for (String clip : new String[]{"one","two","three"}) {
+                String reference = prefix+"rhythm-"+clip+".mp3";
+                String config = "{ \"random\":{\"items\":[{\"audioUrl\":\""+reference+"\"}]}}";
+                String encoded = mapper.writeValueAsString(Map.of("audioUrl",reference,"advancedConfigJson",config));
+                assertEquals(reference,mapper.readTree(encoded).path("audioUrl").asText());
+                assertEquals(config,mapper.readTree(encoded).path("advancedConfigJson").asText());
+                String tree = mapper.writeValueAsString(mapper.readTree(config));
+                assertEquals(reference,mapper.readTree(tree).path("random").path("items").get(0).path("audioUrl").asText());
+            }
+        }
+        verifyNoInteractions(guard);
+        for (String reference : new String[]{"/audio/merchant-games/unknown.mp3",
+                "/audio/merchant-games/../rhythm-one.mp3", "/audio/merchant-games/%72hythm-one.mp3",
+                "/audio/merchant-games/rhythm-one.mp3?anything=1",
+                "https://www.chengyinhub.com/audio/merchant-games/rhythm-one.mp3",
+                "https://www.chengyinhub.com/prod-api/profile/merchant-game-covers/rhythm-blind-guess.jpg"}) {
+            assertEquals("",mapper.readTree(mapper.writeValueAsString(Map.of("audioUrl",reference))).path("audioUrl").asText());
+        }
+    }
+
+    @Test void realLegacyCoverGuardSurvivesPublicListAndJsonProjection() throws Exception {
+        AppMediaReferenceGuard realGuard = new AppMediaReferenceGuard();
+        com.chengyinhub.business.mapper.AppMediaAssetMapper registry =
+                mock(com.chengyinhub.business.mapper.AppMediaAssetMapper.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(realGuard, "mapper", registry);
+        org.springframework.test.util.ReflectionTestUtils.setField(realGuard, "assets",
+                mock(com.chengyinhub.business.service.impl.AppMediaAssetService.class));
+        Jackson2ObjectMapperBuilder builder = new Jackson2ObjectMapperBuilder();
+        new AppMediaOutputConfiguration(realGuard).reviewedMediaOutput().customize(builder);
+        ObjectMapper realMapper = builder.build();
+        String reference = "https://xianghuioss.oss-cn-shanghai.aliyuncs.com/chenyin/t1.png";
+        String key = "chenyin/t1.png";
+        for (boolean tree : new boolean[]{false, true}) {
+            String config = "{\"questionImg\":\"" + reference + "\"}";
+            Object value = Map.of("imgUrl", reference, "advancedConfigJson", config);
+            if (tree) value = realMapper.valueToTree(value);
+            var output = realMapper.readTree(realMapper.writeValueAsString(value));
+            assertEquals(reference, output.path("imgUrl").asText());
+            assertEquals(reference, realMapper.readTree(output.path("advancedConfigJson").asText()).path("questionImg").asText());
+        }
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
+        when(registry.selectByObjectKey(key)).thenReturn(Map.of("id", 7L, "memberId", 11L,
+                "objectKey", key, "reviewState", "REJECTED", "ownerType", "APP"));
+        assertEquals("", realMapper.readTree(realMapper.writeValueAsString(Map.of("imgUrl", reference))).path("imgUrl").asText());
+    }
+
+
+    /** M-1：对象存储缺配置时一张图签不出地址，只让这一项无图，同一响应里其他字段与可签的图照常输出。 */
+    @Test void oneUnsignableImageDegradesToNoImageInsteadOfFailingTheWholeResponse() throws Exception {
+        when(guard.visibleUrl(eq("media-asset:60"), isNull()))
+                .thenThrow(new IllegalStateException("对象存储配置缺失: CHENGYIN_OSS_BUCKET_NAME"));
+        com.chengyinhub.common.core.domain.AjaxResult result = com.chengyinhub.common.core.domain.AjaxResult.success();
+        result.put("data", Map.of("merchantName", "测试商家", "logo", "media-asset:1",
+                "projects", List.of(Map.of("title", "第一项", "imgUrl", "media-asset:60"),
+                        Map.of("title", "第二项", "imgUrl", "media-asset:1"))));
+        com.fasterxml.jackson.databind.JsonNode out = mapper.readTree(mapper.writeValueAsString(result));
+        assertEquals(200, out.path("code").asInt());
+        assertEquals("测试商家", out.path("data").path("merchantName").asText());
+        assertEquals("https://real/upload/approved?signature=stable", out.path("data").path("logo").asText());
+        assertEquals("第一项", out.path("data").path("projects").get(0).path("title").asText());
+        assertEquals("", out.path("data").path("projects").get(0).path("imgUrl").asText());
+        assertEquals("https://real/upload/approved?signature=stable", out.path("data").path("projects").get(1).path("imgUrl").asText());
+    }
+}

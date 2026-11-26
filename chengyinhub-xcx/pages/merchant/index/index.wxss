@@ -1,0 +1,659 @@
+@import '../../../style/merchant-light.wxss';
+
+page {
+  background: var(--cy-bg-page);
+  color: var(--cy-text-title);
+}
+
+.rv-merchant {
+  min-height: 100vh;
+  position: relative;
+  overflow: hidden;
+  background: var(--cy-bg-page);
+}
+
+/* 身份/加载失败只留页内一条内联错误,不再有整屏闸;留出与 hero 的间距。 */
+.rv-console-error { display: block; margin: var(--cy-space-3) var(--cy-page-x) 0; }
+
+/* 入驻申请状态卡(审核中/未通过/停用):页内说清状态与原因,不再静默跳回会员中心。 */
+.rv-apply-state { display: block; margin: var(--cy-space-3) var(--cy-page-x); }
+.rv-apply-state-head { display: flex; margin-bottom: var(--cy-space-3); }
+.rv-apply-state-badge {
+  padding: 4rpx var(--cy-space-2);
+  border-radius: var(--cy-radius-pill);
+  font-size: var(--cy-font-caption);
+  font-weight: 600;
+}
+.rv-apply-state-badge--neutral { background: var(--cy-color-status-neutral-soft); color: var(--cy-text-secondary); }
+.rv-apply-state-badge--warning { background: var(--cy-color-status-warning-soft); color: var(--cy-color-status-warning); }
+.rv-apply-state-badge--danger { background: var(--cy-color-status-danger-soft); color: var(--cy-color-status-danger); }
+.rv-apply-state-badge--success { background: var(--cy-color-status-success-soft); color: var(--cy-color-status-success); }
+.rv-apply-state-text {
+  display: block;
+  color: var(--cy-text-secondary);
+  font-size: var(--cy-font-body);
+  line-height: 1.6;
+}
+.rv-apply-state-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cy-space-1);
+  min-height: var(--cy-btn-h);
+  margin-top: var(--cy-space-3);
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-bg-page);
+  color: var(--cy-text-title);
+  font-size: var(--cy-font-body);
+  font-weight: 600;
+}
+
+.rv-hero {
+  /* 2026-09-18 用户定:收入数字居中在问候行与快捷钮正中间 ⇒ 底距交给 .rv-revenue-zone,
+   * hero 自身不再压 200rpx;员工端(无收入区)仍用 --no-revenue 保持原构图。 */
+  padding: var(--cy-space-2) var(--cy-page-x) 0;
+}
+
+.rv-hero--no-revenue {
+  padding-bottom: 200rpx; /* ds-ok: 200rpx 首屏构图定位值,无对应 spacing token */
+}
+
+.rv-hero-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--cy-space-3);
+  margin-bottom: var(--cy-space-5);
+}
+
+.rv-hero-greet {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 2026-08-20 稿 3910:580:问候行 19px regular,不再用 display 大字 */
+.rv-hero-line {
+  font-size: 38rpx; /* ds-ok: 稿面 19px,介于 subtitle 与 display 之间无同值 token */
+  line-height: 1.4;
+  color: var(--cy-text-title);
+  letter-spacing: -1rpx;
+  /* D10:问候语最多两行加省略号,不再被截成一行 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+/* 营业状态 pill 与欢迎语同一行(设计稿:状态是身份信息,不是独立一栏) */
+.rv-hero-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2);
+  margin-top: var(--cy-space-1-5);
+}
+
+.rv-hero-hi {
+  font-weight: 400;
+  color: var(--cy-text-title);
+}
+
+.rv-hero-name {
+  font-weight: 400; /* 稿面与 Hi 同重 */
+  color: var(--cy-text-title);
+}
+
+.rv-hero-avatar-hit {
+  /* 2026-09-17 用户定:头像再大一些 88→112rpx */
+  width: 112rpx;
+  height: 112rpx;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rv-hero-avatar {
+  /* 2026-09-17 用户定:头像再大一些,撑满 112rpx 热区 */
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 50%;
+  background: var(--cy-bg-card);
+  /* M-27(2026-10-27):商家头像不要描边 */
+}
+
+/* 收入区:固定高度撑出问候行与快捷钮之间的整段留白(原 96+…+200 ≈ 650rpx,
+ * 按钮位置不动),数字组 flex 居中 ⇒ 永远在标题与按钮正中间。 */
+.rv-revenue-zone {
+  position: relative;
+  /* M-27(2026-10-27):「累计收入」上方空了一大块 —— 原 650rpx 竖向居中把数字推到半屏;
+     收成 360rpx,内容贴上缘排(问候行与收入之间只留 hero-top 自带的间距)。 */
+  /* D10:收入与快捷钮之间的大空档收掉,节奏对齐店铺资料页(区块间 --cy-space-5);反馈条不再绝对定位占位 */
+  min-height: 0;
+  padding-bottom: var(--cy-space-5);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding-top: var(--cy-space-4);
+}
+
+.rv-revenue-label {
+  text-align: center;
+  font-size: var(--cy-font-label);
+  color: var(--cy-text-secondary);
+  font-weight: 400;
+  letter-spacing: 0.6rpx;
+}
+
+.rv-revenue-amount {
+  margin-top: var(--cy-space-1);
+  text-align: center;
+  font-size: 88rpx; /* ds-ok: 稿面 44px */
+  line-height: 1.05;
+  font-weight: 400; /* 稿面 regular,大而轻 */
+  letter-spacing: -2.6rpx;
+  color: var(--cy-text-title);
+}
+
+.rv-revenue-value {
+  min-height: 104rpx;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.rv-revenue-feedback {
+  /* 同步/报错提示贴收入区底部(按钮正上方)，不占居中留白，数字才真正居中 */
+  position: static;
+  margin-top: var(--cy-space-2);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* ===== 快捷操作：灰色透明蒙版 ===== */
+.rv-actions {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 var(--cy-page-x) var(--cy-space-8);
+}
+
+.rv-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cy-space-2);
+  width: 120rpx; /* 与 .rv-action-circle 同宽,否则圆钮溢出页边 */
+}
+
+.rv-action-circle {
+  /* 2026-09-17 用户定:圆钮再大一些 96→120rpx,里面 icon 保持 44 不变 */
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: 50%;
+  background: var(--cy-bg-card);
+  box-shadow: var(--cy-shadow-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rv-action-label {
+  font-size: var(--cy-font-caption);
+  color: var(--cy-text-body);
+  font-weight: 400; /* 稿面 regular */
+}
+
+.rv-aftercare-alert {
+  min-height: var(--cy-btn-h);
+  margin: 0 var(--cy-page-x) var(--cy-space-4);
+  padding: 0 var(--cy-space-4);
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-bg-card);
+  box-shadow: var(--cy-shadow-card);
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2);
+  box-sizing: border-box;
+}
+
+.rv-aftercare-alert__mark {
+  width: 14rpx;
+  height: 14rpx;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--cy-color-status-danger);
+}
+
+.rv-aftercare-alert__text {
+  flex: 1;
+  min-width: 0;
+  color: var(--cy-text-title);
+  font-size: var(--cy-font-body);
+  font-weight: 600;
+}
+
+.rv-aftercare-alert__chev {
+  color: var(--cy-text-secondary);
+  font-size: var(--cy-font-title);
+}
+
+/* 项目卡 —— 2026-11-01 业主定稿「方案 B v3」(review 页 LpqXsu44g2fi4vxqeVdYxX):
+ * 横滑大卡 600×450rpx(4:3,与主题封面同比例,封面铺满即整张不裁),左边与「项目」标题对齐;
+ * 状态 / 类型是封面上的白色毛玻璃签;底部白色半透明渐变只包住文字区,越往下越白、到底仍半透。
+ * 圆角只用 clip-path 整组裁一次:overflow:hidden + 圆角会逐层裁,深色封面在底边透出一圈暗线(原型逐像素验过)。 */
+.rv-project-cards { width: 100%; white-space: nowrap; }
+.rv-project-track { display: inline-flex; gap: var(--cy-space-3); padding: 0 var(--cy-page-x) var(--cy-space-1); }
+.rv-project-item { flex: none; }
+
+.rv-project-card {
+  position: relative;
+  width: 600rpx;
+  height: 450rpx;
+  border-radius: var(--cy-radius-lg);
+  clip-path: inset(0 round var(--cy-radius-lg));
+  background: var(--cy-color-bg-surface-strong);
+  white-space: normal;
+}
+.rv-project-cover { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+
+.rv-project-line1 {
+  position: absolute; left: 20rpx; right: 20rpx; top: 20rpx;
+  display: flex; align-items: center; gap: 12rpx;
+}
+.rv-project-line1-fill { flex: 1; min-width: 0; }
+.rv-project-status,
+.rv-project-cat {
+  display: inline-flex; align-items: center; gap: 10rpx;
+  height: 44rpx; padding: 0 18rpx; border-radius: var(--cy-radius-pill);
+  font-size: var(--cy-type-micro); font-weight: 600; line-height: 44rpx;
+  color: var(--cy-color-text-on-light);
+  background: rgba(255, 255, 255, 0.78); /* ds-ok: 封面上的白色毛玻璃签,业主定稿 */
+  backdrop-filter: blur(16rpx);
+  -webkit-backdrop-filter: blur(16rpx);
+}
+.rv-project-dot { width: 14rpx; height: 14rpx; border-radius: var(--cy-radius-pill); flex: none; background: var(--cy-color-text-tertiary); }
+.rv-project-dot--run { background: var(--cy-color-status-success); }
+.rv-project-dot--open { background: var(--cy-color-status-info); }
+.rv-project-dot--fix { background: var(--cy-color-status-warning); }
+
+.rv-project-thumb-logo { position: absolute; left: 50%; top: 40%; width: 128rpx; height: 128rpx; transform: translate(-50%, -50%); opacity: .28; filter: grayscale(1); }
+
+.rv-project-frost {
+  position: absolute; left: -8rpx; right: -8rpx; bottom: -8rpx; height: 216rpx;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.62) 40%, rgba(255, 255, 255, 0.9) 100%); /* ds-ok: 业主定稿的白色半透明渐变,只包住文字区 */
+}
+.rv-project-body {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 0 28rpx 26rpx;
+  display: flex; flex-direction: column; gap: 6rpx;
+}
+.rv-project-verify {
+  align-self: flex-start; margin-bottom: 4rpx;
+  height: 42rpx; padding: 0 20rpx; border-radius: var(--cy-radius-pill);
+  font-size: var(--cy-type-micro); font-weight: 700; line-height: 42rpx;
+  color: var(--cy-color-text-inverse); background: var(--cy-color-text-primary);
+}
+.rv-project-card-title {
+  font-size: var(--cy-font-title); font-weight: 700; line-height: 1.3;
+  color: var(--cy-color-text-primary);
+}
+.rv-project-card-meta,
+.rv-project-visit {
+  font-size: var(--cy-type-micro); line-height: 1.4;
+  color: var(--cy-color-text-secondary);
+}
+
+/* 最后一格:项目多时叠成一摞,点开「全部」 */
+.rv-project-more { position: relative; width: 280rpx; height: 450rpx; }
+.rv-project-more-c {
+  position: absolute; left: 0; top: 40rpx; width: 260rpx; height: 340rpx;
+  border-radius: var(--cy-radius-lg); background: var(--cy-color-bg-surface-strong);
+}
+.rv-project-more-c--3 { transform: translate(40rpx, 24rpx) scale(0.86); opacity: 0.55; }
+.rv-project-more-c--2 { transform: translate(20rpx, 12rpx) scale(0.93); opacity: 0.8; }
+.rv-project-more-c--1 {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8rpx;
+  background: var(--cy-color-bg-surface);
+}
+.rv-project-more-n { font-size: 60rpx; font-weight: 800; font-style: italic; color: var(--cy-color-text-primary); } /* ds-ok: NRC 式大号斜体数字 */
+.rv-project-more-t { font-size: var(--cy-type-micro); color: var(--cy-color-text-secondary); }
+
+/* ===== 区块 ===== */
+/* 2026-08-20 稿 3910:580 间距:区块间收紧到 48rpx(稿面 section 间约 20-24px) */
+.rv-section {
+  margin: 0 0 var(--cy-space-5);
+}
+
+.rv-section-head {
+  display: flex;
+  min-height: var(--cy-btn-h);
+  align-items: center;
+  gap: var(--cy-legacy-10);
+  padding: 0 var(--cy-page-x);
+  margin-bottom: var(--cy-space-4);
+}
+
+.rv-section-title {
+  font-size: 30rpx; /* ds-ok: 稿面 15px */
+  font-weight: 400; /* 稿面 regular */
+  color: var(--cy-text-title);
+}
+
+.rv-section-more {
+  min-height: 88rpx;
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-1);
+  margin-left: auto;
+  font-size: var(--cy-font-caption);
+  color: var(--cy-text-secondary);
+}
+
+/* 第十轮 f4(f1 遗留):页内底栏实高 ≈ 16 + 88 + 16rpx + 安全区 = 120rpx + 安全区,原来的 120rpx 垫底
+ * 刚好与底栏等高,滚到底项目卡下沿就贴在底栏渐变里,看着被盖住一截。与玩家首页 .v3-scroll-pad 同口径留一档间距。 */
+.rv-scroll-pad {
+  height: calc(var(--cy-tabbar-h) + var(--cy-space-6));
+}
+
+.rv-tap {
+  opacity: 0.88;
+}
+
+/* 今日待办四类 */
+
+.rv-more-list {
+  /* 左右边距由 scene-sheet 正文的 --cy-comp-sheet-body-pad-x 给,这里不再补一份 */
+  padding: 0;
+}
+
+/* Airbnb 177/179 式:行直接坐在白底上,靠发丝线分组。
+   不再是胶囊白卡 + 投影 —— 面板本身已是纯白,再叠白卡就是 §3.3 禁止的「白卡叠白卡」,
+   而且卡 + 投影同时出现违反「一层容器只选描边或投影之一」。 */
+.rv-more-item {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-3);
+  min-height: max(88rpx, var(--cy-comp-sheet-merchant-row-h));
+  padding: var(--cy-space-2) var(--cy-space-3);
+  border-radius: 0;
+  background: transparent;
+}
+
+.rv-more-item + .rv-more-item { border-top: 1rpx solid var(--cy-color-border-subtle); }
+
+.rv-more-ico {
+  width: 40rpx;
+  height: 40rpx;
+  flex-shrink: 0;
+}
+
+.rv-more-label {
+  flex: 1;
+  font-size: var(--cy-comp-sheet-merchant-row-size);
+  color: var(--cy-text-title);
+}
+
+/* 营业状态 pill(营业中/已打烊) */
+.rv-biz {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: var(--cy-legacy-6) var(--cy-space-2-5);
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-status-success-soft);
+  font-size: var(--cy-font-caption);
+  color: var(--cy-success);
+  position: relative;
+}
+.rv-biz-dot {
+  width: var(--cy-space-1-5);
+  height: var(--cy-space-1-5);
+  border-radius: 50%;
+  background: var(--cy-success);
+  margin-right: var(--cy-legacy-10);
+}
+/* 营业 pill 视觉高约 46rpx;可切换时热区上下外扩到 88rpx,不改外观 */
+.rv-biz::after { content: ''; position: absolute; left: 0; right: 0; top: -22rpx; bottom: -22rpx; }
+.rv-biz--off { background: var(--cy-color-status-neutral-soft); color: var(--cy-text-secondary); }
+.rv-biz--off .rv-biz-dot { background: var(--cy-text-secondary); }
+
+/* [P0-2] ③ 选章核销面板 —— 装在 cy-sheet 的 slot 里,条数不设上限
+   (wx.showActionSheet 上限 6 项,超了只能截断 = 静默丢选项) */
+.chpick { padding-bottom: var(--cy-space-2); }
+.chpick__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 88rpx;
+  box-sizing: border-box;
+  padding: var(--cy-space-3-5) 0; /* ds-ok: 30rpx无精确匹配的spacing token */
+  border-top: 1rpx solid var(--cy-border-card);
+}
+.chpick__warn {
+  display: block;
+  padding-bottom: var(--cy-space-2);
+  font-size: var(--cy-font-caption);
+  font-weight: 500;
+  color: var(--cy-color-status-warning);
+}
+.chpick__name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--cy-font-body);
+  color: var(--cy-text-title);
+  /* 章节名可能很长,别把箭头挤出屏幕 */
+  margin-right: var(--cy-space-2);
+}
+.chpick__chev {
+  flex-shrink: 0;
+  color: var(--cy-text-secondary);
+}
+
+/* ===== 我的消息(设计稿 3910:702):事件流,单卡分隔线 ===== */
+
+.rv-msg {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2-5);
+  padding: var(--cy-space-3) var(--cy-space-3-5);
+  margin: var(--cy-space-2);
+  border-radius: var(--cy-radius-md);
+}
+
+.rv-msg-ico {
+  flex-shrink: 0;
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  background: var(--cy-bg-card-2);
+  color: var(--cy-text-body);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rv-msg-title {
+  font-size: var(--cy-font-label);
+  color: var(--cy-text-title);
+}
+
+.rv-msg-sub {
+  font-size: var(--cy-font-caption);
+  color: var(--cy-text-secondary);
+}
+
+.rv-msg-time {
+  flex-shrink: 0;
+  font-size: var(--cy-font-caption);
+  color: var(--cy-text-secondary);
+}
+
+/* scroll-view 同时带 100vh 与 padding-top:必须 border-box,否则整页比视口高一个导航栏 */
+.rv-scroll { box-sizing: border-box; }
+
+/* ===== 我的消息(2026-08-20 稿 3910:580):白卡列表,行=图标圈+标题/摘要+时间 ===== */
+.rv-msg-card {
+  margin: 0 var(--cy-page-x);
+  background: var(--cy-bg-card);
+  border-radius: var(--cy-radius-lg);
+  box-shadow: 0 4rpx 10rpx rgba(0, 0, 0, 0.06); /* ds-ok: 与同页项目卡同一投影 */
+  overflow: hidden;
+}
+.rv-msg-item {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-1-5);
+  padding: 28rpx 32rpx;
+}
+.rv-msg-item + .rv-msg-item { border-top: 1rpx solid var(--cy-color-border-subtle); }
+.rv-msg-ico {
+  flex-shrink: 0;
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-bg-surface-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cy-color-text-secondary);
+}
+.rv-msg-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4rpx; }
+.rv-msg-title { font-size: var(--cy-font-label); color: var(--cy-color-text-primary); }
+.rv-msg-sub { font-size: var(--cy-font-caption); color: var(--cy-color-text-tertiary); }
+.rv-msg-time { flex-shrink: 0; font-size: var(--cy-font-caption); color: var(--cy-color-text-tertiary); }
+
+/* 2026-10-23 业主:我的消息像券包/票夹一样分层叠放、点开展开;卡片一律白底、不分色(同日业主二次裁决)。
+   业主三次反馈「太浅、没层次」⇒ 按 iOS 通知中心 / Wallet 的叠法重做:后面的卡从首张**下沿**露出,
+   每层露 20rpx、宽度逐层收窄(以底边为原点缩放)、逐层变淡,首张投影加深,一眼看出下面还压着几张。
+   点首张展开成独立卡片列(cy-fly-in 逐张飞入),回到页面重新叠起。 */
+.rv-msg-card.rv-msg-stack { position: relative; background: transparent; box-shadow: none; overflow: visible; }
+.rv-msg-card.rv-msg-stack--n2 { padding-bottom: 24rpx; }
+.rv-msg-card.rv-msg-stack--n3 { padding-bottom: 48rpx; }
+.rv-msg-stack .rv-msg-item {
+  position: relative;
+  background: var(--cy-bg-card);
+  border-radius: var(--cy-radius-lg);
+  box-shadow: 0 4rpx 10rpx rgba(0, 0, 0, 0.06); /* ds-ok: 与同页项目卡同一投影 */
+}
+.rv-msg-stack .rv-msg-item + .rv-msg-item { border-top: 0; }
+.rv-msg-stack:not(.rv-msg-stack--open) .rv-msg-item:first-child {
+  z-index: 3;
+  padding-top: 36rpx; padding-bottom: 36rpx;
+  box-shadow: 0 10rpx 28rpx rgba(0, 0, 0, 0.10), 0 2rpx 6rpx rgba(0, 0, 0, 0.05); /* ds-ok: 叠放首张的浮起投影 */
+}
+.rv-msg-stack:not(.rv-msg-stack--open) .rv-msg-item:nth-child(n+2) {
+  position: absolute; left: 0; right: 0; top: 0;
+  transform-origin: center bottom;
+  box-shadow: 0 8rpx 20rpx rgba(0, 0, 0, 0.10), 0 1rpx 3rpx rgba(0, 0, 0, 0.06); /* ds-ok: 下层卡投影:白卡不透明、靠投影分层(降透明度会跟灰底糊成一片) */
+  transition: transform var(--cy-motion-standard) var(--cy-ease-standard);
+}
+.rv-msg-stack--n2:not(.rv-msg-stack--open) .rv-msg-item:nth-child(n+2) { bottom: 24rpx; }
+.rv-msg-stack--n3:not(.rv-msg-stack--open) .rv-msg-item:nth-child(n+2) { bottom: 48rpx; }
+.rv-msg-stack:not(.rv-msg-stack--open) .rv-msg-item:nth-child(n+2) > view,
+.rv-msg-stack:not(.rv-msg-stack--open) .rv-msg-item:nth-child(n+2) > text { visibility: hidden; }
+.rv-msg-stack:not(.rv-msg-stack--open) .rv-msg-item:nth-child(2) { z-index: 2; transform: translateY(24rpx) scale(.94); }
+.rv-msg-stack:not(.rv-msg-stack--open) .rv-msg-item:nth-child(3) { z-index: 1; transform: translateY(48rpx) scale(.88); }
+.rv-msg-stack--open { padding-top: 0; padding-bottom: 0; }
+.rv-msg-stack--open .rv-msg-item + .rv-msg-item { margin-top: var(--cy-space-2); }
+
+.scene-host { --cy-comp-sheet-border-width: 0px; }
+
+/* 2026-10-23 页面动效(utils/page-motion.js):容器 --pm-* 置 1 时先隐着,再依次浮上来;静止时无过渡,按压反馈不受影响;减少动态效果时从不触发 */
+.rv-hero { filter: opacity(calc(1 - var(--pm-w, 0))); translate: 0 calc(var(--pm-w, 0) * 31rpx); transition: filter var(--pm-w-d, 0s) ease, translate var(--pm-w-d, 0s) cubic-bezier(.2,.82,.2,1), transform var(--cy-motion-press) var(--cy-ease-out), opacity var(--cy-motion-press) var(--cy-ease-out); transition-delay: calc(var(--pm-w-s, 0) * 0ms), calc(var(--pm-w-s, 0) * 0ms), 0s, 0s; }
+.rv-hero:nth-child(n+2) { transition-delay: calc(var(--pm-w-s, 0) * 30ms), calc(var(--pm-w-s, 0) * 30ms), 0s, 0s; }
+.rv-actions { filter: opacity(calc(1 - var(--pm-w, 0))); translate: 0 calc(var(--pm-w, 0) * 31rpx); transition: filter var(--pm-w-d, 0s) ease, translate var(--pm-w-d, 0s) cubic-bezier(.2,.82,.2,1), transform var(--cy-motion-press) var(--cy-ease-out), opacity var(--cy-motion-press) var(--cy-ease-out); transition-delay: calc(var(--pm-w-s, 0) * 40ms), calc(var(--pm-w-s, 0) * 40ms), 0s, 0s; }
+.rv-actions:nth-child(n+2) { transition-delay: calc(var(--pm-w-s, 0) * 70ms), calc(var(--pm-w-s, 0) * 70ms), 0s, 0s; }
+.rv-aftercare-alert { filter: opacity(calc(1 - var(--pm-w, 0))); translate: 0 calc(var(--pm-w, 0) * 31rpx); transition: filter var(--pm-w-d, 0s) ease, translate var(--pm-w-d, 0s) cubic-bezier(.2,.82,.2,1), transform var(--cy-motion-press) var(--cy-ease-out), opacity var(--cy-motion-press) var(--cy-ease-out); transition-delay: calc(var(--pm-w-s, 0) * 60ms), calc(var(--pm-w-s, 0) * 60ms), 0s, 0s; }
+.rv-section { filter: opacity(calc(1 - var(--pm-w, 0))); translate: 0 calc(var(--pm-w, 0) * 31rpx); transition: filter var(--pm-w-d, 0s) ease, translate var(--pm-w-d, 0s) cubic-bezier(.2,.82,.2,1), transform var(--cy-motion-press) var(--cy-ease-out), opacity var(--cy-motion-press) var(--cy-ease-out); transition-delay: calc(var(--pm-w-s, 0) * (80ms + min(var(--pmi, 0), 4) * 40ms)), calc(var(--pm-w-s, 0) * (80ms + min(var(--pmi, 0), 4) * 40ms)), 0s, 0s; }
+.rv-project-item { filter: opacity(calc(1 - var(--pm-j, 0))); translate: 0 calc(var(--pm-j, 0) * 31rpx); transition: filter var(--pm-j-d, 0s) ease, translate var(--pm-j-d, 0s) cubic-bezier(.2,.82,.2,1), transform var(--cy-motion-press) var(--cy-ease-out), opacity var(--cy-motion-press) var(--cy-ease-out); transition-delay: calc(var(--pm-j-s, 0) * 0ms), calc(var(--pm-j-s, 0) * 0ms), 0s, 0s; }
+.rv-project-item:nth-child(2) { transition-delay: calc(var(--pm-j-s, 0) * 40ms), calc(var(--pm-j-s, 0) * 40ms), 0s, 0s; }
+.rv-project-item:nth-child(3) { transition-delay: calc(var(--pm-j-s, 0) * 80ms), calc(var(--pm-j-s, 0) * 80ms), 0s, 0s; }
+.rv-project-item:nth-child(4) { transition-delay: calc(var(--pm-j-s, 0) * 120ms), calc(var(--pm-j-s, 0) * 120ms), 0s, 0s; }
+.rv-project-item:nth-child(5) { transition-delay: calc(var(--pm-j-s, 0) * 160ms), calc(var(--pm-j-s, 0) * 160ms), 0s, 0s; }
+.rv-project-item:nth-child(6) { transition-delay: calc(var(--pm-j-s, 0) * 200ms), calc(var(--pm-j-s, 0) * 200ms), 0s, 0s; }
+.rv-project-item:nth-child(n+7) { transition-delay: calc(var(--pm-j-s, 0) * 240ms), calc(var(--pm-j-s, 0) * 240ms), 0s, 0s; }
+/* 「我的消息」首载未落定:占住一行(与 72rpx 图标圈同高),不画加载 UI,落定后不跳 */
+.rv-msg-item--pending { min-height: 72rpx; }
+
+/* ===== 走查 v2 R02(2026-11-01):我的消息照 ramandesigns9「通知叠层」—— 原型 p6 home 2 号。
+   沿用 10-23 已定的三张叠放,只改四处:黑色方块图标、右下未读点、展开后每条 × / 底下「清空」、清完「都看完了」。 ===== */
+.rv-msg-card--ns .rv-msg-ico {
+  border-radius: var(--cy-radius-md);
+  background: var(--cy-color-action-primary-bg);
+  color: var(--cy-color-action-primary-fg);
+}
+.rv-msg-card--ns .rv-msg-item { position: relative; }
+.rv-msg-card--ns .rv-msg-time { align-self: flex-start; }
+.rv-msg-dot {
+  position: absolute; right: 36rpx; bottom: 32rpx;
+  width: 14rpx; height: 14rpx;
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-text-primary);
+}
+.rv-msg-x {
+  flex-shrink: 0; align-self: flex-end;
+  width: 48rpx; height: 48rpx;
+  margin: 0 -8rpx -8rpx 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-secondary);
+  position: relative;
+}
+/* 圆钮画 24px,命中区放大到 44px */
+.rv-msg-x::after { content: ''; position: absolute; left: -20rpx; right: -20rpx; top: -20rpx; bottom: -20rpx; }
+.rv-msg-clear {
+  display: flex; align-items: center; justify-content: center; gap: 12rpx;
+  height: 80rpx; margin: 12rpx var(--cy-page-x) 0;
+  font-size: var(--cy-font-caption);
+  color: var(--cy-color-text-tertiary);
+  position: relative;
+}
+.rv-msg-clear::after { content: ''; position: absolute; left: 0; right: 0; top: -4rpx; bottom: -4rpx; }
+.rv-msg-done-row { display: flex; justify-content: center; padding: 12rpx 0; }
+.rv-msg-done {
+  display: inline-flex; align-items: center; gap: 16rpx;
+  height: 72rpx; padding: 0 28rpx 0 12rpx;
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-bg-card);
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.08); /* ds-ok: 原型 p6-done 浮起胶囊 */
+  font-size: var(--cy-font-caption); font-weight: 600;
+  color: var(--cy-color-text-primary);
+  position: relative;
+}
+/* 胶囊画 72rpx,命中区放大到 88rpx */
+.rv-msg-done::after { content: ''; position: absolute; left: 0; right: 0; top: -8rpx; bottom: -8rpx; }
+.rv-msg-done-ico {
+  width: 48rpx; height: 48rpx;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-action-primary-bg);
+  color: var(--cy-color-action-primary-fg);
+}
+
+/* ===== 细节打磨 2026-11-12 · S10 商家工作台(浅色):卡片顶边高光 + 两层柔投影、行分隔线从图标后起、读数等宽;版式、文案、配色不动 ===== */
+.rv-msg-card { box-shadow: var(--cy-depth-float); }
+.rv-msg-item { position: relative; }
+.rv-msg-item + .rv-msg-item { border-top: 0; }
+.rv-msg-item + .rv-msg-item::before { content: ""; position: absolute; top: 0; right: 0; left: calc(32rpx + 72rpx + var(--cy-space-1-5)); height: 1rpx; background: var(--cy-color-border-subtle); pointer-events: none; }
+.rv-more-item { position: relative; }
+.rv-more-item + .rv-more-item { border-top: 0; }
+.rv-more-item + .rv-more-item::before { content: ""; position: absolute; top: 0; right: 0; left: calc(var(--cy-space-3) + 40rpx + var(--cy-space-3)); height: 1rpx; background: var(--cy-color-border-subtle); pointer-events: none; }
+.rv-msg-time, .rv-hero-meta, .rv-msg-sub { font-variant-numeric: tabular-nums; }
+
+/* 细节打磨二期 L1/L5/L7 */
+.rv-biz { transition: var(--cy-tr-press); }
+.rv-hero-avatar-hit { transition: var(--cy-tr-press); }
+.rv-action { transition: var(--cy-tr-press); }
+.rv-section-more { transition: var(--cy-tr-press); }
+.rv-msg-done { transition: var(--cy-tr-press); }
+.rv-msg-x { transition: var(--cy-tr-press); }
+.rv-msg-clear { transition: var(--cy-tr-press); }
+.rv-more-item { transition: var(--cy-tr-press); }
+.chpick__item { transition: var(--cy-tr-press); }
+.rv-revenue-amount { font-variant-numeric: tabular-nums; }
+
+/* 无权限态:让出导航高度后撑满剩余高度,与 cy-empty fill 居中一致 */
+.rv-denied { height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; }

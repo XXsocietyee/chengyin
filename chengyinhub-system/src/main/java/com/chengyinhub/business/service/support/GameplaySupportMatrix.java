@@ -1,0 +1,308 @@
+package com.chengyinhub.business.service.support;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.*;
+
+/** 发布闸与作者端共用的通用结算能力表；旧玩法的判定不等于通用结算证明。 */
+public final class GameplaySupportMatrix {
+    private static final ObjectNode MATRIX = JsonNodeFactory.instance.objectNode();
+    private static final Map<String, JsonNode> TYPES = new LinkedHashMap<>();
+    private static final List<String> GENERIC_ZERO_HP_POLICIES=Collections.unmodifiableList(Arrays.asList("BLOCK_HP_COST","CHALLENGE","BLOCK_PAID","THEME_FAIL","WAIT","STEPS"));
+    private static final List<String> LEGACY_ZERO_HP_POLICIES=Collections.unmodifiableList(Arrays.asList("BLOCK_HP_COST","CHALLENGE","LEGACY_END","BLOCK_PAID"));
+    /**
+     * 呈现/帮助类配置段:它们挂在某个真玩法上,自己不判题、不产生完成证明。
+     * 所以不占能力表的题型/附加行(那两栏是作者端可见目录,由客户端 catalog 同步,不能靠加行扩目录),
+     * 也不参与「本节点启用了哪些玩法」的扫描 —— 否则只配了结案呈现的节点会被判成
+     * 「没有通用结算完成证明」而发不出去。
+     */
+    private static final Set<String> PRESENTATION_SECTIONS = Collections.unmodifiableSet(
+            new LinkedHashSet<>(Arrays.asList("accusation", "clueTransform", "hintLadder")));
+    static {
+        MATRIX.put("schemaVersion", 1);
+        ObjectNode policies=MATRIX.putObject("zeroHpPolicies");
+        GENERIC_ZERO_HP_POLICIES.forEach(policies.putArray("generic")::add);
+        LEGACY_ZERO_HP_POLICIES.forEach(policies.putArray("legacy")::add);
+        MATRIX.putObject("participantSelection").put("toolKind","FACILITY").put("targetScope","PARTICIPANTS")
+                .put("payerRequired",true).put("runtimeScope","TEAM").put("worldMode","WORLD_SHARED");
+        add("album", "album", null, "PRESENTATION", false, false);
+        // CT-07 指认结案等呈现/帮助段不进能力表(见 PRESENTATION_SECTIONS),也不占类型行。
+        add("qaText", "qa", "TYPE", "PROOF", true, false);
+        add("qaPick", "qa", "PICK", "PROOF", true, false);
+        add("qaShot", "qa", "SHOT", "PROOF", false, false);
+        add("branch", "branch", null, "NO_BRIDGE", false, false);
+        for (String key : Arrays.asList("sort", "match", "classify")) add(key, key, null, "PROOF", true, false);
+        add("estimate", "estimate", null, "NO_BRIDGE", false, false);
+        add("pricePair", "pricePair", null, "NO_BRIDGE", false, false);
+        add("hidden", "hiddenObject", null, "NO_BRIDGE", false, false);
+        for (String key : Arrays.asList("predict", "random", "profile", "note")) add(key, key, null, "NO_BRIDGE", false, false);
+        add("objectCard", "photoCheck", "CARD", "NO_BRIDGE", false, false);
+        add("bingo", "", null, "PRESENTATION", false, false);
+        add("steps", "steps", null, "NO_BRIDGE", true, false);
+        add("react", "reaction", null, "NO_BRIDGE", true, false);
+        add("shake", "ballShake", null, "NO_BRIDGE", true, false);
+        add("quiet", "quietHold", null, "NO_BRIDGE", true, false);
+        for (String key : Arrays.asList("compass", "shout", "countdown", "stopwatch")) add(key, key, null, "NO_BRIDGE", true, false);
+        add("photoCheck", "photoCheck", null, "NO_BRIDGE", false, false);
+        add("check", "check", null, "NO_BRIDGE", false, false);
+        add("d20", "diceRoll", "d20", "NO_BRIDGE", false, false);
+        add("typeIn", "typeIn", null, "NO_BRIDGE", true, false);
+        add("coin", "coinFlip", null, "NO_BRIDGE", false, false);
+        add("dice", "diceRoll", "d6", "NO_BRIDGE", false, false);
+        add("scan", "scan", null, "PROOF", false, false);
+        // 逐字猜词:完成证明是服务端判定的「槽位重建 == 冻结答案(含别名)」,即 SUBMIT_HANGMAN 的
+        // solved 事实 —— 和问答同级,不是呈现段也不是附加项。登记了才过发布闸:
+        // 不登记 = 新玩法永远 fail-closed,那不能算完成。
+        // ⚠️ 作者端目录(node-game-catalog.js)与客户端 fixture 由 UI 负责人同批补,
+        // 未补前本行只让后端发布闸放行,客户端编辑器暂看不到该玩法(见 ui-inputs/V2.md 依赖项)。
+        add("hangman", "hangman", null, "PROOF", true, false);
+        // 以物换物:完成证明是服务端从初始背包重放整条换法后的 passed 事实(SUBMIT_BARTER)。
+        // 不进归零挑战客观题组(challenge=false)。
+        add("barter", "barter", null, "PROOF", false, false);
+        // 调音台:完成证明是服务端比对冻结配置 mixer.answer 后的 correct 事实(SUBMIT_MIXER),答案不下发。
+        // 同 barter:不进归零挑战客观题组(challenge=false)。
+        add("mixer", "mixer", null, "PROOF", false, false);
+        for (String key : Arrays.asList("timer", "leaderboard", "multiplayer", "timeWindow", "blindTaste", "silentOrder", "diyName", "musicCorner", "dailySign", "slowTask"))
+            add(key, key, null, "PRESENTATION", false, true);
+        for(String key:Arrays.asList("qaText","qaPick","sort","match","classify","estimate","pricePair","random","blindTaste","react","shake","quiet","compass","shout","countdown","stopwatch","typeIn","check","d20","coin","dice","profile","note","dailySign","hidden","steps","qaShot","photoCheck","objectCard","album","predict","hangman","barter","mixer"))((ObjectNode)TYPES.get(key)).put("r5CompletionProof",true);
+        MATRIX.putObject("outcomeRules").put("version",1).put("nextStepId","SETTLED_FEEDBACK").put("failParticipants","UNSUPPORTED").put("vote","TEAM_PASS_OWNER_AFTER");
+        MATRIX.putObject("legacyProofs").put("GPS", 5).put("qaText", 1).put("qaPick", 3).put("scan", 4);
+        ObjectNode constraints = MATRIX.putObject("constraints");
+        constraints.put("PROOF_REQUIRED", "附加项不能独立产生完成证明；branch/random 可随可信主玩法呈现，但不能独立结算");
+        constraints.put("OWNER_OR_TEAM", "个人和独立队伍仅 OWNER 范围和目标；WORLD/PARTICIPANTS 仅 TEAM/WORLD_SHARED");
+        constraints.put("WORLD_SHARED_ONLY", "交易与投票仅 TEAM/WORLD_SHARED；投票不能叠加节点费用、次数或独立奖励");
+        constraints.put("CHALLENGE_ONLY", "传感器仅归零挑战且须有客观题备选；挑战不收费用、不发普通奖励、不推进章节");
+        constraints.put("FREE_RETRY", "普通 qa TYPE/PICK 的 maxTries、sort 的 maxAttempts 必须为 0");
+    }
+    private GameplaySupportMatrix() { }
+
+    private static void add(String key, String section, String mode, String category, boolean challenge, boolean addon) {
+        ObjectNode row = MATRIX.withArray(addon ? "addons" : "types").addObject().put("key", key).put("section", section).put("category", category);
+        if (mode != null) row.put("mode", mode);
+        boolean proof = "PROOF".equals(category);
+        row.put("r5CompletionProof",false);
+        row.put("completionProof", proof).put("requiresProof", addon);
+        row.put("effectSlotSupport",true);
+        ArrayNode effectScopes=row.putArray("effectSlotScopes").add("OWNER");
+        if(proof)effectScopes.add("WORLD").add("PARTICIPANTS");
+        ObjectNode tools = row.putObject("tools");
+        String normal = addon ? "PROOF_REQUIRED" : proof ? "OWNER_OR_TEAM" : "UNSUPPORTED";
+        for (String tool : Arrays.asList("costs", "costOptions", "limitsScope", "targetScope", "resourceSlots")) tools.put(tool, normal);
+        tools.put("trade", addon ? "PROOF_REQUIRED" : proof ? "WORLD_SHARED_ONLY" : "UNSUPPORTED");
+        tools.put("vote", addon ? "PROOF_REQUIRED" : proof ? "WORLD_SHARED_ONLY" : "UNSUPPORTED");
+        tools.put("decidesEnding", tools.path("vote").asText());
+        tools.put("zeroChallenge", addon ? "PROOF_REQUIRED" : challenge ? proof ? "SUPPORTED" : "CHALLENGE_ONLY" : "UNSUPPORTED");
+        TYPES.put(key, row);
+    }
+
+    /** 返回副本，调用方不能修改发布策略。 */
+    public static ObjectNode view() { return MATRIX.deepCopy(); }
+
+    public static List<String> zeroHpPolicies(boolean generic) { return generic?GENERIC_ZERO_HP_POLICIES:LEGACY_ZERO_HP_POLICIES; }
+
+    /**
+     * 该段是不是「只能挂在真玩法上、自己不能独立产生完成证明」的次要件。
+     *
+     * <p>呈现/帮助段(指认结案、谜面变换、提示阶梯)必须在这里算 true,不能只在
+     * {@link #validateNode} 里跳过 —— 仓里还有两处按 {@code addon()} 扫描节点配置的既有调用者:
+     * {@code GameSessionRuntimeServiceImpl.bindBasicArrivalProof} 与
+     * {@code TopicRoutePublicationCompiler.validateObjectiveGroup}。漏给它们就等于
+     * 「某基础题节点只要多配一条提示/指认,到达证明或任务题组判定就被整段短路」。
+     */
+    public static boolean addon(String section) {
+        if (presentation(section)) return true;
+        JsonNode row = TYPES.get(section);
+        return row != null && row.path("requiresProof").asBoolean() || "branch".equals(section) || "random".equals(section);
+    }
+
+    public static boolean r5CompletionProof(JsonNode config) {
+        if(config.path("outcomeRules").path("version").asInt()!=1)return false;
+        for(JsonNode row:TYPES.values())if(row.path("r5CompletionProof").asBoolean() && config.path(row.path("section").asText()).path("enabled").asBoolean() && (!row.has("mode") || row.path("mode").asText().equals(config.path(row.path("section").asText()).path("mode").asText())))return true;
+        return false;
+    }
+    public static String basicCompletionKind(JsonNode config, int method) {
+        if(config.has("outcomeRules"))return null;
+        Iterator<Map.Entry<String, JsonNode>> fields = config.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            if (presentation(field.getKey())) continue;
+            if (field.getValue().path("enabled").asBoolean() && !"scan".equals(field.getKey()) && !addon(field.getKey())) return null;
+        }
+        return method == 4 ? "SCAN" : method == 5 ? "GPS" : method == 1 || method == 3 ? "ANSWER" : null;
+    }
+
+    /** 该段只是呈现/帮助配置,不是玩法,不参与启用法扫描也不产生完成证明。 */
+    public static boolean presentation(String section) {
+        return section != null && PRESENTATION_SECTIONS.contains(section);
+    }
+    public static void validateNode(JsonNode theme, long nodeId, String nodeName, JsonNode config, int method) {
+        validateNode(theme, nodeId, nodeName, config, method, false);
+    }
+
+    public static void validateNode(JsonNode theme, long nodeId, String nodeName, JsonNode config, int method, boolean draft) {
+        JsonNode game = theme.path("gameplayRuntime");
+        boolean challenge = GameplaySurvivalEngine.challengeNode(theme, nodeId);
+        List<JsonNode> rules = new ArrayList<>();
+        if (GameplayTemplateRules.hasSettlementRules(config)) rules.add(config.path("interactionRules"));
+        boolean referenced = challenge || config.has("interactionTools");
+        for (JsonNode quest : game.path("quests")) if (quest.path("nodeId").asLong() == nodeId) { referenced = true; rules.add(quest); }
+        for (JsonNode facility : game.path("facilities")) if (facility.path("operationNodeId").asLong() == nodeId) { referenced = true; rules.add(facility); }
+        for (JsonNode plan : game.path("plans")) if (plan.path("operationNodeId").asLong() == nodeId) referenced = true;
+        if (!referenced && rules.isEmpty()) return;
+        boolean r5=config.path("outcomeRules").path("version").asInt()==1 || challenge && game.path("survival").path("zeroChallenge").path("version").asInt()==2;
+        List<String> enabled = new ArrayList<>();
+        List<String> secondary = new ArrayList<>();
+        // 第十三轮 m7:带结果规则的主玩法再开「扫码参与」时,扫码是这一站的参与方式(到达证明),不是第二个玩法。
+        // 到达只认 /checkin 扫到这一站自己的码(PlayBasicCommandApplication#checkinOnce 比对 checkin_code 与目标站),
+        // 任务由主玩法的服务端判定经 recordGameplayOutcome 结算。与作者端 gameplay-support-matrix.js mains() 同一口径。
+        boolean scanParticipation = r5 && !challenge && scanIsParticipation(config);
+        config.fields().forEachRemaining(field -> {
+            // 呈现/帮助段(指认结案等)不是玩法:不参与「启用了哪些机制」的判定,
+            // 也不允许它们把节点顶成「已配高级玩法」。
+            if (presentation(field.getKey())) return;
+            if (!field.getValue().path("enabled").asBoolean()) return;
+            if (scanParticipation && "scan".equals(field.getKey())) return;
+            if (addon(field.getKey()) && !(r5 && TYPES.containsKey(field.getKey()) && TYPES.get(field.getKey()).path("r5CompletionProof").asBoolean())) secondary.add(field.getKey());
+            else enabled.add(type(field.getKey(), field.getValue()));
+        });
+        if (enabled.isEmpty()) {
+            String basic = challenge ? null : basicCompletionKind(config, method);
+            enabled.add("SCAN".equals(basic) ? "scan" : "GPS".equals(basic) ? "GPS" : "ANSWER".equals(basic) ? method == 1 ? "qaText" : "qaPick" : secondary.isEmpty() ? "none" : secondary.get(0));
+        }
+        String tool = firstTool(rules, config.path("interactionTools"), challenge);
+        if (scanParticipation && method != 4) fail(nodeId, nodeName, "scan", tool, "扫码证明须使用 validationMethod=4");
+        if (challenge && game.path("survival").path("zeroChallenge").path("version").asInt()==2)
+            GameplayOutcomeRules.visit(config, (path, after) -> {
+                if (!after.path("costs").isEmpty() || !after.path("effects").isEmpty())
+                    fail(nodeId, nodeName, game.path("survival").path("zeroChallenge").path("gameplayKey").asText(), path, "归零挑战不能配置普通结果费用或奖励");
+            });
+        for (String key : enabled) {
+            JsonNode row = TYPES.get(key);
+            boolean proof = "GPS".equals(key) || row != null && row.path(r5?"r5CompletionProof":"completionProof").asBoolean();
+            if (challenge) {
+                if (row == null || "UNSUPPORTED".equals(row.path("tools").path("zeroChallenge").asText()) && !(r5 && row.path("r5CompletionProof").asBoolean())) fail(nodeId, nodeName, key, "zeroChallenge", "没有归零挑战恢复桥");
+                if (!rules.isEmpty() || config.has("interactionTools")) fail(nodeId, nodeName, key, tool, "归零挑战不能配置普通结算工具");
+            } else if (!proof && !(draft && !game.path("survival").has("zeroChallenge") && row != null
+                    && "CHALLENGE_ONLY".equals(row.path("tools").path("zeroChallenge").asText())))
+                fail(nodeId, nodeName, key, tool, "尚无通用结算完成证明");
+            if (!r5 && !challenge && ("qaText".equals(key) || "qaPick".equals(key)) && config.path("qa").path("maxTries").asInt() > 0) fail(nodeId, nodeName, key, "costs", "须允许免费重答 maxTries=0");
+            if (!r5 && !challenge && "sort".equals(key) && config.path("sort").path("maxAttempts").asInt() > 0) fail(nodeId, nodeName, key, "costs", "须允许免费重答 maxAttempts=0");
+            if ("scan".equals(key) && !challenge && method != 4) fail(nodeId, nodeName, key, tool, "扫码证明须使用 validationMethod=4");
+            if (!"TEAM".equals(game.path("runtimeScope").asText()) || !"WORLD_SHARED".equals(game.path("worldMode").asText())) {
+                for (JsonNode rule : rules) {
+                    if (rule.has("scope") && !"OWNER".equals(rule.path("scope").asText())) fail(nodeId, nodeName, key, "limitsScope", "跨队范围仅支持 TEAM/WORLD_SHARED");
+                    if (rule.has("targetScope") && !"OWNER".equals(rule.path("targetScope").asText())) fail(nodeId, nodeName, key, "targetScope", "跨队目标仅支持 TEAM/WORLD_SHARED");
+                }
+                JsonNode tools = config.path("interactionTools");
+                if (tools.path("allowTrade").asBoolean()) fail(nodeId, nodeName, key, "trade", "仅支持 TEAM/WORLD_SHARED");
+                if (tools.path("plans").size() > 0 || tools.has("votePolicy") || tools.path("decidesEnding").asBoolean()) fail(nodeId, nodeName, key, tools.path("decidesEnding").asBoolean() ? "decidesEnding" : "vote", "仅支持 TEAM/WORLD_SHARED");
+                for (JsonNode plan : game.path("plans")) if (plan.path("operationNodeId").asLong() == nodeId) fail(nodeId, nodeName, key, "vote", "仅支持 TEAM/WORLD_SHARED");
+            }
+            try { GameplayTemplateRules.assertCompatible(config); }
+            catch (IllegalArgumentException invalid) { fail(nodeId, nodeName, key, "vote", invalid.getMessage()); }
+        }
+    }
+
+    /** 扫码之外还开了一个真正的主玩法(不是附加项)时,扫码只是参与方式。 */
+    public static boolean scanIsParticipation(JsonNode config) {
+        if (!config.path("scan").path("enabled").asBoolean()) return false;
+        Iterator<Map.Entry<String, JsonNode>> fields = config.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            String key = field.getKey();
+            if ("scan".equals(key) || !field.getValue().path("enabled").asBoolean() || addon(key)) continue;
+            for (JsonNode row : TYPES.values()) if (key.equals(row.path("section").asText()) && !"scan".equals(row.path("key").asText())) return true;
+        }
+        return false;
+    }
+
+    public static void validateChallenge(JsonNode theme, JsonNode configs) {
+        JsonNode challenge = theme.path("gameplayRuntime").path("survival").path("zeroChallenge");
+        if (!challenge.isObject()) return;
+        long nodeId = challenge.path("challengeNodeId").asLong();
+        JsonNode primary = configs.path(String.valueOf(nodeId));
+        for (JsonNode row : MATRIX.path("types")) {
+            if (challenge.path("version").asInt()==2 && !challenge.path("gameplayKey").asText().equals(row.path("section").asText()))continue;
+            if (!primary.path(row.path("section").asText()).path("enabled").asBoolean()
+                    || !"CHALLENGE_ONLY".equals(row.path("tools").path("zeroChallenge").asText()) || "typeIn".equals(row.path("key").asText())) continue;
+            boolean alternative = false;
+            for (JsonNode id : challenge.path("alternativeNodeIds")) {
+                JsonNode config = configs.path(id.asText());
+                for (JsonNode proof : MATRIX.path("types")) if (proof.path("completionProof").asBoolean() && !"scan".equals(proof.path("key").asText())) {
+                    JsonNode section = config.path(proof.path("section").asText());
+                    alternative |= section.path("enabled").asBoolean() && (!proof.has("mode") || proof.path("mode").asText().equals(section.path("mode").asText()));
+                }
+            }
+            if (!alternative) fail(nodeId, null, row.path("key").asText(), "zeroChallenge", "传感器须配置服务端客观题备选节点");
+        }
+    }
+
+    private static String type(String section, JsonNode config) {
+        for (JsonNode row : MATRIX.path("types")) if (section.equals(row.path("section").asText()) && (!row.has("mode") || row.path("mode").asText().equals(config.path("mode").asText()))) return row.path("key").asText();
+        return section + (config.has("mode") ? ":" + config.path("mode").asText() : "");
+    }
+    private static String firstTool(List<JsonNode> rules, JsonNode tools, boolean challenge) {
+        for (JsonNode rule : rules) {
+            if (rule.has("costOptions")) return "costOptions";
+            for (String cost : Arrays.asList("hpCost", "luckCost", "actionCost", "statCosts", "resourceCosts")) if (rule.has(cost)) return "costs";
+            if (rule.has("resourceSlots")) return "resourceSlots";
+            if (rule.has("targetScope")) return "targetScope";
+            if (rule.has("limit") || rule.has("scope")) return "limitsScope";
+        }
+        if (tools.path("allowTrade").asBoolean()) return "trade";
+        if (tools.path("decidesEnding").asBoolean()) return "decidesEnding";
+        if (tools.has("votePolicy") || tools.path("plans").size() > 0) return "vote";
+        return challenge ? "zeroChallenge" : "genericSettlement";
+    }
+    /* 第十二轮 k7 N5:作者在发布时看到的拒绝原因只说人话 —— 哪一站、哪种玩法、为什么、怎么改;
+       不再露 photoCheck / genericSettlement / TEAM/WORLD_SHARED / validationMethod 这类内部名与节点内部编号。 */
+    private static final Map<String, String> GAME_LABELS = new HashMap<>();
+    private static final Map<String, String> REASONS = new LinkedHashMap<>();
+    static {
+        String[][] labels = {{"qaText","文字问答"},{"qaPick","选项问答"},{"qaShot","拍照问答"},{"sort","排序"},{"match","连线"},{"classify","分类"},
+            {"estimate","猜数字"},{"pricePair","比一比"},{"hidden","找东西"},{"predict","预测"},{"random","翻卡"},{"profile","角色建档"},{"note","留言"},
+            {"objectCard","拍物成卡"},{"bingo","九宫格"},{"steps","计步"},{"react","变色就点"},{"shake","弹球"},{"quiet","安静挑战"},{"compass","罗盘"},
+            {"shout","喊一嗓子"},{"countdown","倒计时"},{"stopwatch","精准停表"},{"photoCheck","拍照审核"},{"check","D20 检定"},{"d20","D20 加值"},
+            {"typeIn","输入挑战"},{"coin","抛硬币"},{"dice","掷骰子"},{"scan","扫码"},{"album","相册"},{"branch","分支剧情"},{"GPS","定位到达"},
+            {"blindTaste","闭眼盲品"},{"dailySign","今日城市签"},{"timer","计时"},{"leaderboard","排行榜"},{"multiplayer","多人协作"},{"timeWindow","限时开放"},
+            {"silentOrder","默契点单"},{"diyName","起名"},{"musicCorner","音乐角"},{"slowTask","慢任务"},{"barter","以物换物"},{"mixer","调音台"},{"none","这一站"}};
+        for (String[] row : labels) GAME_LABELS.put(row[0], row[1]);
+        REASONS.put("尚无通用结算完成证明", "这种玩法还不能确认玩家是否完成，请换一种玩法");
+        REASONS.put("没有归零挑战恢复桥", "这种玩法不能用作归零挑战");
+        REASONS.put("归零挑战不能配置普通结算工具", "归零挑战不能再设置扣费、次数或效果");
+        REASONS.put("归零挑战不能配置普通结果费用或奖励", "归零挑战的结果反馈不能再设置扣费或奖励");
+        REASONS.put("须允许免费重答 maxTries=0", "这里的问答不能限制尝试次数");
+        REASONS.put("须允许免费重答 maxAttempts=0", "这里的排序不能限制尝试次数");
+        REASONS.put("扫码证明须使用 validationMethod=4", "扫码玩法的参与方式要选「扫码」");
+        REASONS.put("跨队范围仅支持 TEAM/WORLD_SHARED", "跨队计次数只能用在全场共享的组队主题里");
+        REASONS.put("跨队目标仅支持 TEAM/WORLD_SHARED", "作用到别的队只能用在全场共享的组队主题里");
+        REASONS.put("仅支持 TEAM/WORLD_SHARED", "交易和投票只能用在全场共享的组队主题里");
+        REASONS.put("传感器须配置服务端客观题备选节点", "感应类玩法用作归零挑战时，还要有一站可作答的备选玩法");
+    }
+    /** 作者看得懂的玩法名;不认识的玩法退回「这一站的玩法」,不露内部 key。 */
+    public static String gameLabel(String key) {
+        String base = key == null ? "" : key.split(":")[0];
+        return GAME_LABELS.getOrDefault(base, "这一站的玩法");
+    }
+    /** 「01 拍照审核」这样的站名;没有站名才退回节点编号。 */
+    public static String stationLabel(long nodeId, String name) {
+        return name == null || name.trim().isEmpty() ? "节点 " + nodeId : "「" + name.trim() + "」";
+    }
+    private static void fail(long nodeId, String name, String type, String tool, String reason) {
+        JsonNode row = TYPES.get(type);
+        String plain = "尚无通用结算完成证明".equals(reason) && row != null && row.path("r5CompletionProof").asBoolean()
+                ? "请重新打开这一站的玩法，保存一次再发布"   // 第十三轮 m1:短到小程序 60 字安全闸内,站名长了也不会变成「操作失败」
+                : REASONS.getOrDefault(reason, reason);
+        throw new Refusal(stationLabel(nodeId, name) + "的" + gameLabel(type) + "：" + plain,
+                "节点 " + nodeId + (name == null ? "" : "（" + name + "）") + " 玩法 " + type + " 工具 " + tool + "：" + reason);
+    }
+    /** 发布闸拒绝:getMessage() 是给作者看的人话;toString() 保留工程诊断(节点编号、玩法 key、工具、原因码)供日志与测试。 */
+    public static final class Refusal extends IllegalArgumentException {
+        private final String diagnostic;
+        Refusal(String message, String diagnostic) { super(message); this.diagnostic = diagnostic; }
+        public String diagnostic() { return diagnostic; }
+        @Override public String toString() { return diagnostic + " | " + getMessage(); }
+    }
+}

@@ -1,0 +1,244 @@
+// 回归：商家合作中心「可申请路线」在接口成功时必须真正渲染并收掉 loading。
+//
+// 背景:index.js 顶部只导入了 { toTimestamp, chinaParts },routeCards() 却调了没导入的
+// chinaDayStart —— ReferenceError 抛在 wx.request 的 success 回调里被吞掉,setData 整句
+// 不执行,routesLoading 停在初值 true。表现是「接口成功=永远转圈，接口失败=反而正常收场」,
+// 真机零报错。静态绑定门禁和全量单测都拦不住这一类，只能靠本用例守。
+
+const { beforeEach, test } = require('node:test')
+const assert = require('node:assert/strict')
+
+const COOP_CENTER_PAGE = '../../pages/merchant/coop-center/index.js'
+
+let pageConfig
+let requests
+
+global.getApp = () => ({
+  globalData: { user_id: 9, features: {} },
+  isDevEnv: () => false,
+  getUserID: () => 9,
+  getRequestErrorMessage: (res, fallback) => (res && res.msg) || fallback,
+  sendRequest: (request) => { requests.push(request) },
+  tips() {},
+})
+
+global.wx = {
+  getStorageSync: () => '',
+  setStorageSync() {},
+  getWindowInfo: () => ({ statusBarHeight: 20 }),
+  getSystemInfoSync: () => ({ statusBarHeight: 20 }),
+  showToast() {}, showModal() {}, showLoading() {}, hideLoading() {},
+  navigateTo() {}, switchTab() {},
+}
+
+global.Page = (config) => { pageConfig = config }
+
+beforeEach(() => { pageConfig = null; requests = [] })
+
+function setByPath(target, path, value) {
+  const parts = path.split('.')
+  let cursor = target
+  parts.slice(0, -1).forEach((part) => {
+    if (!cursor[part] || typeof cursor[part] !== 'object') cursor[part] = {}
+    cursor = cursor[part]
+  })
+  cursor[parts[parts.length - 1]] = value
+}
+
+function loadPage() {
+  delete require.cache[require.resolve(COOP_CENTER_PAGE)]
+  require(COOP_CENTER_PAGE)
+  const page = Object.assign({}, pageConfig, {
+    data: JSON.parse(JSON.stringify(pageConfig.data)),
+  })
+  page.setData = (patch, callback) => {
+    Object.entries(patch).forEach(([path, value]) => setByPath(page.data, path, value))
+    if (callback) callback()
+  }
+  return page
+}
+
+// normalizeMarketingHome 校验很严，少一个字段就整包判 null 走 error 分支,
+// 所以夹具必须字段齐全，否则测的是 error 分支、根本到不了 routeCards()。
+function marketingHome(items) {
+  return {
+    code: 200,
+    data: {
+      recruiting: { count: items.length, items },
+      coupons: { couponCount: 0, received: 0, verified: 0 },
+      content: { topicCount: 0, freeExploreCount: 0, activityCount: 0 },
+      funnel: [],
+    },
+  }
+}
+
+const FUTURE_DEADLINE = '2099-01-01 00:00:00'
+
+test('路线接口成功时渲染路线卡并收掉 loading（不得抛错卡在转圈）', () => {
+  const page = loadPage()
+
+  page.loadRoutes()
+  assert.equal(page.data.routesLoading, true, '发起请求后应处于 loading')
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].url, '/api/merchant/marketing-home')
+
+  requests[0].success(marketingHome([
+    { id: 1, name: '夜游苏河', imgUrl: '', productType: 1,
+      recruitDeadline: FUTURE_DEADLINE, remainingMerchantCount: 5 },
+  ]))
+
+  assert.equal(page.data.routesLoading, false, 'loading 必须归零，否则用户永远看转圈')
+  assert.equal(page.data.routesError, '', '成功路径不应有错误文案')
+  assert.equal(page.data.routes.length, 1, '合法的可申请路线必须渲染出来')
+  assert.equal(page.data.routes[0].title, '夜游苏河')
+})
+
+// 稿 234:276:卡片有「已满」「已截止」两态 —— 要不要接这一站由商家判断,不替他藏
+test('已截止的不展示(2026-10-22 owner 推翻「已截止也展示」);已满照稿展示,不限名额不写余席;余席阈值 ≥2 绿 / 1 与 0 琥珀', () => {
+  const page = loadPage()
+  page.loadRoutes()
+
+  requests[0].success(marketingHome([
+    { id: 1, name: '已截止', imgUrl: '', productType: 1,
+      recruitDeadline: '2020-01-01 00:00:00', remainingMerchantCount: 5 },
+    { id: 2, name: '没名额', imgUrl: '', productType: 1,
+      recruitDeadline: FUTURE_DEADLINE, remainingMerchantCount: 0 },
+    { id: 3, name: '不限', imgUrl: '', productType: 2,
+      recruitDeadline: FUTURE_DEADLINE, remainingMerchantCount: null },
+    { id: 4, name: '最后一席', imgUrl: '', productType: 1,
+      recruitDeadline: FUTURE_DEADLINE, remainingMerchantCount: 1 },
+  ]))
+
+  assert.equal(page.data.routesLoading, false)
+  const byTitle = Object.fromEntries(page.data.routes.map((r) => [r.title, r]))
+  assert.equal(byTitle['已截止'], undefined, '招商已截止的路线不得显示')
+  assert.equal(page.data.routes.length, 3)
+  assert.deepEqual([byTitle['没名额'].seatText, byTitle['没名额'].seatTone], ['已满', 'tight'])
+  assert.equal(byTitle['不限'].seatText, '', 'null = 不招商或不限名额，不得渲染成已满')
+  assert.deepEqual([byTitle['最后一席'].seatText, byTitle['最后一席'].seatTone], ['余 1 席', 'tight'])
+  // L07-150:卡面只渲染 deadlineShort(未截止才有);未上屏的 deadlineText / metaText 已删
+  assert.equal(byTitle['最后一席'].deadlineText, undefined)
+})
+
+test('活动已结束(endDate 已过)的路线同样不展示', () => {
+  const page = loadPage()
+  page.loadRoutes()
+  requests[0].success(marketingHome([
+    { id: 1, name: '已结束', productType: 1, recruitDeadline: FUTURE_DEADLINE, endDate: '2020-01-01 00:00:00' },
+    { id: 2, name: '进行中', productType: 1, recruitDeadline: FUTURE_DEADLINE },
+  ]))
+  assert.deepEqual(page.data.routes.map((r) => r.title), ['进行中'])
+})
+
+test('结算方式行按章节档位与公示口径拼,混档只列档位', () => {
+  const page = loadPage()
+  page.loadRoutes()
+  requests[0].success(marketingHome([
+    { id: 1, name: '权益', productType: 1, recruitDeadline: FUTURE_DEADLINE, termsModes: ['PERK'], perkMinValue: 30,
+      cityKeyword: '静安', locationCount: 4, startDate: '2099-03-01 10:00:00', endDate: '2099-03-02 18:00:00' },
+    { id: 2, name: '引流', productType: 2, recruitDeadline: FUTURE_DEADLINE, termsModes: ['TRAFFIC'] },
+    { id: 3, name: '混档', productType: 2, recruitDeadline: FUTURE_DEADLINE, termsModes: ['PERK', 'TRAFFIC'] },
+  ]))
+  const [perk, traffic, mixed] = page.data.routes
+  assert.equal(perk.termsText, '权益核销 · 权益不低于 ¥30.0')
+  assert.deepEqual([perk.cityText, perk.stationText], ['静安', '4 站'])
+  assert.equal(perk.dateText, '3月1日 – 3月2日')
+  assert.equal(perk.modeText, '城市定向')
+  assert.equal(traffic.termsText, '引流合作 · 无结算')
+  assert.equal(mixed.termsText, '权益核销 / 引流合作')
+})
+
+test('对照:接口失败时同样要收掉 loading 并给出错误文案', () => {
+  const page = loadPage()
+  page.loadRoutes()
+
+  requests[0].fail({ msg: '网络异常，请重试' })
+
+  assert.equal(page.data.routesLoading, false)
+  assert.equal(page.data.routes.length, 0)
+  assert.match(page.data.routesError, /网络异常/)
+})
+
+/* CU-M-132/133(2026-09-24 走查):营销卡写「15 个开放商机」,点进广场却是 10 张全是「已截止」,
+   剩下 5 条既看不见也没有说明。计数与排列改在服务端(recruiting()),广场这边负责把
+   「还有没列出的」讲明白 —— 不谎报，也不在老 jar 没下发时凭空造一句。 */
+function homeWithScope(items, scope) {
+  return {
+    code: 200,
+    data: {
+      recruiting: Object.assign({ count: items.length, items }, scope),
+      coupons: { couponCount: 0, received: 0, verified: 0 },
+      content: { topicCount: 0, freeExploreCount: 0, activityCount: 0 },
+      funnel: [],
+    },
+  }
+}
+
+test('CU-M-133:还有未截止的商机没列出时，广场写明共 N · 前 M', () => {
+  const items = Array.from({ length: 10 }, (unused, index) => ({
+    id: index + 1, name: '路线 ' + (index + 1), imgUrl: '', productType: 1,
+    recruitDeadline: FUTURE_DEADLINE, remainingMerchantCount: 3,
+  }))
+  const page = loadPage()
+  page.loadRoutes()
+  requests[0].success(homeWithScope(items, { openCount: 15, shownCount: 10, hasMoreOpen: true }))
+  assert.equal(page.data.routeScopeText, '共 15 个开放商机 · 当前列出前 10 个')
+
+  const full = loadPage()
+  full.loadRoutes()
+  requests[0].success(homeWithScope(items, { openCount: 10, shownCount: 10, hasMoreOpen: false }))
+  assert.equal(full.data.routeScopeText, '', '没有剩余就不许声明被截断')
+
+  const legacy = loadPage()
+  legacy.loadRoutes()
+  requests[0].success(homeWithScope(items, {}))
+  assert.equal(legacy.data.routeScopeText, '', '老 jar 不下发这几个字段时按未截断处理')
+})
+
+test('P0-4:自由探索卡写出空位名，滚到底按页续取并去重', () => {
+  const items = Array.from({ length: 10 }, (unused, index) => ({
+    id: index + 1, name: '路线 ' + (index + 1), imgUrl: '', productType: 2,
+    recruitDeadline: FUTURE_DEADLINE, remainingMerchantCount: 2,
+    slotNames: index === 0 ? ['日常一杯', '风格咖啡'] : undefined,
+  }))
+  const page = loadPage()
+  page.loadRoutes()
+  requests[0].success(homeWithScope(items, { openCount: 12, shownCount: 10, hasMoreOpen: true }))
+  assert.equal(page.data.routes[0].slotText, '日常一杯 · 风格咖啡')
+  assert.equal(page.data.routes[1].slotText, '')
+  assert.equal(page._routesMore, true)
+
+  page.loadMoreRoutes()
+  page.loadMoreRoutes()
+  assert.equal(requests.length, 2, '续取在途时不重复发')
+  assert.equal(requests[1].url, '/api/merchant/recruit-routes')
+  assert.deepEqual(requests[1].data, { pageNum: 2, pageSize: 10 })
+  requests[1].success({ code: 200, data: { total: 12, hasMore: false, items: [
+    { id: 10, name: '路线 10', productType: 2, recruitDeadline: FUTURE_DEADLINE },
+    { id: 11, name: '咖啡散步', productType: 2, recruitDeadline: FUTURE_DEADLINE, slotNames: ['小吃'] },
+    { id: 12, name: '风味巡游', productType: 2, recruitDeadline: FUTURE_DEADLINE, slotNames: ['糕点'] },
+  ] } })
+  assert.deepEqual(page.data.routes.map((item) => item.id), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+  assert.equal(page.data.routes[10].slotText, '小吃')
+  assert.equal(page._routesMore, false)
+  assert.equal(page.data.routeScopeText, '', '全部列出后不再声明被截断')
+  page.loadMoreRoutes()
+  assert.equal(requests.length, 2, '没有下一页就不再请求')
+
+  const failing = loadPage()
+  failing.loadRoutes()
+  requests[2].success(homeWithScope(items, { openCount: 12, shownCount: 10, hasMoreOpen: true }))
+  failing.loadMoreRoutes()
+  requests[3].success({ code: 500, msg: 'x' })
+  assert.equal(failing.data.routes.length, 10, '续取失败保留已有列表')
+  assert.equal(failing._routesMore, true)
+  failing.loadMoreRoutes()
+  assert.equal(requests.length, 5, '失败后可再次续取同一页')
+  assert.deepEqual(requests[4].data, { pageNum: 2, pageSize: 10 })
+})
+
+test('P0-4:广场列表滚到底触发续取，位置名沿用卡面既有文字样式', () => {
+  const wxml = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../pages/merchant/coop-center/index.wxml'), 'utf8')
+  assert.match(wxml, /<scroll-view[^>]*bindscrolltolower="loadMoreRoutes"/)
+  assert.match(wxml, /<text class="cc-route-date" wx:if="\{\{item\.slotText\}\}">\{\{item\.slotText\}\}<\/text>/)
+})

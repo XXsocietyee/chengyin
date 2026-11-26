@@ -1,0 +1,28 @@
+@import '../../../style/merchant-light.wxss';
+@import '../style/merchant-finance.wxss';
+
+/* BL-76:样式照 pages/merchant/aftercare,只换前缀。 */
+page { background: var(--cy-bg-page); }
+.vrl-page { min-height: 100vh; box-sizing: border-box; background: var(--cy-bg-page); display: flex; flex-direction: column; }
+.vrl-scroll { flex: 1; min-height: 0; }
+.vrl-shell { box-sizing: border-box; padding: 0 var(--cy-page-x) var(--cy-space-8); }
+.vrl-tabbar { padding: 0 var(--cy-page-x); }
+.vrl-filter { display: block; margin-top: -14rpx; /* ds-ok: 抵消 chip 热区外扩留白 */ margin-bottom: var(--cy-space-3); }
+.vrl-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--cy-space-2); margin: 0 0 var(--cy-space-2); } /* 日期标题与卡片左右对齐 */
+.vrl-group-label { color: var(--cy-text-title); font-size: var(--cy-font-subtitle); font-weight: 700; }
+.vrl-group-total { color: var(--cy-text-secondary); font-size: var(--cy-font-label); font-variant-numeric: tabular-nums; }
+.vrl-row { min-height: var(--cy-btn-h); }
+.vrl-avatar { width: var(--cy-btn-h); height: var(--cy-btn-h); flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--cy-bg-subtle); color: var(--cy-text-title); }
+.vrl-status--success { color: var(--cy-color-status-success); }
+.vrl-status--neutral { color: var(--cy-text-secondary); }
+.vrl-sub { margin-top: var(--cy-space-1); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--cy-text-secondary); font-size: var(--cy-font-caption); }
+/* 页顶「今天」:主题 / 场次小标题比日期标题低一级;同一主题多个场次各一张卡 */
+.vrl-today { padding: 0 var(--cy-page-x); }
+.vrl-topic-label { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--cy-text-title); font-size: var(--cy-font-body); font-weight: 600; }
+.vrl-card + .vrl-card { margin-top: var(--cy-space-2); }
+.vrl-session { display: flex; align-items: baseline; justify-content: space-between; gap: var(--cy-space-2); padding-bottom: var(--cy-space-3); }
+.vrl-more { display: block; padding: var(--cy-space-4) 0; text-align: center; color: var(--cy-text-secondary); font-size: var(--cy-font-caption); }
+
+/* pm20 */
+/* 2026-10-23 页面动效(utils/page-motion.js):容器 --pm-* 置 1 时先隐着,再依次浮上来;静止时无过渡,按压反馈不受影响;减少动态效果时从不触发 */
+.vrl-group { filter: opacity(calc(1 - var(--pm-l, 0))); translate: 0 calc(var(--pm-l, 0) * 31rpx); transition: filter var(--pm-l-d, 0s) ease, translate var(--pm-l-d, 0s) cubic-bezier(.2,.82,.2,1), transform var(--cy-motion-press) var(--cy-ease-out), opacity var(--cy-motion-press) var(--cy-ease-out); transition-delay: calc(var(--pm-l-s, 0) * min(var(--pmi, 0), 8) * 30ms), calc(var(--pm-l-s, 0) * min(var(--pmi, 0), 8) * 30ms), 0s, 0s; }

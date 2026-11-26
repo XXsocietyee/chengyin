@@ -1,0 +1,1199 @@
+@import "../../../style/fade-in.wxss";  /* 减动效兜底要用它的 cy-fade-in(只淡不移) */
+@import "../../../style/merchant-light-scope.wxss";  /* M-24:商家浅色版根节点挂 .theme-merchant */
+/* Strava 风俱乐部主页 — 纯黑顶区 + 炭灰内容区 + 橙色强调 */
+page { background: var(--cy-bg-page); }
+
+.club-page {
+  min-height: 100vh;
+  background: var(--cy-bg-page);
+  --club-accent: var(--cy-brand);
+  --club-surface: var(--cy-bg-card);
+  --club-surface-2: var(--cy-bg-card);
+  --club-text: var(--cy-text-title);
+  --club-text-muted: var(--cy-color-text-tertiary);
+  --club-glass: rgba(255, 255, 255, 0.12);
+  --club-glass-border: var(--cy-border-card);
+}
+/* 2026-10-27 M-24:商家浅色版 —— 本页几处写死的暗色字面量在浅色根下换回语义色 */
+.theme-merchant .club-page {
+  --club-text-muted: var(--cy-color-text-secondary);
+  --club-glass: var(--cy-color-border-subtle);
+}
+.theme-merchant .cover-wrap { background: var(--cy-color-bg-surface-subtle); }
+/* 2026-10-28 m692:浅色版灰块再浅一档 */
+.theme-merchant .ov-fact { background: var(--cy-color-bg-surface-subtle); }
+.club-nav-spacer { width: 100%; }
+
+/* —— 封面 Hero —— */
+.cover-wrap {
+  position: relative;
+  /* 2026-08-26:400 → 240rpx。封面从「视觉主角」退成一条 banner,首屏多露一条帖子;
+     俱乐部的身份感靠 logo + 名字撑住,不靠封面高度。
+     2026-09-02 对稿(Figma 93:9 Hero cover 160px):240 → 320rpx。 */
+  height: 320rpx;
+  overflow: visible;
+  background: var(--cy-color-bg-surface);
+  /* 必须高于 .profile 的 z-index:2。本元素带 z-index 就会开一个层叠上下文,
+     里面 .profile-logo-wrap 的 z-index:10 只在这个上下文内部有效、逃不出去;
+     只要本值 <= .profile 的值,挂在封面下沿那半个 logo 就会被 .profile 的
+     不透明底色盖掉 —— 这正是「logo 只有一半」的成因(不是裁切,也不是高度不够)。 */
+  z-index: 3;
+}
+.cover-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.cover-wrap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  /* 拍板 2026-10-22:封面下半段渐变到页底色(完全不透明),logo+名字浮在接缝上 */
+  background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 38%, rgba(0,0,0,0.55) 68%, var(--cy-bg-page) 100%); /* ds-ok: owner 10-22 封面下沿压黑渐变到页底 */
+  pointer-events: none;
+}
+.cover-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+.cover-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--cy-bg-card-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cy-text-muted);
+}
+/* 没上传封面时用稿 304:395「默认俱乐部顶图 / BG-11 一起玩」那张插画,
+   而不是原来的灰底 + 图片图标。插画自带配色(#04413C 墨绿底 + 撞色形状),
+   ⚠️ 那些是**插画色**不是 UI 色 —— 只以图片资源形式存在,一个都不许抄进 wxss。
+   .cover-fallback 的灰底留着:图还没解码出来的那一帧要有东西垫底,别闪白。 */
+.cover-fallback-art { width: 100%; height: 100%; }
+.cover-nav-acts { display: flex; align-items: center; gap: var(--cy-space-2); }
+/* CU-C-61:分享/邀请改成原生 <button open-type="share"> 后要把 button 自带盒模型清零
+   (margin/padding/border/行高/伪元素边框),否则圆钮会被撑成胶囊。
+   ::after 对同一个类的 <view> 用法无效果,不必拆第二个类名。 */
+.cover-nav-act {
+  width: var(--cy-btn-h);
+  height: var(--cy-btn-h);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  line-height: normal;
+  border-radius: 50%;
+  background: var(--cy-color-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.cover-nav-act::after { border: 0; }
+/* 2026-09-04 截图走查改:原来是两张 <image> 引 svg,其中 icon_setting3.svg 内部写死
+   fill="#000DFF",只能靠 filter: brightness(10) 硬拉 —— 拉亮了但没拉白,深色导航栏上
+   实拍就是一枚扎眼的蓝。换成 DS 的 cy-icon(CSS mask,颜色由 currentColor 决定),
+   svg 内部写死什么颜色都不再影响显示,filter 这条补丁也就不需要了。 */
+.cover-nav-ico { color: var(--cy-color-text-primary); }
+
+/* —— 资料区 —— */
+.profile {
+  position: relative;
+  /* 高于 .cover-wrap(3):身份行上移压在封面下沿,必须盖在封面之上 */
+  z-index: 4;
+  /* 名字挪到 logo 右侧后,顶部只需让开 logo 露出的 48rpx 一点点;
+     左侧让开 logo 宽 96 + 间距 20 = 116rpx。 */
+  /* Figma 93:19 Identity:px14 pt8 pb4 —— 名字的绝对左边距要落在 84px(= 页边 14 + pl 70) */
+  padding: var(--cy-space-2) 28rpx var(--cy-space-1); /* ds-ok: 与 logo 尺寸联动 */
+  background: var(--cy-bg-page);
+}
+.profile-logo-wrap {
+  /* 拍板 2026-10-22:logo 进身份行做第一列,名字在右侧与它垂直居中(不再半压在封面下沿,
+     那样名字只能贴着 logo 底边,看起来像掉在 logo 右下方)。 */
+  flex: none;
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: var(--cy-radius-md);
+  overflow: hidden;
+  background: var(--club-accent);
+  border: 6rpx solid var(--cy-color-bg-page);
+  box-sizing: border-box;
+}
+.profile-logo { width: 100%; height: 100%; display: block; }
+.profile-id {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2-5);
+  min-height: 112rpx; /* ds-ok: = logo 112,名字按 logo 中线居中 */
+  /* 拍板 2026-10-22:logo + 名字悬浮在封面与下方文字之间 —— 身份行中线落在封面下沿。
+     用 top 上移 + 等量负 margin-bottom,不动 .profile 自身盒子(避免外边距折叠把背景带上去)。 */
+  position: relative;
+  top: calc(-56rpx - var(--cy-space-2)); /* ds-ok: logo 112 的一半 + .profile 顶部内边距 */
+  margin-bottom: calc(-56rpx - var(--cy-space-2));
+}
+.profile-id-main { flex: 1; min-width: 0; }
+/* 2026-10-22 owner:分享挪到名字行右端,圆钮;触控 88rpx(44pt 无障碍下限)。原生 button 盒模型清零同 .cover-nav-act。
+   ⚠️ 必须两级选择器:微信内置 wx-button:not([size=mini]) { width:184px } 的优先级(0,1,1)高过单个类,
+   单写 .profile-share 时宽度被它顶成 184px 的椭圆、把俱乐部名挤成「城市…」(DevTools 实测)。 */
+.profile-id .profile-share {
+  flex: none;
+  width: var(--cy-btn-h);
+  height: var(--cy-btn-h);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  line-height: normal;
+  border-radius: 50%;
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.profile-id .profile-share::after { border: 0; }
+.profile-name {
+  /* Figma 93:21:27px Bold 单行省略 */
+  font-size: var(--cy-type-page-title);
+  font-weight: 700;
+  color: var(--club-text);
+  line-height: var(--cy-leading-tight);
+  letter-spacing: -0.02em;
+  margin-top: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Figma 93:22 Meta:三枚「图标 19 + 文字 15」chip,gap 20。
+   2026-08-26 曾把它压成一行 · 拼接的纯文本并撤掉图标,282:x 那版稿又把图标行留着 —— 以稿为准复原。 */
+.profile-meta {
+  /* 拍板 2026-10-22:固定两行(「类型 · N 名成员」/ 入会方式);2026-10-28 业主:间距退回这一版 */
+  margin-top: var(--cy-space-2-5);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--cy-space-1-5);
+}
+.profile-meta-chip { display: flex; align-items: center; gap: var(--cy-space-1-5); min-width: 0; max-width: 100%; }
+.profile-meta-row { align-self: stretch; display: flex; align-items: center; gap: var(--cy-space-3); }
+.profile-quit {
+  flex: none;
+  margin-left: auto;
+  min-height: var(--cy-btn-h);
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--cy-font-label);
+  font-weight: 500;
+  color: var(--club-text-muted);
+}
+.profile-meta-ico { flex: none; color: var(--cy-color-text-primary); }
+.profile-meta-text {
+  font-size: var(--cy-type-card-title);
+  color: var(--cy-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 2026-10-22 owner:「加入」悬浮在右下角,只在「概览」出现;做小 —— 视觉 68rpx 高的小胶囊,
+   触控区用 ::after 撑回 88rpx(44pt 无障碍下限)。往下滑收起、往上滑再出来。
+   点击:请求中变淡 → 成功变绿、左侧勾从 0 宽展开(transition,不新增关键帧)→ 弹欢迎层。
+   ⚠️ 进场动画(cy-rise,fill both 会一直占着 transform)挂在里层按钮上,收起用外层容器的 transition,两者不打架。 */
+.join-float {
+  position: fixed;
+  right: var(--cy-page-x);
+  bottom: calc(var(--cy-space-4) + env(safe-area-inset-bottom));
+  z-index: 40;
+  display: flex;
+  pointer-events: none;
+  transition: transform var(--cy-motion-standard) var(--cy-ease-out), opacity var(--cy-motion-standard) var(--cy-ease-out);
+}
+.join-float--hidden { transform: translateY(calc(100% + var(--cy-space-6))); opacity: 0; }
+.join-float--hidden .join-float__btn { pointer-events: none; }
+.join-float .join-float__btn {
+  position: relative;
+  pointer-events: auto;
+  box-sizing: border-box;
+  height: 68rpx;                        /* ds-ok: 业主要小号胶囊;触控区由 ::after 撑回 88rpx */
+  padding: 0 var(--cy-space-4);
+  font-size: var(--cy-font-label);
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, .28); /* ds-ok: 悬浮胶囊浮在内容上方的投影 */
+  transition: background-color var(--cy-motion-standard) var(--cy-ease-out), color var(--cy-motion-standard) var(--cy-ease-out), opacity var(--cy-motion-standard) var(--cy-ease-out);
+  /* 打开页面时从下方滑上来(复用全站 cy-rise,不新增关键帧),稍等资料区先出 */
+  animation: cy-rise var(--cy-motion-slow) var(--cy-ease-emphasized-decelerate) 160ms both;
+}
+.join-float .join-float__btn::after { content: ''; position: absolute; left: 0; right: 0; top: -10rpx; bottom: -10rpx; }
+/* 勾:未完成时不占位(display:none);变绿那一下出现并从 0 放大到 1 带过冲(只动 transform,合成层动画) */
+.join-float__check { display: none; align-items: center; margin-right: var(--cy-space-1); }
+.join-float__check > cy-icon { display: block; transform: scale(0) rotate(-30deg); transition: transform var(--cy-motion-slow) var(--cy-ease-spring); }
+.join-float .join-float__btn--busy { opacity: .6; }
+.join-float .join-float__btn--done { background: var(--cy-color-status-success); color: #FFFFFF; } /* ds-ok: 绿底上恒用白字白勾 */
+.join-float__btn--done .join-float__check { display: flex; }
+.join-float__btn--done .join-float__check > cy-icon { transform: scale(1) rotate(0); }
+.cy-motion-reduced .join-float__btn, .join-float__btn--reduced { animation: none; }
+@media (prefers-reduced-motion: reduce) { .join-float__btn { animation: none; } .join-float { transition: none; } }
+.join-float-space { height: calc(var(--cy-btn-h) + var(--cy-space-4) + env(safe-area-inset-bottom)); }
+
+/* 加入后的欢迎层:在这个俱乐部你可以做什么(条目逐条飞入) */
+.welcome { padding: var(--cy-space-1) 0 var(--cy-space-3); }
+.welcome-note {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cy-space-1);
+  margin-bottom: var(--cy-space-4);
+  padding: var(--cy-space-3) var(--cy-space-3-5);
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-color-bg-surface-subtle);
+}
+.welcome-note__from { font-size: var(--cy-font-label); color: var(--cy-color-text-tertiary); }
+.welcome-note__text { font-size: var(--cy-font-body); line-height: var(--cy-leading-loose); color: var(--cy-color-text-primary); white-space: pre-wrap; }
+.welcome-item { display: flex; align-items: flex-start; gap: var(--cy-space-3); padding: var(--cy-space-2-5) 0; }
+.welcome-item__ico {
+  flex: none;
+  width: 72rpx;                         /* ds-ok: 条目图标圆底 36pt */
+  height: 72rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--cy-color-bg-surface-subtle);
+  color: var(--cy-color-text-primary);
+}
+.welcome-item__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4rpx; }
+.welcome-item__title { font-size: var(--cy-font-body); font-weight: 700; color: var(--cy-color-text-primary); }
+.welcome-item__sub { font-size: var(--cy-font-label); line-height: var(--cy-leading-normal); color: var(--cy-color-text-secondary); }
+.welcome-actions { display: flex; gap: var(--cy-space-2-5); }
+.welcome-actions .welcome-actions__btn { flex: 1; }
+/* join-btn 收编至 .cy-btn（primary 反色中性白/secondary/ghost）;此处仅留行内布局 */
+.join-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--cy-space-3-5);
+  /* ⚠️ 不能再压:契约「俱乐部主要 CTA 触控高度不得小于 88rpx」是无障碍下限(44pt),
+     2026-08-26 压到 64rpx 被单测抓出,已改回 --cy-btn-h。 */
+  height: var(--cy-btn-h);
+  border-radius: var(--cy-radius-pill);
+  font-size: var(--cy-font-label);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.join-btn--pending {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--club-text-muted); background: var(--club-surface); border: 2rpx solid var(--club-glass-border);
+}
+
+/* 一次性动作与同页 tab 分开 */
+
+.club-view-tabs {
+  display: block;
+  padding: 0 var(--cy-space-4);
+  background: var(--cy-bg-page);
+  border-bottom: 1rpx solid var(--cy-color-border-subtle);
+}
+
+.feed-divider {
+  height: 2rpx;
+  background: var(--cy-color-border-subtle);
+  margin: 0;
+}
+
+/* —— 内容区(无底色,与页面纯黑一致) —— */
+.feed { padding: 0 0 var(--cy-space-4); background: var(--cy-bg-page); }
+.feed--plain { background: var(--cy-bg-page); }
+
+/* 评论输入框的占位色(原发帖输入框同用;2026-10-27 P-20 内嵌发帖框撤掉后只剩评论) */
+.post-ph { color: var(--club-text-muted); }
+
+/* —— 活动 tab(Figma N2-A 282:350 / N2-B 282:499)—— */
+/* 段头:20px Bold + 分隔线 + 右侧「发布 +」 */
+.ev-sec-head {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2);
+  padding: 0 var(--cy-page-x);
+  margin-top: var(--cy-space-5);
+  margin-bottom: var(--cy-space-4);
+}
+/* 稿里 282:622 / 23:16 / 23:41 这一格是 h-px 的**透明** spacer(get_design_context 无 bg,
+   PNG 导出该区整片 RGB(0,0,0))—— 只负责把右侧文字链推到行尾,不画分隔线。 */
+.ev-sec-rule { flex: 1; min-width: 0; height: 1rpx; }
+.ev-sec-link {
+  flex: none;
+  min-height: var(--cy-btn-h);
+  display: flex;
+  align-items: center;
+  gap: var(--cy-legacy-4);
+  font-size: var(--cy-font-label);
+  font-weight: 500;
+  color: var(--cy-color-text-primary);
+}
+
+/* 活动卡(稿 N2 20:52):封面通栏 + 状态胶囊叠在封面左上 + 三列数字块。
+   2026-09-09 从原来的 343×123 横卡改过来 —— 横卡跟的是较旧的组件 281:360。 */
+.ev-card {
+  margin: 0 var(--cy-page-x) var(--cy-space-3);
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-color-bg-elevated);
+  overflow: hidden;
+}
+.ev-coverslot { position: relative; }
+.ev-cover {
+  display: block;
+  width: 100%;
+  height: 260rpx;
+  background: var(--cy-color-bg-surface-strong);
+}
+.ev-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cy-space-1-5);
+  padding: var(--cy-space-3);
+}
+/* 胶囊叠在封面上,所以底色要实、不能透 */
+.ev-status {
+  position: absolute;
+  top: var(--cy-space-2);
+  left: var(--cy-space-2);
+  padding: var(--cy-legacy-4) var(--cy-space-2);
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-bg-elevated);
+  font-size: var(--cy-font-micro);
+  font-weight: 500;
+}
+.ev-stats { display: flex; gap: var(--cy-space-6); margin-top: var(--cy-space-1); }
+.ev-stat { display: flex; flex-direction: column; gap: 2rpx; }
+.ev-stat-num { font-size: var(--cy-font-subtitle); font-weight: 700; color: var(--cy-color-text-primary); }
+.ev-stat-label { font-size: var(--cy-font-micro); color: var(--cy-color-text-tertiary); }
+.ev-status--open { color: var(--cy-color-status-warning); }
+.ev-status--live { color: var(--cy-color-status-success); }
+.ev-status--muted { color: var(--cy-color-text-tertiary); }
+.ev-name {
+  font-size: var(--cy-font-body);
+  font-weight: 700;
+  color: var(--cy-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ev-time { font-size: var(--cy-font-label); color: var(--cy-color-text-secondary); }
+.ev-acts { display: flex; align-items: center; flex-wrap: wrap; gap: var(--cy-space-2); }
+
+/* 空态:2026-10-29 V-05 业主 —— 不用卡片框住,下移到与「帖子」tab 空态同一高度
+   (帖子 tab 空态上方压着发帖入口,这里用同等的顶部留白对齐)。 */
+.ev-empty {
+  display: block;
+  margin-top: calc(var(--cy-space-8) * 2 + var(--cy-space-5));
+}
+
+.event-group-code {
+  min-height: var(--cy-btn-h);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  margin-top: var(--cy-space-2);
+  padding: var(--cy-space-1) var(--cy-space-2);
+  border: 2rpx solid var(--club-accent);
+  border-radius: var(--cy-radius-pill);
+  color: var(--club-accent);
+  font-size: var(--cy-font-caption);
+}
+/* 2026-10-27 M-24·M-34:商家在活动卡上看到「邀约承接」(代替报名) */
+.ev-undertake {
+  min-height: var(--cy-btn-h);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  margin-top: var(--cy-space-2);
+  padding: var(--cy-space-1) var(--cy-space-3);
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-btn-solid-bg);
+  color: var(--cy-btn-solid-fg);
+  font-size: var(--cy-font-caption);
+  font-weight: 600;
+}
+/* 2026-10-27 P-14:「举报活动」收进卡片右下「更多」,热区 88rpx */
+.ev-more {
+  width: var(--cy-btn-h);
+  height: var(--cy-btn-h);
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--club-text-muted);
+}
+
+/* 概览 */
+.overview-section {
+  padding: var(--cy-space-3-5) var(--cy-space-4); /* ds-ok: 28rpx 无匹配 token */
+  border-bottom: 2rpx solid var(--cy-color-border-subtle);
+}
+.overview-section-tit {
+  font-size: var(--cy-font-body);
+  font-weight: 700;
+  color: var(--club-text);
+  margin-bottom: var(--cy-space-2-5);
+}
+.overview-empty {
+  font-size: var(--cy-font-label);
+  color: var(--club-text-muted);
+  padding: var(--cy-space-2) 0;
+}
+.governance-actions { display: flex; align-items: center; gap: var(--cy-space-2); margin-top: var(--cy-space-2); }
+.governance-action {
+  min-height: var(--cy-btn-h); display: inline-flex; align-items: center;
+  color: var(--club-accent); font-size: var(--cy-font-label); font-weight: 700;
+}
+.governance-action--warning { color: var(--cy-color-status-warning); }
+
+/* owner 管理 tab：全部保持 C 端深色语义 */
+.manage-feed { padding-top: var(--cy-space-3); }
+
+/* 快捷动作行(Figma 78:5423):49px 圆钮 + 12px 标签,整行两端对齐。
+   圆底走 bg-interactive(#4D4D4D)—— 控件底比卡底(elevated)再亮一档,才压得住页黑。 */
+/* ⚠️ 2026-09-02 更正:原为左右 8rpx(4px),而同屏兄弟块 .manage-now / .overview-section
+   都是 32rpx(16px)—— 五个圆钮比下面的卡各往外突出约 12px,而且因为 space-between,
+   圆钮间距被撑开。稿 78:5423 的 Actions 帧 x=20。归位到页边同档。 */
+.quick-acts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: start; padding: var(--cy-space-3) var(--cy-space-4) var(--cy-space-4); }
+/* CU-C-61:「分享」这一格是原生 <button open-type="share">,button 自带的盒模型要清零。
+   ⚠️ PR10 F-W5-11:必须带 .quick-acts 祖先(0,2,0)。微信内置 `wx-button:not([size=mini])
+   {width:184px;margin:auto}` 特异度 (0,1,1),压过裸 .quick-act (0,1,0) —— DevTools 实测分享格
+   184px 宽挤在 72px 栏里,叠住「结算」、在「出示二维码」后空出一格(l1-03b)。同 club/notify `.page .send-btn`。 */
+.quick-acts .quick-act {
+  display: flex; flex-direction: column; align-items: center; gap: 16rpx; width: 100%; min-width: 0;
+  margin: 0; padding: 0; border: 0; line-height: normal;
+  background: transparent; border-radius: 0; overflow: visible;
+}
+.quick-acts .quick-act::after { border: 0; }
+.quick-act-circle {
+  width: 98rpx; height: 98rpx; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--cy-color-bg-interactive); color: var(--cy-color-text-primary);
+}
+.quick-act-label { color: var(--cy-color-text-primary); text-align: center; white-space: nowrap; font-size: var(--cy-font-caption); }
+
+.club-stats-section { padding-top: var(--cy-space-2); }
+.club-stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--cy-space-1); }
+.club-stat {
+  min-width: 0;
+  padding: var(--cy-space-2) var(--cy-space-1);
+  border-radius: var(--cy-radius-sm);
+  background: var(--club-surface);
+  text-align: center;
+}
+.club-stat-value { display: block; color: var(--club-text); font-size: var(--cy-font-body); font-weight: 800; }
+.club-stat-label { display: block; margin-top: var(--cy-space-1); color: var(--club-text-muted); font-size: var(--cy-font-caption); }
+.club-stats-topics { margin-top: var(--cy-space-2); }
+.club-stats-topic { display: flex; align-items: center; gap: var(--cy-space-2); min-height: 64rpx; }
+.club-stats-topic-name { flex: 1; min-width: 0; color: var(--club-text); font-size: var(--cy-font-label); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.club-stats-topic-meta { flex-shrink: 0; color: var(--club-text-muted); font-size: var(--cy-font-caption); }
+
+.manage-project-list, .manage-message-list, .manage-invite-list { display: flex; flex-direction: column; }
+.manage-project {
+  display: grid;
+  grid-template-columns: 112rpx minmax(0, 1fr) auto;
+  row-gap: var(--cy-space-2);
+  align-items: center;
+  min-height: var(--cy-btn-h);
+  padding: var(--cy-space-2) 0;
+  border-bottom: 1rpx solid var(--cy-color-border-subtle);
+  box-sizing: border-box;
+}
+.manage-project-cover { width: 112rpx; height: 88rpx; border-radius: var(--cy-radius-sm); background: var(--club-surface-2); flex-shrink: 0; }
+.manage-project-main { flex: 1; min-width: 0; margin-left: var(--cy-space-2-5); }
+.manage-project-name { color: var(--club-text); font-size: var(--cy-font-body); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.manage-project-meta { margin-top: var(--cy-space-1); color: var(--club-text-muted); font-size: var(--cy-font-caption); }
+/* F-W5-11:工具按钮同处第二行(标题列起、跨到箭头列),第一行只留封面 / 标题+报名 / 箭头。 */
+.manage-project-tools {
+  grid-column: 2 / 4;
+  grid-row: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cy-space-2);
+  margin-left: var(--cy-space-2-5);
+}
+.manage-project-director {
+  flex: none;
+  min-height: var(--cy-btn-h-xs);
+  padding: 0 var(--cy-space-3);
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-action-secondary-bg);
+  color: var(--club-text);
+  font-size: var(--cy-font-caption);
+  line-height: var(--cy-btn-h-xs);
+}
+.manage-chevron { grid-column: 3; grid-row: 1; color: var(--club-text-muted); flex-shrink: 0; }
+/* 带票分享:卡片行内的次级动作,不抢主行动;高度取 DS 最小按钮档 --cy-btn-h-xs。 */
+.manage-project-share {
+  margin: 0 var(--cy-space-2) 0 0; padding: 0 var(--cy-space-3);
+  height: var(--cy-btn-h-xs); line-height: var(--cy-btn-h-xs);
+  font-size: var(--cy-font-caption); color: var(--club-text-muted);
+  background: var(--club-surface-2); border-radius: var(--cy-radius-pill);
+}
+.manage-project-share::after { border: none; }
+/* F-W5-11:期次行没有封面,不能套主题行的「封面 / 标题 / 箭头」三列 —— 否则标题落进 112rpx 封面列被挤成竖排。 */
+.manage-project--edition { grid-template-columns: minmax(0, 1fr) auto; }
+.manage-project--edition .manage-project-main { margin-left: 0; }
+
+.manage-tools { display: grid; grid-template-columns: 1fr 1fr; gap: var(--cy-space-2); }
+.manage-tool {
+  min-height: 112rpx;
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2);
+  padding: var(--cy-space-2-5);
+  border: 1rpx solid var(--club-glass-border);
+  border-radius: var(--cy-radius-md);
+  background: var(--club-surface);
+  color: var(--club-text);
+  font-size: var(--cy-font-label);
+  font-weight: 700;
+  box-sizing: border-box;
+}
+.manage-message, .manage-invite {
+  display: flex;
+  align-items: center;
+  padding: var(--cy-space-2) 0;
+  border-bottom: 1rpx solid var(--cy-color-border-subtle);
+  box-sizing: border-box;
+}
+.manage-message { min-height: 88rpx; }
+.manage-invite { min-height: 88rpx; }
+.manage-message-main, .manage-invite-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--cy-space-1); }
+.manage-message-title, .manage-invite-partner { color: var(--club-text); font-size: var(--cy-font-label); font-weight: 700; }
+.manage-message-sub, .manage-invite-topic, .manage-invite-time, .manage-message-time { color: var(--club-text-muted); font-size: var(--cy-font-caption); }
+.manage-message-time { margin-left: var(--cy-space-2); }
+.manage-invite-status { margin-left: var(--cy-space-2); color: var(--club-text-muted); font-size: var(--cy-font-caption); font-weight: 700; }
+.manage-invite-status--pending { color: var(--club-accent); }
+.manage-invite-status--accepted { color: var(--cy-success); }
+.manage-invite-status--rejected, .manage-invite-status--expired { color: var(--cy-danger); }
+.manage-invite-status--cancelled, .manage-invite-status--replaced { color: var(--cy-info); }
+
+/* AI 策划活动 sheet(cy-sheet slot 内) */
+.ai-plan-chips { display: flex; flex-wrap: wrap; gap: var(--cy-space-1-5); margin-bottom: var(--cy-space-2); }
+.ai-plan-chip { padding: var(--cy-legacy-10) var(--cy-space-2-5); border-radius: var(--cy-radius-pill); font-size: var(--cy-font-caption); color: var(--club-text-muted); background: var(--club-surface); border: 1rpx solid var(--club-glass-border); }
+.ai-plan-idea { width: 100%; box-sizing: border-box; height: 140rpx; padding: var(--cy-space-2-5); border-radius: var(--cy-radius-md); background: var(--club-surface); border: 1rpx solid var(--club-glass-border); font-size: var(--cy-font-body); color: var(--club-text); }
+.ai-plan-ph { color: var(--club-text-muted); }
+.ai-plan-row { display: flex; gap: var(--cy-space-2); margin-top: var(--cy-space-2); }
+.ai-plan-input { flex: 1; box-sizing: border-box; height: var(--cy-btn-h); line-height: var(--cy-btn-h); padding: 0 var(--cy-space-2-5); border-radius: var(--cy-radius-md); background: var(--club-surface); border: 1rpx solid var(--club-glass-border); font-size: var(--cy-font-body); color: var(--club-text); }
+.ai-plan-input--sm { flex: 0 0 240rpx; }
+.ai-plan-acts { display: flex; align-items: center; gap: var(--cy-space-2); margin-top: var(--cy-space-2-5); }
+.ai-plan-gen { flex: 1; text-align: center; padding: var(--cy-space-2-5); border-radius: var(--cy-radius-md); background: var(--cy-btn-solid-bg); color: var(--cy-btn-solid-fg); font-size: var(--cy-font-body); font-weight: 700; }
+.ai-plan-gen--busy { opacity: 0.6; }
+.ai-plan-ghost { padding: var(--cy-space-2-5) var(--cy-space-3-5); border-radius: var(--cy-radius-md); border: 1rpx solid var(--club-glass-border); color: var(--club-text-muted); font-size: var(--cy-font-body); }
+.ai-plan-err { margin-top: var(--cy-space-2); font-size: var(--cy-font-caption); color: var(--cy-color-status-danger); line-height: 1.6; }
+.ai-plan-res { margin-top: var(--cy-space-3); padding-top: var(--cy-space-3); border-top: 1rpx solid var(--club-glass-border); }
+.ai-plan-tit { font-size: var(--cy-font-subtitle); font-weight: 700; color: var(--club-text); }
+.ai-plan-sub { margin-top: var(--cy-legacy-6); font-size: var(--cy-font-caption); color: var(--club-text-muted); }
+.ai-plan-tags { display: flex; flex-wrap: wrap; gap: var(--cy-space-1-5); margin-top: var(--cy-space-2); }
+.ai-plan-tag { padding: var(--cy-legacy-6) var(--cy-space-2); border-radius: var(--cy-radius-pill); font-size: var(--cy-font-caption); color: var(--club-accent); border: 1rpx solid var(--club-glass-border); } /* ds-ok: 6rpx 无匹配 token */
+.ai-plan-text { margin-top: var(--cy-space-2); font-size: var(--cy-font-body); color: var(--club-text); line-height: 1.7; }
+.ai-plan-fit { margin-top: var(--cy-space-1-5); font-size: var(--cy-font-caption); color: var(--club-text-muted); line-height: 1.6; }
+.ai-plan-lbl { margin-top: var(--cy-space-3); font-size: var(--cy-font-caption); font-weight: 700; color: var(--club-text); }
+.ai-plan-copy { float: right; font-weight: 400; color: var(--club-accent); }
+.ai-plan-node { display: flex; align-items: flex-start; gap: var(--cy-space-2); margin-top: var(--cy-space-1-5); }
+.ai-plan-node-no { flex: 0 0 40rpx; height: 40rpx; line-height: 40rpx; text-align: center; border-radius: 50%; background: var(--club-surface); font-size: var(--cy-font-caption); color: var(--club-accent); }
+.ai-plan-node-body { flex: 1; }
+.ai-plan-node-name { font-size: var(--cy-font-body); color: var(--club-text); }
+.ai-plan-node-addr { margin-top: var(--cy-legacy-4); font-size: var(--cy-font-caption); color: var(--club-text-muted); }
+.ai-plan-risk, .ai-plan-msug { margin-top: var(--cy-space-1); font-size: var(--cy-font-caption); color: var(--club-text-muted); line-height: 1.6; }
+.ai-plan-promo { margin-top: var(--cy-space-1-5); padding: var(--cy-space-2-5); border-radius: var(--cy-radius-md); background: var(--club-surface); font-size: var(--cy-font-caption); color: var(--club-text); line-height: 1.7; }
+.ai-plan-adopt { margin-top: var(--cy-space-2); text-align: center; padding: var(--cy-space-3); border-radius: var(--cy-radius-md); background: var(--cy-btn-solid-bg); color: var(--cy-btn-solid-fg); font-size: var(--cy-font-body); font-weight: 700; }
+.ai-plan-adopt-note { margin-top: var(--cy-space-1-5); text-align: center; font-size: var(--cy-font-caption); color: var(--club-text-muted); }
+
+/* 多团选团 picker */
+.owner-picker-item { padding: var(--cy-space-3); border-radius: var(--cy-radius-md); text-align: center; font-size: var(--cy-font-body); color: var(--club-text); background: var(--club-surface); margin-top: var(--cy-space-1-5); }
+
+/* T16:找商家搜索框 */
+.merchant-search {
+  margin: var(--cy-legacy-4) 0 var(--cy-space-2-5);
+}
+
+/* 成员 */
+.member {
+  display: flex;
+  align-items: center;
+  padding: var(--cy-space-2) 0;
+  border-bottom: 1rpx solid var(--cy-color-border-subtle);
+}
+.member--managed { flex-wrap: wrap; }
+.member:last-child { border-bottom: 0; }
+.member-avatar {
+  width: var(--cy-legacy-72); height: var(--cy-legacy-72); border-radius: 50%;
+  flex-shrink: 0; background: var(--club-surface);
+}
+.member-info { flex: 1; margin-left: var(--cy-space-2-5); }
+.member-name { font-size: var(--cy-font-body); color: var(--club-text); }
+.member-meta { margin-top: var(--cy-legacy-6); display: flex; align-items: center; flex-wrap: wrap; font-size: var(--cy-font-caption); color: var(--club-text-muted); }
+.member-meta-arrow { flex-shrink: 0; }
+.admin-tools-notice { margin-bottom: var(--cy-space-2); padding: var(--cy-space-2); border-radius: var(--cy-radius-sm); background: var(--cy-danger-soft); color: var(--cy-danger); font-size: var(--cy-font-caption); line-height: var(--cy-leading-normal); }
+.member-owner {
+  margin-left: var(--cy-space-1-5); font-size: var(--cy-font-caption); color: var(--club-accent);
+  flex: none; white-space: nowrap;
+  background: rgba(122, 92, 255, 0.14); padding: 2rpx var(--cy-space-1-5); border-radius: var(--cy-radius-pill); /* ds-ok */
+}
+.member-admin {
+  margin-left: var(--cy-space-1-5); font-size: var(--cy-font-caption); color: var(--cy-info);
+  flex: none; white-space: nowrap;
+  background: rgba(47, 116, 255, 0.14); padding: 2rpx var(--cy-space-1-5); border-radius: var(--cy-radius-pill); /* ds-ok */
+}
+.member-actions {
+  width: 100%;
+  margin-top: var(--cy-space-1);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--cy-space-1);
+}
+.member-role-btn, .member-governance-btn, .member-remove, .member-report {
+  min-height: var(--cy-btn-h);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--cy-space-2);
+  box-sizing: border-box;
+  font-size: var(--cy-font-label);
+}
+.member-role-btn { color: var(--cy-info); }
+.member-governance-btn { color: var(--cy-color-status-warning); }
+.member-remove { color: var(--cy-danger); }
+.member-report { color: var(--cy-color-status-warning); }
+
+/* —— 本团贡献榜(Figma 23:39 LbHead + 23:43 Leaderboard)——
+   排序从 chip tabs 收成榜头右侧「综合 ▾」;名次表进一张 bg-elevated 卡,
+   自己那一行压 action/secondary-bg 底并带「我」角标。 */
+.ov-lb {
+  margin: 0 var(--cy-page-x);
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-color-bg-elevated);
+  overflow: hidden;
+}
+.ov-lb-row {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-3);
+  padding: var(--cy-space-4) var(--cy-space-3); /* 2026-10-28 业主:贡献榜每行加高 */
+  padding-right: var(--ov-lb-float-gutter, var(--cy-space-3)); /* 未加入时右侧让给悬浮「加入」,分数不被压 */
+}
+.ov-lb-row.is-me { background: var(--cy-color-action-secondary-bg); }
+.ov-lb-rank {
+  flex: none;
+  width: var(--cy-space-5);
+  text-align: center;
+  font-size: var(--cy-font-label);
+  font-weight: 500;
+  color: var(--cy-color-text-tertiary);
+}
+.ov-lb-rank.is-top { font-weight: 700; color: var(--cy-color-status-warning); }
+.ov-lb-avatar { flex: none; }
+.ov-lb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--cy-legacy-4); }
+.ov-lb-namerow { display: flex; align-items: center; gap: var(--cy-space-1-5); min-width: 0; }
+.ov-lb-name {
+  font-size: var(--cy-font-label);
+  font-weight: 500;
+  color: var(--cy-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-lb-me {
+  flex: none;
+  padding: 0 var(--cy-space-1-5);
+  border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-action-primary-bg);
+  color: var(--cy-color-action-primary-fg);
+  font-size: var(--cy-font-micro);
+  font-weight: 600;
+}
+.ov-lb-meta { font-size: var(--cy-font-micro); color: var(--cy-color-text-tertiary); }
+.ov-lb-pts { flex: none; font-size: var(--cy-type-card-title); font-weight: 700; color: var(--cy-color-text-primary); }
+/* 折叠行(23:68):前 3 与我周边之间被省掉的名次 */
+.ov-lb-gap {
+  padding: var(--cy-space-2) var(--cy-space-3);
+  font-size: var(--cy-font-micro);
+  color: var(--cy-color-text-tertiary);
+}
+.ov-lb-empty { margin: 0 var(--cy-page-x); }
+
+/* 商家(2026-08-20 重设计:卡体样式在 components/cy/merchant-card 的 venue 变体,页面只留间距) */
+.mcard { display: block; margin-bottom: var(--cy-space-3); }
+
+/* 评论 */
+.post-moderation { display: flex; flex-wrap: wrap; gap: var(--cy-space-3); }
+/* F0098:引用对象当前不可见时的中性标签 */
+.post-ref-unavailable {
+  align-self: flex-start;
+  margin-top: var(--cy-space-2);
+  padding: var(--cy-space-1) var(--cy-space-3);
+  border-radius: var(--cy-radius-sm);
+  background: var(--cy-bg-subtle);
+  color: var(--club-text-muted);
+  font-size: var(--cy-font-caption);
+}
+.post-moderation__action {
+  min-height: var(--cy-btn-h);
+  display: inline-flex;
+  align-items: center;
+  color: var(--club-text-muted);
+  font-size: var(--cy-font-label);
+}
+.comments {
+  margin: var(--cy-space-2) var(--cy-page-x) var(--cy-space-3) calc(var(--cy-page-x) + var(--cy-space-8) + var(--cy-space-3));
+  padding: var(--cy-space-2);
+  background: transparent;
+  border-radius: var(--cy-radius-sm);
+  border: 1rpx solid var(--cy-color-border-subtle);
+}
+.comment { font-size: var(--cy-font-label); line-height: 1.6; color: var(--club-text); }
+.comment-name { color: var(--cy-info); }
+.comment-mod { min-height: var(--cy-btn-h); margin-left: var(--cy-space-1-5); display: inline-flex; align-items: center; color: var(--club-text-muted); font-size: var(--cy-font-caption); }
+.comment-bar { display: flex; align-items: center; gap: var(--cy-space-1-5); margin-top: var(--cy-legacy-14); }
+.comment-input {
+  flex: 1; height: 64rpx; background: var(--club-surface-2);
+  border-radius: var(--cy-radius-pill); padding: 0 var(--cy-space-3); font-size: var(--cy-font-label); color: var(--club-text);
+}
+.comment-send {
+  min-height: var(--cy-btn-h); box-sizing: border-box; flex-shrink: 0; display: flex; align-items: center; padding: 0 var(--cy-legacy-26); border-radius: var(--cy-radius-pill);
+  background: var(--cy-btn-solid-bg); color: var(--cy-btn-solid-fg); font-size: var(--cy-font-label);
+}
+.comment-send.disabled { opacity: 0.5; }
+
+.post-edit-sheet, .post-history-sheet { padding: 0; }
+.post-edit-input { width: 100%; min-height: 220rpx; padding: var(--cy-space-3); box-sizing: border-box; border-radius: var(--cy-radius-sm); background: var(--cy-color-input-idle-bg); color: var(--club-text); font-size: var(--cy-font-body); line-height: var(--cy-leading-normal); }
+.post-edit-input.is-filled { background: var(--cy-color-input-filled-bg); }
+.post-edit-note { margin-top: var(--cy-space-2); color: var(--club-text-muted); font-size: var(--cy-font-caption); line-height: var(--cy-leading-normal); }
+.post-history-row { padding: var(--cy-space-3) 0; border-bottom: 1rpx solid var(--cy-border-card); }
+.post-history-meta { color: var(--club-text-muted); font-size: var(--cy-font-caption); }
+.post-history-content { margin-top: var(--cy-space-1); color: var(--club-text); font-size: var(--cy-font-body); line-height: var(--cy-leading-normal); white-space: pre-wrap; }
+
+/* 空态 / 错误 */
+.empty { padding: 40rpx var(--cy-space-4); text-align: center; } /* ds-ok: 40rpx 无匹配 token */
+
+.safe-bottom { height: calc(40rpx + env(safe-area-inset-bottom)); }
+
+/* P1 带领场标识 */
+
+/* 团核销码 · 选场次(sheet 内容,弹窗化 2026-07-31) */
+.gc-hint { padding: 0 0 var(--cy-space-3); color: var(--cy-text-secondary); font-size: var(--cy-font-caption); /* cy-sheet 面板已带页边距,内容不再重复内缩 */ }
+.gc-item { margin: 0 var(--cy-page-x) var(--cy-space-3); padding: var(--cy-space-4) var(--cy-space-3-5); display: flex; justify-content: space-between; align-items: center; border-radius: var(--cy-radius-sm); background: var(--cy-bg-card-2); font-size: var(--cy-font-body); color: var(--cy-text-title); }
+
+/* —— 管理 tab 收敛(2026-08-26) —— */
+/* ① 唯一显眼的东西:现在要做。承接 ownerStage 五态 ——
+   文案说的是**哪一层**的事(CU-C-89:承接阶段是俱乐部级的,不点名单个项目)。 */
+.manage-now {
+  margin: 0 var(--cy-space-4) var(--cy-space-3);
+  padding: var(--cy-space-4);
+  border-radius: var(--cy-radius-lg);
+  background: var(--club-surface);
+  border: 1rpx solid var(--club-glass-border);
+}
+.manage-now-kicker {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-1-5);
+  font-size: var(--cy-font-caption);
+  color: var(--club-text-muted);
+}
+.manage-now-dot {
+  width: 12rpx; height: 12rpx; border-radius: 50%;
+  background: var(--cy-color-status-warning);
+}
+.manage-now--accepted .manage-now-dot { background: var(--cy-color-status-success); }
+.manage-now--error .manage-now-dot { background: var(--cy-color-status-danger); }
+.manage-now-title {
+  margin-top: var(--cy-space-2);
+  font-size: var(--cy-font-title);
+  font-weight: 700;
+  color: var(--club-text);
+  line-height: var(--cy-leading-tight);
+}
+.manage-now-hint {
+  margin-top: var(--cy-space-1-5);
+  font-size: var(--cy-font-label);
+  color: var(--club-text-muted);
+  line-height: var(--cy-leading-normal);
+}
+.manage-now-timeline { display: block; margin-top: var(--cy-space-3); }
+.manage-now-acts { display: flex; gap: var(--cy-space-2); margin-top: var(--cy-space-3); }
+.manage-now-btn {
+  flex: 1;
+  height: var(--cy-btn-h);
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--cy-radius-pill);
+  font-size: var(--cy-font-label);
+  font-weight: 700;
+}
+.manage-now-btn--minor { flex: 0 0 auto; padding: 0 var(--cy-space-4); }
+
+/* ② 项目:卡片自己说明自己,不再单起一行 section 标题 */
+.manage-group {
+  border-radius: var(--cy-radius-lg);
+  background: var(--club-surface);
+  overflow: hidden;
+}
+.manage-add-row {
+  display: flex; align-items: center; gap: var(--cy-space-2);
+  min-height: var(--cy-btn-h);
+  padding: 0 var(--cy-space-3);
+  border-top: 1rpx solid var(--club-glass-border);
+  font-size: var(--cy-font-label);
+  color: var(--club-text-muted);
+}
+.manage-add-sign { flex: none; }
+
+/* ③ 经营区块:收起时一行带摘要,展开在原地铺开 */
+.manage-fold-row {
+  display: flex; align-items: center; gap: var(--cy-space-2);
+  padding: var(--cy-space-3);
+  border-radius: var(--cy-radius-lg);
+  background: var(--club-surface);
+}
+.manage-fold-main { flex: 1; min-width: 0; }
+.manage-fold-title { display: block; font-size: var(--cy-font-body); font-weight: 500; color: var(--club-text); }
+/* 展开 300ms emphasized-decelerate / 收起 200ms accelerate —— M3 easing token,
+   exit 比 enter 短。chevron 同曲线转 90°。
+   2026-09-02:原来这四条写的是字面 cubic-bezier / ms,数值本身对(和稿 40:3 一致),
+   但没有入口 —— 调一次动效要全仓找字面量。现改读 --cy-motion-* / --cy-ease-* 档。 */
+.manage-fold-chevron {
+  flex: none;
+  transition: transform var(--cy-motion-collapse) var(--cy-ease-accelerate);
+}
+.manage-fold-chevron.open {
+  transform: rotate(90deg);
+  transition: transform var(--cy-motion-expand) var(--cy-ease-emphasized-decelerate);
+}
+.manage-fold-panel {
+  padding: var(--cy-space-2) 0 var(--cy-space-1);
+  animation: cy-fold-in var(--cy-motion-expand) var(--cy-ease-emphasized-decelerate) both;
+}
+
+/* ⚙ 俱乐部设置弹窗 */
+.cset { padding-bottom: var(--cy-space-2); }
+.cset-row {
+  display: flex; align-items: center; gap: var(--cy-space-2);
+  padding: var(--cy-space-3) 0;
+  border-bottom: 1rpx solid var(--club-glass-border);
+}
+.cset-main { flex: 1; min-width: 0; }
+.cset-titlerow { display: flex; align-items: center; gap: var(--cy-space-1-5); }
+.cset-title { font-size: var(--cy-font-body); font-weight: 500; color: var(--club-text); }
+.cset-sub {
+  display: block; margin-top: var(--cy-legacy-4);
+  font-size: var(--cy-font-caption); color: var(--club-text-muted);
+}
+.cset-dot { width: 12rpx; height: 12rpx; border-radius: 50%; background: var(--cy-color-status-warning); }
+.cset-count {
+  padding: 2rpx var(--cy-space-1-5); /* ds-ok: 计数角标内边距,与帖文身份标签同口径 */
+  border-radius: var(--cy-radius-pill);
+  background: var(--club-glass-border);
+  font-size: var(--cy-font-micro);
+  color: var(--club-text-muted);
+}
+.post-ref-pick { padding: 0 0 var(--cy-space-4); max-height: 60vh; overflow-y: auto; /* cy-sheet 面板已带页边距,内容不再重复内缩 */ }
+.post-ref-opt {
+  min-height: 104rpx; display: flex; align-items: center; gap: var(--cy-space-2);
+  border-bottom: 1rpx solid var(--club-glass-border);
+}
+.post-ref-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6rpx; }
+.post-ref-opt-name { font-size: var(--cy-font-body); color: var(--club-text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.post-ref-opt-sub { font-size: var(--cy-font-caption); color: var(--club-text-muted); }
+.post-ref-opt-arrow { flex: none; color: var(--club-text-muted); }
+
+/* 开放设置那一行右侧的状态字。稿上是个开关,这里用文字态 ——
+   点整行切换,状态字就是当前值,保存中也在同一位置说话,不另起一处提示。 */
+.cset-switch { flex: none; font-size: var(--cy-font-caption); color: var(--club-text-muted); }
+.cset-inline-error { display: block; padding-bottom: var(--cy-space-3); }
+.cset-chevron { flex: none; transition: transform var(--cy-motion-collapse) var(--cy-ease-accelerate); }
+.cset-chevron.open { transform: rotate(90deg); transition: transform var(--cy-motion-expand) var(--cy-ease-emphasized-decelerate); }
+.cset-panel {
+  padding: var(--cy-space-2) 0 var(--cy-space-3);
+  animation: cy-fold-in var(--cy-motion-expand) var(--cy-ease-emphasized-decelerate) both;
+}
+
+/* 行内展开的内容进场(稿 40:3「行内展开」/ 42:168「内容自 -4px 归位」)。
+ * ⚠️ 只有一组 keyframes,两处折叠面板共用 —— 不许每个折叠点再抄一份。
+ * ⚠️ 为什么是 keyframes 而不是 transition(motion-property-ratchet 要求先问这一句):
+ *   两处面板都是 `wx:if` 挂载,挂载那一帧没有可补间的起始态,transition 根本不会播。
+ *   而且折叠行点一下就翻转、再点是**卸载**不是重触发,不存在该门禁要防的
+ *   「快速重触发从 0 重启导致抖」。
+ * ⚠️ 稿写的是「height 与内容不透明度同步插值」,这里只做了不透明度 + 位移:
+ *   height/max-height 是布局属性,受 LAYOUT_ANIMATION_CEILING 只减不增的棘轮管,
+ *   为一个折叠面板去顶高那条上限不划算。可见结果(内容淡入 + 自 -4px 归位)已按稿落地,
+ *   差的是外框高度不补间 —— 记在 PR 的「与稿出入」里。 */
+@keyframes cy-fold-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* ★ 稿 40:3 最后一行「减少动态效果兜底」:
+ *   「全部改成 150ms 纯淡入淡出;不缩放、不位移;sheet 直接出现」。
+ * 所以这里不是简单 animation:none(那样内容会硬闪出来),而是换成只补间不透明度的
+ * cy-fade-in(style/fade-in.wxss 里那一组,全站共用),时长压到 crossfade(150ms)。
+ * 位移是前庭敏感用户真正不适的那一半,必须去掉;淡入本就该保留(Emil「减弱不是归零」)。 */
+.cy-motion-reduced .manage-fold-panel,
+.cy-motion-reduced .cset-panel {
+  animation-name: cy-fade-in;
+  animation-duration: var(--cy-motion-crossfade);
+  animation-timing-function: linear;
+}
+.cset-panel-act {
+  min-height: var(--cy-btn-h);
+  display: flex; align-items: center; justify-content: flex-end;
+  font-size: var(--cy-font-label);
+  color: var(--club-text-muted);
+  /* CU-C-61:「邀请成员」是原生 <button open-type="share">。 */
+  margin: 0; padding: 0; border: 0; line-height: normal;
+  width: 100%;
+  background: transparent;
+}
+.cset-panel-act::after { border: 0; }
+
+/* 发帖收起态 */
+/* Figma 285:395:头像 40 + 右列(昵称 / 提示语 / 工具栏),px12 py13 gap12。
+   原来是一条 pill,稿把它展成三行 —— 工具栏三枚图标就是稿画的入口 */
+.post-composer-collapsed {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cy-space-3);
+  padding: 26rpx var(--cy-space-3); /* ds-ok: py13 = 26rpx */
+  border-bottom: 1rpx solid var(--cy-color-border-subtle);
+}
+.post-composer-me { flex: none; }
+.post-composer-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--cy-legacy-4); }
+.post-composer-who {
+  font-size: var(--cy-type-card-title);
+  font-weight: 500;
+  color: var(--cy-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.post-composer-ph { font-size: var(--cy-type-card-title); color: var(--cy-color-text-secondary); }
+.post-composer-tools { display: flex; align-items: center; gap: var(--cy-space-5); padding-top: var(--cy-space-3); }
+.post-composer-ico { flex: none; color: var(--cy-color-text-primary); }
+
+/* —— 概览 tab(Figma N3 23:2 / N5 24:216 / N6 24:355)——
+   页边 16 · 区块间距 16。简介直接铺开:全局规约「标题下不要小标题」,
+   原「俱乐部简介」那行 label 已撤。 */
+.ov { padding-top: var(--cy-space-3-5); }
+.ov-intro {
+  /* F-W5-06:简介改用 <text> 保留换行后,行内元素的左右外边距只作用在首行/末行,上下外边距不生效 ——
+     必须是块级,多段简介的每一行才都对齐页边。 */
+  display: block;
+  margin: 0 var(--cy-page-x) var(--cy-space-4);
+  font-size: var(--cy-font-body);
+  line-height: 1.4;
+  color: var(--cy-color-text-secondary);
+}
+
+/* Facts 三宫格(23:4):主理人 / 等级 / 所在城市 */
+.ov-facts {
+  display: flex;
+  gap: var(--cy-space-4);
+  margin: 0 var(--cy-page-x) var(--cy-space-4);
+}
+/* N2 俱乐部勋章只读入口:整行可点,min-height 撑到 88rpx(44px) */
+.ov-badge-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2-5);
+  min-height: 88rpx;
+  margin: 0 var(--cy-page-x) var(--cy-space-4);
+  padding: 0 var(--cy-space-3-5);
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-color-bg-surface-strong);
+  color: var(--cy-color-text-primary);
+}
+.ov-badge-entry-text { flex: 1; min-width: 0; font-size: var(--cy-font-label); font-weight: 600; }
+.ov-badge-entry-arrow { flex: none; color: var(--cy-color-text-secondary); }
+.ov-fact {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6rpx; /* ds-ok: Figma gap3 */
+  padding: var(--cy-space-3) var(--cy-space-2-5) var(--cy-space-3) var(--cy-space-3-5);
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-color-bg-surface-strong);
+}
+.ov-fact-value {
+  max-width: 100%;
+  font-size: var(--cy-font-label);
+  font-weight: 600;
+  color: var(--cy-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-fact-label { font-size: var(--cy-font-micro); color: var(--cy-color-text-secondary); }
+
+/* 分区头(23:14 / 23:39):标题 + 分隔线 + 右侧文字链 */
+.ov-head {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-2);
+  margin: 0 var(--cy-page-x) var(--cy-space-4);
+}
+.ov-head-tit { font-size: var(--cy-type-card-title); font-weight: 600; color: var(--cy-color-text-primary); }
+.ov-head-rule { flex: 1; min-width: 0; height: 1rpx; } /* 同 .ev-sec-rule:稿是透明 spacer,不画线 */
+.ov-head-link {
+  flex: none;
+  min-height: var(--cy-btn-h);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cy-legacy-4);
+  font-size: var(--cy-font-caption);
+  font-weight: 500;
+  color: var(--cy-color-text-secondary);
+  /* CU-C-61:「邀请成员」是原生 <button open-type="share">。上下负边距:留 44px 热区但不撑高标题行。 */
+  margin: -24rpx 0; /* ds-ok: 88rpx 热区减去 40rpx 行高 */
+  padding: 0;
+  border: 0;
+  line-height: normal;
+  background: transparent;
+}
+.ov-head-link::after { border: 0; }
+.ov-head-link-ico { flex: none; }
+/* 下拉三角:图标集里没有向下 chevron,把 slide-arrow(向右 chevron)转 90° —— 
+   仓库规约禁止拿 ▾ 这种字符当图标。 */
+.ov-head-caret { flex: none; transform: rotate(90deg); }
+.ev-sec-link-ico { flex: none; }
+
+/* 成员横向头像条(23:18):44px 圆头像 + 名字 + 角色标,第 5 位是「+N」溢出位 */
+.ov-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cy-space-2-5);
+  margin: 0 var(--cy-page-x) var(--cy-space-4);
+}
+.ov-strip-item {
+  /* 拍板 2026-10-22:成员从左往右排,不再 flex:1 撑满(只有 1 人时会被挤到正中) */
+  flex: none;
+  width: 120rpx; /* ds-ok: 头像 64 + 名字留白 */
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10rpx; /* ds-ok: Figma gap5 */
+}
+.ov-strip-avatar {
+  width: var(--cy-space-8);
+  height: var(--cy-space-8);
+  border-radius: 50%;
+  flex: none;
+  background: var(--cy-color-bg-surface-strong);
+}
+.ov-strip-name {
+  max-width: 100%;
+  font-size: var(--cy-font-micro);
+  font-weight: 500;
+  color: var(--cy-color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-strip-role { font-size: 18rpx; } /* ds-ok: Figma 9px 角色标,micro(20rpx) 之下的一次性例外 */
+.ov-strip-role--owner { color: var(--cy-color-status-warning); }
+.ov-strip-role--admin { color: var(--cy-color-text-tertiary); }
+
+/* Locked(25:2 / 25:5):未加入时成员条与榜单整块换成一张说明卡 */
+.ov-locked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cy-space-1-5);
+  margin: 0 var(--cy-page-x) var(--cy-space-4);
+  padding: var(--cy-space-4) 28rpx;
+  border-radius: var(--cy-radius-lg);
+  background: var(--cy-color-bg-elevated);
+}
+.ov-locked-tit { font-size: var(--cy-font-label); font-weight: 600; color: var(--cy-color-text-secondary); }
+
+/* Figma「管理员 管理页面」B2 可对接的活动。与同屏「可对接商家」同构:卡内不放写操作。 */
+.pool-card { display: flex; flex-direction: column; gap: var(--cy-space-2); box-sizing: border-box; margin-bottom: var(--cy-space-3); padding: var(--cy-space-4); border-radius: var(--cy-radius-lg); background: var(--cy-color-bg-raised); }
+.pool-card.is-dim { opacity: 0.55; }
+.pool-card-top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--cy-space-3); }
+.pool-card-name { flex: 1; min-width: 0; overflow: hidden; color: var(--cy-color-text-primary); font-size: var(--cy-font-label); font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.pool-card-state { flex: none; color: var(--cy-color-text-tertiary); font-size: var(--cy-font-caption); }
+.pool-card-meta { color: var(--cy-color-text-tertiary); font-size: var(--cy-font-caption); }
+.pool-card-foot { display: flex; align-items: baseline; justify-content: space-between; gap: var(--cy-space-3); }
+.pool-card-deadline { color: var(--cy-color-text-secondary); font-size: var(--cy-font-caption); }
+.pool-card-cta { display: flex; flex: none; align-items: center; gap: 4rpx; min-height: 88rpx; padding: 0 var(--cy-space-2); /* 就地申请可点:44pt 命中区 */ color: var(--cy-color-text-primary); font-size: var(--cy-font-caption); font-weight: 700; }
+/* 稿 M 268:223:设置弹窗按组分段,组标题是小号次要色 */
+.cset-group { display: block; margin: 32rpx var(--cy-page-x) 8rpx; color: var(--cy-text-secondary); font-size: var(--cy-font-caption); }
+.cset-group:first-of-type { margin-top: 8rpx; }
+
+/* 黑色编辑弹窗不描边；只覆盖本页的非游戏编辑宿主。 */
+.club-scene-host { --cy-comp-sheet-border-width: 0px; }
+
+.join-review-reason { display: block; white-space: pre-wrap; color: var(--cy-text-secondary); font-size: var(--cy-font-label); line-height: var(--cy-leading-normal); }
+
+/* pm20 */
+/* 2026-10-23 页面动效(utils/page-motion.js):容器 --pm-* 置 1 时先隐着,再依次浮上来;静止时无过渡,按压反馈不受影响;减少动态效果时从不触发 */
+/* 2026-10-30 走查:原来淡入用 filter: opacity(),帖文卡在祖先带 filter 时单图整块不显示(发现 / 俱乐部帖文只剩灰底),改成 opacity。 */
+.club-post-anchor { opacity: calc(1 - var(--pm-p, 0)); translate: 0 calc(var(--pm-p, 0) * 31rpx); transition: opacity var(--pm-p-d, 0s) ease, translate var(--pm-p-d, 0s) cubic-bezier(.2,.82,.2,1), transform var(--cy-motion-press) var(--cy-ease-out); transition-delay: calc(var(--pm-p-s, 0) * 0ms), calc(var(--pm-p-s, 0) * 0ms), 0s, 0s; }
+.club-post-anchor:nth-child(2) { transition-delay: calc(var(--pm-p-s, 0) * 30ms), calc(var(--pm-p-s, 0) * 30ms), 0s, 0s; }
+.club-post-anchor:nth-child(3) { transition-delay: calc(var(--pm-p-s, 0) * 60ms), calc(var(--pm-p-s, 0) * 60ms), 0s, 0s; }
+.club-post-anchor:nth-child(4) { transition-delay: calc(var(--pm-p-s, 0) * 90ms), calc(var(--pm-p-s, 0) * 90ms), 0s, 0s; }
+.club-post-anchor:nth-child(5) { transition-delay: calc(var(--pm-p-s, 0) * 120ms), calc(var(--pm-p-s, 0) * 120ms), 0s, 0s; }
+.club-post-anchor:nth-child(6) { transition-delay: calc(var(--pm-p-s, 0) * 150ms), calc(var(--pm-p-s, 0) * 150ms), 0s, 0s; }
+.club-post-anchor:nth-child(7) { transition-delay: calc(var(--pm-p-s, 0) * 180ms), calc(var(--pm-p-s, 0) * 180ms), 0s, 0s; }
+.club-post-anchor:nth-child(8) { transition-delay: calc(var(--pm-p-s, 0) * 210ms), calc(var(--pm-p-s, 0) * 210ms), 0s, 0s; }
+.club-post-anchor:nth-child(n+9) { transition-delay: calc(var(--pm-p-s, 0) * 240ms), calc(var(--pm-p-s, 0) * 240ms), 0s, 0s; }
+
+/* 细节打磨二期 L1/L5/L7 */
+.cover-nav-act { transition: var(--cy-tr-press); }
+.profile-quit { transition: var(--cy-tr-press); }
+.post-composer-collapsed { transition: var(--cy-tr-press); }
+.post-moderation__action { transition: var(--cy-tr-press); }
+.comment-mod { transition: var(--cy-tr-press); }
+.ev-card { transition: var(--cy-tr-press); }
+.ev-undertake { transition: var(--cy-tr-press); }
+.event-group-code { transition: var(--cy-tr-press); }
+.ev-more { transition: var(--cy-tr-press); }
+.ev-sec-link { transition: var(--cy-tr-press); }
+.ov-badge-entry { transition: var(--cy-tr-press); }
+.ov-head-link { transition: var(--cy-tr-press); }
+.ov-strip-item { transition: var(--cy-tr-press); }
+.member-info { transition: var(--cy-tr-press); }
+.member-report { transition: var(--cy-tr-press); }
+.ov-lb-row { transition: var(--cy-tr-press); }
+.governance-action { transition: var(--cy-tr-press); }
+.governance-action--warning { transition: var(--cy-tr-press); }
+.manage-now-btn { transition: var(--cy-tr-press); }
+.manage-now-btn--minor { transition: var(--cy-tr-press); }
+.manage-project { transition: var(--cy-tr-press); }
+.manage-project-director { transition: var(--cy-tr-press); }
+.manage-add-row { transition: var(--cy-tr-press); }
+.manage-fold-row { transition: var(--cy-tr-press); }
+.cset-panel-act { transition: var(--cy-tr-press); }
+.pool-card-cta { transition: var(--cy-tr-press); }
+.manage-message { transition: var(--cy-tr-press); }
+.manage-invite { transition: var(--cy-tr-press); }
+.post-ref-opt { transition: var(--cy-tr-press); }
+.cset-row { transition: var(--cy-tr-press); }
+.manage-tool { transition: var(--cy-tr-press); }
+.member-role-btn { transition: var(--cy-tr-press); }
+.member-governance-btn { transition: var(--cy-tr-press); }
+.member-remove { transition: var(--cy-tr-press); }
+.owner-picker-item { transition: var(--cy-tr-press); }
+.ai-plan-chip { transition: var(--cy-tr-press); }
+.ai-plan-ghost { transition: var(--cy-tr-press); }
+.ai-plan-gen { transition: var(--cy-tr-press); }
+.ai-plan-node-addr { transition: var(--cy-tr-press); }
+.ai-plan-copy { transition: var(--cy-tr-press); }
+.ai-plan-adopt { transition: var(--cy-tr-press); }
+.gc-item { transition: var(--cy-tr-press); }
+.join-btn { transition: var(--cy-tr-press); }
+.ev-stat-num,
+.ev-stat-label,
+.club-stat-value,
+.club-stat-label,
+.club-stats-topic-name,
+.club-stats-topic-meta,
+.ov-lb-rank,
+.cset-count,
+.ov-fact-value { font-variant-numeric: tabular-nums; }

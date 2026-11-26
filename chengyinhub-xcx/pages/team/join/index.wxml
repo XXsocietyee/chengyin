@@ -1,0 +1,65 @@
+<view class="team-page theme-dark" style="padding-top: {{statusBarHeight + navBarHeight}}px;">
+  <view wx:if="{{recoveryShown}}" class="team-card" aria-role="status">
+    <text>{{commandRecovery.label}}</text>
+    <text>{{commandRecovery.message}}</text>
+    <block wx:if="{{commandRecovery.state === 'UNKNOWN'}}">
+      <cy-btn disabled="{{commandRecovery.busy}}" bindtap="queryCommand">查询原请求</cy-btn>
+      <cy-btn disabled="{{commandRecovery.busy}}" bindtap="retryCommand">按原输入重试</cy-btn>
+      <cy-btn disabled="{{commandRecovery.busy}}" bindtap="cancelCommand">终止尚未执行的请求</cy-btn>
+      <text>终止只针对未执行的原请求；已经提交的业务不会撤销。</text>
+    </block>
+  </view>
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+  <cy-nav-bar custom-back bind:back="goBack" />
+  <cy-page-title title="加入队伍" safe-top="{{false}}" flush="{{true}}" />
+  <cy-skeleton wx:if="{{loading && !team}}" type="detail" count="{{1}}" loading-label="正在读取队伍邀请" />
+  <cy-state-shell wx:elif="{{error && !team}}" kind="{{errorKind}}"
+                  title="{{error}}" sub="{{errorSub}}" primary="{{errorAction}}"
+                  fill size="lg" bind:primary="onErrorAction" auto-back="{{errorKind !== 'missing-param'}}" class="cy-fade-in" />
+  <block wx:else>
+    <view class="team-refresh-state cy-fade-in">
+      <text wx:if="{{refreshing && team}}" class="team-sync" aria-role="status">正在确认邀请状态…</text>
+    </view>
+  <view wx:if="{{codeEntry}}" class="tj-code cy-fade-in">
+    <cy-field label="加入码" value="{{codeInput}}" placeholder="粘贴队长给的加入码" maxlength="{{40}}" clearable
+              error="{{!!codeError}}" error-text="{{codeError}}" bind:input="onCodeInput" />
+    <view class="team-actions">
+      <view class="team-action primary {{codeInput ? '' : 'disabled'}}" bindtap="submitCode"
+            aria-role="button" aria-label="用加入码查找队伍" aria-disabled="{{!codeInput}}" hover-class="cy-pressed" hover-stay-time="80">下一步</view>
+    </view>
+  </view>
+  <block wx:if="{{team}}">
+    <view class="team-head tj-head cy-fade-in">
+      <view class="team-title">{{team.title || '一起出发的玩家队伍'}}</view>
+    </view>
+    <!-- U06-01 加入页(r2-join):席位一排(已入队实心、空位虚线,空位数只来自服务端),右侧人数;下方加入方式与邀请到期 -->
+    <view class="team-card tj-card cy-fade-in">
+      <view class="tj-seats {{seatIn === 1 ? 'is-pre' : ''}}" wx:if="{{joinedSeats.length || openSeats.length}}">
+        <view class="tj-seat is-on" wx:for="{{joinedSeats}}" wx:key="*this" style="--tj-d: {{index * 70}}ms"><cy-icon name="tab-me" size="36" /></view>
+        <view class="tj-seat" wx:for="{{openSeats}}" wx:key="*this" style="--tj-d: {{(joinedSeats.length + index) * 70}}ms"><cy-icon name="plus" size="32" /></view>
+      </view>
+      <view class="tj-facts">
+        <view class="tj-fact"><text class="tj-fact__v">{{team.joinedCount || 0}} / {{team.maxMembers || 0}}</text><text class="team-meta-key">当前成员</text></view>
+        <view class="tj-fact"><text class="tj-fact__v">{{team.joinMode == 2 ? '公开招募' : '仅邀请'}}</text><text class="team-meta-key">加入方式</text></view>
+      </view>
+      <view class="tj-invite" wx:if="{{inviteText}}"><cy-icon name="clock" size="28" /><text class="tj-invite__v">{{inviteText}}</text></view>
+    </view>
+    <view class="tj-bar cy-fade-in">
+    <cy-inline-error wx:if="{{joinError}}" kind="error" title="{{joinError}}" />
+    <text wx:elif="{{joinHint && !joined}}" class="team-reject tj-hint" aria-role="status">{{joinHint}}</text>
+    <view class="team-actions tj-actions">
+      <view wx:if="{{joined}}" class="team-action primary" bindtap="goDetail"
+            aria-role="button" aria-label="查看已加入的队伍" hover-class="cy-pressed" hover-stay-time="80">查看队伍</view>
+      <view wx:elif="{{team.status == 0 && ticketRequired && team.ownerType == 2}}" class="team-action primary" bindtap="goBuyTicket"
+            aria-role="button" aria-label="去买这一场的票" hover-class="cy-pressed" hover-stay-time="80">去买这一场的票</view>
+      <view wx:elif="{{team.status == 0}}" class="team-action primary {{joining || joinError ? 'disabled' : ''}}" bindtap="join"
+            aria-role="button" aria-label="{{joining ? '正在加入队伍' : '接受邀请并加入'}}"
+            aria-busy="{{joining}}" aria-disabled="{{joining || !!joinError}}" hover-class="cy-pressed" hover-stay-time="80">{{joining ? '加入中…' : '接受邀请并加入'}}</view>
+      <view wx:else class="team-action disabled secondary" aria-role="button" aria-disabled="true">{{team.status == 1 ? '队伍已满' : '队伍已结束'}}</view>
+    </view>
+    </view>
+  </block>
+  </block>
+</view>

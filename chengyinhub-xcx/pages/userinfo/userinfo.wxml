@@ -1,0 +1,16 @@
+<view class="theme-dark">
+  <cy-toast id="cy-toast" />
+  <cy-loading-mask id="cy-loading" />
+  <cy-modal-host id="cy-modal-host" />
+<cy-profile wx:if="{{!missingUser}}" id="profile" viewer="other" user-id="{{userId}}" initial-tab="{{initialTab}}"
+  topic-id="{{topicId}}" chapter-id="{{chapterId}}" topic-name="{{topicName}}" operation-scope="{{operationScope}}" preview-self="{{previewSelf}}" bind:subjectmerchant="onSubjectMerchant" />
+<view wx:else class="userinfo-missing">
+  <cy-nav-bar custom-back bind:back="onBack" />
+  <cy-page-title title="个人主页" />
+  <view class="userinfo-missing__body">
+    <cy-empty kind="missing-param" fill="{{true}}" size="lg"
+      cta="返回" bind:cta="onBack" />
+  </view>
+</view>
+</view>
+<cy-privacy-gate show="{{privacyGateShow}}" bind:settled="onPrivacyGateSettled" />

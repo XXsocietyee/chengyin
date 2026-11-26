@@ -1,0 +1,59 @@
+<view class="node-card sk">
+  <view class="node-card__row" bindtap="onOpen" aria-role="button" aria-label="线索与物品，{{total || 0}} 项" hover-class="cy-pressed" hover-stay-time="80">
+    <view class="node-card__main"><text class="node-card__title">线索与物品</text></view>
+    <view class="node-pill"><text wx:if="{{state === 'loading'}}">…</text><text wx:else>{{total || 0}} 项</text><cy-icon name="chevron-right" size="24" /></view>
+  </view>
+</view>
+
+<cy-sheet show="{{open}}" bind:close="onClose" class="node-sheet-host">
+  <view class="node-sheet sk-sheet">
+    <view class="node-sheet__top">
+      <view class="node-sheet__close" bindtap="onClose" aria-role="button" aria-label="退出" hover-class="cy-pressed" hover-stay-time="80">退出</view>
+      <text class="sk-sheet__title">线索与物品</text>
+      <view class="node-sheet__done {{saving ? 'is-disabled' : ''}}" bindtap="onDone" aria-role="button" aria-label="完成" hover-class="cy-pressed" hover-stay-time="80">完成</view>
+    </view>
+
+    <view class="sk__state" wx:if="{{state === 'loading'}}"><cy-skeleton type="feed-card" count="1" /></view>
+
+    <block wx:for="{{groups}}" wx:key="kind" wx:for-item="group">
+      <block wx:if="{{state !== 'loading'}}">
+        <text class="sk-group__label">{{group.label}}</text>
+        <view class="node-card sk-group">
+          <block wx:for="{{group.rows}}" wx:key="id">
+            <view class="sk-row" data-id="{{item.id}}" bindtap="onToggle" aria-role="button" aria-label="{{item.name}}" hover-class="cy-pressed" hover-stay-time="80">
+              <text class="sk-row__name">{{item.name}}</text>
+              <cy-icon wx:if="{{!readOnly}}" class="sk-row__chev {{expanded === item.id ? 'is-open' : ''}}" name="chevron-right" size="24" />
+            </view>
+            <block wx:if="{{expanded === item.id}}">
+              <view class="sk-row sk-row--field">
+                <text class="sk-row__name">名称</text>
+                <input class="sk-row__input" value="{{editName}}" maxlength="24" confirm-type="done" bindinput="onEditName" bindconfirm="onRename" bindblur="onRename" />
+              </view>
+              <block wx:if="{{item.usedIn.length}}">
+                <text class="sk-row__head">用在</text>
+                <view class="sk-row" wx:for="{{item.usedIn}}" wx:key="*this" wx:for-item="place"><text class="sk-row__name">{{place}}</text></view>
+              </block>
+              <view class="sk-row sk-row__del {{item.usedIn.length ? 'is-off' : ''}}" data-key="{{item.id}}" bindtap="onAskDelete" aria-role="button"
+                    aria-label="删除{{item.name}}" hover-class="cy-pressed" hover-stay-time="80">{{deleting === item.id ? '删除中' : '删除'}}</view>
+            </block>
+          </block>
+          <block wx:if="{{!readOnly}}">
+            <view wx:if="{{adding === group.kind}}" class="sk-row sk-row--field">
+              <input class="sk-row__input sk-row__input--add {{formError ? 'is-invalid' : ''}}" value="{{addName}}" maxlength="24" focus="{{true}}" placeholder="名称" confirm-type="done" bindinput="onAddInput" bindconfirm="onSave" />
+              <view class="sk-row__act {{!addName || formError || saving ? 'is-off' : ''}}" bindtap="onSave" aria-role="button" aria-label="添加" hover-class="cy-pressed" hover-stay-time="80">添加</view>
+            </view>
+            <view wx:else class="sk-row sk-row--add" data-kind="{{group.kind}}" bindtap="onAddOpen" aria-role="button" aria-label="添加{{group.label}}" hover-class="cy-pressed" hover-stay-time="80">
+              <view class="sk-row__plus"><cy-icon name="plus" size="24" /></view><text>添加{{group.label}}</text>
+            </view>
+          </block>
+        </view>
+        <cy-inline-error wx:if="{{formError && errorKind === group.kind}}" kind="error" title="{{formError}}" />
+      </block>
+    </block>
+
+    <text class="sk__note sk__note--error" wx:if="{{state === 'error'}}" bindtap="load" aria-role="button" hover-class="cy-pressed" hover-stay-time="80">没有读取成功，请再试一次。</text>
+    <text class="sk__note" wx:elif="{{readOnly}}">这个主题现在不能修改。</text>
+    <cy-inline-error wx:if="{{deleteError}}" title="{{deleteError}}" />
+  </view>
+</cy-sheet>
+<cy-danger-confirm id="sk-dc" bind:confirm="onConfirmDelete" />

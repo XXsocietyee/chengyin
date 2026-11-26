@@ -1,0 +1,70 @@
+/* 骨架屏→内容淡切:isolated 组件收不到全局 components.wxss,@import 同一份定义 */
+@import '../../../../style/fade-in.wxss';
+:host { display: block; height: 100%; }
+.poi-body { padding-bottom: calc(180rpx + env(safe-area-inset-bottom)); }
+.poi-full-photo { display: block; width: 100%; height: auto; border-radius: var(--cy-radius-md); }
+.poi-footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: flex; gap: var(--cy-space-2); padding: var(--cy-space-3); padding-bottom: calc(var(--cy-space-3) + env(safe-area-inset-bottom)); background: var(--cy-color-bg-surface); border-top: 1rpx solid var(--cy-color-border-subtle); }
+.poi-footer__button { flex: 1; }
+.poi-credit { min-height: 88rpx; display: flex; align-items: center; color: var(--cy-color-text-secondary); }
+.poi-review { margin-top: var(--cy-space-3); padding: var(--cy-space-3); background: var(--cy-color-bg-surface-subtle); border-radius: var(--cy-radius-md); }
+.poi-review__name { display: block; color: var(--cy-color-text-primary); font-weight: 600; }
+.poi-review-input { width: 100%; height: 160rpx; box-sizing: border-box; margin: var(--cy-space-2) 0; padding: var(--cy-space-2); color: var(--cy-color-text-primary); background: var(--cy-color-bg-surface); border-radius: var(--cy-radius-sm); }
+.poi-review-open { display: block; margin-top: var(--cy-space-3); }
+.poi-review-form { padding: 0 var(--cy-page-x) var(--cy-space-3); }
+.poi-rating-pick { display: flex; }
+.poi-rating-pick__item { width: 88rpx; min-height: 88rpx; display: flex; align-items: center; justify-content: center; color: var(--cy-color-text-tertiary); }
+.poi-rating-pick__item.is-on { color: var(--cy-color-text-primary); }
+.poi-hero { overflow: hidden; border-radius: var(--cy-radius-lg); background: var(--cy-color-bg-surface-subtle); }
+.poi-cover { width: 100%; height: 240rpx; display: block; }
+.poi-identity { display: flex; gap: var(--cy-space-2); padding: var(--cy-space-3); }
+.poi-logo { width: 96rpx; height: 96rpx; flex: none; }
+.poi-identity__copy { min-width: 0; display: flex; flex-direction: column; gap: var(--cy-space-1); }
+.poi-name { color: var(--cy-color-text-primary); font-size: var(--cy-type-card-title); font-weight: 700; }
+.poi-status { color: var(--cy-color-text-secondary); font-size: var(--cy-type-caption); }
+.poi-role { color: var(--cy-color-text-secondary); font-size: var(--cy-type-label); }
+.poi-tags { display: flex; flex-wrap: wrap; gap: var(--cy-space-1); padding: 0 var(--cy-space-3) var(--cy-space-3); }
+.poi-section .poi-tags { padding-left: 0; padding-right: 0; }
+.poi-tag, .poi-node__badge { padding: var(--cy-space-1) var(--cy-space-2); border-radius: var(--cy-radius-pill); background: var(--cy-color-action-secondary-bg); color: var(--cy-color-text-secondary); font-size: var(--cy-type-caption); }
+.poi-section, .poi-node { margin-top: var(--cy-space-3); }
+.poi-section__title, .poi-node__title { display: block; margin-bottom: var(--cy-space-2); color: var(--cy-color-text-primary); font-size: var(--cy-type-section-title); font-weight: 700; }
+.poi-featured { display: flex; align-items: center; gap: var(--cy-space-2); padding: var(--cy-space-2); border-radius: var(--cy-radius-md); background: var(--cy-color-bg-surface-subtle); color: var(--cy-color-text-primary); font-size: var(--cy-type-body); }
+.poi-featured__image { width: 120rpx; height: 96rpx; border-radius: var(--cy-radius-sm); }
+.poi-featured__placeholder { width: 120rpx; height: 96rpx; flex: none; display: flex; align-items: center; justify-content: center; border-radius: var(--cy-radius-sm); background: var(--cy-color-bg-surface); color: var(--cy-color-text-tertiary); }
+.poi-node { padding: var(--cy-space-3); border-radius: var(--cy-radius-lg); background: var(--cy-color-bg-surface-subtle); }
+.poi-node__title { margin-top: var(--cy-space-2); margin-bottom: var(--cy-space-1); font-size: var(--cy-type-card-title); }
+.poi-node__meta { display: block; color: var(--cy-color-text-secondary); font-size: var(--cy-type-caption); }
+.poi-recovery { margin-top: var(--cy-space-3); }
+.poi-interaction-recovery { position: fixed; left: var(--cy-space-3); right: var(--cy-space-3); bottom: calc(var(--cy-btn-h) + var(--cy-space-3) + var(--cy-space-3) + var(--cy-space-2) + env(safe-area-inset-bottom)); z-index: 11; border-radius: var(--cy-radius-md); background: var(--cy-color-bg-surface); }
+.poi-node__actions { display: flex; gap: var(--cy-space-2); margin-top: var(--cy-space-3); }
+.poi-nav { display:inline-flex; align-items:center; gap:var(--cy-space-1); min-height:var(--cy-btn-h); color:var(--cy-color-text-primary); font-size:var(--cy-type-label); }
+.poi-action { flex: 1; min-height: var(--cy-btn-h); display: flex; align-items: center; justify-content: center; border: 2rpx solid var(--cy-color-border-strong); border-radius: var(--cy-radius-md); color: var(--cy-color-text-primary); font-size: var(--cy-type-label); }
+
+.poi-action.is-disabled { opacity: .58; }
+.poi-gallery { white-space: nowrap; }
+.poi-gallery__image { width: 220rpx; height: 160rpx; display: inline-block; margin-right: var(--cy-space-2); border-radius: var(--cy-radius-md); background: var(--cy-color-bg-surface-subtle); }
+.poi-story { display: block; color: var(--cy-color-text-secondary); font-size: var(--cy-type-body); line-height: var(--cy-leading-normal); }
+.poi-group { border-radius: var(--cy-radius-lg); background: var(--cy-color-bg-surface-subtle); }
+.poi-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--cy-space-3); padding: var(--cy-space-3); border-bottom: 1rpx solid var(--cy-color-border-subtle); color: var(--cy-color-text-secondary); font-size: var(--cy-type-body); }
+.poi-row:last-child { border-bottom: 0; }
+.poi-row__value { color: var(--cy-color-text-primary); text-align: right; }
+.poi-row__link { text-decoration: underline; }
+
+/* isolated 组件内全局 .cy-pressed 进不来,必须本地定义一份。
+   只减淡不位移:位移要配 .cy-motion-reduced 兜底,而那个类挂在组件外的祖先上,
+   isolated 下同样够不着 —— 与其留个撤不掉的位移,不如按仓库既有组件按压类的做法只减淡。 */
+.cy-pressed { opacity: .88; }
+
+/* pm20 */
+/* 2026-10-23 页面动效(utils/page-motion.js):容器 --pm-* 置 1 时先隐着,再依次浮上来;静止时无过渡,按压反馈不受影响;减少动态效果时从不触发 */
+.poi-cover { scale: calc(1 + var(--pm-a, 0) * .1); transition: scale calc(var(--pm-a-s, 0) * .6s) cubic-bezier(.2,.8,.2,1); }
+.poi-identity { filter: opacity(calc(1 - var(--pm-a, 0))); translate: 0 calc(var(--pm-a, 0) * 31rpx); transition: filter var(--pm-a-d, 0s) ease, translate var(--pm-a-d, 0s) cubic-bezier(.2,.82,.2,1), transform var(--cy-motion-press) var(--cy-ease-out), opacity var(--cy-motion-press) var(--cy-ease-out); transition-delay: calc(var(--pm-a-s, 0) * (80ms + min(var(--pmi, 0), 8) * 0ms)), calc(var(--pm-a-s, 0) * (80ms + min(var(--pmi, 0), 8) * 0ms)), 0s, 0s; }
+.poi-node { filter: opacity(calc(1 - var(--pm-a, 0))); translate: 0 calc(var(--pm-a, 0) * 31rpx); transition: filter var(--pm-a-d, 0s) ease, translate var(--pm-a-d, 0s) cubic-bezier(.2,.82,.2,1), transform var(--cy-motion-press) var(--cy-ease-out), opacity var(--cy-motion-press) var(--cy-ease-out); transition-delay: calc(var(--pm-a-s, 0) * (80ms + min(var(--pmi, 0), 8) * 0ms)), calc(var(--pm-a-s, 0) * (80ms + min(var(--pmi, 0), 8) * 0ms)), 0s, 0s; }
+.poi-section { filter: opacity(calc(1 - var(--pm-a, 0))); translate: 0 calc(var(--pm-a, 0) * 31rpx); transition: filter var(--pm-a-d, 0s) ease, translate var(--pm-a-d, 0s) cubic-bezier(.2,.82,.2,1), transform var(--cy-motion-press) var(--cy-ease-out), opacity var(--cy-motion-press) var(--cy-ease-out); transition-delay: calc(var(--pm-a-s, 0) * (140ms + min(var(--pmi, 0), 8) * 0ms)), calc(var(--pm-a-s, 0) * (140ms + min(var(--pmi, 0), 8) * 0ms)), 0s, 0s; }
+
+/* 细节打磨二期 L1/L5/L7 */
+.poi-full-photo { transition: var(--cy-tr-press); }
+.poi-gallery__image { transition: var(--cy-tr-press); }
+.poi-featured { transition: var(--cy-tr-press); }
+.poi-action { transition: var(--cy-tr-press); }
+.poi-row { transition: var(--cy-tr-press); }
+.poi-credit { transition: var(--cy-tr-press); }

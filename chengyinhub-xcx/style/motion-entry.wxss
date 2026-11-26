@@ -1,0 +1,24 @@
+/* 页面局部内容的一次性轻入场。只改变 opacity/translateY，不改变布局。 */
+.cy-rise-in { animation: cy-rise-in var(--cy-motion-standard) var(--cy-ease-out) both; }
+.cy-motion-reduced .cy-rise-in { animation: none !important; }
+
+@keyframes cy-rise-in {
+  0% { opacity: 0; transform: translateY(12rpx); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* 2026-10-22 owner:卡片每次打开页面都要「飞进来」。从下方带一点缩放飞入、轻微过冲落位;
+   列表逐张错开用行内 animation-delay(由页面按 index 给,封顶避免长列表等太久)。
+   只动 opacity/transform,不改变布局;减少动态效果时整段不播。 */
+.cy-fly-in { animation: cy-fly-in var(--cy-motion-slow) var(--cy-ease-emphasized-decelerate) both; }
+.cy-motion-reduced .cy-fly-in { animation: none !important; }
+/* 页面离开时先藏好(onHide 挂上),回来 onShow 换成 .cy-fly-in 重播,不会先闪一帧旧卡 */
+.cy-fly-wait { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .cy-fly-in { animation: none !important; } }
+
+@keyframes cy-fly-in {
+  /* 用独立的 translate / scale,不占 transform:fill-mode both 留下的 transform 会盖掉 .cy-pressed 的按压缩放 */
+  0% { opacity: 0; translate: 0 96rpx; scale: .92; }
+  70% { opacity: 1; translate: 0 -6rpx; scale: 1.005; }
+  100% { opacity: 1; translate: 0 0; scale: 1; }
+}

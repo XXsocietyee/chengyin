@@ -1,0 +1,15 @@
+<!-- P1-10:日期范围(含起止两天)与导出放进参考结算卡片的插槽;列表本体仍是主包那一个组件。 -->
+<cy-fe-reference-settlement kind="{{kind}}" from="{{from}}" to="{{to}}">
+  <view class="fe-range">
+    <cy-date-field class="fe-range-date" mode="date" value="{{from}}" title="开始日期" bind:change="onFromChange">
+      <view class="fe-range-btn">{{from || '开始日期'}}</view>
+    </cy-date-field>
+    <cy-date-field class="fe-range-date" mode="date" value="{{to}}" title="结束日期" bind:change="onToChange">
+      <view class="fe-range-btn">{{to || '结束日期'}}</view>
+    </cy-date-field>
+    <text wx:if="{{from || to}}" class="fe-range-link" bindtap="onClearRange" hover-class="cy-pressed" hover-stay-time="80"
+      aria-role="button" aria-label="清除日期范围">清除</text>
+    <button class="fe-range-btn fe-range-export" disabled="{{exporting}}" bindtap="onExport"
+      hover-class="cy-pressed" hover-stay-time="80" aria-label="导出对账表">导出</button>
+  </view>
+</cy-fe-reference-settlement>

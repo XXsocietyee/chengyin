@@ -1,0 +1,172 @@
+package com.chengyinhub.business.service.impl;
+import com.chengyinhub.business.mapper.AppMediaAssetMapper;
+import com.chengyinhub.business.domain.AuditTask;
+import com.chengyinhub.business.service.IAuditTaskService;
+import com.chengyinhub.common.exception.ServiceException;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+class AppMediaAssetServiceTest {
+    AppMediaAssetMapper mapper;
+    IAuditTaskService audits;
+    AppMediaAssetService service;
+    @BeforeEach void setup() {
+        mapper=mock(AppMediaAssetMapper.class);audits=mock(IAuditTaskService.class);
+        ObjectProvider<IAuditTaskService> provider=mock(ObjectProvider.class);when(provider.getObject()).thenReturn(audits);
+        service=new AppMediaAssetService(mapper,provider);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"publicBaseUrl","https://server.invalid/prod-api");
+        when(mapper.insert(anyMap())).thenAnswer(a->{a.<Map<String,Object>>getArgument(0).put("id",12L);return 1;});
+        when(mapper.insertApprovedImage(anyMap())).thenAnswer(a->{a.<Map<String,Object>>getArgument(0).put("id",13L);return 1;});
+        when(audits.submitSafetyHold(eq("MEDIA_ASSET"),eq(12L),eq(9L),eq("NORMAL"),anyString())).thenReturn(101L);
+        when(mapper.bindAuditTask(12L,0,101L)).thenReturn(1);
+    }
+    @Test void audioOrModelHoldCreatesRealAuditBindingAndNeverReturnsPublicationUrl() {
+        for(String ext:java.util.List.of("mp3","glb")) {
+            Map<String,Object> status=service.stage(9L,"upload/0123456789abcdef0123456789abcdef."+ext);
+            assertEquals("HOLD",status.get("reviewState"));assertEquals(12L,status.get("assetId"));
+            assertFalse(status.containsKey("url"));assertFalse(status.containsKey("objectKey"));
+        }
+        verify(audits,times(2)).submitSafetyHold(eq("MEDIA_ASSET"),eq(12L),eq(9L),eq("NORMAL"),argThat(s->s.contains("\"assetVersion\":0")&&!s.contains("url")));
+    }
+    @Test void failedBindAndForeignOwnershipNeverBecomeReadableOrPublic() {
+        when(mapper.bindAuditTask(12L,0,101L)).thenReturn(0);
+        assertThrows(ServiceException.class,()->service.stage(9L,"upload/0123456789abcdef0123456789abcdef.mp3"));
+        Map<String,Object> row=new LinkedHashMap<>();row.put("memberId",9L);row.put("ownerType","APP");row.put("reviewState","HOLD");
+        when(mapper.select(12L)).thenReturn(row);when(mapper.selectForUpdate(12L)).thenReturn(row);
+        assertThrows(ServiceException.class,()->service.ownerPreview(12L,10L));
+        assertThrows(ServiceException.class,()->service.status(12L,10L));
+        assertThrows(ServiceException.class,()->service.retry(12L,10L));
+        assertThrows(ServiceException.class,()->service.approvedUrl(12L));
+    }
+    @Test void systemAndAppNumericIdentityNeverShareAuthorPreview() {
+        Map<String,Object> row=new LinkedHashMap<>();row.put("memberId",9L);row.put("ownerType","SYSTEM");row.put("reviewState","HOLD");
+        when(mapper.select(12L)).thenReturn(row);
+        assertThrows(ServiceException.class,()->service.ownerPreview(12L,9L));
+        assertThrows(ServiceException.class,()->service.status(12L,9L));
+    }
+    @Test void onlyCurrentAuditTaskAndAssetVersionCanPublish() {
+        AuditTask task=new AuditTask();task.setId(101L);task.setBizId(12L);task.setSnapshotJson("{\"assetId\":12,\"assetVersion\":0}");
+        when(mapper.decide(12L,0,101L,"APPROVED",null)).thenReturn(1);
+        assertDoesNotThrow(()->service.applyAudit(task,true,null));
+        task.setSnapshotJson("{\"assetVersion\":1}");
+        assertThrows(ServiceException.class,()->service.applyAudit(task,true,null));
+        task.setSnapshotJson("{}");
+        assertThrows(ServiceException.class,()->service.applyAudit(task,true,null));
+        verify(mapper,never()).decide(eq(12L),eq(0),eq(101L),eq("REJECTED"),any());
+    }
+    @Test void systemReceiptRequiresRandomActualImageKeyAndMatchingServerUrl() {
+        when(mapper.insertApprovedSystemImage(anyMap())).thenReturn(1);
+        String key="/profile/upload/2026/10/12/0123456789abcdef0123456789abcdef.png";
+        assertEquals("https://server.invalid/prod-api"+key,service.registerApprovedSystemImage(99L,key,"https://spoofed.invalid/prod-api"+key));
+        assertThrows(ServiceException.class,()->service.registerApprovedSystemImage(99L,key,"httpx://server.invalid"+key));
+        assertThrows(ServiceException.class,()->service.registerApprovedSystemImage(99L,key,"https://user@server.invalid"+key));
+        assertThrows(ServiceException.class,()->service.registerApprovedSystemImage(99L,key,"https://server.invalid/other.png"));
+        assertThrows(ServiceException.class,()->service.registerApprovedSystemImage(99L,"/profile/upload/2026/10/12/../other.png","https://server.invalid/other.png"));
+        verify(mapper,times(1)).insertApprovedSystemImage(anyMap());
+    }
+    @Test void localSigningUsesOnlyExplicitConfiguredOriginAndFailsClosedWhenMissing() {
+        Map<String,Object> row=new LinkedHashMap<>();String key="/profile/upload/2026/10/12/0123456789abcdef0123456789abcdef.png";
+        row.put("reviewState","APPROVED");row.put("storageType","LOCAL");row.put("objectKey",key);row.put("publicUrl","https://spoofed.invalid"+key);
+        when(mapper.select(14L)).thenReturn(row);
+        assertEquals("https://server.invalid/prod-api"+key,service.approvedUrl(14L));
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"publicBaseUrl","");
+        assertThrows(ServiceException.class,()->service.approvedUrl(14L));
+        assertThrows(ServiceException.class,()->service.registerApprovedSystemImage(99L,key,"https://server.invalid"+key));
+        verify(mapper,never()).insertApprovedSystemImage(anyMap());
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"publicBaseUrl","https://user@server.invalid/prod-api");
+        assertThrows(ServiceException.class,()->service.requireLocalPublicationOrigin());
+    }
+    @Test void approvedImageReceiptAcceptsOnlyOwnedRandomImageKeyAndSkipsManualQueue() {
+        Map<String,Object> status=service.stageApprovedImage(9L,"upload/0123456789abcdef0123456789abcdef.jpg");
+        assertEquals("APPROVED",status.get("reviewState"));assertEquals(13L,status.get("assetId"));
+        assertThrows(ServiceException.class,()->service.stageApprovedImage(9L,"https://external.invalid/image.jpg"));
+        assertThrows(ServiceException.class,()->service.stageApprovedImage(9L,"upload/0123456789abcdef0123456789abcdef.mp3"));
+        verifyNoInteractions(audits);
+    }
+    @Test void ownedCursorPageKeepsExactOwnerAndLongIdentityAndRejectsInvalidCursor() {
+        Map<String,Object> row=new LinkedHashMap<>();row.put("id",9007199254740993L);row.put("reviewState","REJECTED");
+        row.put("mediaType","AUDIO");row.put("objectKey","private-key");row.put("publicUrl","unsafe");
+        java.util.Date created=new java.util.Date(1763769600000L);row.put("createdAt",created);
+        when(mapper.selectOwnedBefore(9L,9007199254740994L)).thenReturn(java.util.List.of(row));
+        Map<String,Object> result=service.ownedRecent(9L,9007199254740994L).get(0);
+        assertEquals(created,result.get("createdAt"),"OR-042:本人媒体行带上传时间");
+        assertEquals("9007199254740993",result.get("assetId"));assertFalse(result.containsKey("objectKey"));assertFalse(result.containsKey("publicUrl"));
+        assertThrows(ServiceException.class,()->service.ownedRecent(9L,0L));
+        assertThrows(ServiceException.class,()->service.ownedRecent(0L,9007199254740994L));
+        verify(mapper).selectOwnedBefore(9L,9007199254740994L);
+        verify(mapper,never()).selectOwnedBefore(eq(0L),anyLong());
+    }
+
+    @Test void provenanceWriteKeepsOwnerNamespaceAndOriginalReviewFact() {
+        Map<String,Object> row=new java.util.HashMap<>(Map.of("id",13L,"memberId",9L,"ownerType","APP","reviewState","APPROVED","version",3));
+        when(mapper.selectForUpdate(13L)).thenReturn(row);
+        when(mapper.updateProvenance(anyMap())).thenReturn(1);
+        Map<String,Object> result=service.saveProvenance(13L,9L,Map.of("sourceType","licensed","licenseNote","test-only licence declaration"));
+        assertEquals("APPROVED",result.get("reviewState"));assertEquals(3,row.get("version"));
+        assertTrue(((java.util.List<?>)result.get("issues")).isEmpty());
+        assertEquals("licensed",((Map<?,?>)result.get("mediaAsset")).get("sourceType"));
+        verify(mapper).updateProvenance(org.mockito.ArgumentMatchers.argThat(values ->
+                Long.valueOf(13L).equals(values.get("id")) && Long.valueOf(9L).equals(values.get("memberId"))));
+        assertThrows(com.chengyinhub.common.exception.ServiceException.class,()->service.saveProvenance(13L,10L,Map.of("sourceType","original")));
+        row.put("ownerType","SYSTEM");
+        assertThrows(com.chengyinhub.common.exception.ServiceException.class,()->service.saveProvenance(13L,9L,Map.of("sourceType","original")));
+        verifyNoInteractions(audits);
+    }
+
+    @Test void savingUnknownWarnsAndPublicAttributionMustPassExistingTextSafety() {
+        Map<String,Object> row=new java.util.HashMap<>(Map.of("id",13L,"memberId",9L,"ownerType","APP","reviewState","APPROVED"));
+        when(mapper.selectForUpdate(13L)).thenReturn(row);when(mapper.updateProvenance(anyMap())).thenReturn(1);
+        Map<String,Object> result=service.saveProvenance(13L,9L,Map.of("sourceType","unknown"));
+        assertEquals("ASSET_LICENSE_MISSING",((Map<?,?>)((java.util.List<?>)result.get("issues")).get(0)).get("code"));
+        com.chengyinhub.business.service.IWxContentSecurityService security=mock(com.chengyinhub.business.service.IWxContentSecurityService.class);
+        com.chengyinhub.business.service.IUmsMemberService members=mock(com.chengyinhub.business.service.IUmsMemberService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"textSecurity",security);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"members",members);
+        when(security.checkText("unsafe attribution",null)).thenReturn("内容审核未通过");
+        assertThrows(com.chengyinhub.common.exception.ServiceException.class,()->service.saveProvenance(13L,9L,
+                Map.of("sourceType","original","licenseNote","test declaration","attribution","unsafe attribution")));
+        verify(mapper,times(1)).updateProvenance(anyMap());
+    }
+
+    @Test void failedDeclarationWriteDoesNotReturnSuccess() {
+        when(mapper.selectForUpdate(13L)).thenReturn(Map.of("id",13L,"memberId",9L,"ownerType","APP"));
+        assertThrows(com.chengyinhub.common.exception.ServiceException.class,()->service.saveProvenance(13L,9L,
+                Map.of("sourceType","original","licenseNote","test declaration")));
+    }
+    @Test void machinePassPublishesAndLaterRiskRevokesWithOneDurableNotice() {
+        Map<String,Object> row=new LinkedHashMap<>();row.put("id",12L);row.put("memberId",9L);
+        row.put("version",0);row.put("mediaType","IMAGE");row.put("reviewState","HOLD");row.put("safetyRejected",0);
+        row.put("storageType","LOCAL");row.put("objectKey","/profile/upload/2026/11/12/0123456789abcdef0123456789abcdef.png");
+        when(mapper.select(12L)).thenReturn(row);when(mapper.selectForUpdate(12L)).thenReturn(row);
+        when(mapper.machineDecide(eq(12L),eq(0),anyString(),nullable(String.class),anyBoolean())).thenAnswer(i->{
+            row.put("reviewState",i.getArgument(2));if(i.<Boolean>getArgument(4))row.put("safetyRejected",1);return 1;
+        });
+        com.chengyinhub.business.service.IImService im=mock(com.chengyinhub.business.service.IImService.class);
+        ObjectProvider<com.chengyinhub.business.service.IImService> noticeProvider=mock(ObjectProvider.class);
+        when(noticeProvider.getObject()).thenReturn(im);
+        when(im.enqueueSystemNotification(anyLong(),anyInt(),anyString(),anyString(),anyString())).thenReturn(99L);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"notices",noticeProvider);
+        assertThrows(ServiceException.class,()->service.approvedUrl(12L));
+        assertTrue(service.applyMachineResult(12L,false,"pass"));
+        assertNotNull(service.approvedUrl(12L));
+        assertTrue(service.applyMachineResult(12L,true,"risk"));
+        assertThrows(ServiceException.class,()->service.approvedUrl(12L));
+        assertTrue(service.applyMachineResult(12L,true,"risk"));
+        assertTrue(service.applyMachineResult(12L,false,"stale-pass"));
+        assertEquals("REJECTED",row.get("reviewState"));
+        verify(im,times(1)).enqueueSystemNotification(eq(9L),anyInt(),anyString(),anyString(),eq("media-safety:12:0"));
+        verify(mapper,times(2)).machineDecide(eq(12L),eq(0),anyString(),nullable(String.class),anyBoolean());
+    }
+
+    @Test void unsupportedVideoAndModelNeverClaimMachineCapability() {
+        for(String type:java.util.List.of("VIDEO","MODEL3D")) {
+            when(mapper.select(12L)).thenReturn(Map.of("mediaType",type));
+            assertEquals(0,service.machineCheckType(12L));
+        }
+    }
+}

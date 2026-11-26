@@ -1,0 +1,22 @@
+@import '../../../../style/merchant-light-scope.wxss';
+page { min-height: 100vh; background: var(--cy-bg-page); color: var(--cy-text-title); }
+.er-page.theme-dark {
+  /* 页面可能从商家浅色分包返回；旧 alias 在 page 作用域已快照为日间值，必须在深色根重映射。 */
+  --cy-bg-page: var(--cy-color-bg-page);
+  --cy-bg-card: var(--cy-color-bg-surface);
+  --cy-bg-card-2: var(--cy-color-bg-surface-subtle);
+  --cy-bg-elevated: var(--cy-color-bg-elevated);
+  --cy-border-card: var(--cy-color-border-subtle);
+  --cy-border-line: var(--cy-color-border-strong);
+  --cy-text-body: var(--cy-color-text-secondary);
+  --cy-btn-solid-bg: var(--cy-color-action-primary-bg);
+  --cy-btn-solid-fg: var(--cy-color-action-primary-fg);
+  min-height: 100vh;
+  background: var(--cy-color-bg-page);
+  color: var(--cy-color-text-primary);
+}
+.er-page.theme-merchant { min-height: 100vh; background: var(--cy-color-bg-page); color: var(--cy-color-text-primary); } /* 商家浅色(10-22:商家永远浅色) */
+/* U5:根节点是一屏高的纵向 flex,收益组件吃满余下高度,空态 fill 才有确定高度可居中 */
+.er-page { display: flex; flex-direction: column; }
+.er-shell { box-sizing: border-box; flex: 1; display: flex; flex-direction: column; }
+.er-earnings { flex: 1; }
