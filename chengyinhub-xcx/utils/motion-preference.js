@@ -7,15 +7,43 @@ function resolveStorage(storage) {
   return typeof wx !== 'undefined' ? wx : null
 }
 
-// L10-038/055/083:组件 attached 时按存储对象缓存读到的值(每个组件实例不再各自同步读 1–2 次 Storage);
-// 页面 show 时用 { fresh: true } 重读一次并刷新缓存,别处直接改了存储也能在回到页面时生效;writeReducedMotion 同步刷新。
+// L10-038/055/083:同一存储对象缓存读到的值,挂载时只有第一次未命中才读 Storage。
+// { fresh: true } 只在页面首次展示,或离开后偏好可能已变时使用;同一轮 show 的多个组件共享这一次重读。
+// 偏好未变的再次 show 走缓存。noteReducedMotionMayChange 让下一轮 fresh 不再复用这一轮结果。
+// writeReducedMotion 同步刷新缓存并通知订阅。
 const cache = typeof WeakMap === 'function' ? new WeakMap() : null
+const freshBurstHit = typeof WeakMap === 'function' ? new WeakMap() : null
+let freshBurst = 0
+let freshBurstOpen = false
+
+function closeFreshBurst(current) {
+  if (freshBurst === current) freshBurstOpen = false
+}
+
+function openFreshBurst() {
+  if (freshBurstOpen) return freshBurst
+  freshBurstOpen = true
+  freshBurst += 1
+  const current = freshBurst
+  if (typeof queueMicrotask === 'function') queueMicrotask(() => closeFreshBurst(current))
+  else if (typeof Promise === 'function') Promise.resolve().then(() => closeFreshBurst(current))
+  else freshBurstOpen = false
+  return current
+}
+
+function noteReducedMotionMayChange() {
+  freshBurst += 1
+  freshBurstOpen = false
+}
 
 function readReducedMotion(storage, options) {
   const target = resolveStorage(storage)
   if (!target || typeof target.getStorageSync !== 'function') return false
   const fresh = !!(options && options.fresh)
-  if (!fresh && cache && cache.has(target)) return cache.get(target)
+  if (cache && cache.has(target)) {
+    if (!fresh) return cache.get(target)
+    if (freshBurstHit && freshBurstHit.get(target) === openFreshBurst()) return cache.get(target)
+  }
   let value
   try {
     const current = target.getStorageSync(REDUCED_MOTION_KEY)
@@ -24,6 +52,7 @@ function readReducedMotion(storage, options) {
     return false
   }
   if (cache) cache.set(target, value)
+  if (fresh && freshBurstHit) freshBurstHit.set(target, openFreshBurst())
   return value
 }
 
@@ -59,4 +88,5 @@ module.exports = {
   readReducedMotion,
   writeReducedMotion,
   subscribeReducedMotion,
+  noteReducedMotionMayChange,
 }

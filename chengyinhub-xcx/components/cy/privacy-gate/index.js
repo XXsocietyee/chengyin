@@ -72,18 +72,16 @@ Component({
   },
 
   lifetimes: {
-    // 兜底:弹窗随宿主页一起被销毁(用户切走/页面被回收)时,等待中的授权必须结算,
+    // 兜底:弹窗随宿主页一起被销毁(用户切走/页面被回收)时,还开着的系统授权提示必须取消,
     // 否则调用方仍会挂住 —— 这是伪弹窗那个 bug 的同源风险,在这里也堵上。
-    // L10-036(业主 2026-11-24 默认项 A):只有本页真弹出过隐私窗、且确有接口在等结果时,离开才记为拒绝;
-    // 没弹过就离开:不记拒绝(不写本机选择),只把在等的调用按本次未授权结算,防止挂起。
+    // L10-036:卸下组件不是用户的答复。本机同意还没落下时,不能因为「还没选」就记成拒绝,也不调拒绝接口。
     detached() {
       const waiting = !!(app.hasWaitingPrivacyAuthorization && app.hasWaitingPrivacyAuthorization());
-      if (this._shown && waiting) {
-        app.declineUsageConsent();
-        app.resolvePrivacyAuthorization({ event: 'disagree', reason: 'gate_detached' });
-      } else if (waiting) {
-        app.resolvePrivacyAuthorization({ event: 'disagree', reason: 'gate_detached_unseen' });
-      }
+      if (!waiting) return;
+      app.resolvePrivacyAuthorization({
+        event: 'disagree',
+        reason: this._shown ? 'gate_detached' : 'gate_detached_unseen',
+      });
     },
   },
 });

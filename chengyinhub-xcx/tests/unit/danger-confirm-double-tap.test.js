@@ -28,6 +28,16 @@ test('600ms 内重复点确认只发一次 confirm', () => {
   assert.equal(events.filter((e) => e.name === 'confirm').length, 2, '隔一会儿可以再点');
 });
 
+test('失败卡不展示异常原文,业务说明照常显示', () => {
+  const { vm } = mount();
+  vm.failed('java.lang.IllegalStateException: boom');
+  assert.equal(vm.data.errorText, '服务开小差了，请稍后重试');
+  vm.failed('TypeError: Cannot read properties of undefined');
+  assert.equal(vm.data.errorText, '请稍后重试');
+  vm.failed('网络异常，请重试');
+  assert.equal(vm.data.errorText, '网络异常，请重试');
+});
+
 test('失败卡上放弃时 done 带 failed:true,成功卡收起时 failed:false', () => {
   const { vm, events } = mount();
   vm.data.action = { key: 'x' };

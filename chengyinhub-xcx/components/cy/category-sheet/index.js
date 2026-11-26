@@ -23,12 +23,21 @@ Component({
   },
   observers: {
     show(v) {
+      if (this._dead) return;
       if (v) this.getCategoryList();
+    },
+  },
+  lifetimes: {
+    detached() {
+      this._dead = true;
+      this._epoch = (this._epoch || 0) + 1;
     },
   },
   methods: {
     getCategoryList() {
+      if (this._dead) return;
       const that = this;
+      const epoch = this._epoch = (this._epoch || 0) + 1;
       // L10-031:每次打开先按传入的 ids 复位选择,列表没到之前不能把上一次的选择当结果保存。
       const ids = String(this.data.ids || '').split(',').filter(Boolean).map((id) => parseInt(id.trim(), 10));
       this.setData({ loaded: false, loadError: '', selectedIds: ids });
@@ -39,6 +48,7 @@ Component({
         method: 'POST',
         data: { type: this.data.type, parentid: 0 },
         success(res) {
+          if (that._dead || epoch !== that._epoch) return;
           if (res.code == '200' && res.data && res.data.length > 0) {
             // UI-13:展示层按 categoryName 映射 cy-icon(iconName);item.icon 仍是后端原值,
             // onSave 回传给调用方的 selectedCategories 形状不变。
@@ -58,6 +68,7 @@ Component({
           }
         },
         fail(res) {
+          if (that._dead || epoch !== that._epoch) return;
           that.setData({
             categoryList: [],
             loaded: false,

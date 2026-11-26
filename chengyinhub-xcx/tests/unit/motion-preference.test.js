@@ -5,6 +5,7 @@ const {
   LEGACY_REDUCED_MOTION_KEY,
   readReducedMotion,
   writeReducedMotion,
+  noteReducedMotionMayChange,
 } = require('../../utils/motion-preference.js')
 
 function memoryStorage(initial) {
@@ -38,6 +39,27 @@ test('写入动效偏好同时保持旧版本页面兼容', () => {
 
   assert.equal(writeReducedMotion(storage, false), false)
   assert.equal(readReducedMotion(storage), false)
+})
+
+test('同一次展示的 fresh 只读一次存储,偏好可能变化后才再读', async () => {
+  let reads = 0
+  const storage = {
+    getStorageSync(key) {
+      reads += 1
+      return key === REDUCED_MOTION_KEY ? true : undefined
+    },
+    setStorageSync() {},
+  }
+  assert.equal(readReducedMotion(storage, { fresh: true }), true)
+  assert.equal(readReducedMotion(storage, { fresh: true }), true)
+  assert.equal(reads, 1)
+  noteReducedMotionMayChange()
+  assert.equal(readReducedMotion(storage, { fresh: true }), true)
+  assert.equal(reads, 2)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(readReducedMotion(storage, { fresh: true }), true)
+  assert.equal(reads, 3)
+  await new Promise((resolve) => setTimeout(resolve, 0))
 })
 
 test('存储不可用时回退为正常动效且不抛错', () => {

@@ -45,7 +45,7 @@ function loadComponent(source) {
     Object.assign(this.data, patch);
     if (cb) cb();
   };
-  return { vm, requests };
+  return { vm, requests, definition };
 }
 
 test('失败:落弹层内 loadError + 重试,不与「真·无分类」混淆', () => {
@@ -98,8 +98,8 @@ test('渲染与接线:错误条用 cy-inline-error,action 指回 getCategoryList
 test('负控:失败分支改回不记录原因,失败用例真红', () => {
   const source = read();
   const broken = source.replace(
-    "        fail(res) {\n          that.setData({\n            categoryList: [],\n            loaded: false,\n            loadError: app.getRequestErrorMessage(res, '分类加载失败'),\n          });",
-    "        fail(res) {\n          that.setData({ categoryList: [], loaded: false, loadError: '' });");
+    "        fail(res) {\n          if (that._dead || epoch !== that._epoch) return;\n          that.setData({\n            categoryList: [],\n            loaded: false,\n            loadError: app.getRequestErrorMessage(res, '分类加载失败'),\n          });",
+    "        fail(res) {\n          if (that._dead || epoch !== that._epoch) return;\n          that.setData({ categoryList: [], loaded: false, loadError: '' });");
   assert.notEqual(broken, source, '负控锚点失效:fail 分支未命中');
 
   const { vm, requests } = loadComponent(broken);
@@ -108,6 +108,15 @@ test('负控:失败分支改回不记录原因,失败用例真红', () => {
   assert.throws(() => {
     assert.notEqual(vm.data.loadError, '', '失败必须有可见原因，不能显示成空列表');
   }, assert.AssertionError, '负控:去掉失败原因后，主用例断言必须真红');
+});
+
+test('卸载后到达的分类列表不再写入', () => {
+  const { vm, requests, definition } = loadComponent();
+  vm.getCategoryList();
+  definition.lifetimes.detached.call(vm);
+  requests[0].success({ code: '200', data: [{ id: 3, categoryName: '夜跑' }] });
+  assert.equal(vm.data.loaded, false);
+  assert.deepEqual(vm.data.categoryList, []);
 });
 
 test('L10-031:加载中或失败时保存无效;重开按传入 ids 复位选择', () => {
@@ -128,4 +137,7 @@ test('L10-031:加载中或失败时保存无效;重开按传入 ids 复位选择
   vm.onSave();
   assert.equal(events[0].name, 'select');
   assert.deepEqual(events[0].detail.selectedIds, [3]);
+
+  const wxml = fs.readFileSync(path.join(ROOT, 'components/cy/category-sheet/index.wxml'), 'utf8');
+  assert.match(wxml, /<cy-btn[^>]*disabled="\{\{!loaded \|\| !!loadError\}\}"[^>]*bindtap="onSave"/, '加载中或失败时保存按钮必须禁用');
 });

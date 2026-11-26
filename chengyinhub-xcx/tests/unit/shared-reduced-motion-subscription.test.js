@@ -7,9 +7,9 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '../..');
 function harness(initial = false) {
   const values = { play_reduced_motion: initial };
-  let failPrimary = false, failLegacy = false;
+  let failPrimary = false, failLegacy = false, reads = 0;
   const wx = {
-    getStorageSync(key) { return values[key]; },
+    getStorageSync(key) { reads += 1; return values[key]; },
     setStorageSync(key, value) {
       if (key === 'play_reduced_motion' && failPrimary || key === 'roam_reduced_motion' && failLegacy) throw Error('storage');
       values[key] = value;
@@ -41,7 +41,7 @@ function harness(initial = false) {
     if (behavior.observers && behavior.observers.reducedMotion) behavior.observers.reducedMotion.call(instance, value);
     else if (behavior.properties.reducedMotion.observer) behavior.properties.reducedMotion.observer.call(instance, value);
   }
-  return { wx, preference, behavior, mount, observe,
+  return { wx, preference, behavior, mount, observe, get reads() { return reads; },
     primaryFails(value) { failPrimary = value; }, legacyFails(value) { failLegacy = value; } };
 }
 test('共享偏好实时开关同步所有已挂载组件，无需返回页面', () => {
@@ -108,6 +108,46 @@ test('主存储失败返回 null 且不广播；legacy 失败仍广播主键已�
   assert.equal(h.preference.writeReducedMotion(h.wx, true), true);
   assert.equal(calls, 1); assert.equal(a.data.reducedMotion, true);
   stop(); h.behavior.lifetimes.detached.call(a);
+});
+test('多个组件挂载只读一次;未变的再次 show 不读,离开页面后才重读', () => {
+  const h = harness(false);
+  const attached = h.reads;
+  const a = h.mount(), b = h.mount();
+  assert.equal(h.reads - attached, 1);
+  const shown = h.reads;
+  h.behavior.pageLifetimes.show.call(a);
+  h.behavior.pageLifetimes.show.call(b);
+  assert.equal(h.reads - shown, 1);
+  const again = h.reads;
+  h.behavior.pageLifetimes.show.call(a);
+  h.behavior.pageLifetimes.show.call(b);
+  assert.equal(h.reads, again);
+  h.behavior.pageLifetimes.hide.call(a);
+  h.behavior.pageLifetimes.hide.call(b);
+  h.wx.setStorageSync('play_reduced_motion', true);
+  h.behavior.pageLifetimes.show.call(a);
+  h.behavior.pageLifetimes.show.call(b);
+  assert.equal(h.reads - again, 1);
+  assert.equal(a.data.reducedMotion, true);
+  assert.equal(b.data.reducedMotion, true);
+  h.behavior.lifetimes.detached.call(a);
+  h.behavior.lifetimes.detached.call(b);
+});
+test('卸载后的组件不再 setData,包括广播进行中被卸掉的和随后的 show', () => {
+  const h = harness(), a = h.mount(), b = h.mount();
+  const orig = a.setData.bind(a);
+  a.setData = function (patch) {
+    h.behavior.lifetimes.detached.call(b);
+    return orig(patch);
+  };
+  h.preference.writeReducedMotion(h.wx, true);
+  assert.equal(a.data.reducedMotion, true);
+  assert.equal(b.updates, 0);
+  assert.equal(b.data.reducedMotion, false);
+  h.behavior.pageLifetimes.show.call(b);
+  assert.equal(b.updates, 0);
+  assert.equal(b.data.reducedMotion, false);
+  h.behavior.lifetimes.detached.call(a);
 });
 test('单个 listener 抛错不阻止其他 listener，退订幂等', () => {
   const h = harness(); let calls = 0;

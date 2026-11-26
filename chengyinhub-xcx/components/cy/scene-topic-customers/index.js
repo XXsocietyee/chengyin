@@ -8,6 +8,7 @@
 //   稿子里手机号右侧那个复制图标没有落地 —— 前端手上只有脱敏串,复制出去的号码打不通;
 //   要能复制就得下发明文,那违反「脱敏必须在服务端做」。
 const app = getApp();
+const { safeUserMessage } = require('../../../utils/transport/safe-user-message.js');
 
 const STATUS_TONE = Object.freeze({
   VERIFIED: 'success',   // 已核销 = 绿
@@ -81,7 +82,14 @@ Component({
   },
   observers: {
     'show, topicId'(show, topicId) {
+      if (this._dead) return;
       if (show && topicId) this.load();
+    },
+  },
+  lifetimes: {
+    detached() {
+      this._dead = true;
+      this._epoch = (this._epoch || 0) + 1;
     },
   },
   methods: {
@@ -93,6 +101,7 @@ Component({
       this.setData({ filterKey: key }, () => this.load());
     },
     load() {
+      if (this._dead) return;
       const epoch = (this._epoch || 0) + 1;
       this._epoch = epoch;
       const that = this;
@@ -108,7 +117,7 @@ Component({
           if (!res || res.code != '200') {
             const message = String((res && res.msg) || '');
             const denied = Number(res && res.code) === 403 || /没有权限|无权|仅(?:俱乐部)?主理人/.test(message);
-            that.setData({ state: denied ? 'no-permission' : 'error', errorText: message || '客户名单暂时不可用' });
+            that.setData({ state: denied ? 'no-permission' : 'error', errorText: safeUserMessage(message, '客户名单暂时不可用') });
             return;
           }
           const shaped = shapeTopicCustomers(res.data);
@@ -119,7 +128,7 @@ Component({
           if (epoch !== that._epoch) return;
           that.setData({
             state: Number(statusCode) === 403 ? 'no-permission' : 'error',
-            errorText: (res && res.msg) || '客户名单暂时不可用',
+            errorText: safeUserMessage(res && res.msg, '客户名单暂时不可用'),
           });
         },
         fail() {

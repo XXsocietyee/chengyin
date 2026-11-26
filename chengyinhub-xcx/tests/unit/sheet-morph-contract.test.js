@@ -93,6 +93,23 @@ test('_flipStyle:量不到时仍给出能播的起点,不能返回空(否则面�
   }
 })
 
+test('卸载后到达的量测不再 setData', () => {
+  let execCb
+  const prevWx = global.wx
+  global.wx = {
+    createSelectorQuery: () => { const q = { select: () => q, boundingClientRect: () => q, in: () => q, exec: (cb) => { execCb = cb } }; return q },
+    nextTick: (fn) => fn(),
+  }
+  try {
+    const h = host({ shellSelector: '.a' }, { show: true })
+    h._measureAnchor()
+    h.def.lifetimes.detached.call(h)
+    h.patches.length = 0
+    execCb([{ left: 0, top: 0, width: 10, height: 10 }, { left: 0, top: 0, width: 100, height: 100 }])
+    assert.deepEqual(h.patches, [], '组件已卸载时量测结果必须丢弃')
+  } finally { global.wx = prevWx }
+})
+
 test('L10-062:量测回合里面板已被关掉 ⇒ 不再翻到打开末态', () => {
   let execCb
   const prevWx = global.wx
