@@ -134,6 +134,37 @@ test('同一参与人删除 single-flight，卸载 abort 全部在途请求', ()
   assert.equal(sandbox.aborts, 2);
 });
 
+test('换账号显示时清掉上一账号的行并重拉，同账号再显示不重拉', () => {
+  const session = { id: '11' };
+  global.getApp = () => ({
+    globalData: {},
+    getUserID() { return session.id; },
+    getRequestErrorMessage: (_res, fallback) => fallback,
+    sendRequest(options) {
+      sandbox.requests.push(options);
+      return { abort() { sandbox.aborts += 1; } };
+    },
+  });
+  const vm = load(LIST_PATH);
+  vm.onLoad({});
+  vm.onShow();
+  assert.equal(sandbox.requests.length, 1);
+  sandbox.requests[0].success({ code: '200', data: { rows: [{ id: 1, fullName: '甲' }] } });
+  sandbox.requests[0].complete();
+  assert.equal(vm.data.list[0].fullName, '甲');
+
+  vm.onShow();
+  assert.equal(sandbox.requests.length, 1, '同账号再显示不重拉');
+
+  session.id = '22';
+  vm.onShow();
+  assert.equal(sandbox.requests.length, 2, '换账号重拉');
+  assert.deepEqual(vm.data.list, []);
+  assert.equal(vm.data.loadState, 'loading');
+  sandbox.requests[1].success({ code: '200', data: { rows: [{ id: 2, fullName: '乙' }] } });
+  assert.equal(vm.data.list[0].fullName, '乙');
+});
+
 test('L10-189:编辑/新增页取消返回不重拉列表，保存过(addressAdded)才重拉', () => {
   const opened = [];
   global.wx.navigateTo = (options) => { opened.push(options); };

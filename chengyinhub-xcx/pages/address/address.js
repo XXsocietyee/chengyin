@@ -4,6 +4,13 @@ function requestErrorMessage(res, fallback) {
   return app.getRequestErrorMessage ? app.getRequestErrorMessage(res, fallback) : fallback;
 }
 
+// 0 / 空号不是账号。换号才重拉；同一次登录里的普通返回不因此重拉。
+function accountKey() {
+  const id = app.getUserID && app.getUserID();
+  if (id == null || id === '' || id === 0 || id === '0') return '';
+  return String(id);
+}
+
 Page({
   /**
    * 页面的初始数据
@@ -26,14 +33,30 @@ Page({
    */
   onLoad(options) {
     this._listDirty = false;
+    this._listOwner = accountKey();
     this.getList();
   },
 
   /**
    * 生命周期函数--监听页面显示
-   * 只在编辑/新增页真的保存过(opener 通道 addressAdded)后才重拉;取消返回不再白打一次列表(L10-189)。
+   * 取消返回保留当前行。真保存过(addressAdded)或换了账号才重拉(L10-189)。
+   * 删除在成功回调里直接 getList。换账号先清掉上一账号的行。
    */
   onShow() {
+    const owner = accountKey();
+    if (this._listOwner !== owner) {
+      this._listOwner = owner;
+      this._listDirty = false;
+      this.setData({
+        list: [],
+        loadState: 'loading',
+        loadErrorMsg: '',
+        refreshing: false,
+        deletingIds: {},
+      });
+      this.getList();
+      return;
+    }
     if (!this._listDirty) return;
     this._listDirty = false;
     this.getList();
