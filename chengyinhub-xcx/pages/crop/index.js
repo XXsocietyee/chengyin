@@ -22,6 +22,17 @@ const MAX_OUTPUT_EDGE = 1440; // 导出长边上限:防止大图裁完仍是几 
 // cropInit 从 app.cropAll 的 navigateTo success 回调抛来,比 onLoad 晚;通道在但图始终不来
 // (opener 在 emit 前就崩 / 被顶掉)时用这只闸兜到无源态,不让用户卡在等待里。
 const SOURCE_WAIT_MS = 3000;
+// L10-046:拖动时位移和缩放留在实例上,视图大约每秒最多写 10 次。
+const POSE_VIEW_MS = 100;
+
+// 失败只给人话。异常原文、微信 errMsg、栈和路径都不进界面。
+function presentCropError(message, fallback) {
+  if (typeof message !== 'string') return fallback;
+  const text = message.trim();
+  if (!text || text.length > 40) return fallback;
+  if (/[A-Za-z]|[:\\/]/.test(text)) return fallback;
+  return text;
+}
 
 Page({
   data: {
@@ -57,6 +68,14 @@ Page({
     this.ratioLiteral = 'free';
     this.natural = { w: 0, h: 0 };
     this.gesture = null;
+    this.pose = null;
+    this.poseTimer = null;
+    this.poseViewAt = null;
+    this._unloaded = false;
+    this._exportGen = 0;
+    this._loadGen = 0;
+    this._exportImage = null;
+    this._exportCanvas = null;
 
     const win = wx.getWindowInfo();
     const navPadTop = win.statusBarHeight || 20;
@@ -77,7 +96,8 @@ Page({
     // 若先 on 后上闸,那一路的 clearSourceWait 会空跑,随后仍挂一只 3s 悬空定时器。
     this.sourceWaitTimer = setTimeout(() => {
       this.sourceWaitTimer = null;
-      if (this.data.sourceState === 'waiting') this.showMissingSource();
+      if (this._unloaded || this.data.sourceState !== 'waiting') return;
+      this.showMissingSource();
     }, SOURCE_WAIT_MS);
     ch.on('cropInit', (d) => {
       this.clearSourceWait();
@@ -99,13 +119,15 @@ Page({
 
   showMissingSource() {
     this.clearSourceWait();
+    if (this._unloaded) return;
     this.setData({ sourceState: 'missing', sourceError: '', exportError: '', ready: false, busy: false, title: '裁剪' });
   },
 
   showSourceError(message) {
+    if (this._unloaded) return;
     this.setData({
       sourceState: 'error',
-      sourceError: message || '这张图片暂时无法读取，请重试或使用原图',
+      sourceError: presentCropError(message, '这张图片暂时无法读取，请重试或使用原图'),
       exportError: '',
       ready: false,
       busy: false,
@@ -113,9 +135,10 @@ Page({
   },
 
   showExportError(message) {
+    if (this._unloaded) return;
     this.setData({
       busy: false,
-      exportError: message || '裁剪结果没有生成，请重试或使用原图',
+      exportError: presentCropError(message, '裁剪结果没有生成，请重试或使用原图'),
     });
   },
 
@@ -127,6 +150,9 @@ Page({
   startAt(i) {
     this.idx = i;
     this.gesture = null;
+    this.clearPoseTimer();
+    this.pose = null;
+    this.poseViewAt = null;
     const src = this.queue[i];
     // 尺寸没读到之前不能算 ready:那会让「选取」露出来但 onConfirm 因 !ready 静默 return。
     // 复用 waiting(此刻确实还在准备这张图),layout 成功才同时置 sourceState/ready。
@@ -139,9 +165,18 @@ Page({
       busy: false,
       title: this.queue.length > 1 ? `裁剪 ${i + 1}/${this.queue.length}` : '裁剪',
     });
+    const loadGen = (this._loadGen = (this._loadGen || 0) + 1);
     wx.getImageInfo({
       src,
-      success: (info) => { this.natural = { w: info.width, h: info.height }; this.layout(); },
+      success: (info) => {
+        if (this._unloaded || loadGen !== this._loadGen) return;
+        try {
+          this.natural = { w: info.width, h: info.height };
+          this.layout();
+        } catch (err) {
+          this.showSourceError();
+        }
+      },
       fail: () => this.showSourceError('这张图片暂时无法读取，请重试或使用原图'),
     });
   },
@@ -154,6 +189,7 @@ Page({
   },
 
   layout() {
+    if (this._unloaded) return;
     const { w: natW, h: natH } = this.natural;
     if (!(natW > 0 && natH > 0)) { this.showSourceError('图片尺寸无法识别，请重试或使用原图'); return; }
 
@@ -190,12 +226,58 @@ Page({
   },
 
   // ---- 手势:单指平移 / 双指缩放 ----
+  livePose() {
+    return this.pose || { tx: this.data.tx, ty: this.data.ty, scale: this.data.scale };
+  },
+
+  // 位移和缩放先记在实例上。和上一帧相同(含已经顶到边界)时不记、也不写视图。
+  rememberPose(next) {
+    const prev = this.livePose();
+    if (next.tx === prev.tx && next.ty === prev.ty && next.scale === prev.scale) return false;
+    this.pose = next;
+    return true;
+  },
+
+  clearPoseTimer() {
+    if (!this.poseTimer) return;
+    clearTimeout(this.poseTimer);
+    this.poseTimer = null;
+  },
+
+  // 视图大约每秒最多写 10 次。force 用于松手,把最后一帧落到 data 上。
+  writePoseView(force) {
+    const pose = this.pose;
+    if (!pose || this._unloaded) return;
+    if (pose.tx === this.data.tx && pose.ty === this.data.ty && pose.scale === this.data.scale) {
+      this.clearPoseTimer();
+      return;
+    }
+    const now = Date.now();
+    if (!force && this.poseViewAt != null && now - this.poseViewAt < POSE_VIEW_MS) {
+      if (!this.poseTimer) {
+        const wait = POSE_VIEW_MS - (now - this.poseViewAt);
+        const timer = setTimeout(() => {
+          if (this.poseTimer !== timer) return;
+          this.poseTimer = null;
+          if (this._unloaded) return;
+          this.writePoseView(false);
+        }, wait);
+        this.poseTimer = timer;
+      }
+      return;
+    }
+    this.clearPoseTimer();
+    this.poseViewAt = now;
+    this.setData({ tx: pose.tx, ty: pose.ty, scale: pose.scale });
+  },
+
   onTouchStart(e) {
     const t = e.touches; if (this.data.settling) this.setData({ settling: false });
+    const pose = this.livePose();
     if (t.length === 1) {
-      this.gesture = { mode: 'pan', x0: t[0].clientX, y0: t[0].clientY, tx0: this.data.tx, ty0: this.data.ty };
+      this.gesture = { mode: 'pan', x0: t[0].clientX, y0: t[0].clientY, tx0: pose.tx, ty0: pose.ty, scale: pose.scale };
     } else if (t.length >= 2) {
-      this.gesture = { mode: 'pinch', d0: this.distance(t[0], t[1]), s0: this.data.scale };
+      this.gesture = { mode: 'pinch', d0: this.distance(t[0], t[1]), s0: pose.scale, tx0: pose.tx, ty0: pose.ty };
     }
   },
 
@@ -205,10 +287,10 @@ Page({
     const t = e.touches;
     let next;
     if (g.mode === 'pan' && t.length === 1) {
-      next = { tx: g.tx0 + (t[0].clientX - g.x0), ty: g.ty0 + (t[0].clientY - g.y0), scale: this.data.scale };
+      next = { tx: g.tx0 + (t[0].clientX - g.x0), ty: g.ty0 + (t[0].clientY - g.y0), scale: g.scale };
     } else if (g.mode === 'pinch' && t.length >= 2) {
       const d = this.distance(t[0], t[1]);
-      next = { tx: this.data.tx, ty: this.data.ty, scale: g.d0 > 0 ? g.s0 * (d / g.d0) : this.data.scale };
+      next = { tx: g.tx0, ty: g.ty0, scale: g.d0 > 0 ? g.s0 * (d / g.d0) : g.s0 };
     } else {
       return;
     }
@@ -218,17 +300,20 @@ Page({
       frameW: this.data.frameW, frameH: this.data.frameH,
       scale: next.scale, x: next.tx, y: next.ty,
     });
-    // L10-046:顶到边界时值不变,不再每个 touchmove 都发一次 setData。
-    if (c.x === this.data.tx && c.y === this.data.ty && c.scale === this.data.scale) return;
-    this.setData({ tx: c.x, ty: c.y, scale: c.scale });
+    // L10-046:手势留在实例上。位置或缩放没变(含已经顶住边界)不写视图;
+    // 真有变化时大约每秒最多 setData 10 次,松手再落到最终位置。
+    if (!this.rememberPose({ tx: c.x, ty: c.y, scale: c.scale })) return;
+    this.writePoseView(false);
   },
 
   onTouchEnd(e) {
+    this.writePoseView(true);
+    const pose = this.livePose();
     // 多指抬到只剩一根时重起 pan 基准,否则剩下那根会带着旧基准跳一下
     if (e.touches && e.touches.length === 1) {
-      this.gesture = { mode: 'pan', x0: e.touches[0].clientX, y0: e.touches[0].clientY, tx0: this.data.tx, ty0: this.data.ty };
+      this.gesture = { mode: 'pan', x0: e.touches[0].clientX, y0: e.touches[0].clientY, tx0: pose.tx, ty0: pose.ty, scale: pose.scale };
     } else if (e.touches && e.touches.length >= 2) {
-      this.gesture = { mode: 'pinch', d0: this.distance(e.touches[0], e.touches[1]), s0: this.data.scale };
+      this.gesture = { mode: 'pinch', d0: this.distance(e.touches[0], e.touches[1]), s0: pose.scale, tx0: pose.tx, ty0: pose.ty };
     } else {
       this.gesture = null;
     }
@@ -241,6 +326,7 @@ Page({
   // ---- 导出 ----
   onConfirm() {
     if (this.data.busy || !this.data.ready) return;
+    this.writePoseView(true);
     // 恒等裁剪:自由比例 + 没缩放没平移 ⇒ 框就是整图,导出只会把图重编码一遍(还会丢 PNG 透明)。
     // 直接收原图,省一次 canvas 往返。
     if (!parseRatio(this.ratioLiteral) && this.data.scale === 1 && this.data.tx === 0 && this.data.ty === 0) {
@@ -255,7 +341,10 @@ Page({
     if (!rect) { this.showExportError('裁剪范围无效，请调整图片后重试'); return; }
 
     this.setData({ busy: true, exportError: '' });
+    if (typeof this._exportGen !== 'number') this._exportGen = 0;
+    const exportGen = this._exportGen;
     wx.createSelectorQuery().in(this).select('#cropCanvas').fields({ node: true }).exec((res) => {
+      if (this._unloaded || exportGen !== this._exportGen) return;
       const node = res && res[0] && res[0].node;
       if (!node) { this.showExportError('裁剪工具暂时不可用，请重试或使用原图'); return; }
       this.drawAndExport(node, rect);
@@ -263,39 +352,99 @@ Page({
   },
 
   drawAndExport(canvas, rect) {
-    const long = Math.max(rect.sw, rect.sh);
-    const k = long > MAX_OUTPUT_EDGE ? MAX_OUTPUT_EDGE / long : 1;
-    const outW = Math.round(rect.sw * k);
-    const outH = Math.round(rect.sh * k);
-    canvas.width = outW;
-    canvas.height = outH;
+    if (this._unloaded) return;
+    if (typeof this._exportGen !== 'number') this._exportGen = 0;
+    const gen = this._exportGen;
+    let outW = 0;
+    let outH = 0;
+    try {
+      const long = Math.max(rect.sw, rect.sh);
+      const k = long > MAX_OUTPUT_EDGE ? MAX_OUTPUT_EDGE / long : 1;
+      outW = Math.round(rect.sw * k);
+      outH = Math.round(rect.sh * k);
+      if (!(outW > 0 && outH > 0)) { this.showExportError(); return; }
+      canvas.width = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx || typeof canvas.createImage !== 'function') { this.showExportError(); return; }
+      const img = canvas.createImage();
+      this._exportCanvas = canvas;
+      this._exportImage = img;
+      img.onload = () => {
+        if (this._unloaded || gen !== this._exportGen) return;
+        try {
+          // 先铺白:导出是 jpg,不铺底的话 PNG 透明像素会被合成成黑色
+          // (相册里的透明底二维码裁完 = 黑码黑底 = 扫不出来)
+          ctx.fillStyle = '#FFFFFF'; // ds-ok: canvas 只收字面色,jpg 不铺白会把透明合成成黑
+          ctx.fillRect(0, 0, outW, outH);
+          ctx.drawImage(img, rect.sx, rect.sy, rect.sw, rect.sh, 0, 0, outW, outH);
+          wx.canvasToTempFilePath({
+            canvas,
+            destWidth: outW,
+            destHeight: outH,
+            fileType: 'jpg',
+            quality: 0.92,
+            success: (r) => {
+              const filePath = r && r.tempFilePath;
+              if (this._unloaded || gen !== this._exportGen) { this.discardTemp(filePath); return; }
+              if (!filePath) { this.showExportError(); return; }
+              this.accept(filePath);
+            },
+            fail: () => {
+              if (this._unloaded || gen !== this._exportGen) return;
+              this.showExportError();
+            },
+          }, this);
+        } catch (err) {
+          if (this._unloaded || gen !== this._exportGen) return;
+          this.showExportError();
+        }
+      };
+      img.onerror = () => {
+        if (this._unloaded || gen !== this._exportGen) return;
+        this.showExportError('图片载入失败，请重试或使用原图');
+      };
+      img.src = this.data.src;
+    } catch (err) {
+      if (this._unloaded || gen !== this._exportGen) return;
+      this.showExportError();
+    }
+  },
 
-    const ctx = canvas.getContext('2d');
-    const img = canvas.createImage();
-    img.onload = () => {
-      // 先铺白:导出是 jpg,不铺底的话 PNG 透明像素会被合成成黑色
-      // (相册里的透明底二维码裁完 = 黑码黑底 = 扫不出来)
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0, 0, outW, outH);
-      ctx.drawImage(img, rect.sx, rect.sy, rect.sw, rect.sh, 0, 0, outW, outH);
-      wx.canvasToTempFilePath({
-        canvas,
-        destWidth: outW,
-        destHeight: outH,
-        fileType: 'jpg',
-        quality: 0.92,
-        success: (r) => this.accept(r.tempFilePath),
-        fail: () => this.showExportError('裁剪结果没有生成，请重试或使用原图'),
-      }, this);
-    };
-    img.onerror = () => this.showExportError('图片载入失败，请重试或使用原图');
-    img.src = this.data.src;
+  // 离开后画布导出仍可能吐出一张临时文件。那张图没有调用方了,删掉,避免占着临时空间。
+  discardTemp(filePath) {
+    if (!filePath || typeof wx.getFileSystemManager !== 'function') return;
+    try {
+      const fs = wx.getFileSystemManager();
+      if (fs && typeof fs.unlink === 'function') fs.unlink({ filePath, fail() {} });
+    } catch (err) {}
+  },
+
+  stopExport() {
+    this._exportGen = (this._exportGen || 0) + 1;
+    const img = this._exportImage;
+    this._exportImage = null;
+    if (img) {
+      img.onload = null;
+      img.onerror = null;
+      try { img.src = ''; } catch (err) {}
+    }
+    const canvas = this._exportCanvas;
+    this._exportCanvas = null;
+    if (!canvas) return;
+    try {
+      const ctx = typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null;
+      if (ctx && canvas.width > 0 && canvas.height > 0) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.width = 0;
+      canvas.height = 0;
+    } catch (err) {}
   },
 
   acceptRaw() { this.accept(this.queue[this.idx]); },
 
   // 收下当前这张,推进队列;最后一张收完即整批完成
   accept(path) {
+    if (this._unloaded) return;
     this.results.push(path);
     if (this.idx + 1 < this.queue.length) this.startAt(this.idx + 1);
     else this.finish(this.results);
@@ -308,7 +457,28 @@ Page({
   onReset() {
     if (!this.data.ready || this.data.busy) return;
     this.gesture = null;
-    this.setData({ tx: 0, ty: 0, scale: 1, exportError: '', settling: true }); clearTimeout(this.settleTimer); this.settleTimer = setTimeout(() => { if (this.data.settling) this.setData({ settling: false }); }, 260);
+    this.clearPoseTimer();
+    this.pose = null;
+    this.poseViewAt = null;
+    this.setData({ tx: 0, ty: 0, scale: 1, exportError: '', settling: true });
+    this.clearSettle();
+    this.settleTimer = setTimeout(() => {
+      this.settleTimer = null;
+      if (this._unloaded || !this.data.settling) return;
+      this.setData({ settling: false });
+    }, 260);
+  },
+
+  clearSettle() {
+    if (!this.settleTimer) return;
+    clearTimeout(this.settleTimer);
+    this.settleTimer = null;
+  },
+
+  onHide() {
+    this.clearSettle();
+    this.clearPoseTimer();
+    if (!this._unloaded && this.data.settling) this.setData({ settling: false });
   },
 
   finish(paths) {
@@ -324,9 +494,12 @@ Page({
   // 唯一 emit 出口:onUnload 时 pop 已提交,调用方此刻再发起路由才是安全的。
   // 侧滑/物理返回不走 finish → result 仍是 null = 取消,调用方不会永久挂起。
   onUnload() {
+    this._unloaded = true;
+    this._loadGen = (this._loadGen || 0) + 1;
     this.clearSourceWait();
-    // L10-196
-    if (this.settleTimer) { clearTimeout(this.settleTimer); this.settleTimer = null; }
+    this.clearSettle();
+    this.clearPoseTimer();
+    this.stopExport();
     try {
       const ch = this.getOpenerEventChannel && this.getOpenerEventChannel();
       if (ch && ch.emit) ch.emit('cropDone', { paths: this.result });
