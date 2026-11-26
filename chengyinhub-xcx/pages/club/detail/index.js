@@ -647,8 +647,8 @@ Page({
   onAddressTap(e) { openAddress().openFromEvent(e); },
   _clubAccessState: 'idle',
   data: {
-    // 复核 V-23(2026-11-22 业主):主题活动不允许举报,活动卡「更多 → 举报活动」入口不露出;处理器与后端保留不删。
-    topicReportExposed: false,
+    // 2026-11-26 业主推翻 2026-11-22 V-23 隐藏:俱乐部主题活动卡重新露出「更多 → 举报活动」。本人活动仍不可报。
+    topicReportExposed: true,
     // 稿 40:3 末行「★ 减少动态效果兜底」的接线端。index.wxss 里 .cy-motion-reduced 的
     // 折叠面板兜底规则要靠根节点这个类才能匹配到 —— 之前 readReducedMotion 已 import
     // 但从没调用,规则等于死代码(截图实测:开了系统减动效,折叠面板照样播 -4px 位移)。

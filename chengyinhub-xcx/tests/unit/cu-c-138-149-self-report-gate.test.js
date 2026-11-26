@@ -46,7 +46,7 @@ function assertActivityReportGate(wxml) {
       'CU-C-149:本人创建的项目不给「举报活动」:' + site);
   });
   // P-14:「举报活动」收进卡片「更多」,入口仍按 canReport 渲染
-  assert.match(wxml, /wx:if="\{\{canReport\}\}" class="ev-more" catchtap="onEventMore"/,
+  assert.match(wxml, /wx:if="\{\{canReport\}\}" class="ev-more ugc-report" catchtap="onEventMore"/,
     '模板内仍按 canReport 渲染(闸加在 data 上，不是加在模板里)');
 }
 

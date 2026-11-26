@@ -191,8 +191,8 @@
                 aria-role="button" aria-label="邀约承接 {{item.name || '该活动'}}" hover-class="cy-pressed" hover-stay-time="80" hover-stop-propagation="true">邀约承接</view>
               <view wx:if="{{canManage}}" class="event-group-code" catchtap="showGroupCode" data-id="{{item.id}}" data-name="{{item.name}}" aria-role="button" aria-label="出示 {{item.name}} 团码" hover-class="cy-pressed" hover-stay-time="80" hover-stop-propagation="true">出示团码</view>
               <!-- CU-C-149:本人创建的项目不给「举报活动」(canReport 已带作者闸)。P-14:入口收进「更多」。
-                   复核 V-23(2026-11-22 业主「这个主题不允许举报,先不加举报按钮」):topicReportExposed=false,入口不渲染;reportTopicActivity 与后端保留。 -->
-              <view wx:if="{{canReport}}" class="ev-more" catchtap="onEventMore" data-id="{{item.id}}" data-name="{{item.name}}"
+                   2026-11-26 业主推翻 2026-11-22 V-23 隐藏:topicReportExposed=true,别人的活动重新露出;不挂在封面上。 -->
+              <view wx:if="{{canReport}}" class="ev-more ugc-report" catchtap="onEventMore" data-id="{{item.id}}" data-name="{{item.name}}"
                 aria-role="button" aria-label="{{item.name || '该活动'}} 更多操作" hover-class="cy-pressed" hover-stay-time="80" hover-stop-propagation="true"><cy-icon name="more" size="36" /></view>
             </view>
           </view>
