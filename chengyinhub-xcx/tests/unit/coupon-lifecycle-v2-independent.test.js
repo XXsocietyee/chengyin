@@ -217,21 +217,28 @@ test('场景 NoGo-2:start 前换码失败后受控自动重试,取得新 token �
   assert.match(wxml, /bind:retry="retryNow"/, '码卡错误态重试也要清退避')
 })
 
-test('独立页 NoGo-2:start 前换码失败后受控自动重试,新 token 成功才亮码;等待壳可重试', () => {
+test('独立页 NoGo-2:未到可用时间不背后换码;到点失败后受控重试,新 token 成功才亮码;等待壳可重试', () => {
+  global.__startTimeouts = []
   const h = mount(QR_PAGE, 'page', { clock: { now: CLOCK_BEFORE } })
   h.instance.onLoad({ couponHistoryId: '72' })
   h.instance.onShow()
   succeed(h.requests[0], futureToken)
   assert.equal(h.instance.data.notStarted, true)
 
-  h.intervals[0]() // countdown 到点 → 换码
-  assert.equal(h.requests.filter((r) => r.opts.url.endsWith('/api/coupon/qr-token')).length, 2)
+  h.intervals[0]() // 等待期倒计时不得换码
+  assert.equal(h.requests.filter((r) => r.opts.url.endsWith('/api/coupon/qr-token')).length, 1,
+    '未到可用时间不得由倒计时换码')
+
+  h.clock.now = CLOCK_AFTER
+  global.__startTimeouts.at(-1)()
+  assert.equal(h.requests.filter((r) => r.opts.url.endsWith('/api/coupon/qr-token')).length, 2,
+    '到可用时间才重新取码')
   fail(h.requests[1])
   assert.equal(h.instance.data.qrState, 'error')
   assert.notEqual(h.instance.data.errMsg, '', '失败正文必须可见')
 
-  h.clock.now = CLOCK_AFTER
-  h.intervals[0]() // 受控重试
+  h.clock.now += 5000
+  h.intervals[h.instance._countTimer - 1]() // 受控重试
   assert.equal(h.requests.filter((r) => r.opts.url.endsWith('/api/coupon/qr-token')).length, 3,
     '到点失败后必须自动重发 token,而不是永久冻结')
   succeed(h.requests[2], startedToken)
@@ -245,6 +252,62 @@ test('独立页 NoGo-2:start 前换码失败后受控自动重试,新 token 成�
   const waiting = wxml.slice(waitingStart, wxml.indexOf('/>', waitingStart) + 2)
   assert.match(waiting, /bind:primary="retryNow"/, '等待壳必须提供可重试动作')
   assert.match(wxml, /bind:retry="retryNow"/, '码卡错误态重试也要清退避')
+})
+
+test('L09-103 独立页:未到可用时间不跑倒计时、轮询和背后换码,到点才启动,离开即停', () => {
+  global.__startTimeouts = []
+  const h = mount(QR_PAGE, 'page', { clock: { now: CLOCK_BEFORE } })
+  h.instance.onLoad({ couponHistoryId: '73' })
+  h.instance.onShow()
+  const timersAtShow = h.intervals.length
+  succeed(h.requests[0], futureToken)
+  assert.equal(h.instance.data.notStarted, true)
+  assert.equal(h.intervals.length, timersAtShow, '等待期不再新挂 1s 倒计时或 5s 轮询')
+  const tokens = () => h.requests.filter((r) => r.opts.url.endsWith('/api/coupon/qr-token')).length
+  const polls = () => h.requests.filter((r) => r.opts.url.endsWith('/api/coupon/status')).length
+  h.intervals.forEach((fn) => fn())
+  assert.equal(tokens(), 1, '等待壳背后不得再换 token')
+  assert.equal(polls(), 0, '等待期不得轮询核销状态')
+  assert.equal(h.instance._countTimer, null)
+  assert.equal(h.instance._pollTimer, null)
+
+  const earlyWake = global.__startTimeouts.at(-1)
+  h.instance.onHide()
+  assert.equal(h.instance._countTimer, null)
+  assert.equal(h.instance._pollTimer, null)
+  assert.equal(h.instance._startTimer, null)
+  earlyWake()
+  assert.equal(tokens(), 1, '离开后到点回调不得换码或重开计时')
+  assert.equal(h.instance._countTimer, null)
+  assert.equal(h.instance._pollTimer, null)
+
+  h.instance.onShow()
+  assert.equal(tokens(), 1, '未到点再次进入不得背后刷新 token')
+  assert.equal(h.instance._countTimer, null)
+  assert.equal(h.instance._pollTimer, null)
+  h.intervals.forEach((fn) => fn())
+  assert.equal(tokens(), 1)
+  assert.equal(polls(), 0)
+
+  h.instance._usableAt = h.clock.now + 2 * 3600000
+  global.__startTimeouts = []
+  h.instance._armUsableTimer()
+  global.__startTimeouts[0]()
+  assert.equal(tokens(), 1, '未到可用时间的分段等待不得换码')
+  assert.equal(h.instance._countTimer, null)
+  assert.equal(h.instance._pollTimer, null)
+
+  h.clock.now = h.instance._usableAt
+  global.__startTimeouts.at(-1)()
+  assert.equal(tokens(), 2, '到可用时间才重新取码')
+  assert.equal(h.instance.data.notStarted, false)
+  assert.ok(h.instance._countTimer)
+  assert.ok(h.instance._pollTimer)
+
+  h.instance.onUnload()
+  assert.equal(h.instance._countTimer, null)
+  assert.equal(h.instance._pollTimer, null)
+  assert.equal(h.instance._startTimer, null)
 })
 
 test('独立页 NoGo-3:onHide/onUnload 废在途,onShow 能发当前请求,旧响应不落屏', () => {

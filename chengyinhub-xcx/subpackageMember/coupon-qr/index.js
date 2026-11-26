@@ -41,6 +41,7 @@ Page({
     this._refreshing = false;
     this._tokenTask = null;
     this._retryAt = 0;
+    this._usableAt = 0;
     // 已渲染凭证的归属戳:undefined = 未打标(旧态/手工态,按同 owner 兼容)。
     this._codeOwner = undefined;
     this._codeCouponId = null;
@@ -69,6 +70,7 @@ Page({
     const historyId = String(this.data.couponHistoryId);
     if (this._sessionOwner !== undefined
         && (this._sessionOwner !== owner || this._sessionHistoryId !== historyId)) {
+      this._usableAt = 0;
       this.setData({ entryState: 'ready', useStatus: 0, useTimeText: '', coupon: {}, notStarted: false });
     }
     this._sessionOwner = owner;
@@ -79,6 +81,8 @@ Page({
     this._refreshing = false;
     // 同 owner+同券+后端 TTL 内:保留已显示的有效码(后台刷新续期,不清不闪);
     // 换 owner / 无法证明归属 / 已超 TTL:先下屏为 loading,拿到当前真实 token 才亮码。
+    // 等待壳已经知道开始时刻:不换 token,也不把 1s/5s 计时重新挂上。到点由 _beginUsable 启动。
+    if (this._holdForStart()) return;
     if (!this._keepRenderedCredential()) this._clearRenderedCredential();
     this.refreshToken();
     this.startCountdown();
@@ -142,6 +146,61 @@ Page({
     if (this._countTimer) { clearInterval(this._countTimer); this._countTimer = null; }
     if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = null; }
     if (this._startTimer) { clearTimeout(this._startTimer); this._startTimer = null; }
+  },
+
+  // 未到可用时间且开始时刻仍在未来:停掉倒计时和轮询,只续排到点唤醒。
+  _holdForStart() {
+    if (!(this.data.notStarted && this.data.useStatus == 0)) return false;
+    const at = this._usableAt || 0;
+    if (at > Date.now()) {
+      this.clearTimers();
+      this._armUsableTimer();
+      return true;
+    }
+    if (at) {
+      this._beginUsable();
+      return true;
+    }
+    return false;
+  },
+
+  // 长等待按最多 1 小时分段续期。分段回调只再排一次,不取 token、不挂 1s/5s。
+  _armUsableTimer() {
+    if (this._startTimer) { clearTimeout(this._startTimer); this._startTimer = null; }
+    if (!(this.data.notStarted && this.data.useStatus == 0)) return;
+    const at = this._usableAt || 0;
+    const now = Date.now();
+    if (!(at > now)) {
+      if (at) this._beginUsable();
+      return;
+    }
+    const remaining = at - now;
+    const delay = Math.min(Math.max(remaining, 1000), 3600000);
+    const reaches = remaining <= 3600000;
+    const epoch = this._epoch || 0;
+    const that = this;
+    const timer = setTimeout(function () {
+      if (epoch !== (that._epoch || 0) || that._startTimer !== timer) return;
+      that._startTimer = null;
+      if (!(that.data.notStarted && that.data.useStatus == 0)) return;
+      if (!reaches && (that._usableAt || 0) > Date.now()) {
+        that._armUsableTimer();
+        return;
+      }
+      that._beginUsable();
+    }, delay);
+    this._startTimer = timer;
+  },
+
+  // 可用时刻先撤下等待壳,再取码并启动倒计时与状态轮询。
+  _beginUsable() {
+    if (this._startTimer) { clearTimeout(this._startTimer); this._startTimer = null; }
+    this._usableAt = 0;
+    this._clearRenderedCredential();
+    if (this.data.notStarted) this.setData({ notStarted: false });
+    this.refreshToken();
+    this.startCountdown();
+    this.startPolling();
   },
 
   friendlyQrError(message, fallback) {
@@ -228,15 +287,15 @@ Page({
           that._codeCouponId = couponHistoryId;
           that._codeIssuedAt = patch.qrcodeUrl ? requestedAt : 0;
           that._codeTtlMs = patch.qrcodeUrl ? CREDENTIAL_TTL_MS : 0;
+          that._usableAt = patch.useStatus == 0 && patch.notStarted ? datetime.toTimestamp(d.startTime) : 0;
           that.setData(patch);
           if (patch.useStatus == 1 && wasUnused) that.onVerified();
           else if (patch.useStatus == 2) that.clearTimers();
           else if (patch.useStatus == 3) that.clearTimers();
-          // L09-103
-          // 还没到可用时间:不跑倒计时与状态轮询,只在开始时刻(最长 1 小时后再看一次)重新取码
+          // L09-103: 等待壳期间不跑 1s 倒计时、5s 轮询,也不在壳背后换 token。到可用时刻再启动。
           else if (patch.useStatus == 0 && patch.notStarted) {
             that.clearTimers();
-            that._startTimer = setTimeout(function () { that._startTimer = null; that.refreshToken(); that.startCountdown(); that.startPolling(); }, Math.min(Math.max(datetime.toTimestamp(d.startTime) - Date.now(), 1000), 3600000));
+            that._armUsableTimer();
           }
           else if (patch.useStatus == 0) { that.startCountdown(); that.startPolling(); }
         } else {
@@ -328,9 +387,14 @@ Page({
 
   startCountdown() {
     if (!this.requireOwner()) return;
+    if (this.data.notStarted) {
+      if (this._countTimer) { clearInterval(this._countTimer); this._countTimer = null; }
+      return;
+    }
     const that = this;
     if (this._countTimer) clearInterval(this._countTimer);
     this._countTimer = setInterval(() => {
+      if (that.data.notStarted) return;
       if (!that.requireOwner()) return;
       if (!that._codeBelongsToCurrentOwner()) { that.refreshToken(); return; }
       if (that.data.useStatus != 0) return;
@@ -357,6 +421,10 @@ Page({
 
   startPolling() {
     if (!this.requireOwner()) return;
+    if (this.data.notStarted) {
+      if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = null; }
+      return;
+    }
     const that = this;
     if (this._pollTimer) clearInterval(this._pollTimer);
     const epoch = this._epoch || 0;
@@ -367,6 +435,7 @@ Page({
       && owner === currentOwnerId()
       && String(that.data.couponHistoryId || '') === polledHistoryId;
     this._pollTimer = setInterval(() => {
+      if (that.data.notStarted) return;
       if (!stillCurrent()) return; // 离页/换代/换券的旧节拍不再发请求
       // 1 已核销、2 已过期都是终态:停止轮询,不得为终态券继续空转(与场景组件同口径)。
       if (that.data.useStatus != 0) { that.clearTimers(); return; }
