@@ -14,6 +14,7 @@ import com.chengyinhub.business.service.INotifyService;
 import com.chengyinhub.business.service.IPlayTeamService;
 import com.chengyinhub.business.service.IUmsMemberService;
 import com.chengyinhub.business.service.IWxContentSecurityService;
+import com.chengyinhub.business.service.support.ActivityPlayEntitlement;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -426,6 +427,48 @@ class PlayTeamServiceImplTest {
 
         assertEquals("队伍不存在", error.getMessage(), "错误口径不得用来探测私密队伍是否存在");
         verify(teamMapper, never()).insertPlayTeamMember(any());
+    }
+
+    @Test
+    void join_claimedSeatEntitlementAdmitsWithoutOwnPaidRegistration() {
+        ActivityPlayEntitlement entitlement = mock(ActivityPlayEntitlement.class);
+        ReflectionTestUtils.setField(service, "activityPlayEntitlement", entitlement);
+        when(entitlement.holds(MEMBER_ID, 9L)).thenReturn(true);
+        PlayTeam team = recruitingTeam();
+        team.setInviteCode("secure-invite");
+        team.setOwnerType(2);
+        team.setOwnerId(9L);
+        when(teamMapper.selectPlayTeamByInviteCode("secure-invite")).thenReturn(team);
+        when(blockMapper.existsBetween(LEADER_ID, MEMBER_ID)).thenReturn(0);
+        when(teamMapper.hasPaidRegistration(MEMBER_ID, 2, 9L)).thenReturn(0);
+        when(teamMapper.reserveSlot(TEAM_ID)).thenReturn(1);
+        when(teamMapper.selectPlayTeamById(TEAM_ID)).thenReturn(team);
+
+        service.join("secure-invite", MEMBER_ID);
+
+        verify(teamMapper).insertPlayTeamMember(any());
+        verify(entitlement).holds(MEMBER_ID, 9L);
+        verify(teamMapper, never()).hasPaidRegistration(MEMBER_ID, 2, 9L);
+    }
+
+    @Test
+    void join_entitlementRefusalStillRequiresATicket() {
+        ActivityPlayEntitlement entitlement = mock(ActivityPlayEntitlement.class);
+        ReflectionTestUtils.setField(service, "activityPlayEntitlement", entitlement);
+        when(entitlement.holds(MEMBER_ID, 9L)).thenReturn(false);
+        PlayTeam team = recruitingTeam();
+        team.setInviteCode("secure-invite");
+        team.setOwnerType(2);
+        team.setOwnerId(9L);
+        when(teamMapper.selectPlayTeamByInviteCode("secure-invite")).thenReturn(team);
+        when(blockMapper.existsBetween(LEADER_ID, MEMBER_ID)).thenReturn(0);
+
+        IPlayTeamService.TeamRejection error = assertThrows(IPlayTeamService.TeamRejection.class,
+                () -> service.join("secure-invite", MEMBER_ID));
+
+        assertEquals("TICKET_REQUIRED", error.getErrorCode());
+        verify(teamMapper, never()).reserveSlot(TEAM_ID);
+        verify(teamMapper, never()).hasPaidRegistration(any(), any(), any());
     }
 
     @Test

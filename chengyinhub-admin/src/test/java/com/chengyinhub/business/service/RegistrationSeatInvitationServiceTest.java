@@ -547,6 +547,43 @@ class RegistrationSeatInvitationServiceTest {
         }
     }
 
+    @Test
+    void fourSeatOrderAllowsOnePendingInvitePerOpenSeat() {
+        order.setOrderNum(4L);
+        SeatInvitationVO seat2 = service.invite(51L, create(null, "r-4a"));
+        SeatInvitationVO seat3 = service.invite(51L, create(null, "r-4b"));
+        SeatInvitationVO seat4 = service.invite(51L, create(null, "r-4c"));
+        assertEquals(Integer.valueOf(2), seat2.getSeatNo());
+        assertEquals(Integer.valueOf(3), seat3.getSeatNo());
+        assertEquals(Integer.valueOf(4), seat4.getSeatNo());
+        assertNotEquals(seat2.getToken(), seat3.getToken());
+        assertNotEquals(seat3.getToken(), seat4.getToken());
+        assertEquals(3, rows.size());
+        assertEquals(Long.valueOf(51L), rows.get(seat2.getInvitationId()).getOwnerMemberId());
+
+        SeatInvitationVO replay = service.invite(51L, create(null, "r-4c"));
+        assertEquals(seat4.getInvitationId(), replay.getInvitationId());
+        assertEquals(seat4.getToken(), replay.getToken());
+        assertTrue(replay.getReplayed());
+        assertEquals(3, rows.size());
+
+        ServiceException outsider = assertThrows(ServiceException.class,
+                () -> service.invite(99L, create(null, "r-4-outsider")));
+        assertEquals(Integer.valueOf(403), outsider.getCode());
+        assertEquals(3, rows.size());
+
+        service.claim(99L, claim(seat2.getToken(), "c-4a"));
+        assertEquals("PENDING", service.status(51L, seat3.getInvitationId()).getStatusLabel());
+        service.claim(100L, claim(seat3.getToken(), "c-4b"));
+        assertEquals("PENDING", service.status(51L, seat4.getInvitationId()).getStatusLabel());
+        assertEquals("CLAIMED", service.status(99L, seat2.getInvitationId()).getStatusLabel());
+
+        ServiceException full = assertThrows(ServiceException.class,
+                () -> service.invite(51L, create(null, "r-4d")));
+        assertEquals(Integer.valueOf(409), full.getCode());
+        assertEquals(3, rows.size());
+    }
+
     private SeatInvitationCreateRequest create(Integer seatNo, String requestId) {
         SeatInvitationCreateRequest request = new SeatInvitationCreateRequest();
         request.setRegistrationId(31L);
