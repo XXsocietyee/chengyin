@@ -2,7 +2,7 @@
 const modal = require('../../utils/modal.js');
 const app = getApp();
 const { sendUiStateRequest } = require('../../utils/ui-state-request.js');
-const { bizFailureMessage } = require('../../utils/response-shape.js');
+const { safeUserMessage } = require('../../utils/transport/safe-user-message.js');
 const { formatRefundDeadline } = require('../../utils/order-status.js');
 const { toTimestamp } = require('../../utils/datetime.js');
 
@@ -23,6 +23,20 @@ function isRecord(value) {
 function blockerList(value) {
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !item.trim())) return null;
   return value.map((item) => item.trim());
+}
+
+// 业务失败才展示后端文案;Java 异常、SQL、errMsg 退回场景兜底,不把原文给用户。
+function failureText(res, fallback) {
+  if (isOk(res)) return fallback;
+  return safeUserMessage(res, fallback);
+}
+
+const QUIET_STATUSES = ['ELIGIBLE', 'BLOCKED', 'PENDING'];
+
+// 短暂离开后的回读。已有资格、阻断或冷静期卡片时不整页转圈;账号变了则整页重读。
+function quietKeep(page, memberId) {
+  return QUIET_STATUSES.includes(page.data.status)
+    && !(page._statusMemberId && page._statusMemberId !== memberId);
 }
 
 // 1-39:后端 Date 无 @JsonFormat,Spring Boot 默认下发 ISO 串("2026-09-24T10:30:00.000+08:00");
@@ -93,6 +107,7 @@ const methods = {
   _readAuthOutcome(res, statusCode) {
     const code = Number(statusCode || res && (res.statusCode || res.code));
     if (code !== 401 && code !== 403) return false;
+    this._statusMemberId = '';
     this.dispose();
     this.setData({ status: code === 401 ? 'LOGIN_REQUIRED' : 'DENIED', blockers: [],
       phone: '', phoneMasked: '', smscode: '', confirmed: false, canApply: false, verificationMethod: 'UNAVAILABLE',
@@ -120,43 +135,50 @@ const methods = {
     this.setData({ status: 'ERROR', statusError: message || '没能确认注销条件，请稍后重试', blockers: [] });
   },
 
-  loadStatus() {
+  loadStatus(options) {
+    const quiet = !!(options && options.quiet);
     const memberId = String(app.getUserID && app.getUserID() || '');
     if (!(Number(memberId) > 0)) { this._readAuthOutcome({ code: 401 }); return; }
     const token = (this._statusToken || 0) + 1;
     this._statusToken = token;
+    const keepSnapshot = quiet && quietKeep(this, memberId);
     // L10-201(业主 2026-11-24 默认项 A):同一次填写只用一个申请编号;重新加载状态才换新编号,网络失败后的重试复用原编号。
-    this._applyRequestId = '';
-    this.setData({ status: 'LOADING', statusError: '', blockers: [], cancelError: '', verificationMethod: 'UNAVAILABLE', canApply: false });
+    // 短暂离开后的安静回读不算新的一次填写。
+    if (!keepSnapshot) this._applyRequestId = '';
+    if (!keepSnapshot) this.setData({ status: 'LOADING', statusError: '', blockers: [], cancelError: '', verificationMethod: 'UNAVAILABLE', canApply: false });
     sendUiStateRequest(app, '/api/user/deregister/status', {
       method: 'GET',
       success: (res) => {
         if (!this._readCurrent(token, memberId, res)) return;
         const data = isOk(res) && isRecord(res.data) ? res.data : null;
         if (!data || typeof data.status !== 'string') {
-          this._statusFailure(bizFailureMessage(res, '注销状态暂时无法读取，请重试'));
+          if (keepSnapshot) return;
+          this._statusFailure(failureText(res, '注销状态暂时无法读取，请重试'));
           return;
         }
         if (data.status === 'PENDING') {
+          this._statusMemberId = memberId;
           this.setData(Object.assign(pendingPatch(data), { statusError: '' }));
           return;
         }
         if (STATUS_AFTER_APPLICATION.includes(data.status)) {
-          this.loadPrecheck(token);
+          this.loadPrecheck(token, { quiet: keepSnapshot });
           return;
         }
+        if (keepSnapshot) return;
         this._statusFailure('账号注销状态待确认，请稍后重试');
       },
-      fail: (res, code) => { if (this._readCurrent(token, memberId, res, code)) this._statusFailure('网络异常，注销状态没有读取成功'); },
-      successStatusAbnormal: (res, code) => { if (this._readCurrent(token, memberId, res, code)) this._statusFailure('服务暂时不可用，请稍后重试'); },
+      fail: (res, code) => { if (this._readCurrent(token, memberId, res, code) && !keepSnapshot) this._statusFailure('网络异常，注销状态没有读取成功'); },
+      successStatusAbnormal: (res, code) => { if (this._readCurrent(token, memberId, res, code) && !keepSnapshot) this._statusFailure('服务暂时不可用，请稍后重试'); },
     });
   },
 
-  loadPrecheck(existingToken) {
+  loadPrecheck(existingToken, options) {
     const memberId = String(app.getUserID && app.getUserID() || '');
     if (!(Number(memberId) > 0)) { this._readAuthOutcome({ code: 401 }); return; }
     const token = existingToken == null ? (this._statusToken || 0) + 1 : existingToken;
     this._statusToken = token;
+    const keepSnapshot = !!(options && options.quiet) && quietKeep(this, memberId);
     if (existingToken == null) this.setData({ status: 'LOADING', statusError: '', blockers: [] });
     sendUiStateRequest(app, '/api/user/deregister/precheck', {
       method: 'POST',
@@ -166,16 +188,22 @@ const methods = {
         const blockers = data ? blockerList(data.blockers) : null;
         if (!data || (data.status !== 'ELIGIBLE' && data.status !== 'BLOCKED') || blockers === null
           || (data.status === 'ELIGIBLE' && blockers.length) || (data.status === 'BLOCKED' && !blockers.length)) {
-          this._statusFailure(bizFailureMessage(res, '注销条件返回异常，请稍后重试'));
+          if (keepSnapshot) return;
+          this._statusFailure(failureText(res, '注销条件返回异常，请稍后重试'));
           return;
         }
         const verificationMethod = data.verificationMethod == null ? 'SMS'
           : ['SMS', 'WECHAT', 'UNAVAILABLE'].includes(data.verificationMethod) ? data.verificationMethod : 'UNAVAILABLE';
-        this.setData({ status: data.status, blockers, verificationMethod: data.status === 'ELIGIBLE' ? verificationMethod : 'UNAVAILABLE',
-          statusError: '', canceling: false, cancelError: '', phone: '', phoneMasked: '', smscode: '', confirmed: false, canApply: false });
+        // 仍是可注销、且人没换:留下验证码、尾号和确认勾选。变成阻断则必须展示阻断项,不能接着申请。
+        const preserveForm = keepSnapshot && this.data.status === 'ELIGIBLE' && data.status === 'ELIGIBLE';
+        const patch = { status: data.status, blockers, verificationMethod: data.status === 'ELIGIBLE' ? verificationMethod : 'UNAVAILABLE',
+          statusError: '', canceling: false, cancelError: '' };
+        if (!preserveForm) Object.assign(patch, { phone: '', phoneMasked: '', smscode: '', confirmed: false, canApply: false, smsSent: false });
+        this._statusMemberId = memberId;
+        this.setData(patch, () => { if (preserveForm) this.refreshApplyState(); });
       },
-      fail: (res, code) => { if (this._readCurrent(token, memberId, res, code)) this._statusFailure('网络异常，注销条件没有核验成功'); },
-      successStatusAbnormal: (res, code) => { if (this._readCurrent(token, memberId, res, code)) this._statusFailure('服务暂时不可用，请稍后重试'); },
+      fail: (res, code) => { if (this._readCurrent(token, memberId, res, code) && !keepSnapshot) this._statusFailure('网络异常，注销条件没有核验成功'); },
+      successStatusAbnormal: (res, code) => { if (this._readCurrent(token, memberId, res, code) && !keepSnapshot) this._statusFailure('服务暂时不可用，请稍后重试'); },
     });
   },
 
@@ -207,7 +235,7 @@ const methods = {
         if (token !== this._smsToken) return;
         const phone = isOk(res) && isRecord(res.data) && typeof res.data.phone === 'string' ? res.data.phone.trim() : '';
         if (!phone) {
-          this.setData({ smsSending: false, smsSent: false, smsError: bizFailureMessage(res, '请先绑定手机号后再获取验证码') });
+          this.setData({ smsSending: false, smsSent: false, smsError: failureText(res, '请先绑定手机号后再获取验证码') });
           return;
         }
         sendUiStateRequest(app, '/api/sms/send', {
@@ -219,7 +247,7 @@ const methods = {
               this.setData({ phone, phoneMasked: phone.slice(-4), smsSending: false, smsSent: true, smsError: '' });
               return;
             }
-            this.setData({ smsSending: false, smsSent: false, smsError: (smsRes && smsRes.msg) || '验证码发送失败，请重试' });
+            this.setData({ smsSending: false, smsSent: false, smsError: failureText(smsRes, '验证码发送失败，请重试') });
           },
           fail: () => { if (token === this._smsToken) this.setData({ smsSending: false, smsSent: false, smsError: '网络异常，验证码没有发送' }); },
           successStatusAbnormal: () => { if (token === this._smsToken) this.setData({ smsSending: false, smsSent: false, smsError: '服务暂时不可用，验证码没有发送' }); },
@@ -261,10 +289,13 @@ const methods = {
         let settled = false;
         const finish = (value, error) => {
           if (settled) return;
-          settled = true; clearTimeout(timer);
+          settled = true;
+          clearTimeout(timer);
+          if (this._wechatConfirmTimer === timer) this._wechatConfirmTimer = null;
           if (error) reject(error); else resolve(value);
         };
         const timer = setTimeout(() => finish(null, new Error('WECHAT_CONFIRMATION_FAILED')), 15000);
+        this._wechatConfirmTimer = timer;
         try {
           wx.login({ timeout: 10000,
             success: res => typeof res.code === 'string' && res.code.trim()
@@ -290,7 +321,7 @@ const methods = {
             this.setData({ status: 'BLOCKED', blockers, submitting: false, applyError: '' });
             return;
           }
-          this.setData({ submitting: false, applyError: bizFailureMessage(res, '注销申请没有提交成功，请重试') });
+          this.setData({ submitting: false, applyError: failureText(res, '注销申请没有提交成功，请重试') });
           this._reconcileApply();
         },
         // F-R2S-07:回包丢失时申请可能已在服务端生效(冷静期已开始、会话已失效),先回查真实状态。
@@ -355,7 +386,7 @@ const methods = {
               this.loadPrecheck();
               return;
             }
-            this.setData({ canceling: false, cancelError: bizFailureMessage(res, '撤销申请没有完成，请重试') });
+            this.setData({ canceling: false, cancelError: failureText(res, '撤销申请没有完成，请重试') });
           },
           fail: () => { if (token === this._cancelToken) this.setData({ canceling: false, cancelError: '网络异常，撤销申请没有完成' }); },
           successStatusAbnormal: () => { if (token === this._cancelToken) this.setData({ canceling: false, cancelError: '服务暂时不可用，撤销申请没有完成' }); },
@@ -366,6 +397,10 @@ const methods = {
   },
 
   dispose() {
+    if (this._wechatConfirmTimer) {
+      clearTimeout(this._wechatConfirmTimer);
+      this._wechatConfirmTimer = null;
+    }
     this._readLoginEpoch = (this._readLoginEpoch || 0) + 1;
     this._readLoginPending = false;
     this._statusToken = (this._statusToken || 0) + 1;

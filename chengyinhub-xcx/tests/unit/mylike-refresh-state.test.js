@@ -48,17 +48,80 @@ test('帖文收藏刷新 502 保留旧卡片与操作，并在 complete 后停�
   assert.deepEqual(vm.data.postList, previous);
   assert.equal(vm.data.refreshing, false);
   assert.equal(vm.data.errorMsg, '');
+  assert.equal(vm.data.refreshError, '服务暂不可用，请稍后重试');
   assert.equal(sandbox.pullStops, 0);
 
   sandbox.requests[1].complete();
 
   assert.equal(vm.data.loading, false);
+  assert.deepEqual(vm.data.postList, previous);
+  assert.equal(vm.data.refreshError, '服务暂不可用，请稍后重试');
   assert.equal(sandbox.pullStops, 1);
   const view = fs.readFileSync(VIEW_PATH, 'utf8');
   assert.doesNotMatch(view, /<cy-inline-error[^>]*staleError/);
+  assert.match(view, /<cy-inline-error wx:if="\{\{refreshError\}\}" kind="data" title="\{\{refreshError\}\}" action="重试" bind:action="refreshData"/);
   assert.match(view, /bind:detail="goPost"/);
   assert.match(view, /bind:more="onPostMore"/);
   assert.match(view, /bind:select="onPostMoreSelect"/);
+});
+
+test('返回收藏页仍刷新第一页，回包前不摘卡片，失败后留着卡片并可重试', () => {
+  const vm = loadPage();
+  const previous = [{ id: 11, pics: '' }];
+  vm.onLoad({});
+  sandbox.requests[0].success({ code: '200', data: { rows: previous, hasMore: true } });
+  sandbox.requests[0].complete();
+  vm.onShow();
+  assert.equal(sandbox.requests.length, 1);
+
+  vm.onShow();
+
+  assert.equal(sandbox.requests.length, 2);
+  assert.equal(sandbox.requests[1].data.pageNum, 1);
+  assert.equal(sandbox.requests[1].data.favorite_only, 1);
+  assert.deepEqual(vm.data.postList.map(row => row.id), [11]);
+  assert.equal(vm.data.refreshError, '');
+
+  sandbox.requests[1].fail({});
+  assert.deepEqual(vm.data.postList.map(row => row.id), [11]);
+  assert.equal(vm.data.refreshError, '收藏帖文加载失败');
+  sandbox.requests[1].complete();
+  assert.equal(vm.data.loading, false);
+  assert.deepEqual(vm.data.postList.map(row => row.id), [11]);
+
+  vm.refreshData();
+  assert.equal(sandbox.requests.length, 3);
+  assert.equal(sandbox.requests[2].data.pageNum, 1);
+  assert.equal(vm.data.refreshError, '');
+  assert.deepEqual(vm.data.postList.map(row => row.id), [11]);
+  sandbox.requests[2].success({ code: '200', data: { rows: [{ id: 12, pics: '' }], hasMore: false } });
+  sandbox.requests[2].complete();
+  assert.deepEqual(vm.data.postList.map(row => row.id), [12]);
+  assert.equal(vm.data.refreshError, '');
+});
+
+test('主题和据点刷新失败时留着已有卡片并给出重试', () => {
+  const topics = loadPage();
+  topics.setData({ activeFavoriteTab: 'topics', ztList1: [{ id: 3, name: '原主题' }] });
+  topics._hasShown = true;
+  topics.onShow();
+  assert.equal(sandbox.requests.at(-1).data.pageNum, 1);
+  assert.equal(topics.data.ztList1[0].id, 3);
+  sandbox.requests.at(-1).fail({});
+  assert.equal(topics.data.ztList1[0].id, 3);
+  assert.equal(topics.data.refreshError, '喜欢列表加载失败');
+
+  sandbox.requests.length = 0;
+  const nodes = loadPage();
+  nodes.setData({ activeFavoriteTab: 'nodes', nodeList: [{ id: 9, name: '原据点' }] });
+  nodes._hasShown = true;
+  nodes.onShow();
+  assert.equal(sandbox.requests.at(-1).url, '/api/city/nodes/favorites');
+  assert.equal(nodes.data.nodeList[0].id, 9);
+  sandbox.requests.at(-1).successStatusAbnormal({ statusCode: 502 });
+  assert.equal(nodes.data.nodeList[0].id, 9);
+  assert.equal(nodes.data.refreshError, '服务暂不可用，请稍后重试');
+  assert.equal(nodes.data.errorMsg, '');
 });
 
 function loadPage() {

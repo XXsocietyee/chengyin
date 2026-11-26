@@ -10,6 +10,8 @@ const discoverNav = require('../../../utils/discover-nav.js');
 const { storeCard } = require('../../../utils/discover-store-card.js');
 const community = require('../../../utils/community-post-api.js').createClient(app, wx);
 const FEED_PAGE_SIZE = 20;
+// 切 tab、从选图或子页马上回来:30 秒内不重拉俱乐部首页和未读数。下拉刷新不受这个窗口限制。
+const SHOW_REFRESH_MS = 30000;
 const clubPostRepost = require('../../../utils/club-post-repost.js');
 const postFeedActions = require('../../../utils/post-feed-actions.js');
 
@@ -18,6 +20,14 @@ const postFeedActions = require('../../../utils/post-feed-actions.js');
 const LEVEL_LABELS = ['', 'L1 新手', 'L2 稳定', 'L3 成熟', 'L4 城市运营者', 'L5 区域策划方'];
 function levelTextOf(lv) { return (lv && LEVEL_LABELS[lv]) ? LEVEL_LABELS[lv] : (lv ? ('Lv.' + lv) : ''); }
 function isOkRes(res) { return !!(res && (res.code == 200 || res.code == '200')); }
+// null、空串、布尔和缺字段都不能当成 0。只有明确的非负整数才是未读数。
+function unreadTotal(data) {
+  var raw = data;
+  if (raw && typeof raw === 'object') raw = raw.total != null ? raw.total : raw.unread;
+  if (typeof raw === 'number') return Number.isInteger(raw) && raw >= 0 ? raw : null;
+  if (typeof raw === 'string' && /^(0|[1-9]\d*)$/.test(raw.trim())) return Number(raw.trim());
+  return null;
+}
 function requestError(res, fallback) {
   return app.getRequestErrorMessage ? app.getRequestErrorMessage(res, fallback) : fallback;
 }
@@ -389,9 +399,24 @@ Page({
     }
     else if (this.data.feedLoginRequired && app.getUserID() && this.data.activeTopTab === 'feed' && !this._feedLoading) this.loadFeed();
     if (this._skipInitialShow) this._skipInitialShow = false;
-    else this.loadClubHome();
-    this.loadImUnread();
+    else if (this._clubHomeStale()) this.loadClubHome();
+    if (this._imUnreadStale()) this.loadImUnread();
     this.loadStoreCard();
+  },
+
+  // 账号变了、上次没成功、或超过窗口,才重拉。加载中不另起一轮。
+  _clubHomeStale() {
+    const owner = String(typeof app.getUserID === 'function' ? app.getUserID() || '' : '');
+    if (this._clubHomeOwner === undefined || owner !== this._clubHomeOwner) return true;
+    if (this._clubHomeLoading) return false;
+    if (this.data.clubsState !== 'ready' && this.data.clubsState !== 'empty') return true;
+    return !this._clubHomeLoadedAt || (Date.now() - this._clubHomeLoadedAt) >= SHOW_REFRESH_MS;
+  },
+
+  _imUnreadStale() {
+    const owner = String(typeof app.getUserID === 'function' ? app.getUserID() || '' : '');
+    if (!owner || owner !== (this._imUnreadOwner || '')) return true;
+    return !this._imUnreadAt || (Date.now() - this._imUnreadAt) >= SHOW_REFRESH_MS;
   },
 
   onHide() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1; merchantTheme.merchantPageRestore(); },
@@ -401,6 +426,7 @@ Page({
     this._feedRequestId = (this._feedRequestId || 0) + 1;
     this._clubHomeRequestId = (this._clubHomeRequestId || 0) + 1;
     this._merchantInfoRequestId = (this._merchantInfoRequestId || 0) + 1;
+    this._imUnreadRequestId = (this._imUnreadRequestId || 0) + 1;
     this._feedLoading = false;
     this._clubHomeLoading = false;
     this._merchantInfoLoading = false;
@@ -413,6 +439,7 @@ Page({
       this._clubHomeRequestId = (this._clubHomeRequestId || 0) + 1;
       this._clubHomeLoading = false;
       this._clubHomeOwner = owner;
+      this._clubHomeLoadedAt = 0;
       this._nearbyAll = [];
       this.setData({ myClubs: [], joinedClubs: [], nearbyClubs: [], clubsLoaded: false, clubsState: 'idle' });
     }
@@ -471,6 +498,7 @@ Page({
         joined.forEach(function (c) { c.isJoined = true; });
         var nearby = d.nearby.map(normalizeClub);
         that._clubHomeLoading = false;
+        that._clubHomeLoadedAt = Date.now();
         that._nearbyAll = nearby; pageMotion.enter(that, 'pmClubs', { once: true }); // C-01:切回 tab 的后台刷新不再把已在屏上的卡片藏起来重播
         that.setData({
           myClubs: owned,
@@ -494,9 +522,11 @@ Page({
     const that = this;
     const requestId = (this._clubHomeRequestId || 0) + 1;
     this._clubHomeRequestId = requestId;
+    this._clubHomeLoading = true;
     const isCurrent = () => !that._unloaded && requestId === that._clubHomeRequestId && !String(app.getUserID() || '');
     const loginEntry = () => {
       if (!isCurrent()) return;
+      that._clubHomeLoading = false;
       that.setData({ clubsLoginRequired: false, clubsPermissionDenied: false, clubsError: true,
         clubsState: 'error', clubsErrorText: '俱乐部加载失败，请重试' });
     };
@@ -508,6 +538,8 @@ Page({
         if (!isCurrent()) return;
         if (!isOkRes(res) || !isRecordList(res.data)) return loginEntry();
         const nearby = res.data.map(normalizeClub);
+        that._clubHomeLoading = false;
+        that._clubHomeLoadedAt = Date.now();
         that._nearbyAll = nearby;
         that.setData({ myClubs: [], joinedClubs: [], nearbyClubs: nearby,
           clubsLoaded: true, clubsError: false, clubsLoginRequired: false, clubsPermissionDenied: false,
@@ -540,13 +572,30 @@ Page({
     });
   },
 
-  // 站内消息未读红点
+  // 站内消息未读红点。拿不到整数就保持上次的数,不用 0 假装「没有未读」。
   loadImUnread() {
-    if (typeof app.getUserID !== 'function' || !app.getUserID()) return;
+    var owner = String(typeof app.getUserID === 'function' ? app.getUserID() || '' : '');
+    if (!owner) {
+      this._imUnreadAt = 0;
+      this._imUnreadOwner = '';
+      if (this.data.imUnread) this.setData({ imUnread: 0 });
+      return;
+    }
     var that = this;
+    var requestId = (this._imUnreadRequestId || 0) + 1;
+    this._imUnreadRequestId = requestId;
     app.sendRequest({
       url: '/api/im/unread-total', method: 'POST', hideLoading: true,
-      success: function (res) { if (res && res.code == 200) that.setData({ imUnread: res.data || 0 }); },
+      success: function (res) {
+        if (that._unloaded || requestId !== that._imUnreadRequestId) return;
+        if (owner !== String(app.getUserID() || '')) return;
+        if (!(res && (res.code == 200 || res.code == '200'))) return;
+        var count = unreadTotal(res.data);
+        if (count == null) return;
+        that._imUnreadAt = Date.now();
+        that._imUnreadOwner = owner;
+        if (count !== that.data.imUnread) that.setData({ imUnread: count });
+      },
       fail: function () {},
     });
   },

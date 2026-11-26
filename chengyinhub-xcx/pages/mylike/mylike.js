@@ -5,6 +5,11 @@ const community = require('../../utils/community-post-api.js').createClient(app,
 const { isRecordList } = require('../../utils/response-shape.js');
 const policy = require('../../utils/identity/identity-policy.js');
 const { isLoginRequired, retryLogin } = require('../../utils/session/login-reload.js');
+function userText(res, fallback) {
+  return app && typeof app.getRequestErrorMessage === 'function'
+    ? app.getRequestErrorMessage(res, fallback)
+    : fallback;
+}
 const merchantTheme = require('../../utils/merchant-theme.js');
 
 Page({
@@ -28,6 +33,7 @@ Page({
     loading: false,
     refreshing: false,
     errorMsg: '',
+    refreshError: '', // 已有收藏时刷新失败的重试文案;空列表仍走 errorMsg
     loginRequired: false,   // PR10 F-W1-12:读失败是未登录(无会话 / 401)⇒ 登录引导,不与加载失败一起留白
     hasMore1: true,
     hasMorePosts: true,
@@ -71,7 +77,8 @@ Page({
       this._hasShown = true;
       return;
     }
-    // 返回页面后刷新数据；首展交给 onLoad，避免同一页并发两次 page=1。
+    // 返回页面后仍刷新第一页；首展交给 onLoad，避免同一页并发两次 page=1。
+    // 回包前不摘掉已有卡片。刷新失败则留下这些卡片，并给出重试。
     // 在途列表期间返回:排队一次刷新,由当前请求 complete 出队(刷新归属本次返回,不记在列表 handler 名下)。
     if (this.data.loading) {
       this._favoriteShowRefresh = { owner: this._favoriteOwner, generation: this._favoriteGeneration, run: () => this.refreshData() };
@@ -96,7 +103,7 @@ Page({
     this._favoriteLoadedPages = Object.create(null);
     this._favoriteRemovals = { posts: Object.create(null), topics: Object.create(null), nodes: Object.create(null) };
     this._unlikePrompts = Object.create(null); this._nodeUnfavoriteRequests = Object.create(null);
-    this.setData({ postList: [], ztList1: [], nodeList: [], loading: false, refreshing: false, errorMsg: '', loginRequired: false,
+    this.setData({ postList: [], ztList1: [], nodeList: [], loading: false, refreshing: false, errorMsg: '', refreshError: '', loginRequired: false,
       hasMore1: true, hasMorePosts: true, pageConfig: { pageNum: 1, pageSize: 10 } });
     return true;
   },
@@ -147,7 +154,7 @@ Page({
     const tab = that.data.activeFavoriteTab;
     const currentList = tab === 'posts' ? that.data.postList : tab === 'nodes' ? that.data.nodeList : that.data.ztList1;
     const refreshing = that.data.pageConfig.pageNum === 1 && currentList.length > 0;
-    that.setData({ loading: true, refreshing: refreshing, errorMsg: '', loginRequired: false });
+    that.setData({ loading: true, refreshing: refreshing, errorMsg: '', refreshError: '', loginRequired: false });
     
     if (tab === 'posts') that.getPostFavoriteList(stopPullAfterComplete);
     else if (tab === 'nodes') that.getNodeFavoriteList(stopPullAfterComplete);
@@ -182,7 +189,8 @@ Page({
       const message = app.getRequestErrorMessage(res, fallback);
       that.setData({ pageConfig: { pageNum: previousPage, pageSize: pageConfig.pageSize } });
       that.setData({ refreshing: false, errorMsg: hasOldContent ? '' : message,
-        loginRequired: !hasOldContent && isLoginRequired(app, res, statusCode) });
+        loginRequired: !hasOldContent && isLoginRequired(app, res, statusCode),
+        refreshError: hasOldContent && pageConfig.pageNum === 1 ? message : '' });
     };
     community.request({
       hideLoading: true,
@@ -204,7 +212,7 @@ Page({
           });
           loadedPages.posts = pageConfig.pageNum;
           const postList = pageConfig.pageNum === 1 ? rows : that.data.postList.concat(rows);
-          that.setData({ postList: postList, hasMorePosts: res.data.hasMore === true, errorMsg: '' });
+          that.setData({ postList: postList, hasMorePosts: res.data.hasMore === true, errorMsg: '', refreshError: '' });
         } else finishLoadError(res, '收藏帖文加载失败');
       },
       fail: function (res, statusCode) {
@@ -249,12 +257,14 @@ Page({
         that.setData({
           refreshing: false,
           errorMsg: '',
+          refreshError: pageConfig.pageNum === 1 ? message : '',
         });
       } else {
         that.setData({
           refreshing: false,
           errorMsg: message,
           loginRequired: isLoginRequired(app, res, statusCode),
+          refreshError: '',
         });
       }
     };
@@ -283,12 +293,14 @@ Page({
               ztList1: list,
               hasMore1: res.data.rows.length >= pageConfig.pageSize,
               errorMsg: '',
+              refreshError: '',
             });
           } else {
             that.setData({ 
               ztList1: [...that.data.ztList1, ...list],
               hasMore1: res.data.rows.length >= pageConfig.pageSize,
               errorMsg: '',
+              refreshError: '',
             });
           }
         } else {
@@ -328,8 +340,8 @@ Page({
     const hasOldContent = that.data.nodeList.length > 0;
     const finishLoadError = function (res, fallback, statusCode) {
       const message = app.getRequestErrorMessage(res, fallback);
-      if (hasOldContent) that.setData({ refreshing: false, errorMsg: '' });
-      else that.setData({ refreshing: false, errorMsg: message, loginRequired: isLoginRequired(app, res, statusCode) });
+      if (hasOldContent) that.setData({ refreshing: false, errorMsg: '', refreshError: message });
+      else that.setData({ refreshing: false, errorMsg: message, loginRequired: isLoginRequired(app, res, statusCode), refreshError: '' });
     };
     app.sendRequest({
       hideLoading: true,
@@ -340,7 +352,7 @@ Page({
         if (!isCurrent()) return;
         if (res && res.code == '200' && isRecordList(res.data)) {
           const rows = res.data.map(function (row) { return Object.assign({}, row, { id: row.poiId }); });
-          that.setData({ nodeList: that._filterFavoriteRead('nodes', rows, removalVersion), errorMsg: '' });
+          that.setData({ nodeList: that._filterFavoriteRead('nodes', rows, removalVersion), errorMsg: '', refreshError: '' });
         } else {
           finishLoadError(res, '收藏加载失败');
         }
@@ -409,7 +421,7 @@ Page({
               // 回包说仍在收藏(并发下被 toggle 回来):不摘卡,重读列表对齐
               request.unknown = true;
             } else {
-              toast((res && res.msg) || '操作失败');
+              toast(userText(res, '操作失败'));
             }
           },
           fail: function () {
@@ -562,7 +574,7 @@ Page({
                 const ztList1 = that.data.ztList1.filter(topic => String(topic.id) !== requestKey);
                 that.setData({ ztList1 });
               } else {
-                toast(res.msg || '操作失败');
+                toast(userText(res, '操作失败'));
               }
             },
             fail: function (res) {
@@ -629,7 +641,7 @@ Page({
       success: (res) => {
         if (!isCurrent()) return;
         if (!res || res.code != '200') {
-          toast((res && res.msg) || '操作失败');
+          toast(userText(res, '操作失败'));
           return;
         }
         this._recordFavoriteRemoval('posts', requestKey);

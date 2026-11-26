@@ -27,6 +27,7 @@ function loadPage() {
   const timers = []
   const clearedTimers = new Set()
   const images = []
+  const imageOptions = []
   const masks = []
   const session = { owner: 7, token: 'unit-session-a', nickname: '', avatar: '' }
   const app = {
@@ -35,7 +36,7 @@ function loadPage() {
     getAuthorization: () => session.token,
     setNickname(value) { session.nickname = value }, setAvatar(value) { session.avatar = value },
     tips() {},
-    chooseImage(callback) { images.push(callback) },
+    chooseImage(callback, count, options) { images.push(callback); imageOptions.push(options || null) },
     // W10b #25 头像审核回执是独立的只读旁路,另记一处,不打乱资料读写请求的顺序断言。
     sendRequest(options) { (options.url === '/api/user/profile/review' ? reviewReads : requests).push(options) },
   }
@@ -47,6 +48,7 @@ function loadPage() {
     require(request) {
       if (request === '../../utils/response-shape.js') return require('../../utils/response-shape.js')
       if (request === '../../utils/form-state.js') return require('../../utils/form-state.js')
+      if (request === '../../utils/transport/safe-user-message.js') return require('../../utils/transport/safe-user-message.js')
       if (request === './nickname-check.js') return require('../../pages/gerenziliao/nickname-check.js')
       if (request === '../../utils/profile-review.js') return require('../../utils/profile-review.js')
       // 2026-10-27 L08 G-5:资料保存成功广播身份变化(纯内存模块,用真身)
@@ -69,7 +71,7 @@ function loadPage() {
     applyPatch(this.data, patch)
     if (callback) callback()
   }
-  return { page, requests, reviewReads, toasts, backs, timers, clearedTimers, session, images, masks }
+  return { page, requests, reviewReads, toasts, backs, timers, clearedTimers, session, images, imageOptions, masks }
 }
 
 function assertStateContract(wxml, jsonText) {
@@ -122,6 +124,66 @@ test('个人资料未知值不会伪装为空；失败可重试且保留最后�
   assert.equal(stale.page.data.refreshing, false)
   assert.equal(stale.page.data.userInfo.name, '已确认昵称')
   assert.equal(stale.page.data.loadErrorKind, 'data')
+})
+
+test('头像上传中保存保持禁用，结束或失败后按 canSave 恢复，期间不提交资料', () => {
+  const updates = (h) => h.requests.filter((item) => item.url === '/api/user/update')
+  const ready = loadPage()
+  ready.page.onLoad({})
+  ready.requests[0].success({ code: 200, data: { name: '城市玩家', avatar: 'old-avatar' } })
+  assert.equal(ready.page.data.canSave, true)
+
+  ready.page.uploadPic()
+  const started = ready.imageOptions[0]
+  started.onUploadStart(['wxfile://tmp.jpg'])
+  assert.equal(ready.page.data.avatarUploading, true)
+  assert.equal(ready.page.data.canSave, false)
+  ready.page.openPop4()
+  ready.page.setData({ tempName: '城市玩家二', nicknameState: '' })
+  ready.page.confirm4()
+  assert.equal(ready.page.data.userInfo.name, '城市玩家二')
+  assert.equal(ready.page.data.canSave, false, '上传中改昵称也不能把保存重新打开')
+  ready.page.saveInfo()
+  ready.page.data.canSave = true
+  ready.page.saveInfo()
+  assert.equal(updates(ready).length, 0, '上传中的点击不能提交资料')
+
+  assert.equal(started.onUploadDone({ ok: true }), false)
+  assert.equal(ready.page.data.avatarUploading, false)
+  assert.equal(ready.page.data.canSave, true)
+  ready.images[0](['https://cdn.example/new.jpg'])
+  assert.equal(ready.page.data.userInfo.avatar, 'https://cdn.example/new.jpg')
+  ready.page.saveInfo()
+  assert.equal(updates(ready).length, 1)
+
+  const failed = loadPage()
+  failed.page.onLoad({})
+  failed.requests[0].success({ code: 200, data: { name: '城市玩家', avatar: 'old-avatar' } })
+  failed.page.uploadPic()
+  const failing = failed.imageOptions[0]
+  failing.onUploadStart(['wxfile://tmp-bad.jpg'])
+  assert.equal(failed.page.data.avatarSrc, 'wxfile://tmp-bad.jpg')
+  assert.equal(failed.page.data.canSave, false)
+  failed.page.saveInfo()
+  assert.equal(updates(failed).length, 0)
+  assert.equal(failing.onUploadDone({ ok: false, failures: [] }), false)
+  assert.equal(failed.page.data.avatarUploading, false)
+  assert.equal(failed.page.data.avatarSrc, 'old-avatar')
+  assert.equal(failed.page.data.canSave, true)
+  failed.page.saveInfo()
+  assert.equal(updates(failed).length, 1)
+
+  const blank = loadPage()
+  blank.page.onLoad({})
+  blank.requests[0].success({ code: 200, data: { name: '' } })
+  assert.equal(blank.page.data.canSave, false)
+  blank.page.uploadPic()
+  blank.imageOptions[0].onUploadStart(['wxfile://tmp.jpg'])
+  blank.imageOptions[0].onUploadDone({ ok: true })
+  assert.equal(blank.page.data.avatarUploading, false)
+  assert.equal(blank.page.data.canSave, false)
+  blank.page.saveInfo()
+  assert.equal(updates(blank).length, 0)
 })
 
 test('保存防重复提交；失败保留草稿，成功留下回执再返回', () => {
@@ -274,6 +336,7 @@ test('profile identity change clears old private draft before the new owner can 
   h.requests[0].success({ code: 200, data: { name: 'owner-a', phone: '13800000000', avatar: 'avatar-a', introduction: 'private-a' } })
   h.page.data.tempName = 'dirty-a'
   h.page.data.tempWechat = 'private-qr-a'
+  h.page.data.avatarUploading = true
   if (h.page.onHide) h.page.onHide()
   Object.assign(h.session, { owner: 8, token: 'unit-session-b' })
   h.page.onShow()
@@ -281,6 +344,7 @@ test('profile identity change clears old private draft before the new owner can 
   assert.equal(h.page.data.userInfo.phone, '')
   assert.equal(h.page.data.tempName, '')
   assert.equal(h.page.data.tempWechat, '')
+  assert.equal(h.page.data.avatarUploading, false)
   assert.equal(h.page.data.canSave, false)
   h.page.saveInfo()
   assert.equal(h.requests.filter(x => x.url === '/api/user/update').length, 0)

@@ -226,7 +226,7 @@ test('撤销申请响应在组件离开后不改状态，也不触发资格回�
   assert.equal(requests.length, requestCount)
 })
 
-test('L10-043:验证码发送成功后 60 秒内重发不再发请求;L10-042:返回页面时已发送标记随手机号一起复位', () => {
+test('L10-043:验证码发送成功后 60 秒内重发不再发请求;返回页面保留尾号和已发送标记', () => {
   const page = makePage()
   page.sendSms()
   requests.find(r => r.url === '/api/user/info').success({ code: 200, data: { phone: '13800138000' } })
@@ -238,10 +238,18 @@ test('L10-043:验证码发送成功后 60 秒内重发不再发请求;L10-042:�
   page._smsSentAt = Date.now() - 61000
   page.sendSms()
   assert.equal(requests.length, before + 1, '冷却结束可重发')
+  requests.at(-1).success({ code: 200, data: { phone: '13800138000' } })
+  requests.filter(r => r.url === '/api/sms/send').at(-1).success({ code: 200 })
+  assert.equal(page.data.smsSent, true)
+  page.data.smscode = '654321'
+  page.data.confirmed = true
   componentConfig.pageLifetimes.hide.call(page)
   componentConfig.pageLifetimes.show.call(page)
-  assert.equal(page.data.smsSent, false)
-  assert.equal(page.data.phoneMasked, '')
+  assert.equal(page.data.smsSent, true)
+  assert.equal(page.data.phoneMasked, '8000')
+  assert.equal(page.data.smscode, '654321')
+  assert.equal(page.data.confirmed, true)
+  assert.equal(page.data.status, 'ELIGIBLE')
 })
 
 test('L10-201:同一次填写重试复用同一个申请编号,重新加载状态才换新编号', async () => {
