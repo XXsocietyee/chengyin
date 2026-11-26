@@ -545,4 +545,60 @@ class AccountDeregistrationServiceImplTest {
         assertEquals("BLOCKED", status.getStatus());
         assertEquals("存在处理中的提现，请等到账后再申请注销", status.getBlockers().get(0));
     }
+
+    @Test
+    void platformPassInFlightOrderBlocksDeregistrationAndFinishedHistoryDoesNot() throws Exception {
+        AccountDeregistrationMapper d = mock(AccountDeregistrationMapper.class);
+        UmsMemberMapper m = mock(UmsMemberMapper.class);
+        PlatformTransactionManager t = mock(PlatformTransactionManager.class);
+        AccountDeregistrationServiceImpl service = wired(d, m, mock(OmsOrderMapper.class),
+                mock(CmsRegistrationMapper.class), mock(ICashWithdrawService.class), t, mock(AlarmService.class));
+        UmsMember member = new UmsMember();
+        member.setId(1001L);
+        member.setBalance(BigDecimal.ZERO);
+        member.setDelFlag(0);
+        when(m.selectUmsMemberById(1001L)).thenReturn(member);
+        when(d.countBlockingPlatformPassOrders(1001L)).thenReturn(0);
+
+        DeregistrationStatusVO finished = service.precheck(1001L);
+        assertEquals("ELIGIBLE", finished.getStatus());
+        assertTrue(finished.getBlockers().isEmpty());
+
+        when(d.countBlockingPlatformPassOrders(1001L)).thenReturn(1);
+        DeregistrationStatusVO blocked = service.precheck(1001L);
+        assertEquals("BLOCKED", blocked.getStatus());
+        assertTrue(blocked.getBlockers().contains("存在待支付或退款处理中的通行证订单，请完成后再申请注销"));
+        assertEquals("BLOCKED", service.apply(1001L).getStatus());
+        verify(d, never()).insert(any(AccountDeregistration.class));
+
+        AccountDeregistration due = new AccountDeregistration();
+        due.setId(9L);
+        due.setMemberId(1001L);
+        due.setStatus("PENDING");
+        due.setExecuteAfter(new Date(0));
+        when(d.selectDue(any(Date.class))).thenReturn(Collections.singletonList(due));
+        when(d.selectByIdForUpdate(9L)).thenReturn(due);
+        when(t.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
+        assertEquals(0, service.executeDue(new Date()));
+        verify(d).markMemberNormal(1001L);
+        verify(d, never()).anonymizeMember(anyLong());
+
+        String xml = sourceFile("chengyinhub-system/src/main/resources/mapper/business/AccountDeregistrationMapper.xml");
+        int at = xml.indexOf("<select id=\"countBlockingPlatformPassOrders\"");
+        assertTrue(at >= 0);
+        String statement = xml.substring(at, xml.indexOf("</select>", at));
+        assertTrue(statement.contains("status = 4 or review_status = 1 or status = 0"), statement);
+    }
+
+    private static String sourceFile(String relative) throws Exception {
+        java.nio.file.Path cursor = java.nio.file.Paths.get(System.getProperty("user.dir")).toAbsolutePath();
+        while (cursor != null) {
+            java.nio.file.Path candidate = cursor.resolve(relative);
+            if (java.nio.file.Files.isRegularFile(candidate)) {
+                return new String(java.nio.file.Files.readAllBytes(candidate), java.nio.charset.StandardCharsets.UTF_8);
+            }
+            cursor = cursor.getParent();
+        }
+        throw new IllegalStateException("找不到 " + relative);
+    }
 }

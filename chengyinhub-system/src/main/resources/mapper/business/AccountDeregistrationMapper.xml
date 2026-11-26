@@ -64,6 +64,12 @@
           and (status = 0 or (status = 1 and (payout_status is null or payout_status not in (1, 4))))
     </select>
 
+    <select id="countBlockingPlatformPassOrders" resultType="int">
+        select count(1) from platform_pass_order
+        where member_id = #{memberId}
+          and (status = 4 or review_status = 1 or status = 0)
+    </select>
+
     <update id="anonymizeMember">
         update ums_member
         set phone = null, password = null, name = null, wechat = null, nickname = '已注销用户', avatar = null,

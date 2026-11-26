@@ -25,6 +25,9 @@ public interface AccountDeregistrationMapper {
 
     int countUnsettledRefunds(@Param("memberId") Long memberId);
 
+    /** 通行证待支付、退款中，或退款复核未完成。已支付/已取消/已退款的历史单不挡注销。 */
+    int countBlockingPlatformPassOrders(@Param("memberId") Long memberId);
+
     int anonymizeMember(@Param("memberId") Long memberId);
 
     int anonymizeRegistrations(@Param("memberId") Long memberId);
