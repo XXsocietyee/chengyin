@@ -181,6 +181,16 @@ class RoamHangoutServiceTest {
     }
 
     @Test
+    void nearby_省略或超大半径收到50公里() {
+        assertEquals(3_000, svc.nearby(1L, 31.23, 121.47, 0).get("radius"));
+        assertEquals(3_000, svc.nearby(1L, 31.23, 121.47, -1).get("radius"));
+        assertEquals(50_000, svc.nearby(1L, 31.23, 121.47, 1_000_000).get("radius"));
+        assertEquals(50_000, svc.nearby(1L, 31.23, 121.47, 50_001).get("radius"));
+        assertEquals(20_000, svc.nearby(1L, 31.23, 121.47, 20_000).get("radius"));
+        assertEquals(IRoamHangoutService.MAX_RADIUS_M, 50_000);
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void nearby_不再返回搭子局图层_也不按局探半径() {
         // 旧行为:半径内没局时按局数探半径(10000/20000),并提示前端拉远。

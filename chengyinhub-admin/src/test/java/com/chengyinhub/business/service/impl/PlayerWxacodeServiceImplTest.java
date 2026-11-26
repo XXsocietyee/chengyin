@@ -77,7 +77,8 @@ class PlayerWxacodeServiceImplTest {
         assertEquals("release", body.get("env_version"));
         assertEquals(430, ((Number) body.get("width")).intValue());
         verify(redisCache).setCacheObject(
-                "wx:player-code:v2:9223372036854775807", "upload/player-code.png");
+                "wx:player-code:v2:9223372036854775807", "upload/player-code.png",
+                PlayerWxacodeServiceImpl.CODE_CACHE_TTL_DAYS, TimeUnit.DAYS);
     }
 
     @Test
@@ -96,7 +97,8 @@ class PlayerWxacodeServiceImplTest {
         assertEquals("0f1e2d3c4b5a69788796a5b4c3d2e1f0", body.get("scene"));
         assertEquals("pages/index/index", body.get("page"));
         verify(redisCache).setCacheObject(
-                "wx:door-code:v2:0f1e2d3c4b5a69788796a5b4c3d2e1f0", "upload/door.png");
+                "wx:door-code:v2:0f1e2d3c4b5a69788796a5b4c3d2e1f0", "upload/door.png",
+                PlayerWxacodeServiceImpl.CODE_CACHE_TTL_DAYS, TimeUnit.DAYS);
     }
 
     /** E-4:缓存的是对象 key,每次读取现签;AccessKey 轮换后旧签名不会永久留成空白码图。 */
