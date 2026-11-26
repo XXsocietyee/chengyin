@@ -319,10 +319,9 @@ Page({
           reject({ errorCode: 'ORIENT_TEAM_NOT_MEMBER' }); return;
         }
         const self = d.members.find(m => exactId(m.memberId) === context.reader.id);
+        // L08-126: activeCount 是任务板上的活跃人数。席位行的名册人数和空位只认 /api/team/info。
         this.setData({ members: d.members.map(m => ({ memberId: exactId(m.memberId),
           memberName: m.name || '城瘾玩家', memberAvatar: m.avatar || '', role: m.role })),
-          'team.joinedCount': d.threshold.activeCount,
-          openSeats: this._seats ? this.data.openSeats : teamSeats.openSeats(Object.assign({}, this.data.team, { joinedCount: d.threshold.activeCount }), null),
           teamTitle: teamTitleOf(this.data.team, d.members.map(m => ({ name: m.name, role: m.role }))),
           joined: true, leader: self.role == null ? this.data.leader : self.role == 1 });
         this._syncSeatBreath();
@@ -330,7 +329,7 @@ Page({
         const tasks = d.tasks.map(t => ({ taskId: exactId(t.taskId), name: t.name || '未命名任务',
           completedCount: t.completedCount, teamDone: t.teamDone }));
         this.setData({ boardState: 'ready', boardMessage: '',
-          board: { threshold: { required: d.threshold.required },
+          board: { threshold: { required: d.threshold.required, activeCount: d.threshold.activeCount },
             summary: { teamDoneCount: d.summary.teamDoneCount, totalTasks: d.summary.totalTasks }, tasks,
             rows: d.members.map(m => {
               const done = new Set(m.doneTaskIds.map(id => String(exactId(id))));
