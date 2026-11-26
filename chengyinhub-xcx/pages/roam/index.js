@@ -5022,14 +5022,27 @@ Page({
    * 取消/返回不能把当前漫游的结算状态串掉。
    */
 
-  /* L05-047(业主默认项 A):功能开关最多每 5 分钟或换账号时重取一次;分享面板的广场选项只在打开面板时按当时的开关算
-     (_openShareSheet),不再每次切回本页就改 share.*。后台收回广场权限时最多晚 5 分钟生效。 */
+  /* L05-047(业主默认项 A):同一账号的开关取到之后 5 分钟内仍算新鲜,再进本页不再重取。
+     第一次打开会取;这次没取到(请求失败,或没有落到当前账号)下次可以再试;换账号立刻重取。
+     分享面板的广场选项只在打开面板时按当时的开关算(_openShareSheet),不再每次切回本页就改 share.*。
+     后台收回广场权限时最多晚 5 分钟生效。 */
   _syncCommunityEntry() {
     const app = getApp();
     const owner = String(app.getUserID && app.getUserID() || '');
     if (owner === this._flagsOwner && Date.now() - this._flagsAt < FLAG_REFRESH_MS) return;
-    this._flagsOwner = owner; this._flagsAt = Date.now();
-    if (typeof app.loadFeatureFlags === 'function') app.loadFeatureFlags();
+    this._flagsOwner = owner;
+    const stamp = this._flagsAt = Date.now();
+    if (typeof app.loadFeatureFlags !== 'function') return;
+    const release = () => { if (this._flagsOwner === owner && this._flagsAt === stamp) this._flagsAt = 0; };
+    let pending;
+    try { pending = app.loadFeatureFlags(); } catch (e) { release(); return; }
+    if (!pending || typeof pending.then !== 'function') return;
+    pending.then(() => {
+      const auth = typeof app.getAuthorization === 'function' ? app.getAuthorization() : undefined;
+      const held = app._communityFeatureOwner === owner
+        && (auth === undefined || app._communityFeatureAuthorization === auth);
+      if (!held) release();
+    }, release);
   },
   _openShareSheet() {
     const app = getApp();
