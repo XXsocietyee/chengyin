@@ -232,7 +232,6 @@ Page({
     const seq = (this._reqSeq = (this._reqSeq || 0) + 1);
     const couponHistoryId = this.data.couponHistoryId;
     this._refreshing = true;
-    this._refreshStartedAt = Date.now();
     const that = this;
     const stale = () => !that.requireOwner() || epoch !== (that._epoch || 0) || seq !== that._reqSeq
       || couponHistoryId !== that.data.couponHistoryId
@@ -497,10 +496,10 @@ Page({
     return datetime.formatMinuteDots(t);
   },
 
-  // 等待壳/错误态的显式重试:清退避 + 作废旧在途,立即取新 token(取得当前真实 token 才算恢复)。
+  // 等待壳/错误态的显式重试:没有在途换码时清退避并取新 token。
+  // L09-104:「刷新二维码」进行中再点不作废、不多发;这一发结束后,下一次点击才再刷新一次。
   retryNow() {
-    // L09-104:「刷新二维码」常驻可点;2 秒内的在途请求不作废,连点只算一次
-    if (this._refreshing && Date.now() - (this._refreshStartedAt || 0) < 2000) return;
+    if (this._refreshing) return;
     this._retryAt = 0;
     this._abortTokenRequest();
     this._refreshing = false;
