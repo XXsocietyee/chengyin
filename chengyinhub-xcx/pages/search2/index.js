@@ -441,8 +441,28 @@ Page({
   /**
    * 生命周期函数--监听页面加载
    */
-  onShow() { if (this.data.merchantView) merchantTheme.merchantPageShow(); },
-  onHide() { if (this.data.merchantView) merchantTheme.merchantPageRestore(); },
+  onShow() {
+    if (this.data.merchantView) merchantTheme.merchantPageShow();
+    // L05-162:筛选搜索离开再回来,只搜关键词不能沿用上一次的日期、价格、类别。
+    // 弹层仍显示这次刚设的日期和价格,再点弹层里的搜索才重新带上。
+    if (!this._backFromSearch) return;
+    this._backFromSearch = false;
+    this.setData({
+      activeCategory: null,
+      filterConditions: Object.assign({}, this.data.filterConditions, {
+        categoryId: null,
+        dateType: '0',
+        startDate: '',
+        endDate: '',
+        minPrice: 0,
+        maxPrice: 1000,
+      }),
+    });
+  },
+  onHide() {
+    if (this.data.merchantView) merchantTheme.merchantPageRestore();
+    this._backFromSearch = true;
+  },
   onUnload() { if (this.data.merchantView) merchantTheme.merchantPageRestore(); },
 
   onLoad(options) {

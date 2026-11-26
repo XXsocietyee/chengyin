@@ -71,6 +71,73 @@ for (const rel of ['pages/searchmap/index.js', 'pages/search2/index.js']) {
   })
 }
 
+test('search2:筛选搜索回来后再只搜关键词,不带上一次的日期/价格/类别;筛选单仍显示刚设的条件', () => {
+  const urls = []
+  const { page, restore } = load('pages/search2/index.js')
+  try {
+    global.wx.navigateTo = ({ url }) => urls.push(url)
+    page.setData({
+      searchKeyword: '外滩',
+      activeCategory: 7,
+      activeDate: '3',
+      startdate: '2026-11-24',
+      enddate: '2026-11-25',
+      minPrice: 80,
+      maxPrice: 300,
+      jg1: '¥80',
+      jg2: '¥300',
+      filterConditions: Object.assign({}, page.data.filterConditions, { keyword: '外滩', categoryId: 7 }),
+    })
+    page.onShow()
+    assert.equal(page.data.filterConditions.categoryId, 7, '还没离开时不把刚选的类别清掉')
+    page.searchFilter()
+    assert.match(urls[0], /categoryId=7/)
+    assert.match(urls[0], /startDate=2026-11-24/)
+    assert.match(urls[0], /endDate=2026-11-25/)
+    assert.match(urls[0], /minPrice=80/)
+    assert.match(urls[0], /maxPrice=300/)
+    assert.equal(page.data.startdate, '2026-11-24')
+    assert.equal(page.data.minPrice, 80)
+    assert.equal(page.data.activeDate, '3')
+
+    page.onHide()
+    page.onShow()
+    assert.equal(page.data.startdate, '2026-11-24')
+    assert.equal(page.data.enddate, '2026-11-25')
+    assert.equal(page.data.minPrice, 80)
+    assert.equal(page.data.maxPrice, 300)
+    assert.equal(page.data.jg1, '¥80')
+    assert.equal(page.data.jg2, '¥300')
+    assert.equal(page.data.activeDate, '3')
+    assert.equal(page.data.activeCategory, null)
+    assert.equal(page.data.filterConditions.categoryId, null)
+    assert.equal(page.data.filterConditions.startDate, '')
+    assert.equal(page.data.filterConditions.endDate, '')
+    assert.equal(page.data.filterConditions.minPrice, 0)
+    assert.equal(page.data.filterConditions.maxPrice, 1000)
+
+    page.onKeywordInput({ detail: { value: '咖啡馆' } })
+    page.onSearchConfirm()
+    assert.match(urls[1], /keyword=/)
+    assert.doesNotMatch(urls[1], /startDate=/)
+    assert.doesNotMatch(urls[1], /endDate=/)
+    assert.doesNotMatch(urls[1], /categoryId=/)
+    assert.doesNotMatch(urls[1], /minPrice=80/)
+    assert.doesNotMatch(urls[1], /maxPrice=300/)
+    assert.equal(page.data.startdate, '2026-11-24')
+    assert.equal(page.data.minPrice, 80)
+
+    page.searchFilter()
+    assert.match(urls[2], /startDate=2026-11-24/)
+    assert.match(urls[2], /endDate=2026-11-25/)
+    assert.match(urls[2], /minPrice=80/)
+    assert.match(urls[2], /maxPrice=300/)
+    assert.doesNotMatch(urls[2], /categoryId=/)
+    assert.equal(page.data.startdate, '2026-11-24')
+    assert.equal(page.data.activeDate, '3')
+  } finally { restore() }
+})
+
 test('search2:重置清掉已生效的日期/价格/排序;再点已选类别取消', () => {
   const { page, restore } = load('pages/search2/index.js')
   try {
