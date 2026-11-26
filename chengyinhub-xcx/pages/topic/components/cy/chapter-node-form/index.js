@@ -156,7 +156,8 @@ Component({
       if (!this.data.show) return;
       // L06-032:地图选点/选地址回来不重拉;只有去创建过玩法(或上次失败)才重拉模板列表
       if (this.data.formMode !== 'offer' && (this._templatesStale || this.data.templatesError)) this.loadMyTemplates();
-      if (this.data.formMode === 'offer' && this.data.termsMode === 'PERK') {
+      // 地图选点 / 选图也会让页面 show 一次。权益模板只在打开表单、去创建过、或上次没拉到时重拉。
+      if (this.data.formMode === 'offer' && this.data.termsMode === 'PERK' && this._perkTemplatesStale) {
         this.loadMyPerkTemplates();
       }
     },
@@ -412,6 +413,7 @@ Component({
     loadMyPerkTemplates() {
       const that = this;
       if (that.data.perkTemplatesLoading) return;
+      that._perkTemplatesStale = false;
       that.setData({ perkTemplatesLoading: true });
       app.sendRequest({
         hideLoading: true,
@@ -431,6 +433,7 @@ Component({
           that.setData({ perkTemplates: rows }, () => that.refreshSubmitState());
         },
         fail() {
+          that._perkTemplatesStale = true;
           that.setData({ perkTemplates: [] });
         },
         complete() {
@@ -566,6 +569,7 @@ Component({
 
     goCreatePerkTemplate() {
       if (this.data.submitting) return;
+      this._perkTemplatesStale = true;
       wx.navigateTo({ url: '/pages/merchant/decor/perks/index' });
     },
 

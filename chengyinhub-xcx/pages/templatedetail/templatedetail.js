@@ -8,15 +8,6 @@ const { isRecord } = require('../../utils/response-shape.js');
 const toast = require('../../utils/toast.js');
 const mediaPreview = require('../../utils/media-preview.js');
 
-function difficultyMeta(difficulty) {
-  var d = String(difficulty || '').trim();
-  if (d === '低') return { letter: '简', label: '简易难度' };
-  if (d === '高') return { letter: '难', label: '困难难度' };
-  if (d === '中') return { letter: '中', label: '中等难度' };
-  if (d) return { letter: d.charAt(0), label: d + '难度' };
-  return { letter: '—', label: '难度待定' };
-}
-
 // 能力 tab 的标签行。三组键值卡压成三行「标签 + chips」——
 // 类别与场所本来就是多值(顿号/中点分隔的串),拆成 chip 比挤在一行右对齐好读。
 // 分隔符与 utils/templateDetail.js 的 joinCategories 保持一致(中点),再兼容中英文顿号逗号。
@@ -169,8 +160,6 @@ Page({
     publisherText: '城瘾',
     isOfficialPublisher: false,
     capExpanded: {},
-    difficultyLetter: '—',
-    difficultyLabel: '难度待定',
     isTopicTemplate: false,
     loading: true,
     loadError: false,
@@ -263,7 +252,6 @@ Page({
 
   applyDetailPayload(raw) {
     var normalized = templateDetailUtil.normalizeTemplateDetail(raw || {});
-    var meta = difficultyMeta(normalized.info.difficulty);
     var detail = buildDetailDisplay(normalized.info, normalized.categoryText);
     var publisher = resolvePublisherDisplay(normalized.info, this.data.scope);
     var capRows = buildCapRows(normalized.info, normalized.categoryText);
@@ -281,8 +269,6 @@ Page({
       sceneIcons: detail.sceneIcons,
       isTopicTemplate: detail.isTopicTemplate,
       capExpanded: {},
-      difficultyLetter: meta.letter,
-      difficultyLabel: meta.label,
       descExpanded: false,
       descNeedMore: false,
       ruleExpanded: false,

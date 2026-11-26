@@ -104,7 +104,6 @@ function chapterNodeReadOnlyReason(info, application) {
 function projectMemberId() { return memberId(app); }
 const PRIVATE_EXTRA_KEYS = ['hostOwnerType', 'recruitStations', 'layers', 'clubCandidates', 'regApplies', 'broadcastSheet',
   'playerPick', 'profitSheet', 'selfSupplySheet', 'circleConfig', 'hostInviteId', 'checkinHost', 'checkinCode'];
-const RESUME_FRESH_MS = 30 * 1000;
 const READ_MEMO_MS = 60 * 1000;
 // L06-017:写操作的回包只看「页面还在、还是同一个人」,不看读代次 —— 在途期间任何一次重读都会推进读代次,
 // 用读闸会把已经生效的写结果丢掉、确认框一直转。
@@ -407,7 +406,7 @@ Page({
     if (this.data.reducedMotion !== reducedMotion) this.setData({ reducedMotion });
     this._resumeCategoryReturn(); if (this._clubSheetReturn) { this._clubSheetReturn = false; if (this.data.clubSheet.show) this.loadClubCandidates(); if (this.data.merchantSheet.show) this.loadRegApplies(); } merchantTheme.merchantPageShow(); this._navigating = false;
   },
-  onHide() { this._hidden = true; this._hiddenAt = Date.now(); merchantTheme.merchantPageRestore(); },
+  onHide() { this._hidden = true; merchantTheme.merchantPageRestore(); },
   // L06-095:同一页面生命期内、同一读代次与账号下,60 秒内的相同只读请求复用上一次结果
   _cachedRead(key) {
     const c = this._readMemo && this._readMemo[key];
@@ -426,11 +425,10 @@ Page({
     });
     return patch;
   },
-  // L06-013:看大图 / 选图 / 地图选点等原生浮层也会触发 hide/show,不必整页重读。
-  // 只有离开本页去过别的页面(_navigating,可能写了数据)、或在后台超过 30 秒,才回来重读。
+  // L06-013:看大图 / 选图 / 地图选点 / 切去微信再回来,都不整页重读。
+  // 只有本页主动跳去别的页面(_navigating,可能写了数据)或俱乐部名单要回来刷新时才重读。
   _resumeNeedsReload() {
-    if (this._navigating || this._clubSheetReturn) return true;
-    return !this._hiddenAt || Date.now() - this._hiddenAt > RESUME_FRESH_MS;
+    return !!(this._navigating || this._clubSheetReturn);
   },
   onUnload() {
     this._disposed = true;

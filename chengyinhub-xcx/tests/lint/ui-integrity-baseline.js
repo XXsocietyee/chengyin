@@ -513,7 +513,7 @@ module.exports = {
     // 2026-11-24 F01b 三合 master(0ac67a26 之后,7a 接手):F01b 退役项与 master 各线出账取并集,u4Field=45,u4Debt / u5 digest 按 baselineKeyDigest 重算。
     // 2026-11-24 F01b 再合 master:F01b 退役 play#leadUnlockChecking/journalDot/finishBadge/reviewEmpty 与各线退役取并集,u4Field 按 u4Debt key 数重算,digest 重算。
     // 2026-11-24 REV-AUTO 合 master(22f27c86):F06 第二轮(L06-089 等)与 F08 pass 2 / F09b(L09-126/087/089)各自出账取并集,u4Field 设为合并后 u4Debt key 数,u4Debt digest 按门禁 baselineKeyDigest 对合并后 key 集重算。
-    "u4Field": 34,
+    "u4Field": 32,
       // 2026-08-26 圈层主题接回主题货架:新增 circleTheme import,两条 _coverFail 动态 setData
       //   等量下移(269→270 / 281→282,行号取门禁实测)。调用点与强化理由不变,显式改 digest。
     // 2026-08-27 合并 #883:activity/list 三条 U4-DYNAMIC 登记行号 +2(129→131/151→153/231→233,
@@ -697,7 +697,7 @@ module.exports = {
       // 2026-09-19 批复1-a=2 还清:partner#toType/toId 两条随页复活短暂回账(151 键)后当场还债出账,
       //   key 集回到退役前那份 149,digest 按当前 key 集合实算。
 // 2026-11-03 第九轮 m1-9:merchant/apply 店铺地址预览与已提交申请的地址一点开地图,locationLat/locationLng 真被读取,两条零消费债务还清出账,u4Field 102→100,digest 按门禁 baselineKeyDigest 重算。
-"u4Debt": "a8199a8a14e8a1d73ccfef316322da3ecb932c07f6116c4580be8585f357faa1",
+"u4Debt": "bfbf90086a901ec417a02d0f4f3473f1b92b44ead9254fe7d40fe1ec86142dab",
 // 2026-11-23 F09 L09-004/L09-009:signup#hasMore/nodata 与 profile#exploreValue/identityCard 零消费字段删除出账,u4Field 93→89,digest 按门禁 baselineKeyDigest 重算。
       // 2026-08-17 漫游 S1 施工:条数不变(65),只是 pages/roam/index.js 的两处
       //   `...this._calcArch()` 动态 setData 行号从 3263/3305 移到 3261/3303
@@ -1364,8 +1364,6 @@ module.exports = {
     "chengyinhub-xcx/pages/roam/index.js#locErr": "存量零消费债务：locErr 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/pages/search2/result/index.js#categoryId": "存量零消费债务：categoryId 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/pages/shezhi/shezhi.js#userInfo": "存量零消费债务：userInfo 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
-    "chengyinhub-xcx/pages/templatedetail/templatedetail.js#difficultyLetter": "存量零消费债务：difficultyLetter 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
-    "chengyinhub-xcx/pages/templatedetail/templatedetail.js#difficultyLabel": "存量零消费债务：difficultyLabel 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/pages/topic/merchantapply/index.js#nodeId": "存量零消费债务：nodeId 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/pages/topic/merchantapply/index.js#templateId": "存量零消费债务：templateId 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/pages/topic/merchantapply/index.js#addressName": "存量零消费债务：addressName 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",

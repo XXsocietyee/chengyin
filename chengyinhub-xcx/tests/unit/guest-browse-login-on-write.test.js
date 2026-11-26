@@ -290,7 +290,7 @@ test('B 游客读页的公开读接口均为后端匿名可读(@Anonymous 或既
 
 test('B 主题详情页游客渲染:info-to-user 成功即出页;本人收藏/角色等私有读在游客下不发', () => {
   const src = read('pages/topic/index/index.js');
-  assert.match(src, /_loadFav\(topicId\) \{\s*if \(!topicId \|\| !this\._loggedIn\(\)\) return;/);
+  assert.match(src, /_loadFav\(topicId, topic\) \{\s*if \(!topicId \|\| !this\._loggedIn\(\)\) return;/);
   assert.match(src, /_loadChars\(data\) \{\s*if \(!this\._loggedIn\(\)\) return;/);
 });
 

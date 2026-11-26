@@ -7,6 +7,17 @@ const { chinaParts } = require('../../../utils/datetime.js');
 const { refundRuleText } = require('../utils/refund-tiers.js'); // L06-010/L06-112:直接取真源,不在循环里 require 转出壳
 const pad2 = (n) => String(n).padStart(2, '0');
 const mdhm = (p) => pad2(p.month) + '-' + pad2(p.day) + ' ' + pad2(p.hours) + ':' + pad2(p.minutes);
+// 详情载荷上的喜欢标记。0/false 也是答案,不能当成「没给」。这三个字段都没有,就不猜心。
+function topicLikeFlag(topic) {
+  if (!topic || typeof topic !== 'object') return null;
+  for (const key of ['isLike', 'isLiked', 'liked']) {
+    if (!Object.prototype.hasOwnProperty.call(topic, key)) continue;
+    const value = topic[key];
+    if (value === null || value === undefined || value === '') continue;
+    return value === true || Number(value) === 1;
+  }
+  return null;
+}
 const themeRecords = require('../../../utils/theme-records.js');
 
 function recordsRequest(url, method, data, header) {
@@ -277,7 +288,7 @@ Page({
     if (this.data.reducedMotion !== reducedMotion) this.setData({ reducedMotion }); this._navigating = false; // 返回时兜底清跳转锁
     this._startKenBurns();
     if (this.data.selfPlayCheckoutShow) this._fillCheckoutProfile(); // 从参与人信息/个人资料回来(R11 j3 F8)
-    setTimeout(() => this.calculateScreenHeights(), 100);
+    this._later(100, () => this.calculateScreenHeights());
   },
 
   /**
@@ -360,7 +371,7 @@ Page({
     // 如果还没有获取到第二屏位置，先计算再滚动
     if (this.data.screen2Top <= 0) {
       this.calculateScreenHeights();
-      setTimeout(scrollToTarget, 200);
+      this._later(200, scrollToTarget);
     } else {
       scrollToTarget();
     }
@@ -373,6 +384,7 @@ Page({
     const t = setTimeout(() => {
       const i = list.indexOf(t);
       if (i >= 0) list.splice(i, 1);
+      if (this._unloaded) return;
       fn();
     }, ms);
     list.push(t);
@@ -401,7 +413,7 @@ Page({
     // L06-008:开局准备只对已报名的人有用(wxml 只在 is_join==1 时出);NPC 只在故事标签出,进故事标签再拉
     this._loadPrep(String(this.data.is_join) === '1' ? data.id : 0);
     if (Number(data.productType) === 2) this._loadExplorePerks(data.id);
-    this._loadFav(data.id);
+    this._loadFav(data.id, data);
     this._charsData = data;
     this._charsLoaded = false;
     if (String(this.data.activeTab) === '1') this._loadCharsOnce();
@@ -573,23 +585,21 @@ Page({
     if (kind === 'signup') return this.bmClick({ currentTarget: { dataset: {} } });
   },
 
-  // 收藏 = 既有的主题「喜欢」(我的-喜欢 同一个接口);进页读一次当前状态
+  // 收藏 = 既有的主题「喜欢」(我的-喜欢 同一个接口)。
+  // 详情上已有 isLike / isLiked / liked(含 0)就用它。没有时不去拉收藏列表:
+  // 列表不按主题 id 过滤,只看最新一条会把更早喜欢过的主题画成未喜欢。
+  // 这次详情发出之后用户点过的,晚到的标记让位。
   _loggedIn() { return typeof app.getUserID === 'function' && !!app.getUserID(); },
 
-  _loadFav(topicId) {
+  _loadFav(topicId, topic) {
     if (!topicId || !this._loggedIn()) return;
-    // L06-007:读回来之前用户点过收藏,以用户的点击为准,迟到的读结果不覆盖
-    const toggles = this._favToggles || 0;
-    app.sendRequest({ url: '/api/topic/like_list', method: 'POST', hideLoading: true, autoErrorToast: false,
-      data: { pageNum: 1, pageSize: 200 },
-      success: (res) => {
-        if (this._unloaded || (this._favToggles || 0) !== toggles || this._favBusy) return;
-        if (!res || String(res.code) !== '200' || !res.data) return;
-        const rows = Array.isArray(res.data.rows) ? res.data.rows : [];
-        this.setData({ faved: rows.some((t) => t && String(t.id) === String(topicId)) });
-      },
-      fail: () => {},
-    });
+    const readAt = this._favReadAt;
+    this._favReadAt = null;
+    const known = topicLikeFlag(topic);
+    if (known === null) return;
+    if (this._unloaded || this._favBusy) return;
+    if (readAt != null && (this._favToggles || 0) !== readAt) return;
+    this.setData({ faved: known });
   },
 
   // 2026-10-31 P-8:主题卡(封面 / 主题名 / 一站接一站的路线),右下主题码;微信好友走本页 onShareAppMessage
@@ -915,11 +925,12 @@ Page({
     });
   },
   _verifySeatOrder(orderNo, attempt) {
+    if (this._unloaded) return;
     app.sendRequest({ url: '/api/marketing/product/orders/' + encodeURIComponent(orderNo), method: 'GET', hideLoading: true, autoErrorToast: false,
       success: (res) => {
         const row = res && String(res.code) === '200' && res.data && res.data.orderNo === orderNo ? res.data : null;
         if (row && row.statusLabel === 'PAID') { this._afterSeatOrder(row); return; }
-        if (attempt < 2) { setTimeout(() => this._verifySeatOrder(orderNo, attempt + 1), 1500); return; }
+        if (attempt < 2) { this._later(1500, () => this._verifySeatOrder(orderNo, attempt + 1)); return; }
         this._seatOrderFail('支付确认中，请到我的订单查看');
       },
       fail: () => this._seatOrderFail('支付确认中，请到我的订单查看'),
@@ -1222,6 +1233,55 @@ Page({
     wx.reLaunch({ url: '/pages/template/index' });
   },
   
+  // 评价成功后只更新评价区。列表接口与主题详情同一批可见评论,最多展示 5 条。
+  _refreshTopicComments(posted) {
+    const that = this;
+    if (that._unloaded || !that.data.id) return;
+    const prev = that.data.info || {};
+    const prevCount = Number(prev.commentCount);
+    const count = (Number.isFinite(prevCount) && prevCount >= 0 ? prevCount : 0) + 1;
+    const prevAvg = Number(prev.averageRating) || 0;
+    const rating = Number(posted && posted.rating) || 0;
+    const nextAvg = Math.round(((prevAvg * (count - 1) + rating) / count) * 10) / 10;
+    const rounded = Math.max(0, Math.min(5, Math.round(nextAvg)));
+    const ratingStars = [];
+    for (let i = 1; i <= rounded; i++) ratingStars.push({ star: i });
+    const existing = Array.isArray(prev.commentList) ? prev.commentList : [];
+    const commentList = [{
+      id: 'local-comment',
+      memberNickname: '',
+      createTime: '',
+      rating: rating,
+      contents: posted && posted.contents || '',
+    }].concat(existing).slice(0, 5);
+    that.setData({
+      info: Object.assign({}, prev, { commentCount: count, averageRating: nextAvg, commentList: commentList }),
+      ratingStars: ratingStars,
+    });
+    const seq = (that._commentSeq || 0) + 1;
+    that._commentSeq = seq;
+    const topicId = that.data.id;
+    app.sendRequest({
+      url: '/api/comment/list',
+      method: 'POST',
+      hideLoading: true,
+      data: { owner_type: 1, owner_id: topicId, pageNum: 1, pageSize: 5 },
+      success(res) {
+        if (that._unloaded || seq !== that._commentSeq || that.data.id !== topicId) return;
+        if (!res || String(res.code) !== '200') return;
+        const data = res.data && typeof res.data === 'object' ? res.data : res;
+        const rows = Array.isArray(data.rows) ? data.rows : (Array.isArray(res.rows) ? res.rows : null);
+        if (!rows) return;
+        const total = Number(data.total != null ? data.total : res.total);
+        const info = Object.assign({}, that.data.info || {}, {
+          commentList: rows,
+          commentCount: Number.isFinite(total) && total >= 0 ? total : count,
+        });
+        that.setData({ info: info });
+      },
+    });
+  },
+
   // 提交评价
   submitComment() {
     if (app.ensureLoginFor && !app.ensureLoginFor('post', () => this.submitComment(), { owner: this, target: () => [this.data.id] })) return; // 2026-10-24 游客写前登录
@@ -1259,9 +1319,10 @@ Page({
       success: function (res) {
         if (res.code == "200") {
           toast.success('评价成功');
+          const posted = { rating: answer + 1, contents: String(plnr || '').trim() };
           that.voteClose();
-          // 重新加载数据更新评价列表
-          that.getData();
+          // 只补评价列表和均分,不再整页重拉主题(会连带重跑封面、路线和一串侧向请求)
+          that._refreshTopicComments(posted);
         } else {
           app.tips(res.msg);
         }
@@ -2211,8 +2272,9 @@ Page({
   calculateScreenHeights() {
     const that = this;
 
-    // 延迟执行，确保页面渲染完成
-    setTimeout(() => {
+    // 延迟执行，确保页面渲染完成。定时器进 _later,卸载时清掉,避免卸页后还 setData
+    this._later(800, () => {
+      if (that._unloaded) return;
       const query = wx.createSelectorQuery();
 
       // 获取第一屏高度和第二屏位置
@@ -2220,6 +2282,7 @@ Page({
       query.select('#screen2').boundingClientRect();
 
       query.exec((res) => {
+        if (that._unloaded) return;
         if (res[0] && res[1]) {
           const screen1Height = res[0].height;
           const screen2Top = res[1].top + (that._scrollTop || 0); // 加上当前滚动位置
@@ -2238,7 +2301,7 @@ Page({
           });
         }
       });
-    }, 800);
+    });
   },
 
   /**
@@ -2317,6 +2380,7 @@ Page({
 
   getData: function () {
     const that = this;
+    const favReadAt = that._favToggles || 0;
     app.sendRequest({
       hideLoading: true,
       url: '/api/topic/info-to-user',
@@ -2407,8 +2471,11 @@ Page({
           });
 
           if (!that._viewTracked) { that._viewTracked = true; that._trackBuy('content_view'); } // 购买漏斗起点:详情首次读成功
-          that._applyMotionData(res.data); if (!that._statCounted) { that._statCounted = true; pageMotion.countIn(that, 'statK'); } /* 细节打磨 G4:数据条读数第一次到达时滚上来 */
-          setTimeout(() => that._measureHero(), 300);
+          that._favReadAt = favReadAt;
+          that._applyMotionData(res.data);
+          that._favReadAt = null;
+          if (!that._statCounted) { that._statCounted = true; pageMotion.countIn(that, 'statK'); } /* 细节打磨 G4:数据条读数第一次到达时滚上来 */
+          that._later(300, () => that._measureHero());
         } else {
           // j5 H1:服务端明确说「主题活动不存在」(审核中 / 已下架 / 未通过,对他人不可见)是终态:讲原因并给返回,不是加载失败留白。
           const refused = refusalOf(res);
