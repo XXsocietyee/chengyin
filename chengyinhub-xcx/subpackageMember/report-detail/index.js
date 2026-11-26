@@ -52,8 +52,7 @@ Page({
       fail() { that._settle(st) },
       successStatusAbnormal(res, status) { st.code = Number(status) || 0; that._settle(st) },
     })
-    // L09-110
-    // 原因字典是静态的:同一进程 10 分钟内复用,不再每次 onShow / 每张详情都重读
+    // L09-110:同一账号的原因字典还在有效期内就不再请求;读失败可重试,换号另读
     taxonomy.readTaxonomyLabels(app, (labels) => { st.labels = labels; that._settle(st) })
   },
   // 两路都回来后再落数据。403 = 不是本人的举报;其他失败给可重试的失败态。
