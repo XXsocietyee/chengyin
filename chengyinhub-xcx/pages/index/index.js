@@ -60,6 +60,14 @@ function normalizeMemberId(memberId) {
   return memberId || '';
 }
 
+// 第一次记下账号不算变更。之后换了账号，活动分栏正在显示才重拉底部活动信息流。
+function homeAccountChanged(page, memberId) {
+  const normalized = normalizeMemberId(memberId);
+  const previous = page._homeFeedMemberId;
+  page._homeFeedMemberId = normalized;
+  return previous !== undefined && previous !== normalized;
+}
+
 function clearPrivateDisplay(page) {
   page.setData({
     userInfo: { avatar: '', nickname: '', point: '0' },
@@ -777,7 +785,7 @@ Page({
     that.setData({ activeTab: index });
     
     if (index === '0') {
-      // 切换到主题
+      // 回到主题不重拉底部活动信息流。主题列表空了才补拉一次。
       if (that.data.bottomTopicList.length === 0) {
         that._bottomTopicPageNo = 1;
         that.setData({
@@ -788,16 +796,9 @@ Page({
         });
       }
     } else if (index === '1') {
-      // 切换到活动
-      if (that.data.bottomActivityList.length === 0) {
-        that._bottomActivityPageNo = 1;
-        that.setData({
-          hasMoreBottomActivity: false,
-          bottomActivityList: []
-        }, () => {
-          that.loadBottomActivityList(1, true);
-        });
-      }
+      // L10-021:每次打开活动分栏都拉底部活动信息流，包括再次打开。
+      that._bottomActivityPageNo = 1;
+      that.loadBottomActivityList(1, true);
     }
   },
 
@@ -827,7 +828,13 @@ Page({
   loadPageData: function () {
     const that = this;
 
-    that.getUserData();
+    // 这一轮自己会按当前分栏拉底部列表，getUserData 里的换账号重拉不要再发一次。
+    that._loadingPageData = true;
+    try {
+      that.getUserData();
+    } finally {
+      that._loadingPageData = false;
+    }
 
 
     // 固定行动 Banner 不再请求后台随机图。
@@ -848,7 +855,8 @@ Page({
       sort_type: 2,
     });
 
-    // L10-021:只加载当前分栏的底部列表;另一栏清空,切过去时由 switchTab 按空列表懒加载一次。
+    // L10-021:只加载当前分栏的底部列表。主题首屏不请求底部活动信息流。
+    // 打开活动分栏由 switchTab 重拉；回到主题不重拉。换账号且正停在活动分栏时由 getUserData 重拉。
     if (that.data.activeTab === '1') {
       that._bottomActivityPageNo = 1;
       that.setData({ hasMoreBottomActivity: false, bottomTopicList: [] }, () => {
@@ -1076,6 +1084,11 @@ Page({
   getUserData: function () {
     const that = this;
     const memberId = normalizeMemberId(app.getUserID());
+    // L10-021:人在活动分栏时换了账号，重拉这一栏。人在主题分栏时不请求底部活动信息流。
+    if (homeAccountChanged(that, memberId) && String(that.data.activeTab) === '1' && !that._loadingPageData) {
+      that._bottomActivityPageNo = 1;
+      that.loadBottomActivityList(1, true);
+    }
     const requestEpoch = capturePrivateRequest(that, memberId);
     if (!that._getUserDataRetryCount) that._getUserDataRetryCount = 0;
     if (!memberId) {
@@ -1303,6 +1316,9 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
   const that = this;
   
   if (that.data.isBottomLoading && !isRefresh) return;
+  const requestEpoch = (that._bottomActivityEpoch || 0) + 1;
+  that._bottomActivityEpoch = requestEpoch;
+  const isCurrent = function () { return that._bottomActivityEpoch === requestEpoch; };
   
   that.setData({ isBottomLoading: true });
   
@@ -1319,6 +1335,7 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
       status: 1,
     },
     success: function (res) {
+      if (!isCurrent()) return;
       if (!(res && res.code == "200" && res.data && isRecordList(res.data.rows))) {
         // A-14-2:同主题列表,失败落行内重试。
         that.setData({ isBottomLoading: false, bottomActivityFailedPage: pageNo });
@@ -1355,6 +1372,7 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
       that.setData({ isBottomLoading: false, bottomActivityFailedPage: 0, 'listLoaded.bottomActivityList': true });
     },
     fail: function (res) {
+      if (!isCurrent()) return;
       // A-14-2:网络失败同样落行内重试,不再只弹一次 toast。
       that.setData({ isBottomLoading: false, bottomActivityFailedPage: pageNo });
     }

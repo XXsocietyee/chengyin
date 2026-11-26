@@ -402,3 +402,39 @@ test('L10-021:首页刷新只加载当前分栏的底部列表', () => {
     assert.deepEqual([topics, activities], [topic, activity])
   }
 })
+
+function bottomActivityFeed(rows) {
+  return rows.filter((request) => request.url === '/api/activity/list'
+    && request.data && request.data.pageSize === 20 && request.data.status === 1)
+}
+
+test('L10-021:主题首屏不拉底部活动信息流，再进活动分栏或换账号才拉', () => {
+  const page = makePage()
+  page.loadPageData()
+  assert.equal(bottomActivityFeed(sent).length, 0, '主题首屏不请求底部活动信息流')
+  assert.equal(sent.filter((request) => request.url === '/api/activity/list' && request.data && request.data.pageSize === 4).length, 2)
+
+  sent = []
+  page.data.bottomTopicList = [{ id: 2 }]
+  page.data.bottomActivityList = [{ id: 1 }]
+  page.switchTab({ detail: { key: '0' } })
+  assert.equal(bottomActivityFeed(sent).length, 0, '回到主题不重拉')
+
+  page.switchTab({ detail: { key: '1' } })
+  assert.equal(bottomActivityFeed(sent).length, 1, '再次打开活动分栏会拉')
+
+  sent = []
+  page.data.bottomTopicList = [{ id: 2 }]
+  page.switchTab({ detail: { key: '0' } })
+  assert.equal(bottomActivityFeed(sent).length, 0)
+
+  userId = 'member-2'
+  page.getUserData()
+  assert.equal(bottomActivityFeed(sent).length, 0, '人在主题分栏时换账号不拉底部活动信息流')
+
+  sent = []
+  page.data.activeTab = '1'
+  userId = 'member-3'
+  page.getUserData()
+  assert.equal(bottomActivityFeed(sent).length, 1, '人在活动分栏时换账号重拉')
+})
