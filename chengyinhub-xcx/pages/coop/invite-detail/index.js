@@ -259,13 +259,17 @@ Page({
     const memberId = partnerMemberId(inv, this.data.box);
     if (!memberId) return;
     const that = this;
+    const ctx = this._captureContext();
+    const inviteId = String(inv.inviteId);
     app.sendRequest({
       hideLoading: true, silentError: true,
       url: '/api/coop/credit', method: 'POST',
       data: JSON.stringify({ memberId: memberId }), header: jsonHeader(),
       success(res) {
+        // 刷新会再要一次。只认这一次:晚到的上一笔不能把页上的履约率盖回去,离开后也不写。
+        if (!that._isCurrent(ctx)) return;
         const credit = res && String(res.code) === '200' ? shapeCredit(res.data) : null;
-        if (credit && that.data.invite && String(that.data.invite.inviteId) === String(inv.inviteId)) {
+        if (credit && that.data.invite && String(that.data.invite.inviteId) === inviteId) {
           that.setData({ partnerCredit: credit });
         }
       },

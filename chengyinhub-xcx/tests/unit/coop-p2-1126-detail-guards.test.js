@@ -92,6 +92,30 @@ test('详情刷新飞行中继续输入的理由不会被开请求时的快照�
   assert.equal(env.page.data.inputKind, '');
 });
 
+test('详情刷新后晚到的履约信用不能盖掉新结果，离开页面也不再写', () => {
+  const env = loadDetail(inviteResponse(pending), true);
+  env.page.onLoad({ inviteId: '7', box: 'received' });
+  env.requests[0].success(inviteResponse(pending));
+  const first = env.requests.find((request) => request.url === '/api/coop/credit');
+  const older = { code: 200, data: { days: 90, fulfil: 1, violationCount: 0, fulfillmentRate: 100 } };
+  const newer = { code: 200, data: { days: 90, fulfil: 8, violationCount: 2, fulfillmentRate: 80 } };
+  first.success(older);
+  assert.equal(env.page.data.partnerCredit.text, '履约率 100% · 违约 0 次');
+
+  env.page.load();
+  env.requests.filter((request) => request.url === '/api/coop/list').at(-1).success(inviteResponse(pending));
+  const second = env.requests.filter((request) => request.url === '/api/coop/credit').at(-1);
+  assert.notEqual(second, first);
+  second.success(newer);
+  assert.equal(env.page.data.partnerCredit.text, '履约率 80% · 违约 2 次');
+  first.success(older);
+  assert.equal(env.page.data.partnerCredit.text, '履约率 80% · 违约 2 次');
+
+  env.page.onUnload();
+  second.success({ code: 200, data: { days: 90, fulfil: 1, violationCount: 9, fulfillmentRate: 10 } });
+  assert.equal(env.page.data.partnerCredit.text, '履约率 80% · 违约 2 次');
+});
+
 test('条款已锁定时不展示申报供给，打开和提交都不发请求', () => {
   const wxml = read('pages/coop/invite-detail/index.wxml');
   const row = wxml.split('\n').find((line) => line.includes('bindtap="openPerkPick"'));
