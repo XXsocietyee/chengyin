@@ -42,6 +42,7 @@ Page({
       initialTab: String(options.tab || ''),
       missingUser: !userId,
       topicId: String(options.topicId || ''),
+      chapterId: String(options.chapterId || ''),
       topicName: options.topicName ? decodeURIComponentSafe(options.topicName) : '', // L10-200:分享链接里坏掉的 % 编码不再让页面 onLoad 抛错
       operationScope: options.scope === 'MERCHANT' ? 'MERCHANT' : '',
       previewSelf: options.preview === '1'

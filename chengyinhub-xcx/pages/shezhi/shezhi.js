@@ -9,6 +9,10 @@ const { getScene } = require('../../utils/scene-registry.js');
 const { pushScene, popScene, currentScene, exitDecision } = require('../../utils/scene-stack.js');
 const { clearStorageForLogout } = require('../../utils/roam-player-memory.js');
 function identitySync() { return require('../../utils/identity-sync.js'); }
+function settingsIdentity() {
+  const gd = app.globalData || {};
+  return [app.getUserID(), gd.role || '', gd.user_type || '', gd.authorization || ''].join('|');
+}
 Page({
 
   data: {
@@ -54,8 +58,12 @@ Page({
     this._hidden = false;
     this.setData({ hasAccount: Number(app.getUserID && app.getUserID()) > 0 });
     this.syncViewStateAndTheme();
+    const refreshProfile = this._refreshProfileOnShow === true;
+    this._refreshProfileOnShow = false;
     if (this._skipInitialShow) this._skipInitialShow = false;
-    else { this.syncCommunityEntry(); this.getUserData(); }
+    else this.syncCommunityEntry();
+    // L10-041:普通返回不重拉 /api/user/info,也不把整份资料再写进视图。改完资料,或账号已经换了,才重读。
+    if (refreshProfile || this._settingsReadOwner !== settingsIdentity()) this.getUserData();
   },
 
   // 与 IM 列表 _syncCommunityEntry、收藏页 syncCommunityTab 同一判据:app.canUseCommunity(false),开关稍后到达再补一次
@@ -74,7 +82,7 @@ Page({
     if (pending && typeof pending.then === 'function') pending.then(sync);
   },
 
-  onHide() { this._hidden = true; this._userInfoEpoch = (this._userInfoEpoch || 0) + 1; merchantTheme.merchantPageRestore(); },
+  onHide() { this._hidden = true; merchantTheme.merchantPageRestore(); },
   onUnload() { this._unloaded = true; this._userInfoEpoch = (this._userInfoEpoch || 0) + 1; merchantTheme.merchantPageRestore(); },
 
   syncViewStateAndTheme() {
@@ -154,6 +162,7 @@ Page({
   // (头像=Logo、昵称=店铺名称、签名=slogan、作品=门店相册,gerenziliao 对商户全是重复字段)。
   goUserInfo() {
     if (this.data.settingsAuthRequired || this.data.settingsAccessDenied) { this.onLoginSettings(); return; }
+    this._refreshProfileOnShow = true;
     if (this.data.isMerchantView) {
       wx.navigateTo({ url: '/pages/merchant/decor/index' });
       return;
@@ -375,10 +384,7 @@ Page({
   getUserData() {
     const that = this;
     const epoch = this._userInfoEpoch = (this._userInfoEpoch || 0) + 1;
-    const identity = () => {
-      const gd = app.globalData || {};
-      return [app.getUserID(), gd.role || '', gd.user_type || '', gd.authorization || ''].join('|');
-    };
+    const identity = () => settingsIdentity();
     const requestedIdentity = identity();
     if (!(Number(app.getUserID()) > 0)) {
       this.setData({ userInfo: {}, settingsAuthRequired: true, settingsAccessDenied: false });
@@ -416,6 +422,7 @@ Page({
           // L10-041:页面不渲染手机号,原始号码与脱敏号都不进视图层。
           const data = Object.assign({}, res.data);
           delete data.phone;
+          delete data.phoneMasked;
           that.setData({ userInfo: data, settingsAuthRequired: false, settingsAccessDenied: false });
         }
       },

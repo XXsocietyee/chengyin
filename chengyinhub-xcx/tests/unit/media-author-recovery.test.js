@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const ROOT = path.resolve(__dirname, '../..');
 const FILE = path.join(ROOT, 'pages/privacy/index.js');
-function load() {
+function load(options = {}) {
   const state = { member: 9, token: 'fixture-token-a', pending: false, calls: [], clipboard: [] };
   global.getApp = () => ({ getUserID: () => state.member, getAuthorization: () => state.token,
     hasPendingPrivacyAuthorization: () => state.pending, sendRequest: options => state.calls.push(options),
@@ -14,7 +14,7 @@ function load() {
   global.Page = definition => { state.definition = definition; };
   delete require.cache[require.resolve(FILE)]; require(FILE);
   const page = Object.assign({}, state.definition, { setData(patch, done) { Object.assign(this.data, patch); if (done) done(); } });
-  page.data = JSON.parse(JSON.stringify(state.definition.data)); page.data.mediaOpen = true; // L10-044:面板展开时才读本人媒体
+  page.data = JSON.parse(JSON.stringify(state.definition.data)); page.data.mediaOpen = !options.collapsed;
   page.onLoad(); page.onShow();
   return { state, page };
 }
@@ -40,8 +40,9 @@ test('actual preview endpoint yields ephemeral author URL; hide and unload clear
   assert.equal(state.calls[1].url, '/api/media/asset/12/preview');
   state.calls[1].success({ code: 200, data: { authorPreviewUrl: 'https://media.invalid/private?expires=300' } });
   assert.equal(page.data.mediaPreviewType, 'AUDIO'); page.onHide(); assert.equal(page.data.mediaPreviewUrl, '');
-  page.onShow(); state.calls[2].success({ code: 200, data: rows('HOLD') }); page.previewOwnMedia(event); page.onUnload();
-  state.calls[3].success({ code: 200, data: { authorPreviewUrl: 'https://media.invalid/stale' } }); assert.equal(page.data.mediaPreviewUrl, '');
+  assert.equal(page.data.mediaRows[0].assetId, '12');
+  page.onShow(); assert.equal(state.calls.length, 2); page.previewOwnMedia(event); page.onUnload();
+  state.calls[2].success({ code: 200, data: { authorPreviewUrl: 'https://media.invalid/stale' } }); assert.equal(page.data.mediaPreviewUrl, '');
 });
 test('stale callback cannot repopulate another account or rotated token', () => {
   const { state, page } = load(); const old = state.calls[0]; state.member = 10; state.token = 'fixture-token-b'; page.onShow();
@@ -123,11 +124,15 @@ test('author pagination preserves exact long cursors and rejects duplicates and 
   page.loadOlderMedia(); state.calls[2].success({ code: 200, data: [{ assetId: 9007199254740993, reviewState: 'HOLD' }] }); assert.equal(page.data.mediaRows.length, 50);
   page.loadOwnMedia(); state.calls[3].success({ code: 200, data: [{ assetId: '9223372036854775808', reviewState: 'HOLD' }] }); assert.deepEqual(page.data.mediaRows, []);
 });
-test('older media requests clear on hide account switch and authentication failures', () => {
+test('older media late page is ignored after hide; account switch and auth failure clear the list', () => {
   for (const failure of ['hide', 'account', 401, 403]) {
     const { state, page } = load(); state.calls[0].success({ code: 200, data: fullPage('70') }); page.loadOlderMedia();
-    if (failure === 'hide') { page.onHide(); state.calls[1].success({ code: 200, data: rows('REJECTED') }); }
-    else if (failure === 'account') { state.member = 10; state.token = 'other-token'; state.calls[1].success({ code: 200, data: rows('REJECTED') }); }
+    if (failure === 'hide') {
+      page.onHide(); state.calls[1].success({ code: 200, data: rows('REJECTED') });
+      assert.equal(page.data.mediaRows.length, 50); assert.equal(page.data.mediaHasMore, true); assert.equal(page._mediaBeforeId, '21');
+      continue;
+    }
+    if (failure === 'account') { state.member = 10; state.token = 'other-token'; state.calls[1].success({ code: 200, data: rows('REJECTED') }); }
     else state.calls[1].fail({ code: failure }, failure);
     assert.deepEqual(page.data.mediaRows, []); assert.equal(page.data.mediaHasMore, false); assert.equal(page._mediaBeforeId, '');
   }
@@ -149,13 +154,20 @@ test('account change before pagination immediately wipes the previous loaded own
   assert.deepEqual(page.data.mediaRows.map(row => row.assetId), ['80']);
 });
 
-test('L10-044:面板收起时进入/返回页面不读本人媒体,首次展开才读', () => {
-  const { state, page } = load();
-  state.calls.length = 0;
-  page.data.mediaOpen = false;
+test('L10-044:面板收起时进入/返回不读本人媒体,首次展开才读,同一趟往返保留', () => {
+  const { state, page } = load({ collapsed: true });
+  assert.equal(state.calls.length, 0);
   page.onHide(); page.onShow();
   assert.equal(state.calls.length, 0);
   page.toggleMediaPanel();
   assert.equal(state.calls.length, 1);
   assert.equal(page.data.mediaOpen, true);
+  state.calls[0].success({ code: 200, data: rows('HOLD') });
+  assert.equal(page.data.mediaRows[0].assetId, '12');
+  page.onHide(); page.onShow();
+  assert.equal(state.calls.length, 1);
+  assert.equal(page.data.mediaRows[0].assetId, '12');
+  page.toggleMediaPanel(); page.toggleMediaPanel();
+  assert.equal(state.calls.length, 1);
+  assert.equal(page.data.mediaRows[0].assetId, '12');
 });

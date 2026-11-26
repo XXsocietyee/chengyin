@@ -23,6 +23,7 @@ function loadPage(recordConsent, options = {}) {
     },
     recordConsent: (payload) => { sandbox.records.push(payload); return recordConsent(payload) },
     resolvePrivacyAuthorization: (payload) => sandbox.resolutions.push(payload),
+    sendRequest: options.sendRequest,
   })
   global.wx = {
     showToast: (options) => sandbox.toasts.push(options.title),
@@ -157,6 +158,45 @@ test('换账号或离开设置后迟到留痕不能给新界面显示成功',asy
   const hidden=loadPage(()=>Promise.resolve(homeReceipt('REVOKE')),{pending:false})
   hidden.page.disableHomeCityLocation();hidden.page.onHide();await settle()
   assert.equal(hidden.sandbox.toasts.length,0)
+})
+test('未登录设置首页定位写在该组下面，不弹 toast', () => {
+  const { page, sandbox } = loadPage(() => Promise.resolve(), { pending: false, owner: () => '' })
+  page.disableHomeCityLocation()
+  assert.equal(sandbox.records.length, 0)
+  assert.equal(sandbox.toasts.length, 0)
+  assert.match(page.data.homeCityError, /请先登录再设置首页定位/)
+})
+test('关闭附近的人失败留在该行下；离开后的回包不再提示', async () => {
+  const failed = loadPage(() => Promise.resolve(), { pending: false, sendRequest(opts) { opts.fail() } })
+  failed.page.disablePresenceSharing()
+  await settle()
+  assert.equal(failed.sandbox.toasts.length, 0)
+  assert.match(failed.page.data.presenceError, /未能关闭/)
+  assert.equal(failed.page.data.submitting, false)
+  const calls = []
+  const late = loadPage(() => Promise.resolve(), { pending: false, sendRequest(opts) { calls.push(opts) } })
+  late.page.disablePresenceSharing()
+  late.page.onHide()
+  assert.equal(late.page.data.submitting, false)
+  late.page.onShow()
+  late.page.disablePresenceSharing()
+  assert.equal(late.page.data.submitting, true)
+  calls[0].success({ code: 200, data: false })
+  await settle()
+  assert.equal(late.sandbox.toasts.length, 0)
+  assert.equal(late.page.data.presenceError, '')
+  assert.equal(late.page.data.submitting, true)
+  calls[1].success({ code: 200, data: false })
+  await settle()
+  assert.deepEqual(late.sandbox.toasts, ['已关闭附近的人位置分享'])
+  assert.equal(late.page.data.submitting, false)
+  const gone = loadPage(() => Promise.resolve(), { pending: false, sendRequest(opts) { calls.push(opts) } })
+  gone.page.disablePresenceSharing()
+  gone.page.onUnload()
+  assert.equal(gone.page.data.submitting, false)
+  calls.at(-1).success({ code: 200, data: false })
+  await settle()
+  assert.equal(gone.sandbox.toasts.length, 0)
 })
 test('匿名、展示会话或初次协议闸不得设置首页定位同意',async()=>{
   for(const options of [{pending:false,owner:()=>''},{pending:false,token:()=> 'dev-token'},{pending:true}]) {
