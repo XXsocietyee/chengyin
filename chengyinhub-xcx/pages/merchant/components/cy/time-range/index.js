@@ -89,20 +89,37 @@ Component({
       this._revalidate()
     },
 
-    // 两支各自写字面量 setData,不合并成一个动态键 —— 动态 setData 让门禁没法静态核对
+    // 两支各自写字面量字段,不合并成一个动态键 —— 动态 setData 让门禁没法静态核对
     // 顶层字段有没有被消费,那条豁免不该为省三行代码去申请。
+    // L07-014:touchmove 约每秒 60 次。吸附值没变不写;变了也只 setData 一次,
+    // 把这一头的文案和校验一起落下去,不再先写时间再让 _revalidate 写第二笔。
     _apply(which, minutes) {
       const m = this._snap(minutes)
-      // L07-014:拖动每秒约 60 次 touchmove,吸附值没变就不 setData
       if (m === (which === 'end' ? this._endMin : this._startMin)) return
+      const startText = which === 'end' ? this.data._startText : tr.fromMinutes(m)
+      const endText = which === 'end' ? tr.fromMinutes(m) : this.data._endText
+      if (which === 'end') this._endMin = m
+      else this._startMin = m
+      const r = tr.validate(startText, endText, {
+        allowCross: this.data.allowCross,
+        minMinutes: this.data.minMinutes,
+        maxMinutes: this.data.maxMinutes,
+      })
       if (which === 'end') {
-        this._endMin = m
-        this.setData({ _endText: tr.fromMinutes(m) })
+        this.setData({
+          _endText: endText,
+          _ok: r.ok,
+          _spanText: r.minutes > 0 ? '共 ' + tr.formatSpan(r.minutes) : '',
+          _hint: this._hintOf(r),
+        })
       } else {
-        this._startMin = m
-        this.setData({ _startText: tr.fromMinutes(m) })
+        this.setData({
+          _startText: startText,
+          _ok: r.ok,
+          _spanText: r.minutes > 0 ? '共 ' + tr.formatSpan(r.minutes) : '',
+          _hint: this._hintOf(r),
+        })
       }
-      this._revalidate()
     },
 
     _revalidate() {

@@ -51,7 +51,7 @@ Page({
     openId: '',          // 展开选答案的那一行
     pickedKey: '',
     submitting: false,
-    confirm: { show: false, rid: '', key: '', label: '', content: '' },
+    confirm: { show: false, rid: '', key: '', label: '', content: '', unconfirmed: false },
   },
 
   onLoad() {
@@ -160,20 +160,49 @@ Page({
         }
         // L07-028:200 但 data 不是数组时按读取失败处理,不抛 TypeError 卡在骨架屏
         if (!Array.isArray(res.data)) { this._readError(res, '待答列表加载失败'); return; }
-        const items = res.data.map(shapeRound);
-        this.setData({
+        const unconfirmedRid = this._settleUnconfirmedRid || '';
+        const items = res.data.map((row) => {
+          const item = shapeRound(row);
+          if (unconfirmedRid && item.rid === unconfirmedRid) item.settleUnconfirmed = true;
+          return item;
+        });
+        const stillUnconfirmed = !!(unconfirmedRid && items.some((item) => item.settleUnconfirmed));
+        const patch = {
           items: items,
           openId: '', pickedKey: '',
           pageState: items.length ? 'ready' : 'empty',
-        });
+        };
+        // 待答列表里已经没有这一轮,读回说明它不在可再提交的待答里
+        if (unconfirmedRid && !stillUnconfirmed) {
+          this._settleUnconfirmedRid = '';
+          if (this.data.confirm && this.data.confirm.rid === unconfirmedRid) {
+            patch.confirm = { show: false, rid: '', key: '', label: '', content: '', unconfirmed: false };
+          }
+        }
+        this.setData(patch);
       },
-      fail: (res, status) => { if (!this._recoverAccess(res, status, epoch) && current()) this._readError(res, '网络异常，请重试', status); },
+      fail: (res, status) => {
+        if (!this._recoverAccess(res, status, epoch) && current()) {
+          // 结算断网后的这次回读失败,不能再说成普通「请重试」
+          if (this._settleUnconfirmedRid || (this.data.confirm && this.data.confirm.unconfirmed)) {
+            this._readError(res, '结算结果未确认，请勿重复提交', status);
+            this.setData({ errorMessage: '结算结果未确认，请勿重复提交' });
+            return;
+          }
+          this._readError(res, '网络异常，请重试', status);
+        }
+      },
       successStatusAbnormal: (res, status) => { if (!this._recoverAccess(res, status, epoch) && current()) this._readError(res, '待答列表加载失败', status); },
     });
   },
 
   onOpenRound(e) {
     const rid = e.currentTarget.dataset.rid;
+    const row = (this.data.items || []).filter((x) => x.rid === rid)[0];
+    if (row && row.settleUnconfirmed) {
+      cyToast('结算结果未确认，请勿重复提交');
+      return;
+    }
     this.setData({ openId: rid, pickedKey: '' });
   },
   onCancelPick() { this.setData({ openId: '', pickedKey: '' }); },
@@ -188,6 +217,10 @@ Page({
     const rid = e.currentTarget.dataset.rid;
     const row = this.data.items.filter((x) => x.rid === rid)[0];
     if (!row) return;
+    if (row.settleUnconfirmed) {
+      cyToast('结算结果未确认，请勿重复提交');
+      return;
+    }
     const picked = (row.options || []).filter((o) => o.key === this.data.pickedKey)[0] || {};
     this.setData({
       confirm: {
@@ -195,12 +228,27 @@ Page({
         /* 把后果写全:结算是一次性的,而且会按规则发券 —— 这两件事
            点下去之后都撤不回来,不能等玩家来问才发现。 */
         content: '选对的人会按你配的规则拿到奖励。这一轮只能公布一次，公布后不能改。',
+        unconfirmed: false,
       },
     });
   },
   onCancelConfirm() {
     if (this.data.submitting) return;
     this.setData({ 'confirm.show': false });
+  },
+
+  onRecheckSettle() {
+    if (this.data.submitting) return;
+    this.loadInbox();
+  },
+
+  // 弹窗确认键:结果未知时只核对待答列表,不发新的结算
+  onConfirmModal() {
+    if (this.data.confirm && this.data.confirm.unconfirmed) {
+      this.onRecheckSettle();
+      return;
+    }
+    this.onConfirmSettle();
   },
 
   onConfirmSettle() {
@@ -216,7 +264,11 @@ Page({
       method: 'POST',
       data: { nodeId: String(row.nodeId), playDay: row.playDay, settledOption: confirm.key },
       success: (res) => {
-        this.setData({ submitting: false, 'confirm.show': false });
+        if (this._settleUnconfirmedRid === confirm.rid) this._settleUnconfirmedRid = '';
+        this.setData({
+          submitting: false,
+          confirm: { show: false, rid: '', key: '', label: '', content: '', unconfirmed: false },
+        });
         if (!successObject(res)) {
           // 失败要说人话并且留在原地 —— 这一轮还没结,人得能再试
           cyToast(errorText(res, '结算失败，请重试'));
@@ -235,9 +287,29 @@ Page({
         });
       },
       fail: () => {
-        this.setData({ submitting: false, 'confirm.show': false });
-        cyToast('网络异常，请重试');
-        this.loadInbox(); // L07-027
+        const rid = confirm.rid;
+        this._settleUnconfirmedRid = rid;
+        const items = (this.data.items || []).map((item) => (
+          item.rid === rid ? Object.assign({}, item, { settleUnconfirmed: true }) : item
+        ));
+        // L07-027:断网不知道结算有没有落地。说清结果未确认,并收起「公布并结算」,
+        // 避免看起来可以当作一笔新结算再提交一次。随后只重读待答列表。
+        this.setData({
+          submitting: false,
+          items: items,
+          openId: '',
+          pickedKey: '',
+          confirm: {
+            show: true,
+            rid: rid,
+            key: confirm.key,
+            label: confirm.label,
+            unconfirmed: true,
+            content: '结算结果未确认。请先核对这一轮，不要把它当成新的结算再提交。',
+          },
+        });
+        cyToast('结算结果未确认，请勿重复提交');
+        this.loadInbox();
       },
     });
   },
