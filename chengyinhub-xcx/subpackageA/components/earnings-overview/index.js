@@ -13,6 +13,10 @@ function identityKey() {
   const type = typeof app.getUserType === 'function' ? app.getUserType() : gd.user_type;
   return [member == null ? '' : member, role || '', type == null ? '' : type].join('|');
 }
+function memberPart(key) {
+  const member = String(key == null ? '' : key).split('|')[0];
+  return member === '0' ? '' : member;
+}
 const EMPTY_MONTH = { ready: false, total: '0.00', items: [], monthLabel: '' };
 
 Component({
@@ -25,23 +29,49 @@ Component({
   },
   pageLifetimes: {
     show() {
-      const refresh = this._hidden || this._identity !== identityKey();
+      const next = identityKey();
+      const refresh = this._hidden || this._identity !== next;
       this._hidden = false;
+      this._clearOtherMember();
       if (refresh) this.load();
     },
-    hide() { this._hidden = true; this._epoch = (this._epoch || 0) + 1; },
+    hide() {
+      this._hidden = true;
+      this._epoch = (this._epoch || 0) + 1;
+      this._clearOtherMember();
+    },
   },
   methods: {
     _current(epoch) {
       return epoch === this._epoch && !this._detached && !this._hidden && this._identity === identityKey();
     },
-    load() {
-      if (this._detached || this._hidden) return;
-      this._identity = identityKey();
-      const epoch = this._epoch = (this._epoch || 0) + 1;
+    _keepsShown(next) {
+      const member = memberPart(next == null ? identityKey() : next);
+      if (!member || this._dataMember !== member) return false;
+      const month = this.data.month;
+      return !!((month && month.ready) || (Array.isArray(this.data.assets) && this.data.assets.length));
+    },
+    _clearShown() {
+      this._dataMember = null;
       this._balanceMonth = null;
       this._clubItems = [];
       this.setData({ month: EMPTY_MONTH, monthError: false, clubError: false, assets: [], assetsError: false });
+    },
+    _clearOtherMember() {
+      if (this._detached) return;
+      if (this._dataMember && this._dataMember !== memberPart(identityKey())) this._clearShown();
+    },
+    _rememberMember() {
+      const member = memberPart(this._identity);
+      if (member) this._dataMember = member;
+    },
+    load() {
+      if (this._detached || this._hidden) return;
+      const next = identityKey();
+      const keep = this._keepsShown(next);
+      this._identity = next;
+      const epoch = this._epoch = (this._epoch || 0) + 1;
+      if (!keep) this._clearShown();
       this.loadMonth(epoch);
       if (this.properties.merchant) this.loadClubPay(epoch);
       this.loadAssets(epoch);
@@ -58,15 +88,21 @@ Component({
       app.sendRequest({
         url: '/api/club-direct-merchant/merchant', method: 'GET', hideLoading: true, silentError: true,
         success: (res) => {
-          if (!this._current(epoch)) return;
+          if (!this._current(epoch)) { this._clearOtherMember(); return; }
           const ledger = ledgerView(res, { kind: 'merchant' });
           if (!ledger) { if (!forbidden(res)) this.setData({ clubError: true }); return; }
           this._clubItems = earningsView.clubPayMonthItems(ledger.rows, new Date());
           this.setData({ clubError: false });
           this._setMonth();
         },
-        fail: (res, status) => { if (this._current(epoch) && !forbidden(res, status)) this.setData({ clubError: true }); },
-        successStatusAbnormal: (res, status) => { if (this._current(epoch) && !forbidden(res, status)) this.setData({ clubError: true }); },
+        fail: (res, status) => {
+          if (!this._current(epoch)) { this._clearOtherMember(); return; }
+          if (!forbidden(res, status)) this.setData({ clubError: true });
+        },
+        successStatusAbnormal: (res, status) => {
+          if (!this._current(epoch)) { this._clearOtherMember(); return; }
+          if (!forbidden(res, status)) this.setData({ clubError: true });
+        },
       });
     },
     retryAssets() { this.loadAssets(this._epoch); },
@@ -75,16 +111,23 @@ Component({
       app.sendRequest({
         url: '/api/user/balance/list', method: 'POST', data: { pageNum: 1, pageSize: 100 }, hideLoading: true, silentError: true,
         success: (res) => {
-          if (!this._current(epoch)) return;
+          if (!this._current(epoch)) { this._clearOtherMember(); return; }
           const data = res && res.code == '200' ? res.data : null;
           const rows = data && (data.rows || data.list || data);
           if (!Array.isArray(rows)) { this.setData({ monthError: true }); return; }
           this._balanceMonth = Object.assign({ ready: true }, earningsView.monthIncome(rows, new Date(), 3));
+          this._rememberMember();
           this.setData({ monthError: false });
           this._setMonth();
         },
-        fail: () => { if (this._current(epoch)) this.setData({ monthError: true }); },
-        successStatusAbnormal: () => { if (this._current(epoch)) this.setData({ monthError: true }); },
+        fail: () => {
+          if (!this._current(epoch)) { this._clearOtherMember(); return; }
+          this.setData({ monthError: true });
+        },
+        successStatusAbnormal: () => {
+          if (!this._current(epoch)) { this._clearOtherMember(); return; }
+          this.setData({ monthError: true });
+        },
       });
     },
     loadAssets(epoch) {
@@ -92,11 +135,21 @@ Component({
         url: '/api/wallet/stages', method: 'POST', data: {}, hideLoading: true, silentError: true,
         header: { 'content-type': 'application/json' },
         success: (res) => {
-          if (!this._current(epoch)) return;
+          if (!this._current(epoch)) { this._clearOtherMember(); return; }
           const stages = res && res.code == 200 ? buildFundsStages(res.data) : null;
-          this.setData({ assets: earningsView.assetRows(stages), assetsError: !stages });
+          if (!stages) {
+            const patch = { assetsError: true };
+            if (!this._keepsShown(identityKey())) patch.assets = [];
+            this.setData(patch);
+            return;
+          }
+          this._rememberMember();
+          this.setData({ assets: earningsView.assetRows(stages), assetsError: false });
         },
-        fail: () => { if (this._current(epoch)) this.setData({ assetsError: true }); },
+        fail: () => {
+          if (!this._current(epoch)) { this._clearOtherMember(); return; }
+          this.setData({ assetsError: true });
+        },
       });
     },
     openDetail() { this.triggerEvent('detail'); },
