@@ -749,7 +749,9 @@ test('照片回执 404 可确认同意后重放原照片：保留原版本/键/�
   const disk = photoDisk();
   const game = createGame([{ err: Error('lost') }, { res: { code: 404 } }, okAction(10)]);
   await game.action('SUBMIT_PHOTO_CHECK', photoInput()); await tick();
-  assert.equal(game.data.photoRetryable, true); assert.ok(disk.size > 0);
+  assert.equal(game.data.photoRetryable, true); assert.equal(game.data.commandRetryable, false);
+  assert.doesNotMatch(game.data.unknownText, /重新提交原请求/);
+  assert.ok(disk.size > 0);
   const original = JSON.parse(JSON.stringify(game.calls[0].data));
   game.data.state.sessionId = '42';
   game.data.state.version = 9;
@@ -894,6 +896,137 @@ test('Photo 在途时调用者改 payload，原发送、原存储和原重试仍
   assert.deepEqual(game.calls[1], { url: '/api/play/advanced/receipt', method: 'GET',
     data: { sessionId: 42, idempotencyKey: game.calls[0].data.idempotencyKey } });
   assert.ok([...disk.values()].some(value => value && value.command && value.command.payload.imageUrl === 'media-asset:701'));
+});
+
+test('回执 404 对普通动作保留原命令，并按同一键和原版本重新提交', async () => {
+  const wxml = require('node:fs').readFileSync(require.resolve('../../pages/play/components/advanced-game/index.wxml'), 'utf8');
+  assert.match(wxml, /bindtap="retryOriginalCommand"/);
+  assert.match(wxml, /重新提交原请求/);
+  assert.match(wxml, /bindtap="retryOriginalPhoto">重试原照片/);
+  for (const [name, payload] of [['DRAW', {}], ['CHOOSE', { optionId: 'a1' }], ['SUBMIT_BALL_SHAKE', { hits: 6 }]]) {
+    const game = createGame([
+      { err: new Error('lost') },
+      { res: { code: 404, msg: '尚未查到原请求回执' } },
+      okAction(10),
+    ]);
+    await game.action(name, payload);
+    await new Promise(setImmediate);
+    assert.equal(game.data.unknown, true, name);
+    assert.equal(game.data.commandRetryable, true, name);
+    assert.equal(game.data.photoRetryable, false, name);
+    assert.match(game.data.unknownText, /重新提交原请求/, name);
+    assert.doesNotMatch(game.data.unknownText, /请勿重复提交/, name);
+    const original = game.calls[0].data;
+    assert.equal(game._unknownCommand.idempotencyKey, original.idempotencyKey, name);
+    assert.equal(game._unknownCommand.version, original.version, name);
+    assert.deepEqual(game._unknownCommand.payload, payload, name);
+    const pending = global.wx.getStorageSync(game.pendingKey());
+    assert.equal(pending.command.idempotencyKey, original.idempotencyKey, name);
+    assert.equal(pending.command.version, original.version, name);
+    assert.equal(pending.command.payload, undefined, name);
+    const blocked = game.calls.length;
+    await game.action(name, payload);
+    assert.equal(game.calls.length, blocked, name + ' unknown 未解除前不得另发一笔');
+    game.data.state.version = 99;
+    assert.equal(await game.retryOriginalCommand(), true, name);
+    assert.equal(game.calls.length, 3, name);
+    assert.equal(game.calls[2].method, 'POST', name);
+    assert.equal(game.calls[2].url, '/api/play/advanced/action', name);
+    assert.deepEqual(game.calls[2].data, original, name);
+    assert.equal(global.wx.getStorageSync(game.pendingKey()), undefined, name);
+    assert.equal(game.data.unknown, false, name);
+    assert.equal(game.data.commandRetryable, false, name);
+  }
+});
+
+test('重新进入后无入参的原请求回执 404 不提供重提，也不再 POST', async () => {
+  const first = createGame([{ err: new Error('timeout') }, { err: new Error('offline') }]);
+  await first.action('SUBMIT_QA', { answer: '原答案' });
+  await new Promise(setImmediate);
+  const savedWx = global.wx;
+  const saved = savedWx.getStorageSync(first.pendingKey());
+  assert.equal(saved.command.payload, undefined);
+  assert.doesNotMatch(JSON.stringify(saved), /原答案/);
+  const second = createGame([{ res: { code: 404, msg: '尚未查到原请求回执' } }]);
+  global.wx = savedWx;
+  await second.start();
+  assert.equal(second.calls.length, 1);
+  assert.equal(second.calls[0].method, 'GET');
+  assert.equal(second.calls[0].url, '/api/play/advanced/receipt');
+  assert.equal(second.calls[0].data.idempotencyKey, saved.command.idempotencyKey);
+  assert.equal(second.data.unknown, true);
+  assert.equal(second.data.commandRetryable, false);
+  assert.match(second.data.unknownText, /请勿重复提交/);
+  assert.doesNotMatch(second.data.unknownText, /重新提交原请求/);
+  assert.equal(second._unknownCommand.payload, undefined);
+  assert.equal(savedWx.getStorageSync(second.pendingKey()).command.payload, undefined);
+  assert.equal(await second.retryOriginalCommand(), false);
+  assert.equal(second.calls.filter(call => call.method === 'POST').length, 0);
+  assert.equal(second.calls.length, 1);
+});
+
+test('回执请求失败或 5xx 不提供原命令重提，仍请勿重复提交', async () => {
+  for (const second of [{ err: new Error('offline') }, { res: { code: 500, msg: '服务繁忙' } }, { res: { code: 503 } }]) {
+    const game = createGame([{ err: new Error('lost') }, second]);
+    await game.action('DRAW', {});
+    await new Promise(setImmediate);
+    assert.equal(game.data.unknown, true);
+    assert.equal(game.data.commandRetryable, false);
+    assert.match(game.data.unknownText, /未查到不代表未提交/);
+    assert.match(game.data.unknownText, /请勿重复提交/);
+    const before = game.calls.length;
+    assert.equal(await game.retryOriginalCommand(), false);
+    assert.equal(game.calls.length, before);
+    assert.equal(global.wx.getStorageSync(game.pendingKey()).command.idempotencyKey, game.calls[0].data.idempotencyKey);
+  }
+});
+
+test('回执 404 后切账号或原命令重提再次丢失，都不换键、不删原请求', async () => {
+  appStub._loginEpoch = 4;
+  try {
+    const switched = createGame([{ err: new Error('lost') }, { res: { code: 404 } }]);
+    await switched.action('CHOOSE', { optionId: 'a1' });
+    await new Promise(setImmediate);
+    const pendingKey = switched.pendingKey();
+    const kept = global.wx.getStorageSync(pendingKey);
+    appStub.getUserID = () => 8; appStub._loginEpoch++;
+    assert.equal(await switched.retryOriginalCommand(), false);
+    assert.equal(switched.calls.filter(call => call.method === 'POST').length, 1);
+    assert.equal(switched.data.unknown, true);
+    assert.equal(switched.data.commandRetryable, true);
+    assert.equal(global.wx.getStorageSync(pendingKey).command.idempotencyKey, kept.command.idempotencyKey);
+  } finally { appStub.getUserID = () => 7; delete appStub._loginEpoch; }
+
+  const game = createGame([
+    { err: new Error('lost') },
+    { res: { code: 404 } },
+    { err: new Error('lost again') },
+    { res: { code: 404 } },
+  ]);
+  await game.action('SUBMIT_QA', { answer: '原答案' });
+  await new Promise(setImmediate);
+  const original = game.calls[0].data;
+  assert.equal(await game.retryOriginalCommand(), undefined);
+  await new Promise(setImmediate);
+  assert.equal(game.data.unknown, true);
+  assert.equal(game.data.commandRetryable, true);
+  assert.equal(game.calls.filter(call => call.method === 'POST').length, 2);
+  assert.deepEqual(game.calls[2].data, original);
+  assert.equal(global.wx.getStorageSync(game.pendingKey()).command.idempotencyKey, original.idempotencyKey);
+  assert.equal(global.wx.getStorageSync(game.pendingKey()).command.payload, undefined);
+  assert.equal(game._unknownCommand.payload.answer, '原答案');
+});
+
+test('动作明确 4xx 仍视为已回滚，不保留原命令重提', async () => {
+  const game = createGame([{ res: { code: 400, msg: '不能这样操作' } }]);
+  assert.equal(await game.action('DRAW', {}), false);
+  assert.equal(game.data.unknown, false);
+  assert.equal(game.data.commandRetryable, false);
+  assert.equal(game._unknownCommand, null);
+  assert.equal(global.wx.getStorageSync(game.pendingKey()), undefined);
+  assert.equal(game.calls.length, 1);
+  assert.equal(await game.retryOriginalCommand(), false);
+  assert.equal(game.calls.length, 1);
 });
 
 test('共享高级动作 A UNKNOWN 切 B 及 A→B→A 不得用当前 token 重发旧命令', async () => {

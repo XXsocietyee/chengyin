@@ -14,6 +14,7 @@
       </view>
     </view>
     <cy-btn wx:if="{{unknown && photoRetryable}}" variant="secondary" disabled="{{readingBack || acting}}" bindtap="retryOriginalPhoto">重试原照片</cy-btn>
+    <cy-btn wx:if="{{unknown && commandRetryable}}" variant="secondary" disabled="{{readingBack || acting}}" bindtap="retryOriginalCommand">重新提交原请求</cy-btn>
     <view class="ag__error" wx:if="{{error && !unknown}}" bindtap="start" hover-class="ag__press" hover-stay-time="80">{{error}} · 点击重新读取</view>
     <block wx:if="{{state}}">
       <!-- 状态行给玩家看的是中文,不露 RUNNING / COMPLETED 这类内部状态名;没得分时不挂「得分 0」(实走 A15 复核) -->

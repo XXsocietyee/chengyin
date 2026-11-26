@@ -33,6 +33,8 @@ Component({
     // 所有局只读原请求回执；负向查询不解除未知状态。
     unknown: false,
     photoRetryable: false,
+    // 回执明确 404：这个幂等键没有回执，可按原命令再提交。回执请求失败不是 404。
+    commandRetryable: false,
     unknownText: '',
     readingBack: false,
     state: null,
@@ -108,6 +110,7 @@ Component({
       this._requestEpoch = (this._requestEpoch || 0) + 1;
       const context = this._startingContext = this.sessionRequestContext();
       this._unknownCommand = null;
+      this._submittedCommand = null;
       if (this.data.preview || this.data.mock) {
         const config = node.advancedConfig || {};
         this._previewTypeStartedAt = 0;
@@ -128,7 +131,8 @@ Component({
           this._unknownCommand = pending.command;
           this._unknownRequestContext = Object.assign({}, context, { sessionId: String(pending.state.sessionId || '') });
           this.setData({ loading: false, acting: false, unknown: true, readingBack: false,
-            state: pending.state, error: '', unknownText: '正在查询原请求结果，请勿重新提交' });
+            commandRetryable: false, state: pending.state, error: '',
+            unknownText: '正在查询原请求结果，请勿重新提交' });
           return this.resolveUnknown();
         }
       } catch (_) {
@@ -140,7 +144,7 @@ Component({
       if (Object.values(scope).some(value => !value)) {
         this.setData({ loading: false, error: '玩法标识不完整，请重新进入' }); return;
       }
-      this.setData({ loading: true, acting: false, unknown: false, photoRetryable: false, readingBack: false, error: '', state: null });
+      this.setData({ loading: true, acting: false, unknown: false, photoRetryable: false, commandRetryable: false, readingBack: false, error: '', state: null });
       let restored;
       try { restored = photoPending.read(wx, context); }
       catch (error) { this.setData({ loading: false, unknown: true, error: error.message }); return; }
@@ -263,20 +267,21 @@ Component({
           || !(['FAILED', 'EXPIRED'].includes(state.status) || state.status === 'COMPLETED' && !!state.challenge)) return false;
       return this.action('RETRY', {});
     },
-    action(name, payload, originalPhoto) {
+    action(name, payload, originalCommand) {
       if (this.data.acting || this.data.unknown || !this.data.state) return;
-      if (originalPhoto && (name !== 'SUBMIT_PHOTO_CHECK' || originalPhoto !== this._unknownCommand
-          || String(originalPhoto.sessionId) !== String(this.data.state.sessionId))) return;
+      if (originalCommand && (originalCommand !== this._unknownCommand || originalCommand.action !== name
+          || String(originalCommand.sessionId) !== String(this.data.state.sessionId))) return;
       if (name === 'CHOOSE' && isR5(this.data.state)
           && !feedbackWritable(this.data.state, { stepId: (this.data.currentStep || {}).id })) return;
       if (this.data.preview || this.data.mock) return this.previewAction(name, payload || {});
       const context = this.sessionRequestContext();
-      const sessionId = originalPhoto ? originalPhoto.sessionId : this.data.state.sessionId;
-      const version = originalPhoto ? originalPhoto.version : this.data.state.version;
-      const body = JSON.parse(JSON.stringify(payload || {}));
+      const sessionId = originalCommand ? originalCommand.sessionId : this.data.state.sessionId;
+      const version = originalCommand ? originalCommand.version : this.data.state.version;
+      const body = JSON.parse(JSON.stringify(originalCommand ? (originalCommand.payload || {}) : (payload || {})));
       // 幂等键由「session + 服务端 version + 动作 + 入参」派生：同一次意图重试复用同一个键，
       // 服务端 selectByIdempotencyKey 才能 replay；写成功后 version 前进，下一动作自动换键。
-      const idempotencyKey = originalPhoto ? originalPhoto.idempotencyKey : buildActionKey(sessionId, version, name, body);
+      // 原命令重提必须沿用该键，不能按当前 version 再派生。
+      const idempotencyKey = originalCommand ? originalCommand.idempotencyKey : buildActionKey(sessionId, version, name, body);
       if (!id(sessionId) || !idempotencyKey) {
         this.setData({ error: '当前玩法状态不完整，请退出节点后重新进入' });
         return;
@@ -292,14 +297,16 @@ Component({
         catch (error) { this.setData({ acting: false, error: error.message }); this.emitActionFail(name, sessionId); return Promise.resolve(false); }
       }
       // 普通动作只持久化脱敏身份；照片沿既有 photoPending 保存原本站媒体引用。
-      const original = isPhoto ? command : { sessionId, version, idempotencyKey, action: name };
+      // 内存里留完整原命令，回执 404 时才能按同一键、原版本和原入参再提交。
+      const persisted = { sessionId, version, idempotencyKey, action: name };
       const originalState = { sessionId, version, nodeId: this.data.state.nodeId,
         ownerId: this.data.state.ownerId, ownerType: this.data.state.ownerType,
         challenge: this.data.state.challenge ? {} : null };
       const pendingKey = this.pendingKey();
-      try { if (!isPhoto) wx.setStorageSync(pendingKey, { command: original, state: originalState }); }
+      try { if (!isPhoto) wx.setStorageSync(pendingKey, { command: persisted, state: originalState }); }
       catch (_) { this.setData({ acting: false, error: '原请求记录无法保存，尚未提交' }); return; }
-      this._unknownCommand = original;
+      this._unknownCommand = command;
+      this._submittedCommand = command;
       this._unknownRequestContext = context;
       return this.request('/api/play/advanced/action', 'POST', command).then(res => {
         if (capturedPhoto && isOk(res) && this.responseMatchesSession(res.data, context)) photoPending.clear(wx, capturedPhoto);
@@ -345,14 +352,14 @@ Component({
         if (!this.currentRequestContext(context)) return;
         this._unknownAction = name;
         this._unknownRequestContext = context;
-        this._unknownCommand = original;
+        this._unknownCommand = command;
         this.enterUnknown(version);
       });
     },
     /** 请求没拿到响应：服务端可能已写入，只按原意图核对，不能生成新键重复提交。 */
     enterUnknown(sentVersion) {
       this.setData({
-        acting: false, unknown: true, photoRetryable: false, error: '',
+        acting: false, unknown: true, photoRetryable: false, commandRetryable: false, error: '',
         unknownText: '结果还没确认，正在确认，请勿重复提交'
       });
       this._unknownVersion = sentVersion;
@@ -370,9 +377,19 @@ Component({
         sessionId: original.sessionId, idempotencyKey: original.idempotencyKey
       }).then(res => {
         if (!this.currentRequestContext(context)) return false;
+        // 404：这个幂等键没有回执。保留原命令（不删 pending），同一键和原版本可以再提交。
+        // 服务端已落账则 replay，版本已变则拒绝。回执请求失败（网络 / 5xx / 抛错）不进这里。
+        // 照片仍走同意后重试原照片，不改成跳过同意的重提。
         if (Number(res.code) === 404 && capturedPhoto) {
-          this.setData({ readingBack: false, unknown: true, photoRetryable: true,
+          this.setData({ readingBack: false, unknown: true, photoRetryable: true, commandRetryable: false,
             unknownText: '未查到不代表未提交；可重新确认同意后重试原照片' });
+          return false;
+        }
+        // 重新进入只恢复不含入参的持久化身份。空入参配旧键不能重提，仍请勿重复提交。
+        const liveCommand = original === this._submittedCommand && original.payload !== undefined;
+        if (Number(res.code) === 404 && original.action !== 'SUBMIT_PHOTO_CHECK' && liveCommand) {
+          this.setData({ readingBack: false, unknown: true, photoRetryable: false, commandRetryable: true,
+            unknownText: '未查到原请求回执，可重新提交原请求' });
           return false;
         }
         const receipt = res.data || {};
@@ -385,11 +402,11 @@ Component({
         this.hydrate(receipt.view);
         if (!this.currentRequestContext(context, false)) return true;
         this._unknownCommand = null;
-        this.setData({ readingBack: false, unknown: false, photoRetryable: false, unknownText: '', error: '' });
+        this.setData({ readingBack: false, unknown: false, photoRetryable: false, commandRetryable: false, unknownText: '', error: '' });
         return true;
       }).catch(() => {
         if (!this.currentRequestContext(context)) return false;
-        this.setData({ readingBack: false, unknown: true,
+        this.setData({ readingBack: false, unknown: true, commandRetryable: false,
           unknownText: '原请求仍待确认，未查到不代表未提交；请勿重复提交，核对原结果' });
         return false;
       });
@@ -409,6 +426,16 @@ Component({
         if (current()) this.setData({ unknownText: safeUserMessage(error, '未同意照片处理，原请求仍可核对或重试') });
         return false;
       }).finally(() => { this._photoConsentAsking = false; });
+    },
+    retryOriginalCommand() {
+      const original = this._unknownCommand, context = this._unknownRequestContext;
+      if (!this.data.commandRetryable || this.data.readingBack || this.data.acting
+          || !original || original !== this._submittedCommand || original.payload === undefined
+          || !original.idempotencyKey || original.action === 'SUBMIT_PHOTO_CHECK'
+          || !context || !this.currentRequestContext(context) || !this.data.state
+          || String(original.sessionId) !== String(this.data.state.sessionId)) return Promise.resolve(false);
+      this.setData({ unknown: false, commandRetryable: false });
+      return this.action(original.action, original.payload, original);
     },
     previewKitAction(event) {
       if (!this.data.preview || !this.data.state || !this.data.state.previewKit) return false;
