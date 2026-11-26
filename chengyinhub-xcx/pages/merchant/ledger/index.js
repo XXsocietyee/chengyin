@@ -18,6 +18,8 @@ const { shapeAftercareListPage } = require('../aftercare/detail/view-model.js');
 const PAGE_SIZE = 20;
 // 售后三个 bucket 都要拉:待处理 = 待回应 + 处理中,已处理 = 已完成。
 const REFUND_BUCKETS = ['PENDING', 'PROCESSING', 'COMPLETED'];
+// L07-034:同一 bucket 最多跟这么多页。短页或没有更多行会更早停;这个上限只挡住坏 total 死循环。
+const REFUND_PAGE_CAP = 8;
 const LEDGER_FRESH_MS = 60 * 1000;
 
 // 请求通道的 fail 是 (body, status):把 status 带进去,否则 HTTP 403 + 业务体会被当成可重试的加载失败
@@ -343,31 +345,68 @@ Page({
   },
 
   // 售后退款行并进同一份列表(UI-06):待处理 = PENDING + PROCESSING,已处理 = COMPLETED。
-  // 三个 bucket 并发拉,全到齐才重排一次,避免逐 bucket 追加造成顺序闪跳。
+  // 三个 bucket 并发拉,每个 bucket 用原来的 pageNum/pageSize 翻到短页或没有更多行,全到齐才重排一次。
   _loadRefundRows(scopeMemberId, epoch, canReadFinance) {
     let pending = REFUND_BUCKETS.length;
     let failed = false;
     const items = [];
+    const stillCurrent = () => this._isCurrentMemberScope(scopeMemberId) && epoch === this._redemptionEpoch;
     const finish = () => {
       pending -= 1;
       if (pending > 0) return;
-      if (!this._isCurrentMemberScope(scopeMemberId) || epoch !== this._redemptionEpoch) return;
+      if (!stillCurrent()) return;
       this._refundRows = items.map((item) => this.refundRow(item, canReadFinance));
       this._refundCache = failed ? null : { member: scopeMemberId, canReadFinance, rows: this._refundRows };
       this._applyRedemptionView(failed ? { error: true } : {});
     };
+    const takeRefunds = (pageItems) => {
+      // PG-031:人工退款工单(MANUAL_CASE)同样并入台账,点进售后详情的工单视图
+      items.push.apply(items, pageItems.filter(item => (item.recordType === 'REFUND'
+        && Number.isSafeInteger(item.refundId) && item.refundId > 0)
+        || (item.recordType === 'MANUAL_CASE' && Number.isSafeInteger(item.manualCaseId) && item.manualCaseId > 0)));
+    };
     REFUND_BUCKETS.forEach((bucket) => {
-      this.request(`/api/merchant/aftercare/list?bucket=${bucket}&pageNum=1&pageSize=${PAGE_SIZE}`, {}, (res) => {
-        if (isAccessDenied(res)) { failed = true; finish(); return; }
-        const shaped = res && (res.code === 200 || res.code === '200')
-          ? shapeAftercareListPage(res.data, bucket) : null;
-        if (!shaped) { failed = true; finish(); return; }
-        // PG-031:人工退款工单(MANUAL_CASE)同样并入台账,点进售后详情的工单视图
-        items.push.apply(items, shaped.items.filter(item => (item.recordType === 'REFUND'
-          && Number.isSafeInteger(item.refundId) && item.refundId > 0)
-          || (item.recordType === 'MANUAL_CASE' && Number.isSafeInteger(item.manualCaseId) && item.manualCaseId > 0)));
+      const seenPages = new Set();
+      const seenRows = new Set();
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
         finish();
-      });
+      };
+      const loadPage = (pageNum) => {
+        // 这一页已经发出去时只等它回来,不能再发一次,也不能提前收口。
+        if (settled || seenPages.has(pageNum)) return;
+        if (!stillCurrent() || pageNum > REFUND_PAGE_CAP) { settle(); return; }
+        seenPages.add(pageNum);
+        this.request(`/api/merchant/aftercare/list?bucket=${bucket}&pageNum=${pageNum}&pageSize=${PAGE_SIZE}`, {}, (res) => {
+          if (settled) return;
+          if (!stillCurrent()) { settle(); return; }
+          if (isAccessDenied(res)) { failed = true; settle(); return; }
+          const shaped = res && (res.code === 200 || res.code === '200')
+            ? shapeAftercareListPage(res.data, bucket) : null;
+          const pageItems = shaped && Array.isArray(shaped.items) ? shaped.items : null;
+          if (!pageItems) { failed = true; settle(); return; }
+          const echoed = Number(shaped.pageNum);
+          const signature = pageItems.map((item) => item && item.recordType === 'MANUAL_CASE'
+            ? 'M' + item.manualCaseId : 'R' + (item && item.refundId)).join(',');
+          const repeated = (Number.isSafeInteger(echoed) && echoed !== pageNum && seenPages.has(echoed))
+            || (signature !== '' && seenRows.has(signature));
+          if (repeated) { settle(); return; }
+          if (signature !== '') seenRows.add(signature);
+          takeRefunds(pageItems);
+          const rawItems = res.data && Array.isArray(res.data.items) ? res.data.items : pageItems;
+          const total = Number(shaped.total);
+          const noMore = shaped.hasMore === false
+            || (Number.isSafeInteger(total) && total <= pageNum * PAGE_SIZE);
+          if (rawItems.length < PAGE_SIZE || noMore || pageNum >= REFUND_PAGE_CAP || seenPages.has(pageNum + 1)) {
+            settle();
+            return;
+          }
+          loadPage(pageNum + 1);
+        });
+      };
+      loadPage(1);
     });
   },
 
