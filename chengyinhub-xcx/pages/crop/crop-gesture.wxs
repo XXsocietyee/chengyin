@@ -1,0 +1,187 @@
+/* 裁剪跟手 · 渲染层(WXS)。L10-046
+ *
+ * touchmove 只 setStyle,不回逻辑层 setData。松手(手指都离开)才 callMethod 一次,
+ * 把夹好的最终位置交回去。已经顶到边界、再拖画面也不动时,不再 setStyle。
+ *
+ * 夹边界与 pages/crop/utils/crop-geometry.js 的 clampTransform 同一套:
+ * img 宽高是页面 data 里的渲染基准(原图 × cover 基准缩放),scale ∈ [1, 4]。
+ * WXS 不能 require JS,tests/unit/crop-touchmove-dedupe.test.js 对同一组输入逐值比对。
+ */
+
+var MIN_SCALE = 1;
+var MAX_SCALE = 4;
+
+function num(v) {
+  var n = +v;
+  if (!(n <= 1e308 && n >= -1e308)) return 0;
+  return n === 0 ? 0 : n;
+}
+
+function clamp(v, lo, hi) {
+  var r = Math.min(hi, Math.max(lo, v));
+  return r === 0 ? 0 : r;
+}
+
+function clampPose(scale, x, y, fw, fh, iw, ih) {
+  var s = clamp(scale, MIN_SCALE, MAX_SCALE);
+  var renderW = iw * s;
+  var renderH = ih * s;
+  var maxX = renderW - fw;
+  var maxY = renderH - fh;
+  if (!(maxX > 0)) maxX = 0; else maxX = maxX / 2;
+  if (!(maxY > 0)) maxY = 0; else maxY = maxY / 2;
+  return { tx: clamp(x, -maxX, maxX), ty: clamp(y, -maxY, maxY), scale: s };
+}
+
+function samePose(a, b) {
+  return !!(a && b && a.tx === b.tx && a.ty === b.ty && a.scale === b.scale);
+}
+
+function distance(a, b) {
+  var dx = a.clientX - b.clientX;
+  var dy = a.clientY - b.clientY;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function readyOf(ds) {
+  return !!(ds && (ds.ready === true || ds.ready === 'true' || ds.ready === 1));
+}
+
+function settlingOf(ds) {
+  return !!(ds && (ds.settling === true || ds.settling === 'true' || ds.settling === 1));
+}
+
+function datasetOf(e) {
+  return (e && e.currentTarget && e.currentTarget.dataset) || {};
+}
+
+function imgOf(owner) {
+  return owner.selectComponent('.crop__img');
+}
+
+function parseStamp(value) {
+  var parts = ('' + (value == null ? '' : value)).split(',');
+  if (parts.length < 7) return null;
+  var scale = num(parts[2]);
+  if (!(scale > 0)) scale = 1;
+  return {
+    tx: num(parts[0]),
+    ty: num(parts[1]),
+    scale: scale,
+    fw: num(parts[3]),
+    fh: num(parts[4]),
+    iw: num(parts[5]),
+    ih: num(parts[6]),
+  };
+}
+
+function ensure(st, ds) {
+  if (!st.box || !(st.box.iw > 0) || !(st.box.ih > 0)) {
+    st.box = { fw: num(ds.fw), fh: num(ds.fh), iw: num(ds.iw), ih: num(ds.ih) };
+  }
+  if (!st.live) {
+    var scale = num(ds.scale);
+    if (!(scale > 0)) scale = 1;
+    st.live = { tx: num(ds.tx), ty: num(ds.ty), scale: scale };
+  }
+  if (!st.committed) st.committed = { tx: st.live.tx, ty: st.live.ty, scale: st.live.scale };
+}
+
+function paint(owner, pose) {
+  var img = imgOf(owner);
+  if (!img) return;
+  var transform = 'translate3d(calc(-50% + ' + pose.tx + 'px), calc(-50% + ' + pose.ty + 'px), 0) scale(' + pose.scale + ')';
+  var st = owner.getState();
+  if (st.lastPaint === transform) return;
+  st.lastPaint = transform;
+  img.setStyle({ transform: transform, transition: 'none' });
+}
+
+function syncPose(newVal, oldVal, owner) {
+  var next = parseStamp(newVal);
+  if (!next || !owner) return;
+  var st = owner.getState();
+  var box = { fw: next.fw, fh: next.fh, iw: next.iw, ih: next.ih };
+  var pose = { tx: next.tx, ty: next.ty, scale: next.scale };
+  var boxChanged = !st.box || st.box.fw !== box.fw || st.box.fh !== box.fh || st.box.iw !== box.iw || st.box.ih !== box.ih;
+  var echo = samePose(st.live, pose) && !boxChanged;
+  st.box = box;
+  st.committed = { tx: pose.tx, ty: pose.ty, scale: pose.scale };
+  if (boxChanged || !samePose(st.live, pose)) st.g = null;
+  st.live = { tx: pose.tx, ty: pose.ty, scale: pose.scale };
+  if (st.g || echo) return;
+  st.lastPaint = '';
+  var img = imgOf(owner);
+  if (img) img.setStyle({ transform: '', transition: '' });
+}
+
+function start(e, owner) {
+  var ds = datasetOf(e);
+  if (!readyOf(ds)) return;
+  var t = (e && e.touches) || [];
+  if (!t.length) return;
+  var st = owner.getState();
+  ensure(st, ds);
+  if (!(st.box.iw > 0 && st.box.ih > 0 && st.box.fw > 0 && st.box.fh > 0)) return;
+  if (settlingOf(ds)) owner.callMethod('onCropGestureStart');
+  var live = st.live;
+  if (t.length === 1) {
+    st.g = { mode: 'pan', x0: t[0].clientX, y0: t[0].clientY, tx0: live.tx, ty0: live.ty, scale: live.scale };
+  } else {
+    st.g = { mode: 'pinch', d0: distance(t[0], t[1]), s0: live.scale, tx0: live.tx, ty0: live.ty };
+  }
+}
+
+function move(e, owner) {
+  var st = owner.getState();
+  var g = st.g;
+  if (!g || !readyOf(datasetOf(e))) return;
+  var t = (e && e.touches) || [];
+  var rawX = g.tx0;
+  var rawY = g.ty0;
+  var rawScale = g.mode === 'pan' ? g.scale : g.s0;
+  if (g.mode === 'pan' && t.length === 1) {
+    rawX = g.tx0 + (t[0].clientX - g.x0);
+    rawY = g.ty0 + (t[0].clientY - g.y0);
+    rawScale = g.scale;
+  } else if (g.mode === 'pinch' && t.length >= 2) {
+    var d = distance(t[0], t[1]);
+    rawScale = g.d0 > 0 ? g.s0 * (d / g.d0) : g.s0;
+  } else {
+    return;
+  }
+  var box = st.box;
+  var next = clampPose(rawScale, rawX, rawY, box.fw, box.fh, box.iw, box.ih);
+  if (samePose(next, st.live)) return;
+  st.live = next;
+  paint(owner, next);
+}
+
+function end(e, owner) {
+  var st = owner.getState();
+  if (!st.g) return;
+  var t = (e && e.touches) || [];
+  var live = st.live;
+  if (t.length === 1) {
+    st.g = { mode: 'pan', x0: t[0].clientX, y0: t[0].clientY, tx0: live.tx, ty0: live.ty, scale: live.scale };
+    return;
+  }
+  if (t.length >= 2) {
+    st.g = { mode: 'pinch', d0: distance(t[0], t[1]), s0: live.scale, tx0: live.tx, ty0: live.ty };
+    return;
+  }
+  st.g = null;
+  if (!live || samePose(live, st.committed)) return;
+  st.committed = { tx: live.tx, ty: live.ty, scale: live.scale };
+  owner.callMethod('onCropPoseCommit', { tx: live.tx, ty: live.ty, scale: live.scale });
+}
+
+module.exports = {
+  MIN_SCALE: MIN_SCALE,
+  MAX_SCALE: MAX_SCALE,
+  clampPose: clampPose,
+  syncPose: syncPose,
+  start: start,
+  move: move,
+  end: end,
+};

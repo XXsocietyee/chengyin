@@ -1,6 +1,7 @@
 <!-- 裁剪页:顶部标题栏 / 中间裁剪区 / 底部 取消·还原·选取(参考 Threads 选图裁剪)
      2026-10-30 业主定稿 P-5(M-09):整张图都在屏幕里,取景框外压暗(浅色版提亮)不再裁掉;框按用途定比例、居中留边;
      底栏三个小胶囊。商家浅色、玩家深色(业主批注「商家是浅色 玩家是深色」)。 -->
+<wxs module="cg" src="./crop-gesture.wxs" />
 <view class="{{merchant ? 'theme-merchant' : 'theme-dark'}}">
   <cy-toast id="cy-toast" />
   <cy-loading-mask id="cy-loading" />
@@ -15,10 +16,21 @@
   <!-- 只有 missing 才换成浅色面:waiting 留在取景台底色上,否则正常流程会从浅色面跳回黑台,
        等于把刚修掉的那次闪烁换了个颜色再闪一遍 -->
   <view class="crop__stage {{sourceState === 'missing' || sourceState === 'error' ? 'crop__stage--empty' : ''}}"
-        catchtouchstart="onTouchStart"
-        catchtouchmove="onTouchMove"
-        catchtouchend="onTouchEnd"
-        catchtouchcancel="onTouchEnd">
+        pose="{{poseStamp}}"
+        change:pose="{{cg.syncPose}}"
+        data-ready="{{ready}}"
+        data-settling="{{settling}}"
+        data-fw="{{frameW}}"
+        data-fh="{{frameH}}"
+        data-iw="{{imgW}}"
+        data-ih="{{imgH}}"
+        data-tx="{{tx}}"
+        data-ty="{{ty}}"
+        data-scale="{{scale}}"
+        catchtouchstart="{{cg.start}}"
+        catchtouchmove="{{cg.move}}"
+        catchtouchend="{{cg.end}}"
+        catchtouchcancel="{{cg.end}}">
     <view class="crop__missing" wx:if="{{sourceState === 'missing'}}">
       <cy-empty fill size="lg" kind="missing-param" title="没有可裁剪的图片" />
     </view>

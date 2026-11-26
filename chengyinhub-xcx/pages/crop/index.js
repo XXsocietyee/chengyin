@@ -22,8 +22,11 @@ const MAX_OUTPUT_EDGE = 1440; // 导出长边上限:防止大图裁完仍是几 
 // cropInit 从 app.cropAll 的 navigateTo success 回调抛来,比 onLoad 晚;通道在但图始终不来
 // (opener 在 emit 前就崩 / 被顶掉)时用这只闸兜到无源态,不让用户卡在等待里。
 const SOURCE_WAIT_MS = 3000;
-// L10-046:拖动时位移和缩放留在实例上,视图大约每秒最多写 10 次。
-const POSE_VIEW_MS = 100;
+
+// 渲染层用这一串认出「逻辑层提交过的位置」。拖动过程中不改它。
+function poseStamp(tx, ty, scale, frameW, frameH, imgW, imgH) {
+  return [tx, ty, scale, frameW, frameH, imgW, imgH].join(',');
+}
 
 // 失败只给人话。异常原文、微信 errMsg、栈和路径都不进界面。
 function presentCropError(message, fallback) {
@@ -48,6 +51,7 @@ Page({
     tx: 0,
     ty: 0,
     scale: 1,
+    poseStamp: '0,0,1,0,0,0,0',
     // 图源四态。waiting 不是"没有图",不能当无源态渲染:cropInit 必然晚于首帧,
     // 初始就画"没有可裁剪的图片"会让每一次正常选图都闪一下假空态。
     sourceState: 'waiting', // waiting | ready | missing | error
@@ -67,10 +71,6 @@ Page({
     this.idx = 0;
     this.ratioLiteral = 'free';
     this.natural = { w: 0, h: 0 };
-    this.gesture = null;
-    this.pose = null;
-    this.poseTimer = null;
-    this.poseViewAt = null;
     this._unloaded = false;
     this._exportGen = 0;
     this._loadGen = 0;
@@ -149,10 +149,6 @@ Page({
   // 载入队列第 i 张
   startAt(i) {
     this.idx = i;
-    this.gesture = null;
-    this.clearPoseTimer();
-    this.pose = null;
-    this.poseViewAt = null;
     const src = this.queue[i];
     // 尺寸没读到之前不能算 ready:那会让「选取」露出来但 onConfirm 因 !ready 静默 return。
     // 复用 waiting(此刻确实还在准备这张图),layout 成功才同时置 sourceState/ready。
@@ -209,14 +205,17 @@ Page({
 
     // 图片渲染基准 = cover 满框
     const base = Math.max(frameW / natW, frameH / natH);
+    const imgW = natW * base;
+    const imgH = natH * base;
     this.setData({
       frameW,
       frameH,
-      imgW: natW * base,
-      imgH: natH * base,
+      imgW,
+      imgH,
       tx: 0,
       ty: 0,
       scale: 1,
+      poseStamp: poseStamp(0, 0, 1, frameW, frameH, imgW, imgH),
       // 与 ready 同步翻:「选取」露出的那一刻 onConfirm 必须真的能干活
       sourceState: 'ready',
       sourceError: '',
@@ -225,108 +224,40 @@ Page({
     });
   },
 
-  // ---- 手势:单指平移 / 双指缩放 ----
-  livePose() {
-    return this.pose || { tx: this.data.tx, ty: this.data.ty, scale: this.data.scale };
+  // ---- 手势:渲染层跟手,松手才把位置写回 data(crop-gesture.wxs) ----
+  // 还原动画被手指打断:只关过渡,不动位移。
+  onCropGestureStart() {
+    if (this._unloaded || !this.data.settling) return;
+    this.setData({ settling: false });
   },
 
-  // 位移和缩放先记在实例上。和上一帧相同(含已经顶到边界)时不记、也不写视图。
-  rememberPose(next) {
-    const prev = this.livePose();
-    if (next.tx === prev.tx && next.ty === prev.ty && next.scale === prev.scale) return false;
-    this.pose = next;
-    return true;
-  },
-
-  clearPoseTimer() {
-    if (!this.poseTimer) return;
-    clearTimeout(this.poseTimer);
-    this.poseTimer = null;
-  },
-
-  // 视图大约每秒最多写 10 次。force 用于松手,把最后一帧落到 data 上。
-  writePoseView(force) {
-    const pose = this.pose;
-    if (!pose || this._unloaded) return;
-    if (pose.tx === this.data.tx && pose.ty === this.data.ty && pose.scale === this.data.scale) {
-      this.clearPoseTimer();
-      return;
-    }
-    const now = Date.now();
-    if (!force && this.poseViewAt != null && now - this.poseViewAt < POSE_VIEW_MS) {
-      if (!this.poseTimer) {
-        const wait = POSE_VIEW_MS - (now - this.poseViewAt);
-        const timer = setTimeout(() => {
-          if (this.poseTimer !== timer) return;
-          this.poseTimer = null;
-          if (this._unloaded) return;
-          this.writePoseView(false);
-        }, wait);
-        this.poseTimer = timer;
-      }
-      return;
-    }
-    this.clearPoseTimer();
-    this.poseViewAt = now;
-    this.setData({ tx: pose.tx, ty: pose.ty, scale: pose.scale });
-  },
-
-  onTouchStart(e) {
-    const t = e.touches; if (this.data.settling) this.setData({ settling: false });
-    const pose = this.livePose();
-    if (t.length === 1) {
-      this.gesture = { mode: 'pan', x0: t[0].clientX, y0: t[0].clientY, tx0: pose.tx, ty0: pose.ty, scale: pose.scale };
-    } else if (t.length >= 2) {
-      this.gesture = { mode: 'pinch', d0: this.distance(t[0], t[1]), s0: pose.scale, tx0: pose.tx, ty0: pose.ty };
-    }
-  },
-
-  onTouchMove(e) {
-    const g = this.gesture;
-    if (!g || !this.data.ready) return;
-    const t = e.touches;
-    let next;
-    if (g.mode === 'pan' && t.length === 1) {
-      next = { tx: g.tx0 + (t[0].clientX - g.x0), ty: g.ty0 + (t[0].clientY - g.y0), scale: g.scale };
-    } else if (g.mode === 'pinch' && t.length >= 2) {
-      const d = this.distance(t[0], t[1]);
-      next = { tx: g.tx0, ty: g.ty0, scale: g.d0 > 0 ? g.s0 * (d / g.d0) : g.s0 };
-    } else {
-      return;
-    }
-    // 每帧夹边界:图片永远贴满框,拖不出黑边(与导出用的是同一套约束)
+  // 手指都离开后的那一帧。和当前 data 相同(含已经顶在边界上)不再写。
+  onCropPoseCommit(raw) {
+    if (this._unloaded || !this.data.ready || !raw) return;
+    const natW = this.natural && this.natural.w;
+    const natH = this.natural && this.natural.h;
+    const frameW = this.data.frameW;
+    const frameH = this.data.frameH;
+    const scale = Number(raw.scale);
+    const x = Number(raw.tx);
+    const y = Number(raw.ty);
+    if (!(natW > 0 && natH > 0 && frameW > 0 && frameH > 0)) return;
+    if (!(scale === scale && x === x && y === y)) return;
     const c = clampTransform({
-      imgW: this.natural.w, imgH: this.natural.h,
-      frameW: this.data.frameW, frameH: this.data.frameH,
-      scale: next.scale, x: next.tx, y: next.ty,
+      imgW: natW, imgH: natH, frameW, frameH, scale, x, y,
     });
-    // L10-046:手势留在实例上。位置或缩放没变(含已经顶住边界)不写视图;
-    // 真有变化时大约每秒最多 setData 10 次,松手再落到最终位置。
-    if (!this.rememberPose({ tx: c.x, ty: c.y, scale: c.scale })) return;
-    this.writePoseView(false);
-  },
-
-  onTouchEnd(e) {
-    this.writePoseView(true);
-    const pose = this.livePose();
-    // 多指抬到只剩一根时重起 pan 基准,否则剩下那根会带着旧基准跳一下
-    if (e.touches && e.touches.length === 1) {
-      this.gesture = { mode: 'pan', x0: e.touches[0].clientX, y0: e.touches[0].clientY, tx0: pose.tx, ty0: pose.ty, scale: pose.scale };
-    } else if (e.touches && e.touches.length >= 2) {
-      this.gesture = { mode: 'pinch', d0: this.distance(e.touches[0], e.touches[1]), s0: pose.scale, tx0: pose.tx, ty0: pose.ty };
-    } else {
-      this.gesture = null;
-    }
-  },
-
-  distance(a, b) {
-    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    if (c.x === this.data.tx && c.y === this.data.ty && c.scale === this.data.scale) return;
+    this.setData({
+      tx: c.x,
+      ty: c.y,
+      scale: c.scale,
+      poseStamp: poseStamp(c.x, c.y, c.scale, frameW, frameH, this.data.imgW, this.data.imgH),
+    });
   },
 
   // ---- 导出 ----
   onConfirm() {
     if (this.data.busy || !this.data.ready) return;
-    this.writePoseView(true);
     // 恒等裁剪:自由比例 + 没缩放没平移 ⇒ 框就是整图,导出只会把图重编码一遍(还会丢 PNG 透明)。
     // 直接收原图,省一次 canvas 往返。
     if (!parseRatio(this.ratioLiteral) && this.data.scale === 1 && this.data.tx === 0 && this.data.ty === 0) {
@@ -456,11 +387,14 @@ Page({
   // M-09「还原」:回到刚载入时的位置和大小(图满框、居中)
   onReset() {
     if (!this.data.ready || this.data.busy) return;
-    this.gesture = null;
-    this.clearPoseTimer();
-    this.pose = null;
-    this.poseViewAt = null;
-    this.setData({ tx: 0, ty: 0, scale: 1, exportError: '', settling: true });
+    this.setData({
+      tx: 0,
+      ty: 0,
+      scale: 1,
+      exportError: '',
+      settling: true,
+      poseStamp: poseStamp(0, 0, 1, this.data.frameW, this.data.frameH, this.data.imgW, this.data.imgH),
+    });
     this.clearSettle();
     this.settleTimer = setTimeout(() => {
       this.settleTimer = null;
@@ -477,7 +411,6 @@ Page({
 
   onHide() {
     this.clearSettle();
-    this.clearPoseTimer();
     if (!this._unloaded && this.data.settling) this.setData({ settling: false });
   },
 
@@ -498,7 +431,6 @@ Page({
     this._loadGen = (this._loadGen || 0) + 1;
     this.clearSourceWait();
     this.clearSettle();
-    this.clearPoseTimer();
     this.stopExport();
     try {
       const ch = this.getOpenerEventChannel && this.getOpenerEventChannel();
