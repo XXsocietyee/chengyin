@@ -78,25 +78,59 @@ function stripComments(source) {
   return source.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
 }
 
-test('传感器启停成对:on 在 start 之前挂,off 在 stop 之后摘', () => {
+test('传感器启停成对:on 在 start 之前挂,放手时 off 与 stop 一起发生', () => {
   const vm = load();
   vm.data.count = 1;
   vm._startTilt();
   assert.deepEqual(vm.calls, ['on', 'start']);
   assert.ok(vm.listening(), '回调必须挂上');
   vm._stopTilt();
-  assert.deepEqual(vm.calls, ['on', 'start', 'stop', 'off']);
-  assert.ok(!vm.listening(), 'off 之后回调必须被摘掉');
+  assert.deepEqual(vm.calls, ['on', 'start', 'off', 'stop']);
+  assert.ok(!vm.listening(), '放手之后回调必须被摘掉');
 });
 
-test('负控:摘掉 offAccelerometerChange 那一行,上一条必须真红', () => {
-  const mutated = sourceOf().replace(/wx\.offAccelerometerChange && [^\n]*\n/, '\n');
+test('负控:摘掉放手那一行,上一条必须真红', () => {
+  const mutated = sourceOf().replace(/if \(release\) release\(\);\n/, '\n');
   assert.notEqual(mutated, sourceOf(), '变异没打上 = 这把尺子是橡皮图章');
   const vm = load(mutated);
   vm.data.count = 1;
   vm._startTilt();
   vm._stopTilt();
   assert.ok(!vm.calls.includes('off'), '变异后确实不再解绑 —— 所以成对断言会红');
+});
+
+test('两份藏品卡都走 holdAccelerometer,自己不开关传感器', () => {
+  const sub = fs.readFileSync(path.join(ROOT, 'subpackageP3/components/cy/spin-card/index.js'), 'utf8');
+  for (const src of [sourceOf(), sub]) {
+    assert.match(src, /holdAccelerometer\(wx,/);
+    assert.doesNotMatch(src, /wx\.(start|stop|on|off)Accelerometer/);
+  }
+});
+
+test('放手时还有别的持有者:不关传感器,读数回到还握着的那一个', () => {
+  const { holdAccelerometer } = require('../../pages/playkit/utils/play-shake.js');
+  const vm = load();
+  const seen = [];
+  const releaseOther = holdAccelerometer(global.wx, (r) => seen.push(r));
+  try {
+    assert.equal(typeof releaseOther, 'function');
+    vm.data.count = 1;
+    vm._startTilt();
+    assert.deepEqual(vm.calls, ['on', 'start'], '第二个持有者不重复开');
+    vm.emit({ x: 0.2, y: 0.1 });
+    vm.emit({ x: 0.4, y: 0.1 });
+    vm._render();
+    assert.match(vm.data.pose, /--ry:/, '最上面的持有者是这张卡,读数给卡');
+    assert.deepEqual(seen, [], '盖在下面的那份收不到');
+    vm._stopTilt();
+    assert.ok(!vm.calls.includes('stop'), '卡放手不能把还在听的传感器关掉');
+    assert.ok(vm.listening(), '监听还在');
+    vm.emit({ x: 9, y: 9 });
+    assert.equal(seen.length, 1, '卡放手后读数回到还握着的那一个');
+  } finally {
+    vm._stopTilt();
+    releaseOther();
+  }
 });
 
 test('detached / 切后台都必须停,回到前台要能自己接上', () => {
@@ -135,7 +169,7 @@ test('转台态(多帧)不开传感器:拖着转和跟着倾斜两种交互会�
     late.definition.observers.frames.call(late, ['/upload/window.jpg']);
     assert.deepEqual(late.calls, ['on', 'start'], '照片卡照常倾斜');
     late.definition.observers.frames.call(late, Array.from({ length: 24 }, (_, i) => '/f/' + i + '.webp'));
-    assert.deepEqual(late.calls, ['on', 'start', 'stop', 'off'], '升级成转台时要把表停掉');
+    assert.deepEqual(late.calls, ['on', 'start', 'off', 'stop'], '升级成转台时要把表停掉');
   } finally {
     vm._stopTilt();     // 红的时候表是开着的:不收尾,node --test 会挂在定时器上而不是报失败
     late._stopTilt();
