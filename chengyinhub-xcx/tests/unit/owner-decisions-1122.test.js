@@ -3,8 +3,8 @@
 // 业主 2026-11-22 定稿(分支 fix/owner-decisions-1122):
 //   1) 金额一位小数 —— 见 money-format-r3.test.js / blank-value-display-contract.test.js。
 //   2) 复核 PG-086:「玩家不需要看到编号」—— 不往玩家屏新增核验/提交编号;商家「输入核验编号」手工流程保持原样。
-//   3) 复核 V-23(device-walkthrough-20261029):「这个主题不允许举报,先不加举报按钮」——
-//      主题相关的玩家屏不露出任何举报入口;处理器与后端接口保留(不删),只是不暴露。
+//   3) 2026-11-26 业主推翻「主题详情不加举报」:详情正文在 canReportTopic 时出「举报」。
+//      头图、玩法详情、俱乐部主题活动卡仍然不露入口;处理器与后端接口保留。
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -14,14 +14,16 @@ const ROOT = path.join(__dirname, '../..')
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')
 const stripComments = (wxml) => wxml.replace(/<!--[\s\S]*?-->/g, '')
 
-test('V-23 复核:主题详情没有任何可点的举报入口,举报原因半屏只由休眠的 reportTopic 打开', () => {
+test('2026-11-26:主题详情正文在 canReportTopic 时出「举报」,头图不放入口', () => {
   const wxml = stripComments(read('pages/topic/index/index.wxml'))
-  assert.doesNotMatch(wxml, /(bind|catch)(tap|longpress)="reportTopic"/)
-  // 唯一剩下的「举报」字样是原因半屏(show 绑 reportReasonShow),不是入口
-  const visible = wxml.split('\n').filter((line) => /举报/.test(line) && !/reportReasonShow|提交举报/.test(line))
-  assert.deepEqual(visible, [])
+  assert.match(wxml, /<text wx:if="\{\{canReportTopic\}\}" class="ugc-report" bindtap="reportTopic"[^>]*>举报<\/text>/)
+  assert.doesNotMatch(wxml, /举报这个主题|topic-report-entry/)
+  assert.ok(wxml.indexOf('class="ugc-report"') > wxml.indexOf('class="topic-beta"'))
+  const hero = wxml.slice(wxml.indexOf('<view class="cont topic-hero-meta">'), wxml.indexOf('<view class="topic-beta"'))
+  assert.doesNotMatch(hero, /reportTopic|ugc-report/)
   const js = read('pages/topic/index/index.js')
-  assert.match(js, /reportTopic\(\) \{/, '处理器保留(休眠),不删')
+  assert.match(js, /reportTopic\(\) \{/)
+  assert.match(js, /if \(!this\.data\.canReportTopic\) return/)
   assert.equal((js.match(/reportReasonShow: true/g) || []).length, 0, '页面自身不直接打开举报半屏')
 })
 

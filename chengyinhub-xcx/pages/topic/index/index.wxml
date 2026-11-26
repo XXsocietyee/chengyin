@@ -278,7 +278,8 @@
           </view>
         </view>
 
-        <!-- V-23 业主 2026-10-29「举报也不展示」:详情正文不再放「举报这个主题」行;本页没有自绘 ⋯ 菜单,举报处理逻辑(reportTopic)保留待业主定入口 -->
+        <!-- 2026-11-26 业主:详情正文出「举报」。不叠在头图上,也不恢复长句入口。公开且非本人才渲染。 -->
+        <text wx:if="{{canReportTopic}}" class="ugc-report" bindtap="reportTopic" hover-class="cy-pressed" hover-stay-time="80" aria-role="button" aria-label="举报">举报</text>
         <!-- v13 评价:标题 + 一张深灰卡;没人评价时整张卡就是写评价入口(原「投票」同一个 voteClick) -->
         <view class="det6">
           <view class="det-type">评价</view>

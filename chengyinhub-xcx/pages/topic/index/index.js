@@ -148,6 +148,7 @@ Page({
     clubSheetItems: [],
     reportReasonShow: false,
     reportReasonItems: [],
+    canReportTopic: false,
     resultSheet: { show: false, kind: 'success', title: '', sub: '', meta: '', pill: '',
       why: '', duration: RESULT_SHEET_MS,
       consentName: '', consentChecked: false, consentState: 'idle', consentError: '' },
@@ -2457,10 +2458,11 @@ Page({
           const ratingStars = [];
           for (let i = 1; i <= rounded; i++) ratingStars.push({ star: i });
 
-          // V-23:详情正文不再放举报行,可否举报只作处理器内部闸,不进页面 data
-          that._canReport = canReportTopic(res.data, typeof app.getUserID === 'function' ? app.getUserID() : '');
+          // 2026-11-26:公开且非本人才可举报,布尔放进页面 data,正文按它显隐
+          const reportable = canReportTopic(res.data, typeof app.getUserID === 'function' ? app.getUserID() : '');
           const routeStyle = routeMapStyleOf(res.data);
           that.setData({
+            canReportTopic: reportable,
             info: res.data, mapSubkey: routeStyle.mapSubkey, mapLayerStyle: routeStyle.mapLayerStyle, castRow: castPlay.routeCastRow(castPlay.remember(that.data.id, res.data.castConfig)), openChapterKey: '',
             // P0(2026-09-05 审核):已购态不再只信 URL 参数 is_join(全仓只有订单详情会传 1,
             // 从首页/搜索进来的已购用户永远看不到「开始玩」)。/info-to-user 已按 ownerType=1 &
@@ -2648,7 +2650,7 @@ Page({
   // FOLLOWUP-A-1:举报主题,流程与动态详情 reportSquare 同一套(utils/content-report.js)
   reportTopic() {
     if (app.ensureLoginFor && !app.ensureLoginFor('report', () => this.reportTopic(), { owner: this, target: () => [this.data.id] })) return; // 2026-10-24 游客写前登录
-    if (!this._canReport) return;
+    if (!this.data.canReportTopic) return;
     contentReport.reportTopic(this, app, this.data.id);
   },
   onReportReasonSelect(e) { reportSheet.select(this, e); },
