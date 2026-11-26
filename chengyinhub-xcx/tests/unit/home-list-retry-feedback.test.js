@@ -287,29 +287,29 @@ test('底部页码和编辑精选原列表不进 setData，触底仍请求下一
   assert.equal(requests.at(-1).data.pageNum, 2);
 });
 
-test('L10-024:编辑精选未换可见卡时不重发整组样式', () => {
+test('L10-024:编辑精选样式没变不重发，进度变了卡仍跟着动', () => {
   const { page } = loadPage();
   page.data.recoCards = [{ id: 1 }, { id: 2 }, { id: 3 }];
   page.data.recoCurrent = 0;
   page.data.reducedMotion = false;
   page._recoSnapPx = 300;
-  page._recoVisibleIndex = 0;
   let sets = 0;
   const original = page.setData;
   page.setData = (patch, callback) => {
     if (Object.prototype.hasOwnProperty.call(patch, 'recoCardStyles')) sets += 1;
     return original(patch, callback);
   };
-  page.onRecoTransition({ detail: { dx: -10 } });
   page.onRecoTransition({ detail: { dx: -100 } });
+  const moved = page.data.recoCardStyles[0];
   page.onRecoTransition({ detail: { dx: -101 } });
-  page.onRecoTransition({ detail: { dx: -140 } });
-  assert.equal(sets, 0);
+  page.onRecoTransition({ detail: { dx: -102 } });
+  assert.equal(sets, 1, '同一进度档样式没变，不再重发整组');
+  assert.match(moved, /--reco-mask-opacity:0\.3333/, '拖动中焦点卡已经让出透明度，不是停在静止档');
   page.onRecoTransition({ detail: { dx: -150 } });
-  assert.equal(sets, 1);
-  page.onRecoTransition({ detail: { dx: -160 } });
-  page.onRecoTransition({ detail: { dx: -299 } });
-  assert.equal(sets, 1, '同一张新卡的后续帧不再重发整组样式');
+  assert.equal(sets, 2);
+  assert.notEqual(page.data.recoCardStyles[0], moved, '过半后样式继续变，卡仍跟着动');
+  page.onRecoTransition({ detail: { dx: -150 } });
+  assert.equal(sets, 2, '同一档再来一帧不重发整组样式');
   assert.equal(page.data.recoCardStyles.length, 3);
 });
 

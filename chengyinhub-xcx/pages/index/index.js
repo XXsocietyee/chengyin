@@ -231,6 +231,7 @@ function fmtRemain(startDateStr) {
 
 const RECO_INACTIVE_SCALE = 280 / 306;
 const RECO_BLUR_PX = 8;
+const RECO_PROGRESS_STEPS = 48;
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
@@ -263,6 +264,14 @@ function buildRecoCardStyles(count, current, target, progress) {
     if (index === target) focus = normalizedProgress;
     return recoCardStyle(focus);
   });
+}
+
+function recoCardStylesUnchanged(previous, next) {
+  if (!Array.isArray(previous) || previous.length !== next.length) return false;
+  for (let i = 0; i < next.length; i += 1) {
+    if (previous[i] !== next[i]) return false;
+  }
+  return true;
 }
 
 // feed/卡片多图:发布页(publish/fabu)写入的 imgArr 与章节同为 "," 分隔，历史数据也有 ";"。
@@ -899,7 +908,6 @@ Page({
   _buildRecoHero() {
     const items = (this.data.recommendedTopicList || []).slice(0, 5);
     if (!items.length) {
-      this._recoVisibleIndex = 0;
       this.setData({ recoHero: null, recoCards: [], recoCurrent: 0, recoCardStyles: [] });
       return;
     }
@@ -922,7 +930,6 @@ Page({
       };
     });
     const current = Math.min(this.data.recoCurrent || 0, cards.length - 1);
-    this._recoVisibleIndex = current;
     this.setData({
       recoHero: cards[0],
       recoCards: cards,
@@ -950,14 +957,14 @@ Page({
     const count = this.data.recoCards.length;
     if (count < 2 || this.data.reducedMotion || this._recoTransitionLocked) return;
     const dx = Number(e.detail && e.detail.dx) || 0;
-    const progress = clamp01(Math.abs(dx) / (this._recoSnapPx || 1));
+    // L10-024:transition 每帧都来。进度收成 1/48，样式字符串没变就不重发整组；变了卡仍跟着动。
+    const progress = Math.round(clamp01(Math.abs(dx) / (this._recoSnapPx || 1)) * RECO_PROGRESS_STEPS) / RECO_PROGRESS_STEPS;
     const current = this.data.recoCurrent || 0;
     const direction = dx < 0 ? 1 : -1;
-    // L10-024:transition 每帧都来。过半才算换了可见卡，只在这一下重发整组样式。
-    const visible = progress >= 0.5 ? (current + direction + count) % count : current;
-    if (visible === this._recoVisibleIndex) return;
-    this._recoVisibleIndex = visible;
-    this.setData({ recoCardStyles: buildRecoCardStyles(count, visible, -1, 0) });
+    const target = progress ? (current + direction + count) % count : -1;
+    const recoCardStyles = buildRecoCardStyles(count, current, target, progress);
+    if (recoCardStylesUnchanged(this.data.recoCardStyles, recoCardStyles)) return;
+    this.setData({ recoCardStyles });
   },
 
   _lockRecoTransitionTail() {
@@ -972,7 +979,6 @@ Page({
   onRecoChange(e) {
     const count = this.data.recoCards.length;
     const current = Math.max(0, Math.min(count - 1, Number(e.detail && e.detail.current) || 0));
-    this._recoVisibleIndex = current;
     this._lockRecoTransitionTail();
     this.setData({
       recoCurrent: current,
@@ -1043,7 +1049,6 @@ Page({
     const cards = this.data.recoCards || [];
     if (cards.length > 1 && Number.isInteger(index) && index !== this.data.recoCurrent) {
       this._lockRecoTransitionTail();
-      this._recoVisibleIndex = index;
       this.setData({
         recoCurrent: index,
         recoCardStyles: buildRecoCardStyles(cards.length, index, -1, 0),
