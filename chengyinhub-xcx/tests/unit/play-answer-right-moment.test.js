@@ -49,10 +49,13 @@ test('作者的完成反馈与答对后揭示都保留', () => {
   assert.deepEqual(m, { text: '恭喜你解开了老城的第一个秘密！', reveal: '第 7 根。', fragment: '碎片', hold: true });
 });
 
-test('P-10:答错兜底不拿模板文字反馈(那是完成后的话)', () => {
+test('P-10:答错兜底不拿模板文字反馈，未解出前完成句也不进页面数据', () => {
   const js = fs.readFileSync(path.join(__dirname, '../../pages/play/index.js'), 'utf8');
   assert.doesNotMatch(js, /feedback: n\.feedbackText \|\|/);
-  assert.match(js, /feedback: '答案还没咬合，再看看四周……', passText: String\(n\.feedbackText \|\| ''\)\.trim\(\),/);
+  assert.doesNotMatch(js, /passText: String\(n\.feedbackText \|\| ''\)\.trim\(\)/);
+  assert.doesNotMatch(js, /passText: node\.passText/);
+  assert.match(js, /feedback: '答案还没咬合，再看看四周……', passText: this\._passTextForSetData\(n\),/);
+  assert.match(js, /feedback: node\.feedback, passText: this\._passTextForSetData\(node\),/);
   assert.match(js, /'game\.feedback': r\.msg \|\| g\.feedback/);
-  assert.match(js, /feedback: node\.feedback, passText: node\.passText,/);
+  assert.match(js, /const passText = String\(found\.passText \|\| ''\)\.trim\(\) \|\| this\._heldPassLookup\(nodeId\)/);
 });

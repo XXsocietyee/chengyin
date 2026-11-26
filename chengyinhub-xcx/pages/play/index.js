@@ -1062,16 +1062,57 @@ Page({
     if (n.answerReveal != null && n.answerReveal !== '') return n.answerReveal;
     return n.reveal || n._heldAnswer || '';
   },
+  /** 作者完成句。优先原文 feedbackText，其次页外暂存，最后才是已经揭晓的 passText。 */
+  _rawPassSentence(n) {
+    if (!n || typeof n !== 'object') return '';
+    const feedback = String(n.feedbackText || '').trim();
+    if (feedback) return feedback;
+    const held = String(n._heldPass || '').trim();
+    if (held) return held;
+    return String(n.passText || '').trim();
+  },
+  /** 完成句先搁在实例上，不进 setData。空值不覆盖已经记下的那句。 */
+  _rememberPassText(n) {
+    if (!n || n.nodeId == null) return '';
+    const raw = this._rawPassSentence(n);
+    if (!raw) return this._heldPassLookup(n.nodeId);
+    if (!this._heldPassText) this._heldPassText = {};
+    this._heldPassText[String(n.nodeId)] = raw;
+    return raw;
+  },
+  _heldPassLookup(nodeId) {
+    if (nodeId == null || !this._heldPassText) return '';
+    return String(this._heldPassText[String(nodeId)] || '').trim();
+  },
+  /** 完成事实或已揭示才把完成句留在页面数据里。未解出的站不带这句。 */
+  _passTextForSetData(n) {
+    if (!n || !this._answerEarned(n)) return '';
+    return this._rawPassSentence(n) || this._heldPassLookup(n.nodeId);
+  },
   _nodeForSetData(n) {
     if (!n || typeof n !== 'object') return n;
+    this._rememberPassText(n);
     const reveal = this._answerTextForSetData(n);
-    const leaked = Object.prototype.hasOwnProperty.call(n, 'answerReveal') || !!n._heldAnswer;
-    if ((n.reveal || '') === reveal && !leaked) return n;
-    const next = Object.assign({}, n, { reveal });
+    const passText = this._passTextForSetData(n);
+    const leaked = Object.prototype.hasOwnProperty.call(n, 'answerReveal') || !!n._heldAnswer
+      || Object.prototype.hasOwnProperty.call(n, 'feedbackText') || !!n._heldPass
+      || (!this._answerEarned(n) && !!String(n.passText || '').trim());
+    if ((n.reveal || '') === reveal && String(n.passText || '') === passText && !leaked) return n;
+    const next = Object.assign({}, n, { reveal, passText });
     delete next.answerReveal;
     delete next._heldAnswer;
+    delete next.feedbackText;
+    delete next._heldPass;
     delete n._heldAnswer;
+    delete n._heldPass;
     return next;
+  },
+  /** 只在玩法已经解开时，把页外的完成句补进给展示函数看的那一份，不写回页面节点。 */
+  _solvedPassNode(node, solved) {
+    if (!solved || !node) return node;
+    const passText = String(node.passText || '').trim() || this._heldPassLookup(node.nodeId);
+    if (!passText || passText === String(node.passText || '').trim()) return node;
+    return Object.assign({}, node, { passText });
   },
   _applyRouteState(routeStateInput, callback) {
     if (!this._acceptRouteStateProjection(routeStateInput)) {
@@ -4773,7 +4814,7 @@ Page({
       const acceptProjection = that._acceptRouteStateProjection(routeInput);
       const routeState = acceptProjection ? normalizeRouteState(routeInput) : that._routeState;
       const nodes = that._nodesForRoute(catalog, routeState);
-      catalog.forEach((node) => { if (node) delete node._heldAnswer; });
+      catalog.forEach((node) => { if (node) { delete node._heldAnswer; delete node._heldPass; } });
       that._routeState = routeState;
       that._serverRunKey = precisePlayId(d.runKey);
       if (!that._currentCompletedHistory()) that._discardCompletedHistory();
@@ -4896,7 +4937,7 @@ Page({
     const catalog = raw.map((n, i) => that.normNode(n, i, mode));
     const routeState = normalizeRouteState(d.routeState || { routeMode: d.routeMode });
     const nodes = applyRouteStateToNodes(catalog, routeState).map((node) => that._nodeForSetData(node));
-    catalog.forEach((node) => { if (node) delete node._heldAnswer; });
+    catalog.forEach((node) => { if (node) { delete node._heldAnswer; delete node._heldPass; } });
     that._routeState = routeState;
     that._versionedRouteState = that._routeStateVersionKnown(d.routeState) ? routeState : null;
     that._routeNodeCatalog = catalog;
@@ -4960,6 +5001,7 @@ Page({
       return seg && typeof seg === 'object' && seg.enabled;
     }));
     const isGame = hasAdvanced || (vm === 1 || vm === 2 || vm === 3 || vm === 4 || vm === 6), shopDay = Number(mode || this.data.mode) === 2; // 5/0 走到达,不开节点任务
+    this._rememberPassText(n.nodeId != null ? n : Object.assign({}, n, { nodeId: i }));
     return {
       nodeId: n.nodeId != null ? n.nodeId : i,
       num: n.sortId != null ? n.sortId : (i + 1),
@@ -5023,9 +5065,10 @@ Page({
       usedHints: Array.isArray(n.usedHints) ? n.usedHints.filter(Boolean) : [],
       puzzleScore: n.puzzleScore == null ? null : Number(n.puzzleScore),
       completionMode: n.completionMode || '',
-      // P-10:feedbackText 是模板「文字反馈」= 完成后给的话(编辑器占位就是「恭喜你解开了……」),
-      // 只在答对时用(passText);答错兜底永远不拿它,否则服务端没带原因时答错会显示一句祝贺。
-      feedback: '答案还没咬合，再看看四周……', passText: String(n.feedbackText || '').trim(),
+      // P-10:feedbackText 是模板「文字反馈」= 完成后给的话(编辑器占位就是「恭喜你解开了……」)。
+      // 未解出前不进页面数据,和答案一样先搁在页外;答错兜底永远不拿它,否则服务端没带原因时答错会显示一句祝贺。
+      feedback: '答案还没咬合，再看看四周……', passText: this._passTextForSetData(n),
+      ...(!this._answerEarned(n) && this._heldPassLookup(n.nodeId != null ? n.nodeId : i) ? { _heldPass: this._heldPassLookup(n.nodeId != null ? n.nodeId : i) } : {}),
       photoDesc: n.photoRequireDesc || '', audio: secureOwnMedia(n.audioUrl), audioDur: (n.audioDuration ? n.audioDuration + '″' : ''),
       medalName: shopDay ? '' : (n.medalName || ''), medalImg: shopDay ? '' : (n.medalImg || ''), medalStyle: shopDay ? '' : (n.medalStyle || 'glow'), couponId: shopDay ? 0 : (n.couponId || 0),
       // 后端 /nodes 新下发的券公开投影(name/amount/endTime;无 code):券页据此显示真面额
@@ -6855,7 +6898,7 @@ Page({
         qname: node.question || '依据现场线索作答', opts,
         qImg: node.questionImg, qAudio: node.questionAudio,
         audio: node.audio, audioDur: node.audioDur, photoDesc: node.photoDesc,
-        feedback: node.feedback, passText: node.passText,
+        feedback: node.feedback, passText: this._passTextForSetData(node),
         reveal: (!!node.done || !!node.gameDone || node.revealed === true || String(node.routeNodeState || '').toUpperCase() === 'COMPLETED' || /^(SOLVED|REVEALED|SKIPPED)$/.test(String(node.completionMode || '').toUpperCase())) ? (node.reveal || '') : '',
         hint1: node.hint1, hint2: node.hint2,
         hintLocked: !!node.hintLocked, hintCost: node.hintCost || 0, hintCount: node.hintCount || 0,
@@ -6957,7 +7000,10 @@ Page({
   },
   /** P-11:答对那一刻。服务端已判对并落了完成事实;这里只决定回故事流之前停不停这一拍。 */
   _answerRight(nodeId, data, msg) {
-    const node = (this.data.nodes || []).find((n) => String(n.nodeId) === String(nodeId)) || {};
+    const found = (this.data.nodes || []).find((n) => String(n.nodeId) === String(nodeId)) || {};
+    const passText = String(found.passText || '').trim() || this._heldPassLookup(nodeId);
+    const node = passText && passText !== String(found.passText || '').trim()
+      ? Object.assign({}, found, { passText }) : found;
     const moment = rightMoment({ data, node, mode: this.data.mode, genericProof: this._hasGenericProofFlow() });
     if (!moment) { if (msg) cyToast(msg); this.onComplete(nodeId, data); return; }
     this._flushAnswerRight();
@@ -8129,7 +8175,7 @@ Page({
     const placeNode = this.data.advancedPlay && this.data.advancedPlay.node;
     const placeName = [this.data.topicName, placeNode && placeNode.name].filter(Boolean).join(' · ');
     view = Object.assign({}, view, { plainOutcome: !((this.data.themeBag || {}).quests || []).length, clueTransform: ((placeNode && placeNode.advancedConfig) || {}).clueTransform }); // 没有通用局:结果反馈没过在本站重来;UG-10 谜面变换模式只在节点公开投影里
-    const picked = this.data.isPreview && view.previewKit ? view.previewKit : pickPlayKit(Object.assign({}, view, { placeName }), new Date()); if (picked && picked.type === 'hangman' && placeNode) Object.assign(picked, hangmanStationText(picked, placeNode, stationLabel(playerTitle(placeNode.gameTitle || placeNode.name)))); // 逐字猜词服务端不一定带题面:缺时用本站题干/站名摆在格子上方,解开后接本站文字反馈
+    const picked = this.data.isPreview && view.previewKit ? view.previewKit : pickPlayKit(Object.assign({}, view, { placeName }), new Date()); if (picked && picked.type === 'hangman' && placeNode) Object.assign(picked, hangmanStationText(picked, this._solvedPassNode(placeNode, picked.solved === true), stationLabel(playerTitle(placeNode.gameTitle || placeNode.name)))); // 逐字猜词服务端不一定带题面:缺时用本站题干/站名摆在格子上方,解开后才接本站文字反馈
     const kit = dailySignRevealState(previous, picked);
     if (kit && kit.type === 'qa' && kit.passed && submitted && submitted.accepted) kit.acceptedInput = submitted.input;
     if (kit && kit.type === 'qa') kit.remember = (this._castRemember ? this._castRemember(view.trustChanged) : '') || (previous && previous.sessionId != null && String(previous.sessionId) === String(kit.sessionId) && previous.remember) || ''; // 角色信任:判完那次回包才带,同局后续视图沿用

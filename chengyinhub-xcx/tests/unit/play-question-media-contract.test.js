@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict')
 const { test, beforeEach } = require('node:test')
+const { evidenceCards } = require('../../pages/play/utils/evidence-cards.js')
 
 const PLAY = '../../pages/play/index.js'
 
@@ -299,18 +300,22 @@ test('站点卡:全天营业不挂、导语取整句、简介重复标题时隐�
   assert.equal(page.data.sheet.node.description, '纪念碑')
 })
 
-test('L01-026 未解出且未揭示的节点不把答案写进 setData', () => {
+test('L01-026 未解出且未揭示的节点不把答案和完成句写进 setData', () => {
   const page = makePage()
   const hidden = page._nodeForSetData(page.normNode({
-    nodeId: 7, validationMethod: 1, question: '门牌',
+    nodeId: 7, validationMethod: 1, question: '门牌', name: '门牌站',
     answerReveal: '梧桐', feedbackText: '恭喜你解开了', hint1: '抬头',
   }, 0))
   assert.equal(hidden.reveal, '')
-  assert.equal(hidden.passText, '恭喜你解开了')
+  assert.equal(hidden.passText, '')
+  assert.equal(hidden.feedback, '答案还没咬合，再看看四周……')
   assert.equal(hidden.hint1, '抬头')
   assert.equal(Object.prototype.hasOwnProperty.call(hidden, 'answerReveal'), false)
+  assert.equal(Object.prototype.hasOwnProperty.call(hidden, 'feedbackText'), false)
   assert.equal(hidden._heldAnswer, undefined)
+  assert.equal(hidden._heldPass, undefined)
   assert.equal(JSON.stringify(hidden).includes('梧桐'), false)
+  assert.equal(JSON.stringify(hidden).includes('恭喜你解开了'), false)
 
   assert.equal(page.normNode({ nodeId: 8, done: true, answerReveal: '梧桐', feedbackText: '恭喜你解开了' }, 0).reveal, '梧桐')
   assert.equal(page.normNode({ nodeId: 8, done: true, answerReveal: '梧桐', feedbackText: '恭喜你解开了' }, 0).passText, '恭喜你解开了')
@@ -321,16 +326,44 @@ test('L01-026 未解出且未揭示的节点不把答案写进 setData', () => {
   assert.equal(page._nodeForSetData(page.normNode({ nodeId: 13, reveal: '不该留下', answerReveal: '也不该' }, 0)).reveal, '')
 
   const completedByRoute = page._nodesForRoute([
-    page.normNode({ nodeId: 21, answerReveal: '路线完成才给的答案' }, 0),
+    page.normNode({ nodeId: 21, answerReveal: '路线完成才给的答案', feedbackText: '路线完成的那句话' }, 0),
   ], { routeMode: 'BRANCH_GRAPH', nodeStates: { 21: 'COMPLETED' } })
   assert.equal(completedByRoute[0].reveal, '路线完成才给的答案')
+  assert.equal(completedByRoute[0].passText, '路线完成的那句话')
   assert.equal(completedByRoute[0]._heldAnswer, undefined)
+  assert.equal(completedByRoute[0]._heldPass, undefined)
   assert.equal(Object.prototype.hasOwnProperty.call(completedByRoute[0], 'answerReveal'), false)
+  assert.equal(Object.prototype.hasOwnProperty.call(completedByRoute[0], 'feedbackText'), false)
 
   const stillOpen = page._nodesForRoute([
-    page.normNode({ nodeId: 22, done: true, answerReveal: '还没轮到这站' }, 0),
+    page.normNode({ nodeId: 22, done: true, answerReveal: '还没轮到这站', feedbackText: '不该提前看见' }, 0),
   ], { routeMode: 'BRANCH_GRAPH', nodeStates: { 22: 'PLAYABLE' } })
   assert.equal(stillOpen[0].done, false)
   assert.equal(stillOpen[0].reveal, '')
+  assert.equal(stillOpen[0].passText, '')
   assert.equal(JSON.stringify(stillOpen[0]).includes('还没轮到这站'), false)
+  assert.equal(JSON.stringify(stillOpen[0]).includes('不该提前看见'), false)
+
+  page.data.nodes = [hidden]
+  page.data.mode = 1
+  page.data.sheet = { node: hidden }
+  page.data.isPreview = true
+  page.stopAudio = () => {}
+  page._stageEvent = () => {}
+  page._startGate = () => false
+  page._autoStationVoice = () => {}
+  page.loadHelpLadder = () => {}
+  page.startGame()
+  assert.equal(page.data.game.passText, '')
+  assert.equal(page.data.game.feedback, '答案还没咬合，再看看四周……')
+  assert.equal(JSON.stringify(page.data.game).includes('恭喜你解开了'), false)
+
+  page._answerRight(7, { firstTime: true, answerReveal: '梧桐' }, '')
+  assert.equal(page.data.gRight.text, '恭喜你解开了')
+  assert.equal(JSON.stringify(page.data.nodes).includes('恭喜你解开了'), false)
+
+  const earned = page._nodeForSetData(Object.assign({}, hidden, { done: true, name: '门牌站' }))
+  assert.equal(earned.passText, '恭喜你解开了')
+  assert.deepEqual(evidenceCards([earned]), [{ key: '7', name: '门牌站', text: '恭喜你解开了' }])
+  assert.equal(evidenceCards([hidden]).length, 0)
 })
