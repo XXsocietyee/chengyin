@@ -69,6 +69,12 @@ class AuditActivityDecisionProjectionTest {
 
     @Test
     void approvalClearsOldReasonAndProjectsApprovedState() {
+        CmsActivity pending = new CmsActivity();
+        pending.setId(18L);
+        pending.setStatus(0L);
+        pending.setPublishStatus(0L);
+        when(activityMapper.selectCmsActivityById(18L)).thenReturn(pending);
+
         AuditReviewDTO decision = new AuditReviewDTO();
         decision.setStatus(AuditTask.STATUS_APPROVED);
 
@@ -78,6 +84,27 @@ class AuditActivityDecisionProjectionTest {
         assertEquals(1L, saved.getStatus());
         assertEquals(1, saved.getCheckStatus());
         assertEquals(1L, saved.getPublishStatus());
+        assertEquals("", saved.getReason());
+    }
+
+    @Test
+    void approvalKeepsOrganizerOfflineApprovedActivityOffShelf() {
+        CmsActivity offline = new CmsActivity();
+        offline.setId(18L);
+        offline.setStatus(1L);
+        offline.setCheckStatus(1);
+        offline.setPublishStatus(0L);
+        when(activityMapper.selectCmsActivityById(18L)).thenReturn(offline);
+
+        AuditReviewDTO decision = new AuditReviewDTO();
+        decision.setStatus(AuditTask.STATUS_APPROVED);
+
+        service.review(8L, 1L, decision);
+
+        CmsActivity saved = capturedActivity();
+        assertEquals(1L, saved.getStatus());
+        assertEquals(1, saved.getCheckStatus());
+        assertEquals(0L, saved.getPublishStatus());
         assertEquals("", saved.getReason());
     }
 
