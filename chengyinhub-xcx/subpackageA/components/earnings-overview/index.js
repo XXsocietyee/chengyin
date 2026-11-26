@@ -49,13 +49,18 @@ Component({
     },
     load() {
       if (this._detached || this._hidden) return;
-      this._identity = identityKey();
+      const next = identityKey();
+      const same = this._identity === next;
+      this._identity = next;
       const epoch = this._epoch = (this._epoch || 0) + 1;
       this._settled = false;
       this._slots = { epoch, month: '', assets: '', club: this.properties.merchant ? '' : 'ok' };
-      this._balanceMonth = null;
-      this._clubItems = [];
-      this.setData({ month: EMPTY_MONTH, monthError: false, clubError: false, assets: [], assetsError: false });
+      // 换号才清。同一账号没读齐时重读,已经画出的明细和资产先留着。
+      if (!same) {
+        this._balanceMonth = null;
+        this._clubItems = [];
+        this.setData({ month: EMPTY_MONTH, monthError: false, clubError: false, assets: [], assetsError: false });
+      }
       this.loadMonth(epoch);
       if (this.properties.merchant) this.loadClubPay(epoch);
       this.loadAssets(epoch);

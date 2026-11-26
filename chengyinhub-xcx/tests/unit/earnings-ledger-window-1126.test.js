@@ -87,6 +87,21 @@ test('L09-045 最新一页已经整页早于窗口时直接画空柱,不再翻�
   assert.deepEqual(h.page.data.series.map((item) => item.totalText), ['0.00', '0.00', '0.00', '0.00', '0.00', '0.00'])
 })
 
+test('L09-045 整页都更早但不是从新到旧时继续翻', () => {
+  const h = mountAnalysis()
+  const now = new Date()
+  const older = new Date(now.getFullYear(), now.getMonth() - 8, 2, 8, 0, 0)
+  const lessOld = new Date(now.getFullYear(), now.getMonth() - 7, 2, 8, 0, 0)
+  h.page.load()
+  h.requests[0].success({
+    code: '200',
+    data: { total: 3, rows: [income(1, stamp(older), 1), income(2, stamp(lessOld), 1)] },
+  })
+  assert.equal(h.page.data.state, 'loading')
+  assert.equal(h.requests.length, 2)
+  assert.equal(h.requests[1].data.pageNum, 2)
+})
+
 test('L09-045 同一页还有窗口内流水,或有读不出的时间时继续翻页', () => {
   const now = new Date()
   const recent = new Date(now.getFullYear(), now.getMonth(), 2, 9, 0, 0)
@@ -287,6 +302,20 @@ test('L09-046 本月明细读齐后,同一账号隐藏再回来不重拉也不�
   assert.ok(h.requests.length > before)
   assert.equal(h.comp.data.month.ready, false)
   assert.equal(h.comp.data.assets.length, 0)
+})
+
+test('L09-046 本月明细已经画出、资产还没到,同一账号隐藏再回来明细还在', () => {
+  const h = mountOverview(false)
+  const now = new Date()
+  h.requests.find((req) => req.url === '/api/user/balance/list').success({
+    code: '200',
+    data: { rows: [income('b1', stamp(new Date(now.getFullYear(), now.getMonth(), 10, 9, 0, 0)), 10)] },
+  })
+  assert.equal(h.comp.data.month.items[0].key, 'b1')
+  h.hide()
+  h.show()
+  assert.equal(h.comp.data.month.ready, true)
+  assert.equal(h.comp.data.month.items[0].key, 'b1')
 })
 
 test('L09-046 本月明细没读成,或俱乐部计酬失败,隐藏后再回来会重读', () => {

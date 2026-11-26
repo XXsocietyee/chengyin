@@ -47,14 +47,19 @@ Page({
     const rows = [], ids = new Set()
     let total = null
     // 这条接口固定带 includeExternalClubIncome,SQL 是 order by create_time desc, id desc。
-    // 近 6 个月与 monthlySeries 同一窗口;整页都更早时后面只会更早,不再把整本流水读进来。
+    // 近 6 个月与 monthlySeries 同一窗口。只有读到的流水一直是新的在前,并且这一页整页都早于窗口,
+    // 后面才会更早,才停。时间读不出,或后面出现更晚的一条,就不猜顺序,继续翻完。
     const now = new Date()
-    const windowStart = new Date(now.getFullYear(), now.getMonth() - 5, 1)
-    const olderThanWindow = (row) => {
+    const windowStart = new Date(now.getFullYear(), now.getMonth() - 5, 1).getTime()
+    const timeOf = (row) => {
       const value = row && row.createTime
-      const parsed = value instanceof Date ? value : new Date(String(value || '').replace(/-/g, '/'))
-      return !isNaN(parsed.getTime()) && parsed < windowStart
+      if (value == null || value === '') return null
+      const parsed = value instanceof Date ? value : new Date(String(value).replace(/-/g, '/'))
+      const time = parsed.getTime()
+      return isNaN(time) ? null : time
     }
+    let newestFirst = true
+    let previousTime = null
     const finish = () => {
       this._rows = rows
       this.setData({ state: 'ready' })
@@ -79,7 +84,18 @@ Page({
           ids.add(id); rows.push(row)
         }
         if (rows.length > total) { if (current()) this.setData({ state: 'error' }); return }
-        if (page.length && page.every(olderThanWindow)) {
+        if (newestFirst) {
+          for (const row of page) {
+            const time = timeOf(row)
+            if (time == null || (previousTime != null && time > previousTime)) { newestFirst = false; break }
+            previousTime = time
+          }
+        }
+        const pageOlder = page.length > 0 && page.every((row) => {
+          const time = timeOf(row)
+          return time != null && time < windowStart
+        })
+        if (newestFirst && pageOlder) {
           rows.splice(rows.length - page.length, page.length)
           finish()
           return
