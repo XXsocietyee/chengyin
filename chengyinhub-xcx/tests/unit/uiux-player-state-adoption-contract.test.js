@@ -22,7 +22,7 @@ function loadSearchResultPage() {
   const requests = [];
   let definition;
   global.getApp = () => ({
-    globalData: {},
+    globalData: { searchUnifiedOn: true },
     getUserID: () => 7,
     getImgUrl(value) { return value || ''; },
     sendRequest(options) { requests.push(options); },

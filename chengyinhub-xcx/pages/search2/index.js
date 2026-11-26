@@ -330,29 +330,53 @@ Page({
     else this.setData({ maxPercent, maxPrice: price, jg2: '¥' + price, sliderRangeStyle, minHandleStyle, maxHandleStyle });
   },
 
+  onMinSliderStart(e) { this._beginSliderDrag(e, 'min'); },
+  onMaxSliderStart(e) { this._beginSliderDrag(e, 'max'); },
   onMinSliderMove(e) { this.handleSliderMove(e, 'min'); },
   onMaxSliderMove(e) { this.handleSliderMove(e, 'max'); },
 
-  // L05-157:轨道位置只量一次(开筛选面板时作废),每次 touchmove 只发一次 setData。
+  // L05-157:轨道在这次拖动开始时量一次(开筛选面板时作废)。touchmove 不再量,价格没变也不 setData。
+  _beginSliderDrag(e, type) {
+    const touch = e.touches && e.touches[0];
+    if (touch) this._sliderTouch = touch;
+    this._sliderType = type;
+    if (this._sliderRect) {
+      if (touch) this._writeSliderPrice(touch, type);
+      return;
+    }
+    if (this._sliderMeasuring) return;
+    this._sliderMeasuring = true;
+    wx.createSelectorQuery().select('.slider-container').boundingClientRect().exec((res) => {
+      this._sliderMeasuring = false;
+      if (!(res && res[0] && res[0].width)) return;
+      this._sliderRect = res[0];
+      if (this._sliderTouch) this._writeSliderPrice(this._sliderTouch, this._sliderType);
+    });
+  },
+
   handleSliderMove(e, type) {
     const touch = e.touches && e.touches[0];
     if (!touch) return;
+    this._sliderTouch = touch;
+    this._sliderType = type;
     if (!this._sliderRect) {
-      if (this._sliderMeasuring) return;
-      this._sliderMeasuring = true;
-      wx.createSelectorQuery().select('.slider-container').boundingClientRect().exec((res) => {
-        this._sliderMeasuring = false;
-        if (res && res[0] && res[0].width) { this._sliderRect = res[0]; this.handleSliderMove(e, type); }
-      });
+      this._beginSliderDrag(e, type);
       return;
     }
+    this._writeSliderPrice(touch, type);
+  },
+
+  _writeSliderPrice(touch, type) {
     const { left, width } = this._sliderRect;
     const { min, max } = this.data.priceRange;
     const gap = 5;   // 两枚滑块最小间隔 5%
     let percent = Math.max(0, Math.min(100, ((touch.clientX - left) / width) * 100));
     if (type === 'min') percent = Math.min(percent, this.data.maxPercent - gap);
     else percent = Math.max(percent, this.data.minPercent + gap);
-    this._applyPrice(type, percent, Math.round((percent / 100) * (max - min) + min));
+    const price = Math.round((percent / 100) * (max - min) + min);
+    const current = type === 'min' ? this.data.minPrice : this.data.maxPrice;
+    if (price === current) return;
+    this._applyPrice(type, percent, price);
   },
 
   openDatePicker(e) {

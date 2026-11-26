@@ -38,6 +38,26 @@ for (const rel of ['pages/searchmap/index.js', 'pages/search2/index.js']) {
     } finally { restore() }
   })
 
+  test(rel + ':拖动开始只量一次,价格没变的像素不再 setData', () => {
+    const { page, queries, restore } = load(rel)
+    try {
+      page.onMinSliderStart({ touches: [{ clientX: 40 }] })
+      page.handleSliderMove({ touches: [{ clientX: 40 }] }, 'min')
+      assert.equal(queries.length, 1)
+      assert.equal(page.data.minPrice, 200)
+      page._sliderRect = { left: 0, width: 10000 }
+      const before = page.writes
+      page.handleSliderMove({ touches: [{ clientX: 100 }] }, 'min')
+      page.handleSliderMove({ touches: [{ clientX: 104 }] }, 'min')
+      assert.equal(page.data.minPrice, 10)
+      assert.equal(page.writes - before, 1)
+      assert.equal(queries.length, 1)
+      page.handleSliderMove({ touches: [{ clientX: 150 }] }, 'min')
+      assert.equal(page.data.minPrice, 15)
+      assert.equal(page.writes - before, 2)
+    } finally { restore() }
+  })
+
   test(rel + ':输入超上限夹到 1000;清空不报错不动数据', () => {
     const { page, restore } = load(rel)
     try {

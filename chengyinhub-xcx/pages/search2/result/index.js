@@ -9,8 +9,32 @@ const discoverSearch = require('../../../utils/discover-search.js');
 const { openScene } = require('../../../utils/scene-entry.js');
 const { memberId, failureStatus, recoverReadSession } = require('../../../utils/session/login-reload.js');
 const DEFAULT_RESULT_TABS = [{ key: 'all', label: '全部' }];
-// 合并搜索默认关闭(回 503),退回列表请求;「没开」记在 app 会话里(L05-159)。
-function unifiedAvailable() { return !(app.globalData && app.globalData.searchUnifiedOff); }
+// L05-159:合并搜索服务端默认关闭(503)。没打开就不发 /api/search/unified,只用拆开的列表。
+function unifiedAvailable() {
+  const data = app.globalData;
+  return !!(data && data.searchUnifiedOn && !data.searchUnifiedOff);
+}
+// L05-160:主题模板整表与关键词无关。同一次访问、同一账号复用成功目录;失败不记,下次再拉。
+function topicCatalog(owner) {
+  const cache = app.globalData && app.globalData.searchTopicCatalog;
+  if (!cache || cache.owner !== owner || !Array.isArray(cache.rows)) return null;
+  return cache;
+}
+function rememberTopicCatalog(owner, rows) {
+  if (!app.globalData || !Array.isArray(rows)) return;
+  app.globalData.searchTopicCatalog = { owner: owner, rows: rows.slice() };
+}
+// PG-003:分享链接里坏掉的 % 不能让 onLoad 抛 URIError 变成白屏。
+function decodeQuery(value) {
+  try { return decodeURIComponent(String(value)); } catch (error) { return String(value); }
+}
+function resultQueryKey(keyword, categoryId, filters) {
+  const f = filters || {};
+  return String(keyword || '').trim() + '::' + String(categoryId || '')
+    + '::' + String(f.startDate || '') + '::' + String(f.endDate || '')
+    + '::' + String(f.minPrice || '') + '::' + String(f.maxPrice || '')
+    + '::' + String(f.sortType || '') + '::' + String(f.cityCode || '');
+}
 
 Page({
   data: {
@@ -33,12 +57,12 @@ Page({
   },
 
   onLoad(options) { if (isMerchantView()) this.setData({ merchantView: true });
-    const keyword = options.keyword ? decodeURIComponent(options.keyword) : '';
+    const keyword = options.keyword ? decodeQuery(options.keyword) : '';
     const categoryId = options.categoryId || null;
     this._filters = {
       cityCode: options.city_code || options.cityCode || '',
-      startDate: options.startDate ? decodeURIComponent(options.startDate) : '',
-      endDate: options.endDate ? decodeURIComponent(options.endDate) : '',
+      startDate: options.startDate ? decodeQuery(options.startDate) : '',
+      endDate: options.endDate ? decodeQuery(options.endDate) : '',
       minPrice: options.minPrice != null && options.minPrice !== '' ? Number(options.minPrice) : null,
       maxPrice: options.maxPrice != null && options.maxPrice !== '' ? Number(options.maxPrice) : null,
       // CU-M-66:入口页的排序选择必须活到请求里。四类里只有 /api/activity/list 有 sort_type,
@@ -71,10 +95,13 @@ Page({
 
   onShow() { if (this.data.merchantView) merchantTheme.merchantPageShow();
     this._hidden = false;
-    // L05-158:换账号、结果超过 60 秒或没搜完才重搜;否则只重挂卡片
+    // L05-158:查询没变就不重发整页搜索。关键词或筛选变了、上次没搜完、换了账号才重搜;否则只重挂卡片。
     const back = this._searchWasHidden;
     this._searchWasHidden = false;
-    if (this._resultOwner !== undefined && this._resultOwner !== memberId(app) || back && !(Date.now() - this._searchDoneAt < 6e4)) this.runSearch();
+    const ownerChanged = this._resultOwner !== undefined && this._resultOwner !== memberId(app);
+    const queryChanged = resultQueryKey(this.data.keyword, this.data.categoryId, this._filters) !== this._issuedQuery;
+    const unfinished = !(this._searchDoneAt > 0);
+    if (ownerChanged || back && (queryChanged || unfinished)) this.runSearch();
     else if (back) {
       if (this._content) this._content.seq = this._searchSeq; // onHide 作废了序号;不重搜时把已搜完的内容分页接回,否则加载更多的回包被丢、一直转圈
       this.setData({ visibleResults: [] }, () => this.updateVisibleResults());
@@ -98,10 +125,8 @@ Page({
     const useUnified = unifiedOpen && discoverSearch.unifiedCompatible(keyword, categoryId, filters);
     const requests = discoverSearch.buildRequests(keyword, categoryId, filters)
       .filter(request => !useUnified || !['topic', 'activity'].includes(request.type));
-    const queryKey = String(keyword || '').trim() + '::' + String(categoryId || '')
-      + '::' + String(filters.startDate || '') + '::' + String(filters.endDate || '')
-      + '::' + String(filters.minPrice || '') + '::' + String(filters.maxPrice || '')
-      + '::' + String(filters.sortType || '') + '::' + String(filters.cityCode || '');
+    const queryKey = resultQueryKey(keyword, categoryId, filters);
+    this._issuedQuery = queryKey;
     const preserveExisting = this._resultOwner === owner && this._resultQueryKey === queryKey
       && (this.data.resultGroups || []).some((group) => (group.items || []).length > 0);
     const previousGroups = {};
@@ -139,9 +164,8 @@ Page({
       }
     }
 
-    const finish = () => {
-      pending -= 1;
-      if (pending > 0 || !isCurrent()) return;
+    let searchSettled = false;
+    const publish = () => {
       clearTimeout(this._searchSkeletonTimer);
       const resultGroups = (this._contentGroups || []).concat(requests.map((request) => ({
         type: request.type,
@@ -163,19 +187,27 @@ Page({
       this.updateVisibleResults();
       if (failed > 0 && hasResults) toast('部分搜索没有完成，结果可能不全');
     };
+    const finish = () => {
+      pending -= 1;
+      if (pending > 0 || !isCurrent()) return;
+      searchSettled = true;
+      publish();
+    };
+    const complete = (counted) => { if (counted) finish(); else if (isCurrent()) publish(); };
 
     if (!requests.length) {
-      this._resultQueryKey = queryKey; this.setData({ searchLoading: false, showSearchSkeleton: false }); return; }
+      this._resultQueryKey = queryKey; this._searchDoneAt = Date.now();
+      this.setData({ searchLoading: false, showSearchSkeleton: false }); return; }
 
-    if (useUnified) this.loadMoreContent();
-
-    // L05-160:主题模板整表与关键词无关,同账号本页只拉一次
-    const templates = this._templateCache && this._templateCache.owner === owner ? this._templateCache : null;
-    requests.forEach((request) => {
+    const templates = topicCatalog(owner);
+    const initial = requests.slice();
+    const dispatch = (request, counted) => {
       let settled = false;
       if (request.type === 'topicTemplate' && templates) {
-        groupsByType[request.type] = discoverSearch.decorateRows(request.type, templates.rows, { ...filters, keyword });
-        settled = true; finish(); return;
+        const rows = discoverSearch.decorateRows(request.type, templates.rows, { ...filters, keyword });
+        rows.forEach((item) => { item.cover = app.getImgUrl(item.cover); });
+        groupsByType[request.type] = rows;
+        settled = true; complete(counted); return;
       }
       const requestFailed = (res, status) => {
         if (!isCurrent() || settled) return;
@@ -193,7 +225,7 @@ Page({
         }
         settled = true;
         failed += 1;
-        finish();
+        complete(counted);
       };
       app.sendRequest({
         hideLoading: true,
@@ -206,7 +238,7 @@ Page({
         success: (res) => {
           if (!isCurrent() || settled) return;
           if (res && res.code == 200) {
-            if (request.type === 'topicTemplate' && Array.isArray(res.data)) this._templateCache = { owner, rows: res.data };
+            if (request.type === 'topicTemplate' && Array.isArray(res.data)) rememberTopicCatalog(owner, res.data);
             groupsByType[request.type] = discoverSearch.decorateRows(request.type, res.data, { ...filters, keyword });
             if (request.type === 'topicTemplate' || request.type === 'gameTemplate') {
               groupsByType[request.type].forEach((item) => { item.cover = app.getImgUrl(item.cover); });
@@ -225,12 +257,26 @@ Page({
             requestFailed(res); return;
           }
           settled = true;
-          finish();
+          complete(counted);
         },
         fail: requestFailed,
         successStatusAbnormal: requestFailed,
       });
-    });
+    };
+    let addedTopicActivity = false;
+    // L05-159:503/404 只补主题和活动。俱乐部、商家、模板留在已经发出的请求里。
+    this._addTopicActivity = () => {
+      if (addedTopicActivity || !isCurrent()) return;
+      addedTopicActivity = true;
+      const extras = discoverSearch.buildRequests(keyword, categoryId, filters)
+        .filter((request) => request.type === 'topic' || request.type === 'activity');
+      const counted = !searchSettled;
+      if (counted) pending += extras.length;
+      extras.slice().reverse().forEach((request) => requests.unshift(request));
+      extras.forEach((request) => dispatch(request, counted));
+    };
+    if (useUnified) this.loadMoreContent();
+    initial.forEach((request) => dispatch(request, true));
   },
 
   onReachBottom() {
@@ -259,11 +305,16 @@ Page({
           contentError: '', contentEnabled: false });
       }, this.runSearch, status)) return;
       const code = failureStatus(res, status);
-      // 合并搜索未开放(503/404):本轮改走主题/活动列表请求重搜,不给已登录用户空结果。
+      // L05-159:合并搜索关着。记在这次访问里,本轮只补主题和活动,不重发已在途的分类。
       if (code === 503 || code === 404) {
-        if (app.globalData) app.globalData.searchUnifiedOff = true;
-        this.setData({ contentLoading: false, contentHasMore: false, contentError: '' });
-        this.runSearch();
+        if (app.globalData) {
+          app.globalData.searchUnifiedOn = false;
+          app.globalData.searchUnifiedOff = true;
+        }
+        this._content = null;
+        this._contentGroups = [];
+        this.setData({ contentLoading: false, contentHasMore: false, contentError: '', contentEnabled: false });
+        if (this._addTopicActivity) this._addTopicActivity();
         return;
       }
       if (code === 401 || code === 403) {

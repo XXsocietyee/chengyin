@@ -133,27 +133,30 @@ test('连续两个首页查询时，只接受最后一次查询的响应', () =>
   assert.deepEqual(page.data.list.map((item) => item.id), [30]);
 });
 
-test('切换搜索词后立即移除上一查询的活动与商家地图点', () => {
+test('L05-152 切换搜索词后保留上一查询的地图点，直到新结果写回', () => {
   const { page, requests } = loadPage();
   // L05-153:活动 / 商家点与原始节点留在实例上,视图只收合并后的 markers
-  Object.assign(page, { _activityMarkers: [{ id: 1, kind: 'activity', activityId: 0 }], _merchantNodes: [{ poiId: 9, name: '旧商家' }], _merchantMarkers: [{ id: 1000009, kind: 'merchant', poiId: 9 }] });
+  const activity = { id: 1, kind: 'activity', activityId: 0 };
+  const merchant = { id: 1000009, kind: 'merchant', poiId: 9 };
+  Object.assign(page, { _activityMarkers: [activity], _merchantNodes: [{ poiId: 9, name: '旧商家' }], _merchantMarkers: [merchant] });
   page.setData({
     list: [{ id: 1, name: '旧活动' }],
-    markers: [
-      { id: 1, kind: 'activity', activityId: 0 },
-      { id: 1000009, kind: 'merchant', poiId: 9 },
-    ],
+    markers: [activity, merchant],
     'filterConditions.keyword': '新词',
   });
 
   page.onSearchConfirm();
 
   assert.deepEqual(page.data.list, []);
-  assert.deepEqual((page._activityMarkers || []), []);
-  assert.deepEqual((page._merchantNodes || []), []);
-  assert.deepEqual((page._merchantMarkers || []), []);
-  assert.equal(page.data.markers.some((marker) => marker.kind === 'activity' || marker.kind === 'merchant'), false);
+  assert.deepEqual(page._activityMarkers, [activity]);
+  assert.deepEqual(page._merchantNodes, [{ poiId: 9, name: '旧商家' }]);
+  assert.deepEqual(page._merchantMarkers, [merchant]);
+  assert.deepEqual(page.data.markers, [activity, merchant]);
   assert.deepEqual(requests.map((request) => request.url), ['/api/activity/list', '/api/city/nodes']);
+
+  ok(requests[0], [{ id: 20, name: '新活动', latitude: 31.2, longitude: 121.4 }]);
+  assert.deepEqual(page._activityMarkers, [{ activityId: 20 }]);
+  assert.deepEqual(page._merchantMarkers, [merchant], '商家点仍留到自己的新结果写回');
 });
 
 test('清场后的 setData callback 执行前，旧活动与商家回包也不得写回地图', () => {
@@ -183,18 +186,17 @@ test('清场后的 setData callback 执行前，旧活动与商家回包也不�
   assert.deepEqual(requests.slice(2).map((request) => request.url), ['/api/activity/list', '/api/city/nodes']);
 });
 
-test('拖图、重新定位与筛选都会在新范围请求前清掉旧查询点位', () => {
-  const seedOldQuery = (page) => (Object.assign(page, { _activityMarkers: [{ id: 1, kind: 'activity', activityId: 0 }], _merchantNodes: [{ poiId: 9, name: '旧商家' }], _merchantMarkers: [{ id: 1000009, kind: 'merchant', poiId: 9 }] }), page.setData({
+test('拖图、重新定位与筛选在新结果写回前保留旧地图点', () => {
+  const activity = { id: 1, kind: 'activity', activityId: 0 };
+  const merchant = { id: 1000009, kind: 'merchant', poiId: 9 };
+  const seedOldQuery = (page) => (Object.assign(page, { _activityMarkers: [activity], _merchantNodes: [{ poiId: 9, name: '旧商家' }], _merchantMarkers: [merchant] }), page.setData({
     list: [{ id: 1, name: '旧活动' }],
-    markers: [
-      { id: 1, kind: 'activity', activityId: 0 },
-      { id: 1000009, kind: 'merchant', poiId: 9 },
-    ],
+    markers: [activity, merchant],
   }));
-  const assertFresh = (page, requests, label) => {
-    assert.deepEqual((page._activityMarkers || []), [], `${label} 未清旧活动点`);
-    assert.deepEqual((page._merchantMarkers || []), [], `${label} 未清旧商家点`);
-    assert.equal(page.data.markers.some((marker) => marker.kind === 'activity' || marker.kind === 'merchant'), false);
+  const assertKept = (page, requests, label) => {
+    assert.deepEqual(page._activityMarkers, [activity], `${label} 在新结果前清掉了旧活动点`);
+    assert.deepEqual(page._merchantMarkers, [merchant], `${label} 在新结果前清掉了旧商家点`);
+    assert.deepEqual(page.data.markers, [activity, merchant], label);
     assert.deepEqual(requests.map((request) => request.url), ['/api/activity/list', '/api/city/nodes']);
   };
 
@@ -207,18 +209,18 @@ test('拖图、重新定位与筛选都会在新范围请求前清掉旧查询�
   };
   moved.page.onRegionChange({ type: 'end', causedBy: 'drag' });
   moved.page._flushRegionChange();
-  assertFresh(moved.page, moved.requests, '拖图');
+  assertKept(moved.page, moved.requests, '拖图');
 
   const located = loadPage();
   seedOldQuery(located.page);
   global.wx.getLocation = ({ success }) => success({ latitude: 30.6, longitude: 104.1 });
   located.page.moveToLocation();
-  assertFresh(located.page, located.requests, '重新定位');
+  assertKept(located.page, located.requests, '重新定位');
 
   const filtered = loadPage();
   seedOldQuery(filtered.page);
   filtered.page.searchFilter();
-  assertFresh(filtered.page, filtered.requests, '筛选');
+  assertKept(filtered.page, filtered.requests, '筛选');
 });
 
 test('连续定位与拖图只接受最后一次空间输入，卸载后迟到回调全部失效', () => {
@@ -385,6 +387,7 @@ test('商家点位刷新失败保留缓存并提供局部重试，不把部分�
 
   page.getMerchantNodes();
   assert.equal(page.data.merchantNodesRefreshing, true);
+  assert.equal(requests[0].silentError, true, '商家失败不再另弹一条和活动层重复的 toast');
   requests[0].fail({ errMsg: 'request:fail timeout' });
 
   assert.deepEqual((page._merchantNodes || []), [cachedNode]);
@@ -508,16 +511,48 @@ test('卸载时清掉待发的区域防抖', () => {
   page._flushRegionChange();
 });
 
-// L05-154:本地筛掉一整页时自动再翻(最多 3 页),不把「这页没有」说成「这一带没有」
-test('筛选后首页全被筛掉且未到底:自动翻下一页', () => {
-  const { page, requests } = loadPage();
-  page.data.filterConditions = Object.assign({}, page.data.filterConditions, { startDate: '2030-01-01', endDate: '2030-01-02' });
-  page.getList();
-  const rows = Array.from({ length: 10 }, (_, i) => ({ id: i + 1, startDate: '2026-01-01', latitude: 31, longitude: 121 }));
-  requests.find(r => r.url === '/api/activity/list').success({ code: 200, data: { rows } });
-  const lists = requests.filter(r => r.url === '/api/activity/list');
-  assert.equal(lists.length, 2, '应自动请求第 2 页');
-  assert.equal(lists[1].data.pageNum, 2);
+// L05-154:日期/价格把整页筛掉时继续要下一页,直到留下一行或服务端没有更多;额外最多 5 页,途中不画空列表。
+test('筛选后首页全被筛掉且未到底:继续翻到有一行,最多额外 5 页', () => {
+  const listsOf = (bag) => bag.requests.filter((request) => request.url === '/api/activity/list');
+  const miss = (id) => ({ id, minAmout: 10, startDate: '2020-01-01', latitude: 31, longitude: 121 });
+
+  const kept = loadPage();
+  kept.page._activityMarkers = [{ activityId: 1 }];
+  kept.page.setData({ pageSize: 2, filterConditions: Object.assign({}, kept.page.data.filterConditions, { minPrice: 80, maxPrice: 120 }) });
+  kept.page.getList();
+  listsOf(kept)[0].success({ code: 200, data: { rows: [miss(1), miss(2)] } });
+  assert.equal(kept.page.data.listState, 'loading', '整页被筛掉时不能先显示空列表');
+  assert.deepEqual(kept.page._activityMarkers, [{ activityId: 1 }], '还在翻页时不清地图点');
+  assert.equal(listsOf(kept).length, 2);
+  assert.equal(listsOf(kept)[1].data.pageNum, 2);
+  listsOf(kept)[1].success({ code: 200, data: { rows: [{ id: 9, minAmout: 100, latitude: 31, longitude: 121 }, miss(10)] } });
+  assert.deepEqual(kept.page.data.list.map((item) => item.id), [9]);
+  assert.equal(kept.page.data.listState, 'ready');
+  assert.equal(listsOf(kept).length, 2, '留下一行就停');
+
+  const capped = loadPage();
+  capped.page.setData({ pageSize: 1, filterConditions: Object.assign({}, capped.page.data.filterConditions, { startDate: '2030-01-01', endDate: '2030-01-02' }) });
+  capped.page.getList();
+  for (let i = 0; i < 6; i += 1) {
+    listsOf(capped)[i].success({ code: 200, data: { rows: [miss(i + 1)] } });
+  }
+  assert.equal(listsOf(capped).length, 6, '首页之外最多再要 5 页');
+  assert.equal(capped.page.data.listState, 'empty');
+  assert.equal(capped.page.data.list.length, 0);
+
+  const ended = loadPage();
+  ended.page.setData({ pageSize: 2, filterConditions: Object.assign({}, ended.page.data.filterConditions, { maxPrice: 5 }) });
+  ended.page.getList();
+  listsOf(ended)[0].success({ code: 200, data: { rows: [miss(1)] } });
+  assert.equal(listsOf(ended).length, 1, '服务端没有更多就停');
+  assert.equal(ended.page.data.listState, 'empty');
+
+  const failed = loadPage();
+  failed.page.setData({ pageSize: 1, filterConditions: Object.assign({}, failed.page.data.filterConditions, { minPrice: 500 }) });
+  failed.page.getList();
+  listsOf(failed)[0].success({ code: 200, data: { rows: [miss(1)] } });
+  listsOf(failed)[1].fail({ errMsg: 'request:fail' });
+  assert.equal(failed.page.data.listState, 'error', '下一页失败不能画成空列表');
 });
 
 // L05-183:被盖住时网络恢复不在后台重拉,回来再拉
