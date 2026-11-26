@@ -1131,8 +1131,8 @@ Page({
       if (changed || this._eventMissionCode) this._loadBoundEvent(this._eventId);
     }
     // 雾遮罩的自愈:.fogscreen-guard 是 inset:0 的不透明层,guard 卡住 = 整页纯黑且 POI 点不动
-    // (onPoiTap 首行就按它拦)。页面上没有「点击重试」入口(L05-040 决定不加按钮):初始化放弃时
-    // _trySetupScreenFog 会自动再试一次;其余停在 guard:true 的路径 ⇒ 全黑、无提示、无出口。已知至少三条:①首帧既不回 bindload 也不回 binderror 的机型;
+    // (onPoiTap 首行就按它拦)。初始化或出图失败时 _offerFogRetry 会说明并再画一次;
+    // 自动那次用掉之后再失败,会给出「重试」,点下去再画。已知至少三条:①首帧既不回 bindload 也不回 binderror 的机型;
     // ②regionchange 的 begin 到了而 end 丢了(手势被来电/切后台打断);③重绘定时器被 dispose 截断。
     // ②已由 _guardScreenViewportChange 的看门狗就地兜住,这里是最后一道:tabBar 页实例常驻,
     // 切走再回来仍是那个 guard,冷启动前不自愈,所以回到本页时补一次重试(retryScreenFog 自带防重入)。
@@ -3377,6 +3377,7 @@ Page({
           g.scale(dpr, dpr);
           this._fogMode = 'screen';
           this._fogAutoRetried = false;
+          this._fogRetryShown = false;
           this._fogScreenCv = node;
           this._fogScreenG = g;
           this._fogScreenSize = { width, height };
@@ -3403,15 +3404,35 @@ Page({
       this._fogMode = 'blocked';
       this.setData({ fogScreenLayers: [], fogScreenReady: false, fogScreenGuard: true });
       this._finishFogSetup(false, generation);
-      // L05-040(业主默认项 B):不加按钮;遮罩卡住时 1 秒后自动再初始化一次(每次成功后重新给一次机会)
-      if (!this._fogAutoRetried) {
-        this._fogAutoRetried = true;
-        this._fogAutoRetryTimer = setTimeout(() => {
-          this._fogAutoRetryTimer = null;
-          if (generation === this._fogLifecycleGen && this._fogMode === 'blocked') this.retryScreenFog();
-        }, 1000);
-      }
+      // L05-040:失败要让人看见重试,并且这次重试必须重新把雾画上(开场屏也要画,不能空返回)
+      this._offerFogRetry(generation);
     });
+  },
+
+  _offerFogRetry(generation) {
+    if (generation !== this._fogLifecycleGen) return;
+    if (this._fogAutoRetried) {
+      if (this._fogRetryShown) return;
+      this._fogRetryShown = true;
+      try {
+        cyModal.show({
+          title: '迷雾没画上',
+          content: '再试一次会重新画上。',
+          confirmText: '重试',
+          cancelText: '取消',
+          success: (m) => { if (m && m.confirm) this.retryScreenFog(); },
+        });
+      } catch (e) { /* 弹不出来也不能挡住之后的重试 */ }
+      return;
+    }
+    this._fogAutoRetried = true;
+    try { cyToast('迷雾没画上，正在重试'); } catch (e) { /* 说不出来也要再画一次 */ }
+    this._fogAutoRetryTimer = setTimeout(() => {
+      this._fogAutoRetryTimer = null;
+      if (generation !== this._fogLifecycleGen) return;
+      if (this._fogMode !== 'blocked' && !this.data.fogScreenGuard) return;
+      this.retryScreenFog();
+    }, 1000);
   },
 
   _drawScreenFog(region) {
@@ -3473,6 +3494,7 @@ Page({
     } catch (e) {
       this._fogScreenErr = 'publish:' + (e && e.message);
       this.setData({ fogScreenGuard: true });
+      this._offerFogRetry(this._fogLifecycleGen);
     }
   },
 
@@ -3485,6 +3507,8 @@ Page({
     const found = layers.find((layer) => Number(layer.version) === version);
     if (!found) return;
     if (version === this._fogScreenVersion) {
+      this._fogAutoRetried = false;
+      this._fogRetryShown = false;
       this._fogScreenLoadMs = Math.max(0, Date.now() - Number(found.frameStartedAt || Date.now()));
       this.setData({ fogScreenLayers: [found], fogScreenReady: true, fogScreenGuard: false }, () => {
         oldLayers.forEach((layer) => { if (layer.src !== found.src) this._deleteScreenFogFile(layer.src); });
@@ -3510,11 +3534,13 @@ Page({
     this._fogScreenErr = 'image:' + ((e && e.detail && e.detail.errMsg) || 'load-failed');
     this.setData({ fogScreenGuard: true }, () => {
       if (failed) this._deleteScreenFogFile(failed.src);
+      this._offerFogRetry(generation);
     });
   },
 
   retryScreenFog() {
-    if (this.data.screen !== 'map' && this.data.screen !== 'arrive') return;
+    // 开场 4.2 秒里画布已经挂上。失败后的那一次重试若只认 map/arrive,会在 opening 上空返回,雾一直黑着。
+    if (this.data.screen !== 'opening' && this.data.screen !== 'map' && this.data.screen !== 'arrive') return;
     if (this._fogScreenSetupResolve) return;
     this.setData({ fogScreenGuard: true });
     if (this._fogMode === 'screen' && this._fogScreenG) {
@@ -6157,11 +6183,16 @@ Page({
     wx.getLocation({ type: 'gcj02',
       success: (r) => {
         if (this._unloaded) return;
-        lastLocation.save(r);   // L05-051:存不进缓存也照用这次定位,不让「开启定位」点了没反应
-        this._entryMe = { lat: r.latitude, lng: r.longitude };
+        // L05-051:存不进也照用这次定位。好的点留在这次,并告诉人没有保存下来。
+        const saved = lastLocation.save(r);
+        const point = { lat: r.latitude, lng: r.longitude };
+        this._entryMe = point;
         this._entryFarCards = [];
-        this.setData({ center: { lat: r.latitude, lng: r.longitude }, entryLocated: true });
+        this.setData({ center: point, entryLocated: true });
         this._loadEntryMap(this.data.center);
+        if (saved === false && lastLocation.valid(r)) {
+          try { cyToast('这个位置只在这次使用，没有保存'); } catch (e) { /* 提示失败也不丢掉这次定位 */ }
+        }
       },
       // L05-051:openSetting 只能在点按里调;异步回调里改成弹窗,由「去设置」那一下打开
       fail: () => {
