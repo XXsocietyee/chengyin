@@ -72,7 +72,7 @@ test('L10-122:附近活动请求不带坐标时,回包里的距离不能显示',
   }
 });
 
-test('L10-122:请求带了坐标时保留实测距离,包括 0', () => {
+test('L10-122:请求带了坐标时只保留正数实测距离,0 不是距离', () => {
   const { page, requests } = loadPage();
   page.getListData('nearbyActivityList', '/api/activity/list', {
     is_my: 0,
@@ -89,20 +89,22 @@ test('L10-122:请求带了坐标时保留实测距离,包括 0', () => {
         { id: 3, name: '字符串零', distance: '0' },
         { id: 4, name: '没有距离字段' },
         { id: 5, name: '坏距离', distance: '不是数' },
+        { id: 6, name: '空白', distance: '  ' },
       ],
     },
   });
   const rows = page.data.nearbyActivityList;
-  assert.equal(rows[0].distance, '0.00km');
+  assert.equal(rows[0].distance, '');
   assert.equal(rows[1].distance, '2.50km');
-  assert.equal(rows[2].distance, '0.00km');
+  assert.equal(rows[2].distance, '');
   assert.equal(rows[3].distance, '');
   assert.equal(rows[4].distance, '');
+  assert.equal(rows[5].distance, '');
 });
 
 test('L10-122:字符串坐标和 0,0 算测过;空白或只传一个不算', () => {
   const cases = [
-    [{ latitude: '31.2', longitude: '121.5' }, 0, '0.00km'],
+    [{ latitude: '31.2', longitude: '121.5' }, 0, ''],
     [{ latitude: 0, longitude: 0 }, 100, '0.10km'],
     [{ latitude: '  ', longitude: 121.5 }, 800, ''],
     [{ latitude: 31.2, longitude: '' }, 800, ''],
@@ -121,15 +123,19 @@ test('L10-122:字符串坐标和 0,0 算测过;空白或只传一个不算', () 
 
 test('L10-122:首页刷新的附近列表本身不传坐标,因此不显示距离', () => {
   const { page, requests } = loadPage();
+  let locationCalls = 0;
+  wx.getLocation = () => { locationCalls += 1; };
   page.loadPageData();
   const nearby = requests.find((request) => request.url === '/api/activity/list'
     && request.data && request.data.is_my === 0 && request.data.pageSize === 4);
   assert.ok(nearby);
   assert.equal('latitude' in nearby.data, false);
   assert.equal('longitude' in nearby.data, false);
-  nearby.success({ code: 200, data: { rows: [{ id: 9, name: '外滩', distance: 1200 }] } });
+  assert.equal(locationCalls, 0);
+  nearby.success({ code: 200, data: { rows: [{ id: 9, name: '外滩', distance: 0 }, { id: 10, name: '外滩东', distance: 1200 }] } });
   assert.equal(page.data.nearbyActivityList[0].name, '外滩');
   assert.equal(page.data.nearbyActivityList[0].distance, '');
+  assert.equal(page.data.nearbyActivityList[1].distance, '');
 });
 
 test('L10-122:附近卡只在有距离文案时渲染徽标', () => {

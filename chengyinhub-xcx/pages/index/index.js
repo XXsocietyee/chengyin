@@ -213,7 +213,8 @@ function requestIncludedCoordinates(params) {
 function distanceTextFromMeters(distance) {
   if (distance == null || distance === '') return '';
   const meters = typeof distance === 'number' ? distance : Number(String(distance).trim());
-  if (!Number.isFinite(meters)) return '';
+  // 缺距离、非数字、0 和负数都不是这次测出来的距离,徽标留空。
+  if (!Number.isFinite(meters) || meters <= 0) return '';
   return (meters / 1000).toFixed(2) + 'km';
 }
 
@@ -1174,7 +1175,7 @@ Page({
           
           // L10-121:日期整形只在 index-format 一处
           indexFormat.shapeListDates(list, true);
-          // L10-122:没传坐标就不展示距离(哪怕回包里带了 distance)。传了坐标则保留实测值,0 米也显示。
+          // L10-122:没传坐标就不展示距离(哪怕回包里带了 distance)。传了坐标也只保留正数实测值,0 不是距离。
           const measuredDistance = requestIncludedCoordinates(params);
           for (let i = 0; i < list.length; i++) {
             if (list[i]['startDate']) {
