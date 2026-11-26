@@ -171,6 +171,10 @@ function countUp(ctx, key, from, to, ms, reduced) {
 
 // V1-P59(IqRophy):汇总卡里叠放的被邀请人头像,只用后端返回的真实记录,最多 5 个
 const STACK_MAX = 5
+// L09-047:积分流水是全部积分事件。一页 200 条不够时继续用同一 pageSize 往后读。
+// 页数封顶是固定小常数,坏 total 不能把翻页转成死循环。
+const POINT_PAGE_SIZE = 200
+const POINT_PAGE_CAP = 8
 const pageMotion = require('../../../utils/page-motion.js')
 const { readReducedMotion } = require('../../../utils/motion-preference.js')
 function buildStack(records) {
@@ -247,7 +251,7 @@ Component({
         data: { pageNum: pageNo, pageSize: app.getPageSize() },
       }, recover)
       const rewardsRequest = reset
-        ? request({ url: '/api/user/points/list', method: 'POST', data: { pageNum: 1, pageSize: 200 } }, recover)
+        ? readPointPages(this, seq, owner, recover)
         : Promise.resolve(null)
 
       Promise.all([inviteRequest, rewardsRequest]).then(([inviteResponse, rewardsResponse]) => {
@@ -347,5 +351,43 @@ Component({
     },
   },
 })
+
+function pointPageSignature(rows) {
+  return JSON.stringify(rows)
+}
+
+// 重置时把积分流水读完再决定奖励是否齐。本页短于 pageSize,或累计条数达到 total,就停。
+// 后续页若与已经应用过的某一页相同,也停。没读完时让 total 对不上 rows,调用方不会把 _rewardReady 置真。
+function readPointPages(ctx, seq, owner, recover) {
+  const collected = []
+  const seen = new Set()
+  let expected = null
+  const current = () => !ctx._detached && seq === ctx._loadSeq && owner === memberId(app)
+  const unfinished = () => ({ code: 200, data: { rows: collected.slice(), total: null } })
+  const read = (pageNum) => request({
+    url: '/api/user/points/list',
+    method: 'POST',
+    data: { pageNum: pageNum, pageSize: POINT_PAGE_SIZE },
+  }, recover).then((response) => {
+    if (!current() || recover(response)) return response
+    const status = failureStatus(response)
+    if (status === 401 || status === 403) return response
+    const pageRows = rowsOf(response)
+    const pageTotal = response && response.data ? nonNegativeInteger(response.data.total) : null
+    if (!pageRows || pageTotal === null) return collected.length ? unfinished() : response
+    if (expected === null) expected = pageTotal
+    else if (pageTotal !== expected) return unfinished()
+    if (pageNum > 1 && seen.has(pointPageSignature(pageRows))) return unfinished()
+    seen.add(pointPageSignature(pageRows))
+    pageRows.forEach((row) => { collected.push(row) })
+    const covered = collected.length
+    const short = pageRows.length < POINT_PAGE_SIZE
+    const reached = covered >= expected
+    const capped = pageNum >= POINT_PAGE_CAP
+    if (!short && !reached && !capped && current()) return read(pageNum + 1)
+    return { code: 200, data: { rows: collected.slice(), total: expected } }
+  })
+  return read(1)
+}
 
 if (typeof module !== 'undefined') module.exports = { earnFacts, countUp }

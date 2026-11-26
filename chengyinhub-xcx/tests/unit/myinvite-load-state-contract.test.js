@@ -57,6 +57,28 @@ async function flush() {
   await new Promise((resolve) => setImmediate(resolve))
 }
 
+function fullPointPage(seed) {
+  return Array.from({ length: 200 }, (_, index) => ({
+    id: seed * 1000 + index + 1,
+    eventType: 1,
+    eventId: seed * 1000 + index + 1,
+    changePoints: 1,
+    createTime: '2026-01-01 00:00:00',
+  }))
+}
+
+function pointRequests() {
+  return requests.filter((request) => request.url === '/api/user/points/list')
+}
+
+function pointPageCap() {
+  const match = read(COMPONENT_PATH).match(/const POINT_PAGE_CAP = (\d+)/)
+  assert.ok(match, '积分流水翻页必须写死页数封顶')
+  const cap = Number(match[1])
+  assert.ok(cap >= 2 && cap <= 12, '封顶要小，挡住坏 total，而不是跟着 total 走')
+  return cap
+}
+
 test('邀请记录同时读取真实邀请列表与积分流水，并按记录时间分组', async () => {
   const component = loadComponent()
   component.load(true)
@@ -150,6 +172,200 @@ test('积分流水被分页截断时不把未匹配记录误判为首购未完�
   assert.equal(component.data.rewardReady, false)
   assert.equal(component.data.groups[0].items[0].statusText, '已加入 · 奖励发放中')
   assert.equal(component.data.groups[0].items[0].rewardText, '发放中')
+  assert.equal(pointRequests().length, 1)
+})
+
+test('L09-047 超过一页的积分流水继续按同一 pageSize 读完，更早的邀请奖励仍进分组', async () => {
+  const component = loadComponent()
+  component.load(true)
+  const page = fullPointPage(2)
+  page[199] = { id: 9002, eventType: 5, eventId: 12, changePoints: 30, createTime: '2026-08-07 10:30:00' }
+  assert.equal(requests[1].data.pageNum, 1)
+  assert.equal(requests[1].data.pageSize, 200)
+  assert.deepEqual(Object.keys(requests[1].data).sort(), ['pageNum', 'pageSize'])
+  respond(0, {
+    code: '200',
+    data: { rows: [{ id: 12, nickname: '老邀请', avatar: 'old.png', createTime: '2025-12-01 09:00:00' }], total: 1 },
+  })
+  respond(1, { code: '200', data: { rows: fullPointPage(1), total: 400 } })
+  await flush()
+  assert.equal(requests[2].data.pageNum, 2)
+  assert.equal(requests[2].data.pageSize, 200)
+  assert.deepEqual(Object.keys(requests[2].data).sort(), ['pageNum', 'pageSize'])
+  respond(2, { code: '200', data: { rows: page, total: 400 } })
+  await flush()
+
+  assert.equal(pointRequests().length, 2)
+  assert.equal(component.data.rewardReady, true)
+  assert.equal(component.data.groups[0].label, '2025年12月')
+  assert.equal(component.data.groups[0].items[0].statusText, '首购奖励已到账')
+  assert.equal(component.data.groups[0].items[0].rewardText, '+30 积分')
+  component._detached = true
+})
+
+test('L09-047 后续页短于 pageSize 且还没到 total 时停，不把半截流水当成读完', async () => {
+  const component = loadComponent()
+  component.load(true)
+  respond(0, {
+    code: '200',
+    data: { rows: [{ id: 12, nickname: '阿林', avatar: '' }], total: 1 },
+  })
+  respond(1, { code: '200', data: { rows: fullPointPage(1), total: 500 } })
+  await flush()
+  respond(2, {
+    code: '200',
+    data: { rows: [{ eventType: 1, eventId: 1, changePoints: 1 }], total: 500 },
+  })
+  await flush()
+
+  assert.equal(pointRequests().length, 2)
+  assert.equal(component.data.rewardReady, false)
+  assert.equal(component.data.groups[0].items[0].statusText, '已加入 · 奖励发放中')
+  assert.equal(component.data.groups[0].items[0].rewardText, '发放中')
+})
+
+test('L09-047 后续页重复已应用的页时停，不把重复页凑成读完', async () => {
+  const component = loadComponent()
+  component.load(true)
+  const page = fullPointPage(1)
+  page[0] = { id: 11, eventType: 5, eventId: 12, changePoints: 10, createTime: '2026-08-07 10:30:00' }
+  respond(0, {
+    code: '200',
+    data: {
+      rows: [
+        { id: 12, nickname: '已到账', avatar: '', createTime: '2026-08-06 09:15:00' },
+        { id: 13, nickname: '还没读到', avatar: '' },
+      ],
+      total: 2,
+    },
+  })
+  respond(1, { code: '200', data: { rows: page, total: 400 } })
+  await flush()
+  respond(2, { code: '200', data: { rows: page, total: 400 } })
+  await flush()
+
+  assert.equal(pointRequests().length, 2)
+  assert.equal(component.data.rewardReady, false)
+  assert.equal(component.data.groups[0].items[0].rewardText, '+10 积分')
+  assert.equal(component.data.groups[1].items[0].statusText, '已加入 · 奖励发放中')
+  assert.equal(component.data.groups[1].items[0].rewardText, '发放中')
+})
+
+test('L09-047 坏 total 最多翻到固定页数，截断的流水不标记奖励已齐', async () => {
+  const component = loadComponent()
+  const cap = pointPageCap()
+  component.load(true)
+  respond(0, {
+    code: '200',
+    data: { rows: [{ id: 12, nickname: '阿林', avatar: '' }], total: 1 },
+  })
+  respond(1, { code: '200', data: { rows: fullPointPage(1), total: 999999 } })
+  for (let page = 2; page <= cap; page += 1) {
+    await flush()
+    const points = pointRequests()
+    assert.equal(points.length, page)
+    assert.equal(points[page - 1].data.pageNum, page)
+    assert.equal(points[page - 1].data.pageSize, 200)
+    assert.deepEqual(Object.keys(points[page - 1].data).sort(), ['pageNum', 'pageSize'])
+    respond(requests.indexOf(points[page - 1]), { code: '200', data: { rows: fullPointPage(page), total: 999999 } })
+  }
+  await flush()
+
+  assert.equal(pointRequests().length, cap)
+  assert.equal(component.data.rewardReady, false)
+  assert.equal(component.data.groups[0].items[0].statusText, '已加入 · 奖励发放中')
+})
+
+test('L09-047 后续积分页失败时不把已读到的半截流水当成读完', async () => {
+  const component = loadComponent()
+  component.load(true)
+  const page = fullPointPage(1)
+  page[0] = { id: 11, eventType: 5, eventId: 12, changePoints: 10, createTime: '2026-08-07 10:30:00' }
+  respond(0, {
+    code: '200',
+    data: {
+      rows: [
+        { id: 12, nickname: '已到账', avatar: '', createTime: '2026-08-06 09:15:00' },
+        { id: 13, nickname: '还没读到', avatar: '' },
+      ],
+      total: 2,
+    },
+  })
+  respond(1, { code: '200', data: { rows: page, total: 400 } })
+  await flush()
+  respond(2, 'fail')
+  await flush()
+
+  assert.equal(pointRequests().length, 2)
+  assert.equal(component.data.rewardReady, false)
+  assert.equal(component.data.loadErr, false)
+  assert.equal(component.data.groups[0].items[0].rewardText, '+10 积分')
+  assert.equal(component.data.groups[1].items[0].statusText, '已加入 · 奖励发放中')
+})
+
+test('L09-047 加载序号变了之后，迟到的积分页不能写入', async () => {
+  const component = loadComponent()
+  component.load(true)
+  respond(0, {
+    code: '200',
+    data: { rows: [{ id: 12, nickname: '旧序号', avatar: '' }], total: 1 },
+  })
+  respond(1, { code: '200', data: { rows: fullPointPage(1), total: 400 } })
+  await flush()
+  component._loadSeq += 1
+  respond(2, {
+    code: '200',
+    data: { rows: [{ eventType: 5, eventId: 12, changePoints: 10, createTime: '2026-08-07 10:30:00' }], total: 400 },
+  })
+  await flush()
+
+  assert.equal(component.data.groups.length, 0)
+  assert.deepEqual(component._rewards, {})
+  assert.equal(pointRequests().length, 2)
+})
+
+test('L09-047 换账号后迟到的积分页不能写进新账号', async () => {
+  let userId = 7
+  const originalGetApp = global.getApp
+  global.getApp = () => ({
+    getUserID: () => userId,
+    getPageSize: () => 10,
+    sendRequest(options) { requests.push(options) },
+  })
+  try {
+    const component = loadComponent()
+    component.load(true)
+    respond(0, {
+      code: '200',
+      data: { rows: [{ id: 12, nickname: '旧账号', avatar: '' }], total: 1 },
+    })
+    respond(1, { code: '200', data: { rows: fullPointPage(1), total: 400 } })
+    await flush()
+    const late = pointRequests()[1]
+    userId = 99
+    componentConfig.pageLifetimes.show.call(component)
+    assert.equal(requests[4].data.pageNum, 1)
+    assert.equal(requests[4].data.pageSize, 200)
+    respond(3, {
+      code: '200',
+      data: { rows: [{ id: 21, nickname: '新账号', avatar: '' }], total: 1 },
+    })
+    respond(4, { code: '200', data: { rows: [], total: 0 } })
+    await flush()
+    assert.equal(component.data.groups[0].items[0].nickname, '新账号')
+    assert.equal(component.data.groups[0].items[0].rewardText, '待解锁')
+    late.success({
+      code: '200',
+      data: { rows: [{ eventType: 5, eventId: 21, changePoints: 80, createTime: '2026-08-07 10:30:00' }], total: 400 },
+    })
+    await flush()
+    assert.equal(component.data.groups[0].items[0].nickname, '新账号')
+    assert.equal(component.data.groups[0].items[0].rewardText, '待解锁')
+    assert.equal(component.data.rewardReady, true)
+    assert.equal(pointRequests().length, 3)
+  } finally {
+    global.getApp = originalGetApp
+  }
 })
 
 test('邀请人 Long ID 以字符串关联奖励，不经 Number 转换丢精度', async () => {
