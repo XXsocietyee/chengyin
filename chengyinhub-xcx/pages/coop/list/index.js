@@ -702,8 +702,9 @@ Page({
   // 我发出的:撤回待处理的申请带队(申请入口在俱乐部详情「可对接的活动」)
   withdrawApply(e) {
     const topicId = e.currentTarget.dataset.topicid;
+    const clubId = e.currentTarget.dataset.clubid;
     const that = this;
-    const actionKey = 'withdraw:' + topicId;
+    const actionKey = 'withdraw:' + topicId + ':' + clubId;
     if (!this._beginAction(actionKey)) return;
     modal.show({
       title: '撤回申请',
@@ -713,7 +714,7 @@ Page({
         if (!r.confirm) { that._finishAction(actionKey, '', ''); return; }
         app.sendRequest({
           url: '/api/coop/pool/withdraw', method: 'POST',
-          data: JSON.stringify({ topicId: topicId }),
+          data: JSON.stringify({ topicId: topicId, clubId: clubId }),
           header: { 'Content-Type': 'application/json' },
           success(res) {
             if (res.code == '200') {

@@ -284,7 +284,7 @@ class CoopClubApplyServiceImplTest {
     @Test
     void withdraw_flips_pending_to_withdrawn() {
         when(applyMapper.selectByTopicAndClub(TOPIC, MY_CLUB)).thenReturn(row(5L, 0));
-        svc.withdraw(TOPIC, ME);
+        svc.withdraw(TOPIC, ME, MY_CLUB);
         ArgumentCaptor<CoopClubApply> cap = ArgumentCaptor.forClass(CoopClubApply.class);
         verify(applyMapper).updateCoopClubApply(cap.capture());
         assertEquals(5L, cap.getValue().getId());
@@ -296,9 +296,34 @@ class CoopClubApplyServiceImplTest {
     void withdraw_without_pending_rejects() {
         when(applyMapper.selectByTopicAndClub(TOPIC, MY_CLUB)).thenReturn(row(5L, 1));
         IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> svc.withdraw(TOPIC, ME));
+                () -> svc.withdraw(TOPIC, ME, MY_CLUB));
         assertTrue(e.getMessage().contains("撤回"), e.getMessage());
         verify(applyMapper, never()).updateCoopClubApply(any());
+    }
+
+    @Test
+    void withdraw_without_club_id_does_not_fall_back_to_the_first_club() {
+        assertThrows(IllegalStateException.class, () -> svc.withdraw(TOPIC, ME, null));
+        verify(applyMapper, never()).selectByTopicAndClub(anyLong(), anyLong());
+    }
+
+    @Test
+    void withdraw_uses_the_named_club_when_member_owns_several() {
+        Long second = MY_CLUB + 1;
+        when(clubMapper.selectClubsByMemberId(ME))
+                .thenReturn(Arrays.asList(activeClub(MY_CLUB, ME), activeClub(second, ME)));
+        CoopClubApply pending = row(8L, 0);
+        pending.setClubId(second);
+        when(applyMapper.selectByTopicAndClub(TOPIC, second)).thenReturn(pending);
+
+        svc.withdraw(TOPIC, ME, second);
+
+        verify(applyMapper).selectByTopicAndClub(TOPIC, second);
+        verify(applyMapper, never()).selectByTopicAndClub(TOPIC, MY_CLUB);
+        ArgumentCaptor<CoopClubApply> cap = ArgumentCaptor.forClass(CoopClubApply.class);
+        verify(applyMapper).updateCoopClubApply(cap.capture());
+        assertEquals(8L, cap.getValue().getId());
+        assertEquals(2, cap.getValue().getStatus());
     }
 
     // ---------- decline ----------

@@ -37,6 +37,7 @@ import com.chengyinhub.business.domain.dto.ClubLeaderProfileRequest;
 import com.chengyinhub.business.domain.vo.ClubLifecycleCommandResultVO;
 import com.chengyinhub.business.domain.vo.ClubPostRepostItemVO;
 import com.chengyinhub.business.domain.vo.ClubRegistrationRosterVO;
+import com.chengyinhub.business.domain.vo.ClubCoopMerchantCardVO;
 import com.chengyinhub.business.domain.vo.PublicClubVO;
 import com.chengyinhub.business.domain.CoopInvite;
 import com.chengyinhub.business.domain.GrowthBadge;
@@ -1426,11 +1427,43 @@ public class ApiClubController extends BaseController {
     @Operation(summary = "可对接商家列表(承接方,coop_open=1)")
     @PostMapping("/merchants")
     public AjaxResult merchants(@RequestBody(required = false) MmsMerchant query) {
+        Long memberId;
+        try { memberId = currentMemberId(); } catch (Exception e) { return error("请先登录"); }
+        if (!mayViewCoopMerchants(memberId)) {
+            return new AjaxResult(403, "仅俱乐部主理人或管理员可查看可对接商家");
+        }
         if (query == null) query = new MmsMerchant();
         query.setCoopOpen(1);   // 开放对接
         query.setStatus(1L);    // 审核通过
         query.setDelFlag(0);
-        return AjaxResult.success(mmsMerchantService.selectMmsMerchantList(query));
+        // 电话、微信、执照和审核备注不能留在查询条件里,否则会按联系方式探库。
+        query.setPhone(null);
+        query.setWechat(null);
+        query.setWechatQrcode(null);
+        query.setBusinessLicense(null);
+        query.setReson(null);
+        query.setDisableReason(null);
+        List<ClubCoopMerchantCardVO> cards = mmsMerchantService.selectClubCoopMerchantCards(query);
+        return AjaxResult.success(cards);
+    }
+
+    /** 主理人(能力位、主理人档案或名下俱乐部)或俱乐部管理员才能拉可对接商家。 */
+    private boolean mayViewCoopMerchants(Long memberId) {
+        if (memberId == null) return false;
+        if (capabilityService.hasCapability(memberId, MemberCapability.CAP_CLUB_LEADER)) return true;
+        if (clubLeaderService.selectClubLeaderByMemberId(memberId) != null) return true;
+        List<Club> owned = clubService.selectClubsByMemberId(memberId);
+        if (owned != null) {
+            for (Club club : owned) {
+                if (club != null && club.getId() != null) return true;
+            }
+        }
+        List<Long> joined = clubMemberService.selectClubIdsByMember(memberId);
+        if (joined == null) return false;
+        for (Long clubId : joined) {
+            if (clubMemberService.canGovernClub(clubId, memberId)) return true;
+        }
+        return false;
     }
 
     @Operation(summary = "俱乐部群聊(进入/创建,成员可进)")

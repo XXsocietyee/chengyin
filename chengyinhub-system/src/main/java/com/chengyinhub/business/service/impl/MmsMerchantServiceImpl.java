@@ -15,6 +15,7 @@ import com.chengyinhub.business.domain.CmsPointsSetting;
 import com.chengyinhub.business.domain.UmsMemberPointsDetail;
 import com.chengyinhub.business.domain.MerchantOperator;
 import com.chengyinhub.business.domain.dto.MerchantSearchQuery;
+import com.chengyinhub.business.domain.vo.ClubCoopMerchantCardVO;
 import com.chengyinhub.business.mapper.MerchantOperatorInviteMapper;
 import com.chengyinhub.business.mapper.MerchantOperatorMapper;
 import com.chengyinhub.business.mapper.MmsMerchantMapper;
@@ -104,6 +105,12 @@ public class MmsMerchantServiceImpl implements IMmsMerchantService
     public List<MmsMerchant> selectMmsMerchantList(MmsMerchant mmsMerchant)
     {
         return mmsMerchantMapper.selectMmsMerchantList(mmsMerchant);
+    }
+
+    @Override
+    public List<ClubCoopMerchantCardVO> selectClubCoopMerchantCards(MmsMerchant mmsMerchant)
+    {
+        return mmsMerchantMapper.selectClubCoopMerchantCards(mmsMerchant);
     }
 
     @Override

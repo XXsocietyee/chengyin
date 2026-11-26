@@ -19,15 +19,19 @@ public interface ICoopClubApplyService {
      *
      * @param topicId  开放承接的主题
      * @param memberId 申请人(须为生效俱乐部主理人)
-     * @param clubId   以哪个俱乐部申请;null = 取申请人第一个生效俱乐部
+     * @param clubId   以哪个俱乐部申请;null = 取申请人第一个生效俱乐部。撤回不允许省略。
      * @param message  留言(可空)
      * @return 申请行(新建或复位)
      * @throws IllegalStateException 闸不过:非主理人/主题不存在或未开放/自己主题/已锁价/已有俱乐部承接/重复申请
      */
     CoopClubApply apply(Long topicId, Long memberId, Long clubId, String message);
 
-    /** 俱乐部撤回待处理申请(仅本人俱乐部、仅 status=0) */
-    CoopClubApply withdraw(Long topicId, Long memberId);
+    /**
+     * 俱乐部撤回待处理申请(仅本人该俱乐部、仅 status=0)。
+     *
+     * @param clubId 要撤回的俱乐部;必填,不回落到第一个生效俱乐部
+     */
+    CoopClubApply withdraw(Long topicId, Long memberId, Long clubId);
 
     /** 商家(主题发布者)婉拒待处理申请 */
     CoopClubApply decline(Long applyId, Long memberId);

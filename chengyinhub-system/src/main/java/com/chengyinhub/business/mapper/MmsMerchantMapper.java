@@ -2,6 +2,7 @@ package com.chengyinhub.business.mapper;
 
 import com.chengyinhub.business.domain.MmsMerchant;
 import com.chengyinhub.business.domain.dto.MerchantSearchQuery;
+import com.chengyinhub.business.domain.vo.ClubCoopMerchantCardVO;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.Date;
@@ -50,6 +51,12 @@ public interface MmsMerchantMapper
      * @return 商家集合
      */
     public List<MmsMerchant> selectMmsMerchantList(MmsMerchant mmsMerchant);
+
+    /**
+     * 俱乐部可对接商家卡。筛选口径同 {@link #selectMmsMerchantList}，
+     * 列只保留卡片渲染字段，不读电话、微信、执照和审核备注。
+     */
+    public List<ClubCoopMerchantCardVO> selectClubCoopMerchantCards(MmsMerchant mmsMerchant);
 
     /**
      * 商家搜索/发现列表(E5)按距离升序:与 selectMmsMerchantList 同筛选,

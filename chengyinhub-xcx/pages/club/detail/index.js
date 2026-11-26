@@ -3786,7 +3786,7 @@ Page({
     const that = this;
     app.sendRequest({
       hideLoading: true, silentError: true,
-      url: '/api/coop/pool/list', method: 'POST', data: jsonBody({}), header: jsonHeader(),
+      url: '/api/coop/pool/list', method: 'POST', data: jsonBody({ clubId: that.data.clubId }), header: jsonHeader(),
       success(res) {
         const d = res && res.data;
         // 形状不对就当没拿到,不把坏响应渲染成空列表 —— 空列表会被读成「没有可对接的活动」

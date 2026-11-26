@@ -99,8 +99,9 @@ public class CoopClubApplyServiceImpl implements ICoopClubApplyService {
     }
 
     @Override
-    public CoopClubApply withdraw(Long topicId, Long memberId) {
-        Club club = resolveMyActiveClub(memberId, null);
+    public CoopClubApply withdraw(Long topicId, Long memberId, Long clubId) {
+        if (clubId == null) throw new IllegalStateException("缺少俱乐部");
+        Club club = resolveMyActiveClub(memberId, clubId);
         CoopClubApply existing = coopClubApplyMapper.selectByTopicAndClub(topicId, club.getId());
         if (existing == null || existing.getStatus() == null || existing.getStatus() != 0) {
             throw new IllegalStateException("没有待处理的申请可撤回");

@@ -304,15 +304,16 @@ class ApiCoopPoolControllerTest {
     void withdraw_delegates_to_service() {
         Map<String, Object> body = new HashMap<>();
         body.put("topicId", 1L);
+        body.put("clubId", MY_CLUB);
         CoopClubApply upd = new CoopClubApply();
         upd.setId(66L);
         upd.setStatus(2);
-        when(coopClubApplyService.withdraw(1L, ME)).thenReturn(upd);
+        when(coopClubApplyService.withdraw(1L, ME, MY_CLUB)).thenReturn(upd);
 
         AjaxResult r = controller.withdraw(body);
 
         assertEquals(200, r.get("code"));
-        verify(coopClubApplyService).withdraw(1L, ME);
+        verify(coopClubApplyService).withdraw(1L, ME, MY_CLUB);
     }
 
     @Test
@@ -472,13 +473,80 @@ class ApiCoopPoolControllerTest {
         when(clubService.selectClubById(MY_CLUB)).thenReturn(clubOf(MY_CLUB, "夜跑团"));
 
         List<Map<String, Object>> rows = listData(controller.mine(null));
-        assertEquals(Boolean.TRUE, rows.get(0).get("canWithdraw"), "待处理且在我第一个生效俱乐部上:能撤");
+        assertEquals(Boolean.TRUE, rows.get(0).get("canWithdraw"), "待处理且俱乐部仍是我的生效俱乐部:能撤");
         assertEquals(Boolean.FALSE, rows.get(1).get("canWithdraw"), "已撤回的不能再撤");
 
         assertEquals(Arrays.asList(2L, 3L, 1L),
                 Arrays.asList(rows.get(0).get("applyId"), rows.get(1).get("applyId"), rows.get(2).get("applyId")),
                 "去重 + 按申请时间倒序;前任主理人发的申请现任也看得见");
         assertEquals("夜跑团", rows.get(0).get("clubName"));
+    }
+
+    @Test
+    void mine_pending_apply_on_a_later_club_can_withdraw() {
+        Club later = clubOf(8L, "晨跑团");
+        later.setMemberId(ME);
+        Club first = clubOf(MY_CLUB, "夜跑团");
+        first.setMemberId(ME);
+        when(clubService.selectClubsByMemberId(ME)).thenReturn(Arrays.asList(first, later));
+        when(coopClubApplyService.selectByApplicant(ME)).thenReturn(Collections.singletonList(
+                applyOf(9L, 100L, 8L, ME, 0, 3000L)));
+        when(coopClubApplyService.selectByClubIds(any())).thenReturn(Collections.emptyList());
+        when(cmsTopicService.selectCmsTopicById(100L)).thenReturn(topic(100L, MERCHANT, 1, 1));
+        when(clubService.selectClubById(8L)).thenReturn(later);
+
+        List<Map<String, Object>> rows = listData(controller.mine(null));
+
+        assertEquals(8L, rows.get(0).get("clubId"));
+        assertEquals(Boolean.TRUE, rows.get(0).get("canWithdraw"), "第二个生效俱乐部上的待处理申请也要能撤");
+    }
+
+    @Test
+    void list_scopes_apply_state_to_the_named_club() {
+        Club later = clubOf(8L, "晨跑团");
+        later.setMemberId(ME);
+        Club first = clubOf(MY_CLUB, "夜跑团");
+        first.setMemberId(ME);
+        when(clubService.selectClubsByMemberId(ME)).thenReturn(Arrays.asList(first, later));
+        when(cmsTopicService.selectCmsTopicList(any(CmsTopic.class)))
+                .thenReturn(Collections.singletonList(topic(1L, MERCHANT, 1, 1)));
+        when(coopClubApplyService.selectByClubIds(any())).thenAnswer(invocation -> {
+            List<?> ids = invocation.getArgument(0);
+            if (ids.size() == 1 && Long.valueOf(8L).equals(ids.get(0))) {
+                return Collections.singletonList(applyOf(2L, 1L, 8L, ME, 0, 1000L));
+            }
+            return Collections.emptyList();
+        });
+
+        Map<String, Object> second = new HashMap<>();
+        second.put("clubId", 8L);
+        assertEquals("applied", rows(controller.list(second)).get(0).get("state"));
+
+        Map<String, Object> earlier = new HashMap<>();
+        earlier.put("clubId", MY_CLUB);
+        assertEquals("open", rows(controller.list(earlier)).get(0).get("state"));
+    }
+
+    @Test
+    void list_rejects_a_club_the_member_does_not_operate() {
+        Map<String, Object> body = new HashMap<>();
+        body.put("clubId", 99L);
+
+        AjaxResult result = controller.list(body);
+
+        assertEquals(500, result.get("code"));
+        verify(coopClubApplyService, never()).selectByClubIds(any());
+    }
+
+    @Test
+    void withdraw_requires_explicit_club_id() {
+        Map<String, Object> body = new HashMap<>();
+        body.put("topicId", 1L);
+
+        AjaxResult result = controller.withdraw(body);
+
+        assertEquals(500, result.get("code"));
+        verify(coopClubApplyService, never()).withdraw(anyLong(), anyLong(), any());
     }
 
     @Test

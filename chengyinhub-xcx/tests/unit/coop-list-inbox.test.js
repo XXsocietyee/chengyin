@@ -67,9 +67,9 @@ test('「我发出的」待处理申请可撤回,撤回走 /api/coop/pool/withdr
   const { page, requests } = loadList({ '/api/coop/list': EMPTY_LIST, '/api/coop/pool/received': { code: 200, data: [] }, '/api/coop/pool/mine': { code: 200, data: [APPLY] } });
   page.load();
   const before = requests.filter(r => r.url === '/api/coop/pool/mine').length;
-  page.withdrawApply({ currentTarget: { dataset: { topicid: 8 } } });
+  page.withdrawApply({ currentTarget: { dataset: { topicid: 8, clubid: 7 } } });
   const w = requests.find(r => r.url === '/api/coop/pool/withdraw');
-  assert.deepEqual(JSON.parse(w.data), { topicId: 8 });
+  assert.deepEqual(JSON.parse(w.data), { topicId: 8, clubId: 7 });
   w.success({ code: 200 });
   assert.equal(requests.filter(r => r.url === '/api/coop/pool/mine').length, before + 1);
 });

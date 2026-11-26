@@ -95,6 +95,13 @@ public class ApiCoopPoolController extends BaseController {
                 }
             }
         }
+        // 多团主理人必须点名俱乐部。不传则沿用全部生效俱乐部;传了不属于自己的,不退回第一个团。
+        Long scopeClubId = toLong(body == null ? null : body.get("clubId"));
+        if (scopeClubId != null) {
+            if (!myClubIds.contains(scopeClubId)) return error("只能操作自己的生效俱乐部");
+            myClubIds.clear();
+            myClubIds.add(scopeClubId);
+        }
         // 我的俱乐部发出的申请:topicId → 申请行
         Map<Long, CoopClubApply> myApplyByTopic = new HashMap<>();
         if (!myClubIds.isEmpty()) {
@@ -225,8 +232,10 @@ public class ApiCoopPoolController extends BaseController {
         try { memberId = getAppUserId(); } catch (Exception e) { return error("请先登录"); }
         Long topicId = toLong(body == null ? null : body.get("topicId"));
         if (topicId == null) return error("缺少主题");
+        Long clubId = toLong(body == null ? null : body.get("clubId"));
+        if (clubId == null) return error("缺少俱乐部");
         try {
-            coopClubApplyService.withdraw(topicId, memberId);
+            coopClubApplyService.withdraw(topicId, memberId, clubId);
         } catch (IllegalStateException e) {
             return error(e.getMessage());
         }
@@ -335,10 +344,9 @@ public class ApiCoopPoolController extends BaseController {
             Club club = cached(clubs, a.getClubId(), clubService::selectClubById);
             row.put("clubName", club == null || club.getName() == null ? "" : club.getName());
             row.put("merchantNick", topic == null ? "" : nickOf(topic.getMemberId()));
-            // /withdraw 按「申请人第一个生效俱乐部」定位申请(CoopClubApplyServiceImpl.resolveMyActiveClub),
-            // 已转让出去的俱乐部或第二个俱乐部上的申请撤不了 —— 不给按钮,别让人点了必失败
+            // 撤回带明确 clubId。名下任一生效俱乐部上的待处理申请都可以撤,不再只放第一个。
             row.put("canWithdraw", a.getStatus() != null && a.getStatus() == 0
-                    && !myClubIds.isEmpty() && myClubIds.get(0).equals(a.getClubId()));
+                    && myClubIds.contains(a.getClubId()));
             rows.add(row);
         }
         return AjaxResult.success(rows);

@@ -250,7 +250,7 @@
       </view>
       <view class="inv-terms">{{item.termsText}}</view>
       <view class="inv-acts inv-acts--apply" wx:if="{{item.canWithdraw}}">
-        <view class="inv-btn inv-btn--secondary" catchtap="withdrawApply" data-topicid="{{item.topicId}}" aria-role="button" aria-label="撤回带队申请" aria-disabled="{{!!actionPendingKey}}" hover-class="{{!!actionPendingKey ? 'none' : 'cy-pressed'}}" hover-stay-time="80">{{actionPendingKey === 'withdraw:' + item.topicId ? '撤回中…' : '撤回申请'}}</view>
+        <view class="inv-btn inv-btn--secondary" catchtap="withdrawApply" data-topicid="{{item.topicId}}" data-clubid="{{item.clubId}}" aria-role="button" aria-label="撤回带队申请" aria-disabled="{{!!actionPendingKey}}" hover-class="{{!!actionPendingKey ? 'none' : 'cy-pressed'}}" hover-stay-time="80">{{actionPendingKey === 'withdraw:' + item.topicId + ':' + item.clubId ? '撤回中…' : '撤回申请'}}</view>
       </view>
       <view class="inv-acts inv-acts--apply" wx:if="{{item.status===3}}">
         <view class="inv-btn inv-btn--secondary" catchtap="switchToReceived" aria-role="button" aria-label="去收到的确认商家回的邀约" hover-class="cy-pressed" hover-stay-time="80">去收到的确认</view>

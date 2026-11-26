@@ -2,6 +2,7 @@ package com.chengyinhub.business.service;
 
 import com.chengyinhub.business.domain.MmsMerchant;
 import com.chengyinhub.business.domain.dto.MerchantSearchQuery;
+import com.chengyinhub.business.domain.vo.ClubCoopMerchantCardVO;
 
 import java.util.List;
 
@@ -31,6 +32,9 @@ public interface IMmsMerchantService
      * @return 商家集合
      */
     public List<MmsMerchant> selectMmsMerchantList(MmsMerchant mmsMerchant);
+
+    /** 俱乐部可对接商家卡，不含联系方式与审核字段。 */
+    public List<ClubCoopMerchantCardVO> selectClubCoopMerchantCards(MmsMerchant mmsMerchant);
 
     /**
      * 商家搜索/发现列表(E5)按距离升序:同筛选口径,追加直线距离升序,无坐标商家排最后。

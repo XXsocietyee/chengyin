@@ -92,6 +92,18 @@
         </where>
     </select>
 
+    <!-- 俱乐部可对接商家卡:同筛选,列只留卡片。不选 phone/wechat/wechat_qrcode/business_license/reson。 -->
+    <select id="selectClubCoopMerchantCards" parameterType="MmsMerchant"
+            resultType="com.chengyinhub.business.domain.vo.ClubCoopMerchantCardVO">
+        select id, member_id, name, logo, cover_image, address, category_id, coop_open,
+               suit_activity_types, available_time, business_time, capacity, charge_type,
+               business_status, location_lat, location_lng
+        from mms_merchant
+        <where>
+            <include refid="merchantListCriteria"/>
+        </where>
+    </select>
+
     <!-- 距离排序结果:复用商家列映射,追加 distance(米) -->
     <resultMap id="MerchantSearchResult" type="com.chengyinhub.business.domain.dto.MerchantSearchQuery" extends="MmsMerchantResult">
         <result property="distance"    column="distance"    />
