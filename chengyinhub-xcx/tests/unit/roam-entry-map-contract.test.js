@@ -135,6 +135,8 @@ test('A1.1 / A1.5 / A1.6 入口读地点不依赖定位,半径取自视口,读�
   assert.match(body, /const located = !!this\.data\.entryLocated/)
   assert.match(body, /req\('\/api\/roam\/pois', 'GET', \{ lat: c\.lat, lng: c\.lng, radius \}/)
   assert.match(body, /placeMap\.mergePlaces\(this\._entryPlaces/)
+  assert.match(body, /_fillEntryPlaceMedia\(/)
+  assert.doesNotMatch(body, /await resolvePlaceMedia/)
   assert.doesNotMatch(body, /this\._entryPlaces = \[\]/)
   assert.match(body, /Promise\.all\(jobs/)
   assert.equal((body.match(/this\._syncEntryMap\(/g) || []).length, 1)
