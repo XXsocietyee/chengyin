@@ -362,6 +362,76 @@ test('BL-31 处理器: 点开「我的举报」先跳转再把未读举报进度
   assert.equal(notices.makeReadRequestId('3', 1760000000000, 'abcd1234'), 'ntr-3-' + (1760000000000).toString(36) + '-abcd1234')
 })
 
+function governanceNotice(id, reportId, readAt) {
+  return {
+    id,
+    notification_type: 'SYSTEM_GOVERNANCE',
+    payload_json: JSON.stringify({ reportId, action: 'REPORT_STAGE_RESOLVED', publicNote: '已处理' }),
+    read_at: readAt,
+    create_time: '2026-10-15 10:00:00',
+  }
+}
+
+test('L08-121: 未读要等这条已读成功才拿掉;在途不重发;失败角标不降;新列表之后的迟到成功不改已不未读的 id', () => {
+  const pending = []
+  let items = [governanceNotice(3, 41, null), governanceNotice(5, 42, null)]
+  const h = loadPage(CHAT, (o) => {
+    if (o.url === '/api/v1/community/notifications') {
+      o.success({ code: 200, data: { items } })
+      return
+    }
+    if (/\/api\/v1\/community\/notifications\/\d+\/read$/.test(o.url)) pending.push(o)
+  })
+  try {
+    h.vm.data.type = 2
+    h.vm.loadReportEntry()
+    assert.equal(h.vm.data.reportUnread, 2)
+    h.vm.openReportMine()
+    assert.deepEqual(h.nav, ['/subpackageMember/report-mine/index'], '先跳转')
+    assert.deepEqual(pending.map((r) => r.url), [
+      '/api/v1/community/notifications/3/read',
+      '/api/v1/community/notifications/5/read',
+    ], '仍按条 POST,不发明批已读')
+    pending.forEach((r) => {
+      assert.equal(r.method, 'POST')
+      assert.equal(typeof r.success, 'function')
+      assert.equal(typeof r.fail, 'function')
+    })
+    assert.deepEqual(h.vm._reportUnreadIds, ['3', '5'], '请求未回前不清未读')
+    assert.equal(h.vm.data.reportUnread, 2, '角标不先降')
+    const sent = h.requests.length
+    h.vm.openReportMine()
+    assert.equal(h.requests.length, sent, '在途的不重发')
+    assert.equal(pending.length, 2)
+
+    pending[0].fail({})
+    pending[1].success({ code: 500 })
+    assert.deepEqual(h.vm._reportUnreadIds, ['3', '5'], '网络失败和业务失败都留下')
+    assert.equal(h.vm.data.reportUnread, 2, '失败后角标仍是未读数')
+    h.vm.loadReportEntry()
+    assert.equal(h.vm.data.reportUnread, 2, 'onShow 回读仍未读,角标保持')
+
+    h.vm.openReportMine()
+    assert.equal(pending.length, 4, '失败之后可以再标')
+    pending[2].successStatusAbnormal({ code: 503 }, 503)
+    assert.deepEqual(h.vm._reportUnreadIds, ['3', '5'], 'HTTP 失败也不拿掉')
+    h.vm.openReportMine()
+    assert.equal(pending.length, 5, '已失败的可再发,在途的 5 不重发')
+    assert.equal(pending[4].url, '/api/v1/community/notifications/3/read')
+
+    items = [governanceNotice(9, 43, null), governanceNotice(5, 42, null), governanceNotice(3, 41, '2026-10-15 10:05:00')]
+    h.vm.loadReportEntry()
+    assert.deepEqual(h.vm._reportUnreadIds, ['9', '5'])
+    assert.equal(h.vm.data.reportUnread, 2)
+    pending[4].success({ code: 200 })
+    assert.deepEqual(h.vm._reportUnreadIds, ['9', '5'], '3 已不在未读里,迟到成功不动当前列表')
+    assert.equal(h.vm.data.reportUnread, 2)
+    pending[3].success({ code: '200' })
+    assert.deepEqual(h.vm._reportUnreadIds, ['9'], '仍未读的 5 成功后只拿掉 5')
+    assert.equal(h.vm.data.reportUnread, 1, '成功的那条进入即标已读')
+  } finally { h.restore() }
+})
+
 test('BL-52: 申诉成功回执——回执属本举报且阶段可识别才给摘要，缺回执不编造', () => {
   assert.equal(view.appealReceiptText({ reportId: 5, stage: 'APPEALED', publicStage: 'IN_REVIEW', version: 3 }, 5), '举报编号 5 · 当前阶段：申诉中')
   assert.equal(view.appealReceiptText({ reportId: 6, stage: 'APPEALED' }, 5), '', '不是本举报的回执')

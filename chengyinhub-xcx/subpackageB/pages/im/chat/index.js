@@ -223,18 +223,40 @@ Page({
   openReportMine() {
     if (this._navigating) return;
     this._navigating = true;
+    const that = this;
     wx.navigateTo({ url: '/subpackageMember/report-mine/index', complete: () => { this._navigating = false; } });
-    // 进入即标已读;回到本页 onShow 重读,未读数以服务端 read_at 为准
+    // 进入即标已读:仍按条 POST。这一条成功才从当前未读里拿掉并降角标;
+    // 失败或在途留下。列表换过之后,已经不在未读里的 id 不被迟到的成功改掉。
+    if (!this._reportReadInflight) this._reportReadInflight = {};
+    const inflight = this._reportReadInflight;
     (this._reportUnreadIds || []).forEach(function (id) {
+      if (!id || inflight[id]) return;
+      inflight[id] = 1;
+      const release = function (ok) {
+        if (that._reportReadInflight) delete that._reportReadInflight[id];
+        if (!ok) return;
+        const current = that._reportUnreadIds || [];
+        const next = [];
+        let removed = false;
+        for (let i = 0; i < current.length; i += 1) {
+          if (String(current[i]) === String(id)) { removed = true; continue; }
+          next.push(current[i]);
+        }
+        if (!removed) return;
+        that._reportUnreadIds = next;
+        that.setData({ reportUnread: next.length });
+      };
       app.sendRequest({
         url: '/api/v1/community/notifications/' + id + '/read',
         method: 'POST',
         data: JSON.stringify({ requestId: makeReadRequestId(id) }),
         header: { 'Content-Type': 'application/json' },
         hideLoading: true,
+        success(res) { release(isBizOk(res)); },
+        fail() { release(false); },
+        successStatusAbnormal() { release(false); },
       });
     });
-    this._reportUnreadIds = [];
   },
 
   // 第十二轮 k9(p1 N-10):链接直达没带 name 时,从会话列表(只读)取对方昵称,不停在通用的「对话」。
