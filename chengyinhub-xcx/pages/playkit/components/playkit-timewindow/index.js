@@ -66,12 +66,14 @@ Component({
       this._left = Math.max(0, Math.ceil((this._deadline - Date.now()) / 1000));
       if (this._left <= 0) {
         this._stop();
-        this.setData({ clock: formatClock(0) });
+        const clock = formatClock(0);
+        if (clock !== this.data.clock) this.setData({ clock });
         // 到点不自己开门:让页面回服务端问一次,本地时钟不是权威
         this.triggerEvent('open');
         return;
       }
-      this.setData({ clock: formatClock(this._left) });
+      const clock = formatClock(this._left);
+      if (clock !== this.data.clock) this.setData({ clock });
     },
     _stop() {
       if (this._timer) { clearInterval(this._timer); this._timer = null; }

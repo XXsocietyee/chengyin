@@ -37,6 +37,12 @@ Component({
     cardZ: 0.4,
     cardLift: 0.2,
   },
+  lifetimes: {
+    detached() {
+      this._gone = true;
+      if (this._lockT) { clearTimeout(this._lockT); this._lockT = null; }
+    },
+  },
   observers: {
     'mode': function (mode) {
       const base = CARD_BASE[mode] || CARD_BASE.PLANE;
@@ -95,12 +101,13 @@ Component({
       this._lockPending = true;
       // 「认到了」等锁定成功再报:先报的话说明条先没了,锁定却可能失败,画面是空的
       // 官方 markerLock 同样延一帧:认到的这一刻识别器的世界坐标还没更新完
-      setTimeout(() => this._lockMarker(), 30);
+      if (this._lockT) clearTimeout(this._lockT);
+      this._lockT = setTimeout(() => { this._lockT = null; this._lockMarker(); }, 30);
     },
 
     /** 把识别器的世界矩阵抄给 marker-root,东西从此钉在现实里;然后卸掉识别器(wxml 按 markerLocked)。 */
     _lockMarker() {
-      if (this.data.markerLocked || !this.scene) return;
+      if (this._gone || this.data.markerLocked || !this.scene) return;
       const sys = typeof wx !== 'undefined' && wx.getXrFrameSystem && wx.getXrFrameSystem();
       const tracker = this.scene.getElementById && this.scene.getElementById('marker-tracker');
       const root = this.scene.getNodeById && this.scene.getNodeById('marker-root');

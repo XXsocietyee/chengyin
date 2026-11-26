@@ -23,6 +23,8 @@ const motion = require('../../../../utils/motion.js');
 const mediaDenied = require('../../utils/media-denied.js');
 const cyToast = require('../../../../utils/toast.js');
 const { stripOptionKey } = require('../../utils/playkit-questo.js');
+const { stripLeadingHandMark } = require('../../utils/hand-mark.js');
+function qaFeedback(text) { return stripLeadingHandMark(text); }
 const letterPool = require('../../utils/letter-pool.js');
 
 const KEYS = ['A', 'B', 'C', 'D'];
@@ -153,6 +155,7 @@ Component({
     typeWrong: false,
     playing: false,
     feedback: '',
+    answerShown: '',
     shownFeedbackImages: [],
     submitted: false,
     fbHead: HEAD_NO,
@@ -172,6 +175,10 @@ Component({
   },
   observers: {
     imageUrl() { if (this.data.imgFailed) this.setData({ imgFailed: false }); },
+    answerText(value) {
+      const answerShown = qaFeedback(value);
+      if (answerShown !== this.data.answerShown) this.setData({ answerShown });
+    },
     acceptedInput(value) {
       if (value && this.data.mode === 'type' && this.data.passed) this.setData({ typed: value });
       if (value && this.data.poolOn && this.data.passed) this._syncQaPool();
@@ -187,7 +194,7 @@ Component({
       if (!this.data.passed && typeof this.selectComponent === 'function') { const stage = this.selectComponent('#cy-play-stage'); if (stage && stage.nudge) stage.nudge(); }
       if (this.data.mode !== 'type' || this.data.passed || this.data.finished) return;
       const kept = String(this.data.typed || this._submittedText || '');
-      this.setData({ typed: kept, typeWrong: true, selectAll: kept.length, ctaDisabled: !kept.trim(), fbHead: HEAD_NO, feedback: this.data.feedbackText || (this.data.authoredOutcome === 'FAIL' ? '' : RETRY_TEXT) });
+      this.setData({ typed: kept, typeWrong: true, selectAll: kept.length, ctaDisabled: !kept.trim(), fbHead: HEAD_NO, feedback: qaFeedback(this.data.feedbackText || (this.data.authoredOutcome === 'FAIL' ? '' : RETRY_TEXT)) });
       if (this.data.poolOn) this._paintQaPool();   // 字符池:已放的字不清,按钮按「填满没有」重新亮
     },
     /* 证据表:选项状态 / 题面 / 判错规则一变就重画表(派生到 tableRows / ruleList,不写回被监听的键) */
@@ -243,8 +250,9 @@ Component({
         /* P-10:打字题答错时服务端常不带反馈文案,原来整块反馈不渲染 = 玩家看不出判过了。
            没有文案就写一句固定的「不对」,输入框描红,下一次输入即清。 */
         typed: passed ? (this.data.acceptedInput || (!fresh && (this._submittedText || this.data.typed)) || '')
-          : ((!fresh && (this.data.typed || this._submittedText)) || ''), feedback: (passed || finished || this.data.attempts > 0)
-          ? (this.data.feedbackText || (mode === 'type' && !passed && !finished && this.data.attempts > 0 && this.data.authoredOutcome !== 'FAIL' ? RETRY_TEXT : '')) : '',
+          : ((!fresh && (this.data.typed || this._submittedText)) || ''), feedback: qaFeedback((passed || finished)
+          ? (this.data.feedbackText || '') : (this.data.attempts > 0
+          ? (this.data.feedbackText || (mode === 'type' && this.data.authoredOutcome !== 'FAIL' ? RETRY_TEXT : '')) : '')),
         typeWrong: mode === 'type' && !passed && !finished && this.data.attempts > 0,
         shownFeedbackImages: (passed || finished || this.data.attempts > 0)
           ? (this.data.feedbackImages || []).slice() : [],
@@ -552,7 +560,7 @@ Component({
       if (this._pendingEvidence) {
         this.setData({
           optionList: this.data.optionList.map((o, i) => Object.assign({}, o, { state: i === d.index ? 'is-right' : 'is-dim' })),
-          feedback: d.feedback || '', fbHead: HEAD_OK, ctaLabel: '重拍', ctaDisabled: false,
+          feedback: qaFeedback(d.feedback || ''), fbHead: HEAD_OK, ctaLabel: '重拍', ctaDisabled: false,
         });
         return;
       }
@@ -566,10 +574,10 @@ Component({
           });
         }
         this.setData({
-          feedback: d.feedback || '', fbHead: this.data.mode === 'shot' ? HEAD_SHOT : HEAD_OK,
+          feedback: qaFeedback(d.feedback || ''), fbHead: this.data.mode === 'shot' ? HEAD_SHOT : HEAD_OK,
           ctaLabel: '继续', ctaDisabled: true,
         });
-        if (stage) stage.win(d.feedback || '');
+        if (stage) stage.win(qaFeedback(d.feedback || ''));
         return;
       }
       // 证据表:判错时服务端给的规则序号先标红(故事流里由 lastRule 属性回流,这里接 settle 调用方带来的)
@@ -582,6 +590,7 @@ Component({
          那行字会盖过刚才的反馈,人先看到的是判决,不是解释。 */
       const answerIndex = this._answerIndex();
       const reveal = this.data.judge !== false && pick && this.data.reveal && (multi ? Array.isArray(d.answerIds) : answerIndex >= 0);
+      const revealNow = (exhausted || this.data.finished || this.data.passed) && reveal;
       const kept = this.data.mode === 'type' ? String(this.data.typed || '') : '';
       // 字段写死成字面量,不拼 patch:动态 setData 门禁核不出写了哪些顶层字段
       this.setData({
@@ -590,16 +599,16 @@ Component({
         selectAll: kept.length,
         submitted: false,
         typeWrong: this.data.mode === 'type',
-        feedback: d.feedback || (this.data.mode === 'type' ? RETRY_TEXT : ''),
+        feedback: qaFeedback(d.feedback || (this.data.mode === 'type' ? RETRY_TEXT : '')),
         fbHead: HEAD_NO,
         optionList: pick ? this.data.optionList.map((o, i) => {
           if (multi) {
             if (o.state === 'is-on') return Object.assign({}, o, { state: 'is-wrong' });
-            if (reveal && d.answerIds.indexOf(o.id) >= 0) return Object.assign({}, o, { state: 'is-right' });
+            if (revealNow && d.answerIds.indexOf(o.id) >= 0) return Object.assign({}, o, { state: 'is-right' });
             return o;
           }
           if (i === d.index) return Object.assign({}, o, { state: 'is-wrong' });
-          if (reveal && i === answerIndex) return Object.assign({}, o, { state: 'is-right' });
+          if (revealNow && i === answerIndex) return Object.assign({}, o, { state: 'is-right' });
           // 图片选项点选时变淡的其余几张在判错后回到原样,还能再选(原型答错 2.4s 后复位,这里随回执即复位)
           return o.state === 'is-dim' ? Object.assign({}, o, { state: '' }) : o;
         }) : this.data.optionList,

@@ -12,6 +12,7 @@
 const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
 const motion = require('../../../../utils/motion.js');
 const { codePoints, hangmanPayload } = require('../../utils/playkit-questo.js');
+const { stripLeadingHandMark } = require('../../utils/hand-mark.js');
 const letterPool = require('../../utils/letter-pool.js');
 
 const POP_MS = 220;   // 每填一格弹一下:过渡来回的半程(与 --cy-motion-standard 同值)
@@ -87,23 +88,47 @@ Component({
     referenceUrl: { type: String, value: '' },   // CG-10-D-3:看不清时的资料图(内容配了才有)        // CG-01-P2-5:本站填格说明(服务端没给就用通用一句)
   },
   data: { groups: [], active: -1, pop: -1, typedText: '', focused: false, cursor: 0, blankCount: 0, verdict: '', canSubmit: false,
-    poolOn: false, poolRows: [], canClear: false, howtoOpen: false, DEFAULT_HOWTO: '一格填一个字或字母；拼音不写声调，ü 用 V 代替。' },
+    poolOn: false, poolRows: [], canClear: false, howtoOpen: false, passShown: '', wrongShown: '',
+    DEFAULT_HOWTO: '一格填一个字或字母；拼音不写声调，ü 用 V 代替。' },
   observers: {
+    feedback(value) {
+      const passShown = stripLeadingHandMark(value);
+      if (passShown !== this.data.passShown) this.setData({ passShown });
+    },
+    wrongFeedback(value) {
+      const wrongShown = stripLeadingHandMark(value);
+      if (wrongShown !== this.data.wrongShown) this.setData({ wrongShown });
+    },
     'show, slots, solved, inputMode, pool': function (show, slots, solved, inputMode, pool) {
       // L02-037
       if (!show) {
         this._typed = null; this._pending = false; this._pool = null; this._poolSlots = null; this._clearPop();
-        if (this.data.typedText || this.data.verdict || this.data.active !== -1) this.setData({ typedText: '', verdict: '', active: -1 });
+        this._freshKeyboard = true;
+        // L02-037: 输入框和格子是两份。收起时两份都清掉，下一回打开不留上一题的字。
+        const painted = (this.data.groups || []).some((g) => (g.cells || []).some((c) => c.ch));
+        if (this.data.typedText || this.data.verdict || this.data.active !== -1 || painted || this.data.focused || this.data.canSubmit) {
+          this.setData({ typedText: '', verdict: '', active: -1, groups: [], focused: false, cursor: 0, canSubmit: false, pop: -1 });
+        }
         return;
       }
-      if (inputMode === 'pool') { this._syncPool(slots, solved, pool); return; }
-      if (this._kbTitle !== this.data.title) { this._kbTitle = this.data.title; this._typed = null; if (this.data.typedText) this.setData({ typedText: '', verdict: '' }); }
+      const fresh = this._freshKeyboard;
+      this._freshKeyboard = false;
+      if (inputMode === 'pool') {
+        if (fresh) { this._pool = null; this._poolSlots = null; }
+        this._syncPool(slots, solved, pool);
+        return;
+      }
+      if (fresh || this._kbTitle !== this.data.title) {
+        this._kbTitle = this.data.title;
+        this._typed = null;
+        if (!fresh && this.data.typedText) this.setData({ typedText: '', verdict: '' });
+      }
       /* 刚交过、服务端回来仍未解开:提示一句,保留已填的格子让玩家直接改(F02;服务端不给逐格对错) */
       const wrong = this._pending && !solved;
       this._pending = false;
-      if (this._typed == null) { this._typed = distribute(slots, initialText(slots)); }
+      if (this._typed == null) { this._typed = distribute(slots, fresh ? initialText(slots) : (this.data.typedText || initialText(slots))); }
       const cells = paintCells(slots, this._typed);
-      const text = this.data.typedText || initialText(slots);
+      const text = fresh ? initialText(slots) : (this.data.typedText || initialText(slots));
       this.setData({
         poolOn: false,
         groups: groupCells(cells),

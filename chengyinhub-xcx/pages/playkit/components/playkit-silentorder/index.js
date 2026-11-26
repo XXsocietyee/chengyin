@@ -55,7 +55,8 @@ Component({
     },
     _tick() {
       this._elapsed = Math.max(0, Math.floor((Date.now() - this._t0) / 1000));
-      this.setData({ clock: formatElapsed(this._elapsed) });
+      const clock = formatElapsed(this._elapsed);
+      if (clock !== this.data.clock) this.setData({ clock });
     },
     _stop() {
       if (this._timer) { clearInterval(this._timer); this._timer = null; }

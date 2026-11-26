@@ -49,7 +49,7 @@ test('逐字猜词答错:保留已填的格子与输入框,不清空重来', () 
 
 test('逐字猜词 / 限时打字:错答回复替换旧兜底句,兜底句句末不带句号', () => {
   const hangman = fs.readFileSync(path.join(ROOT, 'pages/playkit/components/playkit-hangman/index.wxml'), 'utf8')
-  assert.match(hangman, /wrongFeedback \|\| '还不对，再看看题面'/)
+  assert.match(hangman, /wrongShown \|\| '还不对，再看看题面'/)
   assert.doesNotMatch(hangman, /不对，再想想/)
   const typein = fs.readFileSync(path.join(ROOT, 'pages/playkit/components/playkit-typein/index.wxml'), 'utf8')
   assert.match(typein, /wrongFeedback \|\| '没打对，再打一次'/)
@@ -67,5 +67,5 @@ test('限时打字:服务端 lastFeedback 映射到 kit.wrongFeedback;通过后�
 
 test('逐字猜词字母池(F03)答错:同样显示服务端回复(F02)', () => {
   const wxml = fs.readFileSync(path.join(ROOT, 'pages/playkit/components/playkit-hangman/index.wxml'), 'utf8')
-  assert.equal((wxml.match(/wrongFeedback \|\| '还不对，再看看题面'/g) || []).length, 2, '键盘与字母池两种输入都显示')
+  assert.equal((wxml.match(/wrongShown \|\| '还不对，再看看题面'/g) || []).length, 2, '键盘与字母池两种输入都显示')
 })

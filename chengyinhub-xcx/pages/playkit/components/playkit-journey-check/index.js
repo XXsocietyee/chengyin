@@ -100,7 +100,11 @@ Component({
   },
   lifetimes: {
     ready() { this._dieMounted = true; this._mountDie(); },
-    detached() { this._dieMounted = false; this._stopHold(); this._destroyDie(); },
+    detached() {
+      this._dieMounted = false;
+      clearTimeout(this._rollReset); this._rollReset = null;
+      this._stopHold(); this._destroyDie();
+    },
   },
   pageLifetimes: {
     hide() { this._stopHold(); },

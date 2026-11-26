@@ -34,6 +34,8 @@ function qaOptions(options, resolve) {
   });
 }
 
+const { stripLeadingHandMark } = require('./hand-mark.js');
+
 /** 逐字猜词:服务端 publicProjection → 槽位。BLANK 不带字符;answer/aliases/format 本来就不在回包里。 */
 function hangmanSlots(seg) {
   return ((seg && seg.slots) || []).map((slot, idx) => {
@@ -53,12 +55,12 @@ function hangmanKit(seg) {
     caseSensitive: s.caseSensitive === true,
     solved: s.solved === true,
     display: s.solved === true ? String(s.display || '') : '',
-    feedback: s.solved === true && typeof s.feedback === 'string' ? s.feedback : '',   // 服务端没带时页面补本站文字反馈(hangmanStationText)
+    feedback: s.solved === true && typeof s.feedback === 'string' ? stripLeadingHandMark(s.feedback) : '',   // 服务端没带时页面补本站文字反馈(hangmanStationText)
     // F03 字母池:只有服务端说 pool 才走候选字;pool 是本局已打乱、已去掉提示移除的干扰字的候选字(可重复)
     inputMode: s.inputMode === 'pool' ? 'pool' : 'keyboard',
     pool: s.inputMode === 'pool' && Array.isArray(s.pool) ? s.pool.filter((c) => typeof c === 'string' && c !== '') : [],
     // F02:没解开时服务端回的那句话(错答表命中那条或通用错答);没有就由组件兜底
-    wrongFeedback: s.solved !== true && typeof s.lastFeedback === 'string' ? s.lastFeedback : '',
+    wrongFeedback: s.solved !== true && typeof s.lastFeedback === 'string' ? stripLeadingHandMark(s.lastFeedback) : '',
     // CG-01-P2-5:本站「怎么填」说明,服务端 / 内容配了才有,缺省由组件给通用一句
     howto: typeof s.howto === 'string' ? s.howto.trim() : '',
     // CG-10-D-3:题物看不清时的资料图,内容配了才有入口
@@ -91,7 +93,7 @@ function hangmanStationText(kit, node, fallbackTitle) {
   const n = node || {};
   const k = kit || {};
   const title = String(n.question || '').trim() || k.title || fallbackTitle || '';
-  const feedback = k.solved === true ? String(k.feedback || n.passText || '').trim() : '';
+  const feedback = k.solved === true ? stripLeadingHandMark(String(k.feedback || n.passText || '').trim()) : '';
   return { title, feedback };
 }
 
@@ -205,7 +207,7 @@ function accusationKit(view, qaSeg, resolve) {
     terminal,
     pending,
     canRetry: !!(acc.result && acc.result.canRetry === true) || (!acc.result && !qa.finished),
-    retryNote: (outcome === 'WRONG' || (!acc.result && Number(qa.attempts) > 0 && !qa.finished && qa.passed !== true)) ? (qa.lastFeedback || '') : '',
+    retryNote: (outcome === 'WRONG' || (!acc.result && Number(qa.attempts) > 0 && !qa.finished && qa.passed !== true)) ? stripLeadingHandMark(qa.lastFeedback || '') : '',
     wrongAttempt: outcome === 'WRONG' || (!acc.result && Number(qa.attempts) > 0 && !qa.finished && qa.passed !== true),
     screen: terminal ? screenBlocks(acc.screen, r) : [],
     lastPick: qa.lastOptionId || '',

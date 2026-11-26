@@ -26,14 +26,20 @@ module.exports = Behavior({
     // true = 这一帧把动画摘掉。只活一帧,下一帧就置回 false 让动画重新起播。
     _motionReset: false,
   },
+  lifetimes: {
+    detached() {
+      this._motionGone = true;
+      if (this._motionT) { clearTimeout(this._motionT); this._motionT = null; }
+    },
+  },
   methods: {
     replayMotion() {
       // 减弱动效下本来就没有动画可重播,别白发两次 setData
       if (this.data.reducedMotion) return;
       // L02-139: 摘掉的那一帧要真的渲染出来再装回 —— 只靠 wx.nextTick 两次 setData 可能被框架合并,动画就不重播。
       // 等摘掉这次 setData 落到渲染层(回调)后再隔一帧(16ms)装回。
-      const resume = () => this.setData({ _motionReset: false });
-      this.setData({ _motionReset: true }, () => setTimeout(resume, 16));
+      const resume = () => { this._motionT = null; if (this._motionGone) return; this.setData({ _motionReset: false }); };
+      this.setData({ _motionReset: true }, () => { this._motionT = setTimeout(resume, 16); });
     },
   },
 });

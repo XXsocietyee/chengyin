@@ -63,7 +63,9 @@ Component({
       const total = this.data.seconds > 0 ? this.data.seconds : 0;
       const elapsed = Date.now() - this._t0;      // 每拍对时,不累加
       const left = remainSeconds(elapsed, total);
-      this.setData({ clock: formatElapsed(left), oilY: oilPercent(elapsed, total) });
+      const clock = formatElapsed(left);
+      const oilY = oilPercent(elapsed, total);
+      if (clock !== this.data.clock || oilY !== this.data.oilY) this.setData({ clock, oilY });
       if (left > 0) return;
       this._stop();
       this.setData({ running: false, finished: true });

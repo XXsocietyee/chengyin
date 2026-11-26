@@ -121,7 +121,11 @@ Component({
     'arMode': function () { this._refreshAr(); },
   },
   lifetimes: {
-    detached() { this._scanEpoch = (this._scanEpoch || 0) + 1; clearTimeout(this._overTimer); clearTimeout(this._arTimer); },
+    detached() {
+      this._scanEpoch = (this._scanEpoch || 0) + 1;
+      clearTimeout(this._overTimer); clearTimeout(this._arTimer); clearTimeout(this._codeTimer);
+      this._overTimer = this._arTimer = this._codeTimer = null;
+    },
   },
   methods: {
     _normalizeKind: normalizeKind,      // 纯算法出口,供单测
@@ -163,7 +167,9 @@ Component({
       if (!code || code === this._lastCode) return;
       this._lastCode = code;
       const epoch = this._scanEpoch;
-      setTimeout(() => {
+      clearTimeout(this._codeTimer);
+      this._codeTimer = setTimeout(() => {
+        this._codeTimer = null;
         if (epoch === this._scanEpoch && !this.data.overlayUrl && this.data.reply === '' && this._lastCode === code) this._lastCode = '';
       }, 6000);
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'light' });

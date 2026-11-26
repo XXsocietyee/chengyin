@@ -42,7 +42,13 @@ Component({
   },
   observers: {
     'show, questions, answers, done': function (show, questions, answers, done) {
-      if (!show) { this._formSignature = ''; return; }
+      // L02-040: 这一层收起时立刻落盘。只等停手的话，关掉再打开会读到少几个字的旧稿
+      if (!show) {
+        if (done) kitDraft.drop(this);
+        else kitDraft.flush(this);
+        this._formSignature = '';
+        return;
+      }
       const signature = JSON.stringify([questions, answers, done]);
       if (signature === this._formSignature) return;
       this._formSignature = signature;
@@ -181,6 +187,10 @@ Component({
       this.setData({ step: this.data.step - 1 }, () => { this._syncCta(); this._saveDraft(); });
     },
 
-    onClose() { this.triggerEvent('close'); },
+    onClose() {
+      if (this.data.done) kitDraft.drop(this);
+      else kitDraft.flush(this);
+      this.triggerEvent('close');
+    },
   },
 });
