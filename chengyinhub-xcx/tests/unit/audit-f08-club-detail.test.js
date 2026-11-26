@@ -120,20 +120,96 @@ test('L08-001 重载回包失败照旧收回权限;换账号先收回', () => {
   assert.equal(page.data.activeTab, 'overview');
 });
 
-test('L08-002 看大图回来不整页重拉;之后真的从子页回来照旧重拉', () => {
+test('L08-002 已加载后再出现不整页重拉;从主办视图返回才重拉;看大图不重拉', () => {
   const { page } = loadClubDetail();
   let loads = 0;
   page.loadAll = () => { loads += 1; };
   page._hasShown = true;
   page.setData({ clubId: 7, club: { id: 7, isJoined: true, viewerCanGovern: true }, canUseManageTab: true });
+  page.onHide(); page.onShow();
+  assert.equal(loads, 0, '已加载的页面再次出现不重拉');
   page.onPreviewImage({ detail: { picList: ['https://a/1.png'], picIndex: 0 }, currentTarget: { dataset: {} } });
   page.onHide(); page.onShow();
   assert.equal(loads, 0, '系统浮层返回不重拉');
-  page.onHide(); page.onShow();
-  assert.equal(loads, 1, '普通返回照旧重拉');
   page.onPreviewImage({ detail: { picList: [], picIndex: 0 }, currentTarget: { dataset: {} } });
   page.onHide(); page.onShow();
-  assert.equal(loads, 2, '没打开浮层不许吞掉下一次刷新');
+  assert.equal(loads, 0, '没打开浮层也不整页重拉');
+  page.goEventOps();
+  page.onHide(); page.onShow();
+  assert.equal(loads, 1, '从主办视图返回照旧重拉');
+});
+
+test('L08-004 发出一条评论只改这条帖的评论数,不重拉帖子列表', () => {
+  const { page, requests } = loadClubDetail();
+  page.setData({
+    clubId: 7,
+    openCommentPost: 11,
+    commentText: '好看',
+    posts: [
+      { id: 11, feedKey: '11', commentCount: 2 },
+      { id: 12, feedKey: '12', commentCount: 0 },
+      { id: 11, feedKey: 'r5', isRepostItem: true, commentCount: 2 },
+    ],
+  });
+  page.onCommentSubmit();
+  const create = requests.find((r) => r.url === '/api/club/post/comment/create');
+  assert.ok(create);
+  requests.length = 0;
+  create.success({ code: '200', data: {} });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0, '不整页重拉帖子');
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/comment/list').length, 1);
+  assert.deepEqual(page.data.posts.map((p) => p.commentCount), [3, 0, 3]);
+  assert.equal(page.data.commentText, '');
+});
+
+test('委派角色从主办返回重拉详情仍留在管理 tab', () => {
+  const { page, requests } = loadClubDetail();
+  page.setData({
+    clubId: 7,
+    club: { id: 7, isJoined: true, viewerCanGovern: false },
+    activeTab: 'manage',
+    canUseManageTab: true,
+    canOperateEvents: true,
+  });
+  page._tabInitialized = true;
+  page._clubAccessState = 'ready';
+  page._clubAccessReadyFor = '1001:7';
+  page._hasShown = true;
+  page._returnRefresh = true;
+  page.onShow();
+  const detail = requests.find((r) => r.url === '/api/club/detail');
+  assert.ok(detail);
+  detail.success({ code: '200', data: { id: 7, isJoined: true, isOwner: false, viewerCanGovern: false } });
+  assert.equal(page.data.activeTab, 'manage', '详情回包不许把委派角色踢回概览');
+  assert.equal(page.data.canUseManageTab, true);
+  const access = requests.filter((r) => r.url === '/api/club/access/me');
+  assert.equal(access.length, 1);
+  assert.equal(page.data.activeTab, 'manage', 'access 在途也不许踢回概览');
+  access[0].success(accessOk(7, ['club:event:operate']));
+  assert.equal(page.data.activeTab, 'manage');
+  assert.equal(page.data.canOperateEvents, true);
+});
+
+test('删除一条评论只改这条帖的评论数并重读评论,不重拉帖子列表', () => {
+  const { page, requests } = loadClubDetail();
+  page.setData({
+    clubId: 7,
+    openCommentPost: 11,
+    posts: [
+      { id: 11, feedKey: '11', commentCount: 2 },
+      { id: 12, feedKey: '12', commentCount: 0 },
+      { id: 11, feedKey: 'r5', isRepostItem: true, commentCount: 2 },
+    ],
+  });
+  page._doDeleteComment(9, 11);
+  const del = requests.find((r) => r.url === '/api/club/post/comment/delete');
+  assert.ok(del);
+  requests.length = 0;
+  del.success({ code: '200', data: {} });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0, '不整页重拉帖子');
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/comment/list').length, 1);
+  assert.equal(JSON.parse(requests.find((r) => r.url === '/api/club/post/comment/list').data).postId, 11);
+  assert.deepEqual(page.data.posts.map((p) => p.commentCount), [1, 0, 1]);
 });
 
 test('L08-004 点赞成功只改这条帖(含转发条目),不重拉帖子列表', () => {
@@ -180,6 +256,147 @@ test('L08-005 快速切排序:旧排序迟到回包不覆盖新榜单', () => {
   a.success({ code: '200', data: [{ memberId: 1, nickname: 'A' }] });
   assert.equal(page._leaderboardSortBy, 'mileage');
   assert.deepEqual(page._leaderboardRows.map((r) => r.memberId), [2]);
+});
+
+function finishRequest(req, body) {
+  req.success(body);
+  if (req.complete) req.complete();
+}
+
+function topicRow(id, name) {
+  return { id: id, name: name, startDate: '2026-11-01', endDate: '2026-12-01' };
+}
+
+function poolBody(topicId, name) {
+  return { code: 200, data: { hasClub: true, rows: [{ topicId: topicId, name: name, state: 'open' }] } };
+}
+
+test('L08-005 下拉刷新叠上返回刷新:旧回包不盖住当前俱乐部', () => {
+  const { page, requests } = loadClubDetail();
+  page.setData({ clubId: 7, club: { id: 7, isOwner: true, name: '当前' }, coopPoolState: 'ready' });
+  page._hasShown = true;
+  page._returnRefresh = true;
+  page.onShow();
+  page.onPullDownRefresh();
+  const of = (url) => requests.filter((r) => r.url === url);
+  const detail = of('/api/club/detail');
+  const topics = of('/api/club/topics');
+  const board = of('/api/club/leaderboard');
+  assert.equal(detail.length, 2);
+  assert.equal(topics.length, 2);
+  assert.equal(board.length, 2);
+  finishRequest(detail[1], { code: '200', data: { id: 7, isOwner: true, isJoined: true, name: '新俱乐部' } });
+  finishRequest(topics[1], { code: 200, data: [topicRow(2, '新主题')] });
+  board[1].success({ code: '200', data: [{ memberId: 2, nickname: '新' }] });
+  finishRequest(detail[0], { code: '200', data: { id: 7, isOwner: true, isJoined: true, name: '旧俱乐部' } });
+  finishRequest(topics[0], { code: 200, data: [topicRow(1, '旧主题')] });
+  board[0].success({ code: '200', data: [{ memberId: 1, nickname: '旧' }] });
+  assert.equal(page.data.club.name, '新俱乐部');
+  assert.deepEqual(page._topics.map((t) => t.id), [2]);
+  assert.deepEqual((page._leaderboardRows || []).map((r) => r.memberId), [2]);
+  assert.equal(of('/api/club/merchants').length, 1, '过期的那轮刷新不再另拉商家');
+  const merchants = of('/api/club/merchants')[0];
+  page.loadMerchants();
+  const again = of('/api/club/merchants');
+  assert.equal(again.length, 2);
+  again[1].success({ code: '200', data: [{ name: '新商家' }] });
+  merchants.success({ code: '200', data: [{ name: '旧商家' }] });
+  assert.deepEqual(page.data.merchants.map((m) => m.name), ['新商家']);
+});
+
+test('L08-005 换俱乐部后,上一团的主题/榜/商家/合作池回包作废', () => {
+  const { page, requests } = loadClubDetail();
+  const owner = { isOwner: true, isJoined: true };
+  page.setData({ clubId: 7, club: Object.assign({ id: 7, name: '甲' }, owner) });
+  page.loadTopics();
+  page.loadLeaderboard();
+  page.loadMerchants();
+  page.loadCoopPool();
+  page.setData({ clubId: 8, club: Object.assign({ id: 8, name: '乙' }, owner) });
+  page.loadTopics();
+  page.loadLeaderboard();
+  page.loadMerchants();
+  page.loadCoopPool();
+  const of = (url) => requests.filter((r) => r.url === url);
+  const topics = of('/api/club/topics');
+  const board = of('/api/club/leaderboard');
+  const merchants = of('/api/club/merchants');
+  const pool = of('/api/coop/pool/list');
+  assert.equal(JSON.parse(topics[0].data).id, 7);
+  assert.equal(JSON.parse(topics[1].data).id, 8);
+  topics[1].success({ code: 200, data: [topicRow(8, '乙的主题')] });
+  topics[0].success({ code: 200, data: [topicRow(7, '甲的主题')] });
+  board[1].success({ code: '200', data: [{ memberId: 8, nickname: '乙' }] });
+  board[0].success({ code: '200', data: [{ memberId: 7, nickname: '甲' }] });
+  merchants[1].success({ code: '200', data: [{ name: '乙的商家' }] });
+  merchants[0].success({ code: '200', data: [{ name: '甲的商家' }] });
+  pool[1].success(poolBody(8, '乙的池'));
+  pool[0].success(poolBody(7, '甲的池'));
+  assert.deepEqual(page._topics.map((t) => t.id), [8]);
+  assert.deepEqual(page._leaderboardRows.map((r) => r.memberId), [8]);
+  assert.deepEqual(page.data.merchants.map((m) => m.name), ['乙的商家']);
+  assert.deepEqual(page.data.coopPool.map((row) => row.topicId), [8]);
+});
+
+test('L08-007 移出成员成功后只拉一次成员名单', () => {
+  const { page, requests } = loadClubDetail();
+  page.setData({
+    clubId: 7,
+    club: { id: 7, isOwner: true, isJoined: true, name: '团' },
+    members: [{ memberId: 3, nickname: '甲' }, { memberId: 4, nickname: '乙' }],
+    membersState: 'ready',
+  });
+  page._doRemoveMember(4);
+  const remove = requests.find((r) => r.url === '/api/club/remove-member');
+  assert.ok(remove);
+  requests.length = 0;
+  remove.success({ code: '200', data: {} });
+  const detail = requests.find((r) => r.url === '/api/club/detail');
+  assert.ok(detail);
+  detail.success({ code: '200', data: { id: 7, isOwner: true, isJoined: true, name: '团' } });
+  if (detail.complete) detail.complete();
+  assert.equal(requests.filter((r) => r.url === '/api/club/members').length, 1);
+});
+
+test('L08-008 设置人数或金额读失败后,下次打开要重试;读成功才记住', () => {
+  const { page, requests } = loadClubDetail();
+  page.setData({ clubId: 7, club: { id: 7, isOwner: true } });
+  page.onSettings();
+  const of = (url) => requests.filter((r) => r.url === url);
+  of('/api/club/crm/customers/count')[0].success({ code: 500, msg: '客户数没读到' });
+  of('/api/club/settlement/summary')[0].success({ code: 500, msg: '金额没读到' });
+  assert.equal(page.data.customerCountText, '暂时读不到');
+  assert.equal(page.data.settledAmountText, '暂时读不到');
+  requests.length = 0;
+  page.onSettings();
+  assert.equal(of('/api/club/crm/customers/count').length, 1);
+  assert.equal(of('/api/club/settlement/summary').length, 1);
+  of('/api/club/crm/customers/count')[0].fail();
+  of('/api/club/settlement/summary')[0].fail();
+  requests.length = 0;
+  page.onSettings();
+  assert.equal(of('/api/club/crm/customers/count').length, 1, '网络失败也不许记一整次访问');
+  of('/api/club/crm/customers/count')[0].success({ code: 200, data: { total: 3 } });
+  of('/api/club/settlement/summary')[0].success({ code: 200, data: { settledAmountText: '¥12.00' } });
+  assert.equal(page.data.customerCountText, '3 人');
+  assert.equal(page.data.settledAmountText, '¥12.00');
+  requests.length = 0;
+  page.onSettings();
+  assert.equal(requests.length, 0, '两次都读到之后,这次访问不再重复取');
+});
+
+test('L08-008 金额尚未核实是读到了,不当失败反复重试', () => {
+  const { page, requests } = loadClubDetail();
+  page.setData({ clubId: 7, club: { id: 7, isOwner: true }, settledAmountText: '' });
+  page.onSettings();
+  const of = (url) => requests.filter((r) => r.url === url);
+  of('/api/club/crm/customers/count')[0].success({ code: 200, data: { total: 0 } });
+  of('/api/club/settlement/summary')[0].success({ code: 200, data: { settledAmountText: null } });
+  assert.equal(page.data.customerCountText, '');
+  assert.equal(page.data.settledAmountText, '');
+  requests.length = 0;
+  page.onSettings();
+  assert.equal(requests.length, 0);
 });
 
 test('L08-022 带队进度的最近邀请时间跨年也取最新', () => {
@@ -279,6 +496,31 @@ test('L08-011 关注作者 / 点赞回读只按路径改相关帖子行', () => 
   page._applyPostLike('2', true);
   assert.ok(writes.every((k) => !k.includes('posts')));
   assert.deepEqual(page.data.posts.map((p) => [p.id, p.likeCount]), [[1, 1], [2, 1], [3, 2]]);
+});
+
+test('L08-012 场次工具失败在页面上说明原因,已打开的工具留着', () => {
+  const { page, requests } = loadClubDetail();
+  const tools = [{ key: '/pages/club/event-ops/index?clubId=7&activityId=3', label: '现场名册与核销' }];
+  page.setData({
+    clubId: 7,
+    club: { id: 7, isOwner: true },
+    choiceSheetShow: true,
+    choiceSheetTitle: '本场工具',
+    choiceSheetItems: tools,
+  });
+  page.openActivityTools({ currentTarget: { dataset: { id: 31 } } });
+  const biz = requests.find((r) => r.url === '/api/topic/info-to-user');
+  biz.success({ code: 500, msg: '主题服务不可用' });
+  if (biz.complete) biz.complete();
+  assert.equal(page.data.activityToolsError, '主题服务不可用');
+  assert.equal(page.data.choiceSheetShow, true);
+  assert.deepEqual(page.data.choiceSheetItems, tools);
+  page.openActivityTools({ currentTarget: { dataset: { id: 31 } } });
+  const net = requests.filter((r) => r.url === '/api/topic/info-to-user').pop();
+  net.fail();
+  assert.equal(page.data.activityToolsError, '场次没能加载，请重试');
+  assert.deepEqual(page.data.choiceSheetItems, tools);
+  assert.equal(page.data.choiceSheetShow, true);
 });
 
 test('L08-013 取场次列表共用一条读取:团码选场与场次工具同口径', () => {

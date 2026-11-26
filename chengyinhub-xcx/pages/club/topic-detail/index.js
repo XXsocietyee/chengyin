@@ -79,6 +79,48 @@ function positiveId(v) { const n = Number(v); return Number.isFinite(n) && n > 0
 // 这里只拆/拼这一种格式;拿不到合法时间就不给改 —— 宁可不给入口,也不给一个会写错的入口。
 const OPS_TIME_RE = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})(?::\d{2})?$/;
 const OPS_RESULT_SHEET_MS = 2000;
+// 预览、地图、系统选择器会盖住页面并走 onHide/onShow,但不会改活动日期或名册。
+const LOOK_ONLY_OVERLAYS = [
+  'previewImage', 'previewMedia', 'openLocation', 'chooseLocation', 'choosePoi',
+  'chooseImage', 'chooseMedia', 'chooseVideo', 'chooseMessageFile',
+];
+
+function armLookOnlyOverlays(page) {
+  if (page._lookOnlyOverlayRestore || typeof wx === 'undefined') return;
+  const restore = [];
+  LOOK_ONLY_OVERLAYS.forEach(function (name) {
+    const original = wx[name];
+    if (typeof original !== 'function' || original.__topicDetailLookOnly) return;
+    function wrapped(options) {
+      page._readOnlyAway = true;
+      const opts = options && typeof options === 'object' ? Object.assign({}, options) : null;
+      if (!opts) {
+        try { return original.call(wx); }
+        catch (err) { if (page._readOnlyAway === true) page._readOnlyAway = false; throw err; }
+      }
+      const fail = opts.fail;
+      opts.fail = function () {
+        // 没盖住页面就失败:不能把下一次真正离开当成只读。
+        if (page._readOnlyAway === true) page._readOnlyAway = false;
+        if (typeof fail === 'function') return fail.apply(this, arguments);
+      };
+      try { return original.call(wx, opts); }
+      catch (err) { if (page._readOnlyAway === true) page._readOnlyAway = false; throw err; }
+    }
+    wrapped.__topicDetailLookOnly = true;
+    wx[name] = wrapped;
+    restore.push([name, original]);
+  });
+  page._lookOnlyOverlayRestore = restore;
+}
+
+function disarmLookOnlyOverlays(page) {
+  const restore = page._lookOnlyOverlayRestore || [];
+  page._lookOnlyOverlayRestore = null;
+  restore.forEach(function (pair) {
+    if (wx[pair[0]] && wx[pair[0]].__topicDetailLookOnly) wx[pair[0]] = pair[1];
+  });
+}
 
 // 六个状态 → 状态胶囊文案 / 主键 / 出不出核销与未通过原因。
 // key 同时用作胶囊圆点的配色修饰符,别在 wxml 里散落 if。
@@ -260,6 +302,7 @@ Page({
   },
 
   onLoad(query) {
+    armLookOnlyOverlays(this);
     let windowInfo; let menuButtonInfo;
     try { windowInfo = wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync(); } catch (e) {}
     try { menuButtonInfo = wx.getMenuButtonBoundingClientRect(); } catch (e) {}
@@ -286,8 +329,12 @@ Page({
   onShow() {
     this._syncOpsTimeContext();
     this._navigating = false; if (!this._hasShown) { this._hasShown = true; return; }
-    if (this._skipShowRefresh) { this._skipShowRefresh = false; return; }
-    if (!this.data.loaded || this.data.loadError || this.data.missingParam) return;
+    // 只读离开(剧情/团码,以及预览、地图、系统选择器)回来不重拉。详情失败除外:下次出现仍要重拉。
+    const lookOnly = this._skipShowRefresh === true;
+    this._skipShowRefresh = false;
+    if (this.data.missingParam) return;
+    if (!this.data.loaded && !this.data.loadError) return;
+    if (lookOnly && !this.data.loadError) return;
     this.fetchDetail();
     this.loadManageStats(true);
   },
@@ -815,7 +862,8 @@ Page({
 
   goEventOps() {
     if (!this._clubId) return;
-    if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/pages/club/event-ops/index?clubId=' + this._clubId
+    // 场次运营能改活动日期,回来必须重拉,不能被只读离开标记吃掉。
+    if (this._navigating) return; this._navigating = true; this._readOnlyAway = false; wx.navigateTo({ url: '/pages/club/event-ops/index?clubId=' + this._clubId
       + '&topicId=' + this._topicId, complete: () => { this._navigating = false; } });
   },
 
@@ -861,7 +909,7 @@ Page({
       this.loadManageStats();
       return;
     }
-    if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/pages/club/event-ops/index?clubId=' + this._clubId
+    if (this._navigating) return; this._navigating = true; this._readOnlyAway = false; wx.navigateTo({ url: '/pages/club/event-ops/index?clubId=' + this._clubId
       + '&topicId=' + this._topicId + '&activityId=' + activityId, complete: () => { this._navigating = false; } });
   },
 
@@ -869,7 +917,8 @@ Page({
   // 只是原来没把核销态显示出来(它只被用来算「能不能退款」)。
   goLedger() {
     if (!this._clubId || !this._topicId) { this.notReady('核销记录'); return; }
-    if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/pages/club/enroll/index?clubId=' + this._clubId + '&topicId=' + this._topicId, complete: () => { this._navigating = false; } });
+    // 名册/核销能改在册状态,回来必须重拉。
+    if (this._navigating) return; this._navigating = true; this._readOnlyAway = false; wx.navigateTo({ url: '/pages/club/enroll/index?clubId=' + this._clubId + '&topicId=' + this._topicId, complete: () => { this._navigating = false; } });
   },
 
 
@@ -900,6 +949,7 @@ Page({
   goScan() {
     if (!this._clubId || this._navigating) return;
     this._navigating = true;
+    this._readOnlyAway = false;
     wx.navigateTo({ url: '/pages/club/detail/index?id=' + encodeURIComponent(this._clubId) + '&scan=1', complete: () => { this._navigating = false; } });
   },
 
@@ -1347,6 +1397,7 @@ Page({
   ...planFallback.methods(),
 
   onUnload() {
+    disarmLookOnlyOverlays(this);
     this._opsDisposed = true;
     this._detailSeq = (this._detailSeq || 0) + 1;
     this._invalidateOpsTime();

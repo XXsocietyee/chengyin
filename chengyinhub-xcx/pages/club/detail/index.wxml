@@ -455,6 +455,7 @@
         <cy-skeleton wx:if="{{topicState === 'loading'}}" type="list" count="2" />
         <cy-error load-failure class="cy-fade-in" wx:elif="{{topicState === 'error'}}" title="项目列表加载失败" retry="重新加载" bind:retry="loadTopics" />
         <view wx:elif="{{manageTopics.length}}" class="manage-project-list cy-fade-in">
+          <view wx:if="{{activityToolsError}}" class="admin-tools-notice">{{activityToolsError}}</view>
           <view class="manage-project" wx:for="{{manageTopics}}" wx:key="id" data-id="{{item.id}}" bindtap="goManageTopic" aria-role="button" hover-class="cy-pressed" hover-stay-time="80">
             <image class="manage-project-cover" src="{{item.imgUrl || '/pages/club/images/route_free_cover.png'}}" mode="aspectFill" lazy-load="true" />
             <view class="manage-project-main">

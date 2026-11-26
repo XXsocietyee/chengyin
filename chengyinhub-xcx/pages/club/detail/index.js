@@ -639,6 +639,7 @@ Page({
     choiceSheetTitle: '',
     choiceSheetHint: '',
     choiceSheetItems: [],
+    activityToolsError: '',
     ownerClubs: [],
     ownerPickerShow: false,
     isMerchantViewer: false,
@@ -761,7 +762,8 @@ Page({
     this.setData({ detailLoaded: true, clubGoneText: '链接已失效' });
   },
 
-  // 首展由 onLoad 负责，避免双请求；从发布/邀请/主办视图返回后重拉阶段真源。
+  // 首展由 onLoad 负责，避免双请求。已加载后再 onShow 不整页 loadAll；
+  // 从发布/邀请/主办视图返回才重拉阶段真源（onClubEdited 仍直接回读详情）。
   onShow() {
     // 2026-10-30 走查:商家看俱乐部整页浅色,系统状态栏也要换深色字(否则白字压浅底看不见);玩家保持深色页的白字
     if (this.data.isMerchantViewer) {
@@ -778,12 +780,21 @@ Page({
     if (String(me || '') !== String(this.data.myMemberId || '')) this.setData({ myMemberId: me });
     if (!this._hasShown) { this._hasShown = true; return; }
     if (this._skipShowRefresh) { this._skipShowRefresh = false; return; }
+    const returnRefresh = this._returnRefresh === true;
+    this._returnRefresh = false;
     if (this.data.clubId && this.data.club) {
-      if (this.canGovern() || this.data.canUseManageTab) this.loadAll();
-      else if (this.data.club.isJoined) this.refreshMemberRelationship();
+      if (returnRefresh && (this.canGovern() || this.data.canUseManageTab)) this.loadAll();
+      else if (this.data.club.isJoined && !(this.canGovern() || this.data.canUseManageTab)) this.refreshMemberRelationship();
     }
     // CU-C-18:从「我发出的」撤回申请后返回,合作池那张卡要跟着变回「可再申请」,不能停在「已申请」。
     if (this.data.coopPoolState === 'ready') this.loadCoopPool(true);
+  },
+
+  // 发布 / 邀请 / 主办会改阶段真源,回来才允许 onShow 走 loadAll。
+  armReturnRefresh(url) {
+    if (/\/pages\/(?:publish\/fabu|coop\/list|club\/event-ops|topic\/merchantinfo|topic\/pricing)(?:\/|\?|$)/.test(String(url || ''))) {
+      this._returnRefresh = true;
+    }
   },
 
   // 普通成员从子页/后台回来时只重读详情里的本人关系，不重拉 owner 阶段模型。
@@ -874,9 +885,20 @@ Page({
     // owner 入口未解析出 clubId 前(多团 picker 态)不发 id:null 请求(修下拉刷新触发的空请求+误 notFound)
     if (!this.data.clubId) { if (done) done(); return; }
     const that = this;
+    const clubId = this.data.clubId;
+    // L08-005:下拉叠在 onShow 上时,前一轮的收尾不许再刷商家/阶段。
+    const generation = this._loadAllGen = (this._loadAllGen || 0) + 1;
     let pending = 2;
+    let finished = false;
     const tick = function () {
+      if (finished) return;
+      if (generation !== that._loadAllGen || String(clubId) !== String(that.data.clubId)) {
+        finished = true;
+        if (done) done();
+        return;
+      }
       if (--pending > 0) return;
+      finished = true;
       if (that.data.club && that.data.club.isOwner) {
         that.loadMerchants();
         that.loadOwnerManagement();
@@ -899,23 +921,28 @@ Page({
   },
 
   // 达人视角:可对接商家列表(/api/club/merchants),点「发邀请」发起合作(coop/invite 类型0)
+  // L08-005:接口不带 clubId,仍丢掉上一团或更早一次请求的回包。
   loadMerchants() {
+    const that = this;
+    const seq = this._merchantsSeq = (this._merchantsSeq || 0) + 1;
+    const clubId = this.data.clubId;
+    const stale = function () { return seq !== that._merchantsSeq || String(clubId) !== String(that.data.clubId); };
     if (!this.data.club || !this.data.club.isOwner) {
       this._rawMerchants = [];
       this.setData({ merchants: [], merchantsLoaded: true });
       return;
     }
-    const that = this;
     app.sendRequest({
       hideLoading: true, url: '/api/club/merchants', method: 'POST', data: jsonBody({}), header: jsonHeader(),
       success(res) {
+        if (stale()) return;
         const list = (res.code == '200' && res.data) || [];
         that._rawMerchants = list;
         that.setData({ merchantsLoaded: true, merchantsError: '' });
         that.filterMerchants();
       },
       // E-09(2026-09-16):失败原来是空列表 → 「还没有开放对接的商家」。
-      fail() { that.setData({ merchantsLoaded: true, merchantsError: '网络异常，商家列表加载失败' }); },
+      fail() { if (stale()) return; that.setData({ merchantsLoaded: true, merchantsError: '网络异常，商家列表加载失败' }); },
     });
   },
 
@@ -934,8 +961,8 @@ Page({
     });
     this.setData({ merchants: hit });
   },
-  goCoopList() { if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/pages/coop/list/index', complete: () => { this._navigating = false; } }); },
-  goCooperation() { if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/pages/coop/list/index?tab=sent', complete: () => { this._navigating = false; } }); },
+  goCoopList() { if (this._navigating) return; this._navigating = true; this.armReturnRefresh('/pages/coop/list/index'); wx.navigateTo({ url: '/pages/coop/list/index', complete: () => { this._navigating = false; } }); },
+  goCooperation() { if (this._navigating) return; this._navigating = true; this.armReturnRefresh('/pages/coop/list/index?tab=sent'); wx.navigateTo({ url: '/pages/coop/list/index?tab=sent', complete: () => { this._navigating = false; } }); },
 
   // 客户按人聚合(来过几次、标签备注),与按团聚合的报名名册各走各的入口。
   goCustomers() {
@@ -953,7 +980,10 @@ Page({
   goEventOps() {
     const club = this.data.club;
     if (!club || !(this.canGovern(club) || this.data.canManageActivities) || !this.data.clubId) return;
-    if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/pages/club/event-ops/index?clubId=' + this.data.clubId, complete: () => { this._navigating = false; } });
+    if (this._navigating) return; this._navigating = true;
+    const eventOpsUrl = '/pages/club/event-ops/index?clubId=' + this.data.clubId;
+    this.armReturnRefresh(eventOpsUrl);
+    wx.navigateTo({ url: eventOpsUrl, complete: () => { this._navigating = false; } });
   },
 
   /**
@@ -1129,10 +1159,12 @@ Page({
           });
         }
         if (!isSuccess(res)) {
-          // E-15f(2026-09-16):加载失败 ≠ 没有场次。原来两者共用同一句 toast,
-          // 断网时主理人会读到「没有可管理的具体场次」—— 把一个假事实端给他。
+          // E-15f:加载失败 ≠ 没有场次。L08-012:也不能什么都不说。
+          // 只补原因,不关已经打开的场次清单或本场工具。
+          that.showActivityToolsFailure(res);
           return;
         }
+        if (that.data.activityToolsError) that.setData({ activityToolsError: '' });
         if (!activities.length) {
           cyToast('这个项目还没有可管理的具体场次');
           return;
@@ -1150,9 +1182,16 @@ Page({
           function (item) { that.chooseActivityTool(item.key, item.label); }
         );
       },
-      fail() {},
+      fail(res) { that.showActivityToolsFailure(res); },
       complete() { that._activityToolsLoading = false; },
     });
+  },
+
+  // L08-012:失败原因写在页面上。不改 choiceSheet / 项目行上已有的工具。
+  showActivityToolsFailure(res) {
+    const reason = bizFailureMessage(res, '场次没能加载，请重试');
+    this.setData({ activityToolsError: reason });
+    cyToast(reason);
   },
 
   // L08-013:四处「取主题的场次列表」共用一条读取;各处只关心成功时的场次与失败怎么说
@@ -1164,7 +1203,7 @@ Page({
       hideLoading: true,
       silentError: true,
       success(res) { handlers.success(res, listGroupCodeActivities(res && res.data && res.data.activityList)); },
-      // 失败一律交给调用方说(打开场次工具保持留白 E-15f;团码 / 导演台各自给提示)
+      // 失败一律交给调用方说(场次工具在页面上给原因且不收起已打开的工具;团码 / 导演台各自给提示)
       fail(res, statusCode) { if (handlers.fail) handlers.fail(res, statusCode); },
       successStatusAbnormal(res, statusCode) {
         if (handlers.successStatusAbnormal) handlers.successStatusAbnormal(res, statusCode);
@@ -1203,14 +1242,14 @@ Page({
     }
     if (!tools.length) return;
     if (tools.length === 1) {
-      if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: tools[0].route, complete: () => { this._navigating = false; } });
+      if (this._navigating) return; this._navigating = true; this.armReturnRefresh(tools[0].route); wx.navigateTo({ url: tools[0].route, complete: () => { this._navigating = false; } });
       return;
     }
     this.openChoiceSheet(
       '本场工具',
       '',
       tools.map(function (item) { return { key: item.route, label: item.label }; }),
-      (item) => { if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: item.key, complete: () => { this._navigating = false; } }); }
+      (item) => { if (this._navigating) return; this._navigating = true; this.armReturnRefresh(item.key); wx.navigateTo({ url: item.key, complete: () => { this._navigating = false; } }); }
     );
   },
 
@@ -1619,6 +1658,7 @@ Page({
         ? '/pages/topic/merchantinfo/merchantinfo?topicId=' + this._stageTopic.id + '&scope=CLUB&open=merchant'
         : '/pages/topic/pricing/index?topicId=' + this._stageTopic.id + '&club=1';
       if (this._navigating) return; this._navigating = true;
+      this.armReturnRefresh(url);
       wx.navigateTo({ url: url, complete: () => { this._navigating = false; } });
       return;
     }
@@ -1744,7 +1784,7 @@ Page({
       title: '方案已带到发布页',
       content: '标题、简介和节点已回填。封面图和活动分类 AI 给不了，需要你手动补齐后才能发布。',
       showCancel: false, confirmText: '去发布',
-      success() { wx.navigateTo({ url: '/pages/publish/fabu/index?clubId=' + cid }); },
+      success: () => { this.armReturnRefresh('/pages/publish/fabu/index?clubId=' + cid); wx.navigateTo({ url: '/pages/publish/fabu/index?clubId=' + cid }); },
     });
   },
 
@@ -2837,7 +2877,10 @@ Page({
       ],
       (item) => {
         const mode = item.key;
-        if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/pages/publish/fabu/index?clubId=' + cid + '&mode=' + mode, complete: () => { this._navigating = false; } });
+        if (this._navigating) return; this._navigating = true;
+        const publishUrl = '/pages/publish/fabu/index?clubId=' + cid + '&mode=' + mode;
+        this.armReturnRefresh(publishUrl);
+        wx.navigateTo({ url: publishUrl, complete: () => { this._navigating = false; } });
       }
     );
   },
@@ -2847,7 +2890,10 @@ Page({
     const club = this.data.club;
     const clubId = positiveId((club && club.id) || this.data.clubId);
     if (!club || !club.isOwner || !clubId) return;
-    if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/pages/club/event-ops/index?clubId=' + clubId + '&recurrence=ONCE', complete: () => { this._navigating = false; } });
+    if (this._navigating) return; this._navigating = true;
+    const sessionUrl = '/pages/club/event-ops/index?clubId=' + clubId + '&recurrence=ONCE';
+    this.armReturnRefresh(sessionUrl);
+    wx.navigateTo({ url: sessionUrl, complete: () => { this._navigating = false; } });
   },
 
   // 退出俱乐部(成员;群主不可退,后端拦)。退出同步移出团群。
@@ -2930,7 +2976,7 @@ Page({
     app.sendRequest({
       url: '/api/club/post/comment/delete', method: 'POST', data: jsonBody({ id: id }), header: jsonHeader(),
       success(res) {
-        if (res.code == '200') { if (dc) dc.done(); that.loadComments(postId); that.loadPosts(); }
+        if (res.code == '200') { if (dc) dc.done(); that._bumpPostCommentCount(postId, -1); that.loadComments(postId); }
         else if (dc) dc.failed(res.msg || '删除失败');
       },
       fail() { if (dc) dc.failed('网络异常，请重试'); },
@@ -3384,6 +3430,17 @@ Page({
     this.loadComments(postId);
   },
 
+  // L08-004:一条评论只改这条帖的评论数(含转发条目),不重拉整份帖子列表。
+  _bumpPostCommentCount(postId, delta) {
+    const id = parseInviteId(postId);
+    if (!id) return;
+    (this.data.posts || []).forEach((p, i) => {
+      if (!p || p.source === 'community' || parseInviteId(p.id) !== id) return;
+      const commentCount = Math.max(0, (Number(p.commentCount) || 0) + delta);
+      this.setData({ ['posts[' + i + '].commentCount']: commentCount });
+    });
+  },
+
   onCommentInput(e) { this.setData({ commentText: e.detail.value }); },
 
   onCommentSubmit() {
@@ -3402,7 +3459,7 @@ Page({
       header: jsonHeader(),
       success(res) {
         that.setData({ commenting: false });
-        if (res.code == '200') { that.setData({ commentText: '' }); that.loadComments(postId); that.loadPosts(); }
+        if (res.code == '200') { that.setData({ commentText: '' }); that._bumpPostCommentCount(postId, 1); that.loadComments(postId); }
         else cyToast((res && res.msg) || '评论失败');
       },
       fail() { that.setData({ commenting: false }); cyToast('网络异常，请重试'); },
@@ -3574,30 +3631,44 @@ Page({
     this.loadSettingsCounts();
   },
 
-  // 弹窗右侧那两个数。都走已有接口,只在有权限看那一行的人身上发请求;
-  // 同一次进页面只取一次(_settingsCountsFor 记的是取过的 clubId)。
+  // 弹窗右侧那两个数。都走已有接口,只在有权限看那一行的人身上发请求。
+  // 读成功才记住(_settingsCountsFor)。失败不记账,下次打开设置再试。
   loadSettingsCounts() {
     const that = this;
     const club = this.data.club || {};
     const clubId = club.id || this.data.clubId;
     if (!clubId || String(this._settingsCountsFor || '') === String(clubId)) return;
+    const seq = this._settingsCountsSeq = (this._settingsCountsSeq || 0) + 1;
     this._settingsCountsFor = clubId;
+    const showing = function () {
+      return seq === that._settingsCountsSeq
+        && String(clubId) === String((that.data.club && that.data.club.id) || that.data.clubId);
+    };
+    // 只清掉这一次的记账。更新的一次打开已经换了序号,迟到的失败不许把它也清掉。
+    const retryNextOpen = function () {
+      if (seq !== that._settingsCountsSeq) return;
+      if (String(that._settingsCountsFor || '') === String(clubId)) that._settingsCountsFor = null;
+    };
     if (club.isOwner || club.viewerIsAdmin) {
       app.sendRequest({
         hideLoading: true, silentError: true,
         url: '/api/club/crm/customers/count', method: 'POST',
         data: jsonBody({ clubId: clubId }), header: jsonHeader(),
         success(res) {
-          if (String(clubId) !== String(that.data.club && that.data.club.id || that.data.clubId)) return;
+          if (!showing()) { retryNextOpen(); return; }
           const total = isSuccess(res) && isRecord(res.data) ? Number(res.data.total) : NaN;
-          if (Number.isFinite(total) && total > 0) that.setData({ customerCountText: total + ' 人' });
+          if (!Number.isFinite(total)) {
+            retryNextOpen();
+            that.setData({ customerCountText: '暂时读不到' });
+            return;
+          }
+          if (total > 0) that.setData({ customerCountText: total + ' 人' });
         },
         // 读不到就在同一个位置说读不到。留空会被读成「这个俱乐部一个客户都没有」——
         // 那是另一件事,不能拿加载失败去冒充。
         fail() {
-          if (String(clubId) !== String(that.data.club && that.data.club.id || that.data.clubId)) return;
-          that._settingsCountsFor = null;
-          that.setData({ customerCountText: '暂时读不到' });
+          retryNextOpen();
+          if (showing()) that.setData({ customerCountText: '暂时读不到' });
         },
       });
     }
@@ -3607,16 +3678,21 @@ Page({
         url: '/api/club/settlement/summary', method: 'POST',
         data: jsonBody({ clubId: clubId }), header: jsonHeader(),
         success(res) {
-          if (String(clubId) !== String(that.data.club && that.data.club.id || that.data.clubId)) return;
+          if (!showing()) { retryNextOpen(); return; }
           // 金额只透传服务端算好的字符串,前端一分钱都不算。
-          const text = isSuccess(res) && isRecord(res.data) ? res.data.settledAmountText : null;
-          if (typeof text === 'string' && text) that.setData({ settledAmountText: text });
+          // null 是「还有未核实的结算」,读是成功的,不当成失败。
+          if (isSuccess(res) && isRecord(res.data)) {
+            const text = res.data.settledAmountText;
+            if (typeof text === 'string' && text) that.setData({ settledAmountText: text });
+            return;
+          }
+          retryNextOpen();
+          that.setData({ settledAmountText: '暂时读不到' });
         },
         // 钱这一行尤其不能留空:空白会被读成「这个月一分没有」。
         fail() {
-          if (String(clubId) !== String(that.data.club && that.data.club.id || that.data.clubId)) return;
-          that._settingsCountsFor = null;
-          that.setData({ settledAmountText: '暂时读不到' });
+          retryNextOpen();
+          if (showing()) that.setData({ settledAmountText: '暂时读不到' });
         },
       });
     }
@@ -3777,17 +3853,22 @@ Page({
    * 2026-09-15 合作池 tab 收编进收发件箱后,这里是俱乐部**发现并申请**带队的唯一入口:
    *   申请就地提交(applyCoopPool,从 coop/list 搬来,只此一份);申请记录与撤回在协作邀请「我发出的」。 */
   // silent:已有列表时后台刷新,不把屏上的卡换成骨架。
+  // L08-005:下拉和返回叠在一起时,上一团或更早一次的池子回包不许盖住当前列表。
   loadCoopPool(silent) {
+    const that = this;
+    const seq = this._coopPoolSeq = (this._coopPoolSeq || 0) + 1;
+    const clubId = this.data.clubId;
+    const stale = function () { return seq !== that._coopPoolSeq || String(clubId) !== String(that.data.clubId); };
     if (!this.data.club || !this.data.club.isOwner) {
       this.setData({ coopPoolState: 'permission', coopPoolError: '只有主理人能看可对接的活动' });
       return;
     }
     if (!silent) this.setData({ coopPoolState: 'loading', coopPoolError: '' });
-    const that = this;
     app.sendRequest({
       hideLoading: true, silentError: true,
       url: '/api/coop/pool/list', method: 'POST', data: jsonBody({}), header: jsonHeader(),
       success(res) {
+        if (stale()) return;
         const d = res && res.data;
         // 形状不对就当没拿到,不把坏响应渲染成空列表 —— 空列表会被读成「没有可对接的活动」
         if (String(res && res.code) !== '200' || !d || typeof d.hasClub !== 'boolean' || !isPoolList(d.rows)) {
@@ -3800,7 +3881,7 @@ Page({
         }
         that.setData({ coopPool: decoratePool(d.rows), coopPoolState: 'ready', coopPoolError: '' });
       },
-      fail() { that.setData({ coopPool: [], coopPoolState: 'error', coopPoolError: '网络异常，请检查连接后重试' }); },
+      fail() { if (stale()) return; that.setData({ coopPool: [], coopPoolState: 'error', coopPoolError: '网络异常，请检查连接后重试' }); },
     });
   },
   retryCoopPool() { this.setData({ coopPoolState: 'idle' }); this.loadCoopPool(); },
@@ -3844,7 +3925,7 @@ Page({
       fail() { done('操作确认没有打开，请重试'); },
     });
   },
-  goCoopSent() { if (this._navigating) return; this._navigating = true; wx.navigateTo({ url: '/pages/coop/list/index?tab=sent', complete: () => { this._navigating = false; } }); },
+  goCoopSent() { if (this._navigating) return; this._navigating = true; this.armReturnRefresh('/pages/coop/list/index?tab=sent'); wx.navigateTo({ url: '/pages/coop/list/index?tab=sent', complete: () => { this._navigating = false; } }); },
 
   // 2026-10-22 owner:「加入俱乐部」往下滑时收起,往上滑或回到顶部再出来(只在状态变化时 setData)。
   onPageScroll(e) {
