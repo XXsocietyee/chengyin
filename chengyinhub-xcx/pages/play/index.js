@@ -3321,8 +3321,7 @@ Page({
         });
         const evidenceOnly = node.playerTask.inputType === 'PHOTO'
           && node.playerTask.completionPolicy === 'EVIDENCE_ONLY';
-        const submissionId = result.receipt.result && result.receipt.result.submissionId;
-        cyToast(evidenceOnly ? '证据已记录' : (submissionId ? ('核验编号 ' + submissionId) : '任务已提交'), { icon: evidenceOnly ? 'none' : 'success' });
+        cyToast(evidenceOnly ? '证据已记录' : '任务已提交', { icon: evidenceOnly ? 'none' : 'success' });
         this.setData({ 'gameModule.write': {
           status: 'confirmed', requestId,
           message: evidenceOnly ? '证据已记录' : '任务已记录',

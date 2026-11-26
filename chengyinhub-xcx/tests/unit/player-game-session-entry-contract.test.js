@@ -155,7 +155,12 @@ test('玩家页从共享三身份客户端读取服务端投影并提供精确�
   assert.match(js, /buildPlayerRoleConfirmInput\(gameModule, requestId\)/)
   assert.match(js, /buildPlayerSubmissionInput\(/)
   assert.match(wxml, /bindtap="submitPlayerTask"/)
-  assert.match(wxml, /核验编号 \{\{item\.submission\.submissionId\}\}/)
+  assert.doesNotMatch(wxml, /核验编号/)
+  assert.doesNotMatch(wxml, /\{\{item\.submission\.submissionId\}\}/)
+  assert.doesNotMatch(js, /核验编号/)
+  assert.match(js, /cyToast\(evidenceOnly \? '证据已记录' : '任务已提交'/)
+  assert.match(wxml, /\{\{item\.submission\.statusLabel\}\}/)
+  assert.match(wxml, /驳回原因：\{\{item\.submission\.decisionReason\}\}/)
   assert.match(wxml, /bindtap="confirmPlayerRole"/)
   assert.match(js, /game_player_pending_/)
   assert.match(js, /结果待确认，请勿重复提交/)
@@ -622,7 +627,8 @@ test('重启恢复的回执索引收到精确 FAILED 后清锁，仍不重发原
 
 test('PHOTO EVIDENCE_ONLY 提交后显示证据已记录，RECORDED 不进入商家核验语义', async () => {
   assert.match(wxml, /item\.playerTask\.completionPolicy === 'EVIDENCE_ONLY' \? '记录现场证据'/)
-  assert.match(wxml, /item\.submission\.status === 'PENDING'/)
+  assert.doesNotMatch(wxml, /核验编号/)
+  assert.doesNotMatch(wxml, /\{\{item\.submission\.submissionId\}\}/)
   assert.match(wxml, /\{\{item\.submission\.statusLabel\}\}/)
 
   const harness = loadUnknownWritePlayer()

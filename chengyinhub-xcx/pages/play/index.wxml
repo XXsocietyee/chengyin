@@ -1958,7 +1958,6 @@ module.exports = { scroll: scroll, start: start, move: move, end: end };
           <text class="gmod__task-evidence-status" wx:if="{{item.taskEvidence.statusText}}">{{item.taskEvidence.statusText}}</text>
           <view class="gmod__submission" wx:if="{{item.submission}}">
             <text>{{item.submission.statusLabel}}</text>
-            <text wx:if="{{item.submission.status === 'PENDING'}}">核验编号 {{item.submission.submissionId}}</text>
             <text wx:if="{{item.submission.status === 'REJECTED' && item.submission.decisionReason}}">
               驳回原因：{{item.submission.decisionReason}}
             </text>
