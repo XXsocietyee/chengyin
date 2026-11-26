@@ -136,7 +136,7 @@ Page({
     this._pendingClearReturn = null;
     this._pollWatermark = null;
     this._pollInFlight = false;
-    this._historyAppliedEpoch = null;
+    this._historyInFlight = false;
     this._scrollWhenShown = false;
     this._pendingReadConversationId = 0;
     this._pendingReadMemberId = 0;
@@ -325,21 +325,21 @@ Page({
     this._pollInFlight = true;
     const requestEpoch = (this._messageRequestEpoch || 0) + 1;
     this._messageRequestEpoch = requestEpoch;
-    const current = function () {
-      return viewCurrent() && requestEpoch === that._messageRequestEpoch
-        && pollEpoch === that._pollRequestEpoch
-        && that._isReadContextCurrent(conversationId, memberId);
+    this._historyInFlight = true;
+    // 藏起页面会抬高轮询代际,但不能把这一次历史读取作废。只有更新的 loadMessages
+    // 才算「新的一次」;离开这个会话(卸载、换会话、换账号)的回包不得再画。
+    const accept = function () {
+      if (requestEpoch !== that._messageRequestEpoch) return false;
+      that._historyInFlight = false;
+      const readable = viewCurrent() && that._isReadContextCurrent(conversationId, memberId);
+      if (readable && pollEpoch === that._pollRequestEpoch) that._pollInFlight = false;
+      return readable;
     };
     app.sendRequest({
       url: '/api/im/messages', method: 'POST', hideLoading: true, silentError: true,
       data: { conversation_id: conversationId, cursor_id: 0, size: 30 },
       success(res) {
-        // 离开页面会抬高轮询代际,首屏回包因此不再算 current。线程还空着时仍要落地,
-        // 否则回来只剩骨架,要等下一次读取才看得到已经到了的消息。
-        const latest = current();
-        const sameThread = viewCurrent() && that._isReadContextCurrent(conversationId, memberId);
-        if (!latest && (!sameThread || (that._historyAppliedEpoch != null && that._historyAppliedEpoch >= requestEpoch))) return;
-        if (latest) that._pollInFlight = false;
+        if (!accept()) return;
         if (res && res.code == 200 && res.data && typeof res.data === 'object' && !Array.isArray(res.data)
             && (res.data.list == null || isRecordList(res.data.list))) {
           const list = that.decorate(Array.isArray(res.data.list) ? res.data.list : []);
@@ -347,7 +347,6 @@ Page({
           const pending = that.data.msgs.filter(m => m.sendPayload && !list.some(server =>
             server.clientMessageId === m.clientMessageId && server.senderId == m.senderId));
           const msgs = list.concat(pending);
-          that._historyAppliedEpoch = requestEpoch;
           that.setData({ msgs, sending: msgs.some(m => m.sending), hasMore: !!res.data.hasMore, cursor: res.data.nextCursor || 0, loadState: 'ready', loadErrorText: '', loadMoreError: '' });
           if (that._needPeerName && !that.data.name) that._fillPeerName();
           // 拉黑只存服务端:重进会话按回包禁用输入框,不然能打字、一发就失败(3-22)
@@ -363,16 +362,14 @@ Page({
           that.recoverPending();
           return;
         }
-        if (latest) that._setMessageLoadError(res, res && res.code != null && res.code != 200);
+        that._setMessageLoadError(res, res && res.code != null && res.code != 200);
       },
       fail(res) {
-        if (!current()) return;
-        that._pollInFlight = false;
+        if (!accept()) return;
         that._setMessageLoadError(res);
       },
       successStatusAbnormal(res) {
-        if (!current()) return;
-        that._pollInFlight = false;
+        if (!accept()) return;
         that._setMessageLoadError(res);
       },
     });
@@ -1310,6 +1307,7 @@ Page({
     this._hidden = true;
     this._pollWatermark = null;
     this._pollInFlight = false;
+    this._historyInFlight = false;
     this._pendingReadConversationId = 0;
     this._pendingReadMemberId = 0;
     this._messageRequestEpoch = (this._messageRequestEpoch || 0) + 1;
@@ -1335,7 +1333,7 @@ Page({
   pollNew() {
     const conversationId = this.data.conversationId;
     const memberId = this.data.myId;
-    if (this._hidden || this._pollInFlight || !this._isReadContextCurrent(conversationId, memberId)) return;
+    if (this._hidden || this._pollInFlight || this._historyInFlight || !this._isReadContextCurrent(conversationId, memberId)) return;
     // L08-140:连续失败后退避 —— 跳过 1、3、7 跳(8s→16s→32s→64s 封顶),成功即恢复 8s
     if (this._pollSkip > 0) { this._pollSkip -= 1; return; }
     if (this._pollWatermark == null) {

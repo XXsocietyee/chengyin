@@ -85,6 +85,43 @@ test('L08-120 首屏回包在后台到达,回到页面时线程不是空的', ()
   chat.page.onUnload();
 });
 
+test('L08-120 新的读取已经开始后,原来的回包不再画上', () => {
+  const chat = boot('../../subpackageB/pages/im/chat/index.js', { getUserID: () => 9 });
+  chat.page.onLoad({ conversationId: '11', type: '1' });
+  chat.page.onShow();
+  const first = chat.requests.find((row) => row.url === '/api/im/messages');
+  chat.page.retryLoad();
+  first.success(messageBody);
+  assert.equal(chat.page.data.loadState, 'loading');
+  assert.equal(chat.page.data.msgs.length, 0);
+  chat.page.onUnload();
+});
+
+test('L08-120 已经离开的会话,回包不再画上', () => {
+  const chat = boot('../../subpackageB/pages/im/chat/index.js', { getUserID: () => 9 });
+  chat.page.onLoad({ conversationId: '11', type: '1' });
+  chat.page.onShow();
+  const first = chat.requests.find((row) => row.url === '/api/im/messages');
+  chat.page.setData({ conversationId: 99 });
+  first.success(messageBody);
+  assert.equal(chat.page.data.loadState, 'loading');
+  assert.equal(chat.page.data.msgs.length, 0);
+  chat.page.onUnload();
+});
+
+test('L08-120 首屏失败后再回来可以重新读取', () => {
+  const chat = boot('../../subpackageB/pages/im/chat/index.js', { getUserID: () => 9 });
+  chat.page.onLoad({ conversationId: '11', type: '1' });
+  chat.page.onShow();
+  const first = chat.requests.find((row) => row.url === '/api/im/messages');
+  chat.page.onHide();
+  first.fail({ errMsg: 'timeout' });
+  const before = chat.requests.filter((row) => row.url === '/api/im/messages').length;
+  chat.page.onShow();
+  assert.ok(chat.requests.filter((row) => row.url === '/api/im/messages').length > before);
+  chat.page.onUnload();
+});
+
 test('L08-122 没有空位不呼吸,离开页面呼吸停止', () => {
   const detail = boot('../../pages/team/detail/index.js');
   detail.page.onLoad({ teamId: '12' });

@@ -444,7 +444,7 @@ test('negative control: 去掉缺参短路 ⇒ 坏链接照样打后端且被说
 
 test('negative control: 去掉 fail 分支 ⇒ 网络失败停在 loading,永远不承认异常', () => {
   const ctx = loadPage(CHAT_JS, null, (src) => src.replace(
-    "      fail(res) {\n        if (!current()) return;\n        that._pollInFlight = false;\n        that._setMessageLoadError(res);\n      },\n",
+    "      fail(res) {\n        if (!accept()) return;\n        that._setMessageLoadError(res);\n      },\n",
     '',
   ))
   ctx.page.onLoad({ conversationId: '11' })
@@ -786,15 +786,28 @@ test('L08-117 轮询一跳只拉新消息,不先把路线卡抹成「路线已�
   ctx.page.onUnload()
 })
 
-test('L08-120 首屏在后台被丢弃:回到前台立即重拉,不等 8s', () => {
+test('L08-120 首屏还在途时回来不另起一次,失败后再回来才重读', () => {
   const ctx = loadPage(CHAT_JS)
   ctx.page.onLoad({ conversationId: '11' })
   ctx.page.onShow()
-  ctx.page.onHide()   // 首屏还在途就切后台,回包会被丢
+  ctx.page.onHide()
   const n = ctx.requests.filter((r) => r.url === '/api/im/messages').length
   ctx.page.onShow()
-  assert.ok(ctx.requests.filter((r) => r.url === '/api/im/messages').length > n, '回前台立即补拉')
+  assert.equal(ctx.requests.filter((r) => r.url === '/api/im/messages').length, n, '第一次还没结束,回来沿用这一次')
+  ctx.requests.filter((r) => r.url === '/api/im/messages')[0].success({ code: 200, data: { list: [{ id: 5, senderId: 8, content: '外滩夜行', createTime: '2026-11-22 10:00:00' }], hasMore: false } })
+  assert.equal(ctx.page.data.msgs[0].content, '外滩夜行')
   ctx.page.onUnload()
+
+  const failed = loadPage(CHAT_JS)
+  failed.page.onLoad({ conversationId: '11' })
+  failed.page.onShow()
+  const first = failed.requests.filter((r) => r.url === '/api/im/messages')[0]
+  failed.page.onHide()
+  first.fail({ errMsg: 'timeout' })
+  const before = failed.requests.filter((r) => r.url === '/api/im/messages').length
+  failed.page.onShow()
+  assert.ok(failed.requests.filter((r) => r.url === '/api/im/messages').length > before, '第一次失败,回来可以再读')
+  failed.page.onUnload()
 })
 
 // AUDIT-1122 L08-140:断网时轮询退避(8s→16s→32s→64s 封顶),成功后恢复每跳一读
