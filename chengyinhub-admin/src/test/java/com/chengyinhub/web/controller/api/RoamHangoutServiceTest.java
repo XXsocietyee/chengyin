@@ -181,13 +181,19 @@ class RoamHangoutServiceTest {
     }
 
     @Test
-    void nearby_省略或超大半径收到50公里() {
+    void nearby_省略半径仍用3公里_超出50公里拒绝() {
         assertEquals(3_000, svc.nearby(1L, 31.23, 121.47, 0).get("radius"));
         assertEquals(3_000, svc.nearby(1L, 31.23, 121.47, -1).get("radius"));
-        assertEquals(50_000, svc.nearby(1L, 31.23, 121.47, 1_000_000).get("radius"));
-        assertEquals(50_000, svc.nearby(1L, 31.23, 121.47, 50_001).get("radius"));
+        assertEquals(50_000, svc.nearby(1L, 31.23, 121.47, 50_000).get("radius"));
         assertEquals(20_000, svc.nearby(1L, 31.23, 121.47, 20_000).get("radius"));
-        assertEquals(IRoamHangoutService.MAX_RADIUS_M, 50_000);
+        ServiceException over = assertThrows(ServiceException.class, () -> svc.nearby(1L, 31.23, 121.47, 50_001));
+        assertEquals(400, over.getCode());
+        assertTrue(over.getMessage().contains("50公里"), over.getMessage());
+        assertThrows(ServiceException.class, () -> svc.nearby(1L, 31.23, 121.47, 1_000_000));
+        verify(mapper, never()).selectNearbyActivities(anyDouble(), anyDouble(), anyDouble(), anyDouble(),
+                anyDouble(), anyDouble(), eq(50_001d), anyInt(), anyLong());
+        verify(topicMapper, never()).selectNearbyTopics(anyDouble(), anyDouble(), anyDouble(), anyDouble(),
+                anyDouble(), anyDouble(), eq(50_001), anyInt(), anyLong());
     }
 
     @Test

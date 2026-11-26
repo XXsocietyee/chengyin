@@ -130,9 +130,9 @@ public class ApiRoamController extends BaseController {
     public AjaxResult pois(Double lat, Double lng, Integer radius) {
         if (lat == null || lng == null) return error("缺少定位");
         if (!validLat(lat) || !validLng(lng)) return error("定位无效");
-        // 省略用 3km;超出收到 50km。条数仍按距离截断(POIS_NEAR_LIMIT)。
-        int requested = (radius == null || radius <= 0) ? IRoamHangoutService.DEFAULT_RADIUS_M : radius;
-        int r = Math.min(requested, IRoamHangoutService.MAX_RADIUS_M);
+        // 省略或非正数用 3km;客户端要的半径超过 50km 直接拒绝。条数仍按距离截断(POIS_NEAR_LIMIT)。
+        if (radius != null && radius > IRoamHangoutService.MAX_RADIUS_M) return error("查询半径不能超过50公里");
+        int r = (radius == null || radius <= 0) ? IRoamHangoutService.DEFAULT_RADIUS_M : radius;
         double dLat = r / 111320.0;
         double dLng = r / (111320.0 * Math.max(0.2, Math.cos(Math.toRadians(lat))));
         // C-13:found 是「这个账号已发现过」的服务端事实(按会员投影),换设备/清缓存不再回到迷雾。
@@ -185,7 +185,11 @@ public class ApiRoamController extends BaseController {
     public AjaxResult entryNearby(Double lat, Double lng, Integer radius) {
         if (lat == null || lng == null) return error("缺少定位");
         if (!validLat(lat) || !validLng(lng)) return error("定位无效");
-        return success(roamHangoutService.nearby(uid(), lat, lng, radius == null ? 0 : radius));
+        try {
+            return success(roamHangoutService.nearby(uid(), lat, lng, radius == null ? 0 : radius));
+        } catch (ServiceException e) {
+            return codedServiceException(e);
+        }
     }
 
     /** POI 发现校验半径(米);poi 自带 radius_m 优先,否则用此默认 */

@@ -16,8 +16,8 @@ public interface IRoamHangoutService {
     int MAX_MEMBERS = 200;
     int DEFAULT_RADIUS_M = 3000;
     /**
-     * 附近查询半径上限(米)。省略走 {@link #DEFAULT_RADIUS_M};
-     * 超出(含旧的 1000km「全部」)收到 50km,结果仍按距离由近到远截断条数。
+     * 附近查询半径上限(米)。省略或非正数走 {@link #DEFAULT_RADIUS_M};
+     * 大于该值的请求拒绝,不按上限继续查。
      */
     int MAX_RADIUS_M = 50_000;
     /** 返回 {items:[局 + 活动], suggestedRadius?, suggestedCount?}。viewerId 用于 isMember 与拉黑过滤;必须登录。 */

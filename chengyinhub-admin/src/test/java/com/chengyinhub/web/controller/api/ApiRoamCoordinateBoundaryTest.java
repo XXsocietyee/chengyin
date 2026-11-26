@@ -280,6 +280,23 @@ class ApiRoamCoordinateBoundaryTest
         verify(roamMapper, never()).selectNearbyRunners(anyLong(), anyDouble(), anyDouble(), anyInt(), any(), any(), anyInt());
     }
 
+    @Test
+    void poisRejectsRadiusAbove50kmWithoutQuerying()
+    {
+        AjaxResult over = controller.pois(NEAR_LAT, NEAR_LNG, 50_001);
+        assertNotEquals(200, over.get("code"));
+        assertEquals("查询半径不能超过50公里", over.get("msg"));
+        AjaxResult huge = controller.pois(NEAR_LAT, NEAR_LNG, 1_000_000);
+        assertNotEquals(200, huge.get("code"));
+        verify(roamMapper, never()).selectPoisNear(anyDouble(), anyDouble(), anyDouble(), anyDouble(), any(), anyInt());
+
+        when(roamMapper.selectPoisNear(anyDouble(), anyDouble(), anyDouble(), anyDouble(), org.mockito.ArgumentMatchers.eq(PLAYER),
+                org.mockito.ArgumentMatchers.eq(ApiRoamController.POIS_NEAR_LIMIT + 1))).thenReturn(Collections.emptyList());
+        assertEquals(200, controller.pois(NEAR_LAT, NEAR_LNG, null).get("code"));
+        assertEquals(200, controller.pois(NEAR_LAT, NEAR_LNG, 0).get("code"));
+        assertEquals(200, controller.pois(NEAR_LAT, NEAR_LNG, 50_000).get("code"));
+    }
+
     // ---------- C-13 已发现按账号投影 ----------
 
     @SuppressWarnings("unchecked")
