@@ -187,6 +187,8 @@ public class MarketingProductPurchaseServiceImpl implements IMarketingProductPur
         if (!signer.matches(canonical, request.getQuoteSign())) {
             throw MarketingProductException.conflict("QUOTE_STALE", "商品价格或内容已变化，请重新报价");
         }
+        // 发放时才会拒的主题条件，在建单前先拒，避免积分已扣或现金单已落下才失败。
+        rules.requireCollectibleTopics(product, items, product.getTermsVersion());
 
         MarketingProductOrder order = new MarketingProductOrder();
         order.setOrderNo(orderNo());
@@ -325,6 +327,15 @@ public class MarketingProductPurchaseServiceImpl implements IMarketingProductPur
         if (!wechatPayService.isReady()) {
             throw MarketingProductException.paymentRequired("PAYMENT_UNAVAILABLE", "支付服务暂不可用");
         }
+        MarketingProduct product = productMapper.selectById(order.getProductId());
+        if (product == null) {
+            throw MarketingProductException.conflict("PRODUCT_MISSING", "商品不存在");
+        }
+        Date now = new Date();
+        rules.requireSellable(product, now);
+        if (!product.usesTicketRegistration()) {
+            rules.requireCollectibleTopics(product, rules.items(product.getId()), termsVersionOf(order, product));
+        }
         boolean appChannel = payChannel != null && "APP".equalsIgnoreCase(payChannel.trim());
         String description = paymentDescription(order);
         Map<String, String> payParams = appChannel
@@ -334,6 +345,23 @@ public class MarketingProductPurchaseServiceImpl implements IMarketingProductPur
         Map<String, Object> out = orderView(order);
         out.put("payParams", payParams);
         return out;
+    }
+
+    /** 退款窗的多人票例外认成交快照里的条款版本，没有快照时才看当前商品。 */
+    private static String termsVersionOf(MarketingProductOrder order, MarketingProduct live) {
+        String json = order == null ? null : order.getProductSnapshotJson();
+        if (json != null && !json.trim().isEmpty()) {
+            try {
+                com.alibaba.fastjson2.JSONObject snapshot = JSON.parseObject(json);
+                String frozen = snapshot == null ? null : snapshot.getString("termsVersion");
+                if (frozen != null && !frozen.trim().isEmpty()) {
+                    return frozen;
+                }
+            } catch (RuntimeException broken) {
+                // 快照坏了就按当前商品条款判断，发放侧自己还会再拒一次。
+            }
+        }
+        return live == null ? null : live.getTermsVersion();
     }
 
     static final String DEFAULT_PAYMENT_DESCRIPTION = "城瘾商品";
