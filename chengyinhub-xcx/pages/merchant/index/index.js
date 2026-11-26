@@ -404,9 +404,33 @@ Page({
     });
   },
 
-  // 项目卡的三块数据(承接列表 / 主办列表 / 待办 / 动态)是四个独立请求,
-  // 谁先回来都得能重算一次,所以统一收在这里,由各 load* 成功后调用。
+  // 项目卡的来源是多路独立请求。各 load* 写完实例字段后调用这里。
+  // L07-011:同一轮更新里多路一起回来只重建一次,卡片用这一轮里最新的项目;
+  // 下一轮真有变化再重建。直接改写过卡片的路径要作废还没落地的这一次。
   refreshProjectCards() {
+    this._projectCardsDirty = true;
+    if (this._projectCardsRefreshQueued) return;
+    this._projectCardsRefreshQueued = true;
+    const generation = this._projectCardsRefreshGen || 0;
+    const flush = () => {
+      if (generation !== (this._projectCardsRefreshGen || 0)) return;
+      this._projectCardsRefreshQueued = false;
+      if (this._unloaded || !this._projectCardsDirty) return;
+      this._projectCardsDirty = false;
+      this._rebuildProjectCards();
+    };
+    if (typeof wx !== 'undefined' && typeof wx.nextTick === 'function') wx.nextTick(flush);
+    else flush();
+  },
+
+  _forgetProjectCardsSnapshot() {
+    this._projectCardsSignature = '';
+    this._projectCardsRefreshGen = (this._projectCardsRefreshGen || 0) + 1;
+    this._projectCardsRefreshQueued = false;
+    this._projectCardsDirty = false;
+  },
+
+  _rebuildProjectCards() {
     // 2026-09-16 用户裁决:「项目已结束就不显示了」。判据直接用卡片自己的状态签
     // (与 buildProjectCards 内同一条 statusLabelOf),不另按日期算一套。
     // 结束的项目仍在「全部」完整列表页里可查,工作台只是不再占位。
@@ -438,7 +462,7 @@ Page({
   refreshGameStationSummaries(projectCards) {
     const decorated = attachMerchantGameEntries(projectCards, this._merchantGameEntries);
     const next = attachVisitTexts(decorated, this._upcomingRuns);
-    // L07-011:七路加载各自回来都会重建卡片;内容没变就不再整表 setData,
+    // L07-011:这一轮重建出的卡片和上次下发的一样,就不再整表 setData;
     // 入场动画只在卡片从无到有时播一次(原先列表为空期间每次都重播)
     const signature = JSON.stringify(next);
     if (signature === this._projectCardsSignature) return;
@@ -503,8 +527,8 @@ Page({
     }
     this._merchantGameEntryTask = null;
     if (renderCards && this.data.projectCards.length) {
-      // L07-011:卡片被直接改写,下次重建必须重新下发
-      this._projectCardsSignature = '';
+      // L07-011:卡片被直接改写,作废同一轮里还没落地的重建,下次必须重新下发
+      this._forgetProjectCardsSnapshot();
       this.setData({
         projectCards: attachMerchantGameEntries(this.data.projectCards, []),
         gameEntryLoading: true,
@@ -675,8 +699,8 @@ Page({
       this.resetJoinState();
       this._projectList = [];
       this._hostProjectList = [];
-      // L07-011:卡片被直接改写,下次重建必须重新下发
-      this._projectCardsSignature = '';
+      // L07-011:卡片被直接改写,作废同一轮里还没落地的重建,下次必须重新下发
+      this._forgetProjectCardsSnapshot();
       this.setData({
         joinTotal: 0, joinLoading: false, joinError: false,
         hostProjectTotal: 0, hostLoading: false, hostError: false,
@@ -744,8 +768,8 @@ Page({
     if (this._revHoldTimer) { clearTimeout(this._revHoldTimer); this._revHoldTimer = null; }
     if (this._revenueCountStop) this._revenueCountStop();
     this._revenueCountStop = null;
-    // L07-011:卡片被直接改写,下次重建必须重新下发
-    this._projectCardsSignature = '';
+    // L07-011:卡片被直接改写,作废同一轮里还没落地的重建,下次必须重新下发
+    this._forgetProjectCardsSnapshot();
     this.setData({
       displayName: '商家',
       businessStatus: 1,
@@ -1885,6 +1909,7 @@ Page({
 
   onUnload() {
     this._unloaded = true;
+    this._projectCardsRefreshGen = (this._projectCardsRefreshGen || 0) + 1;
     this._noteLoginLeave();
     if (this._offIdentitySync) { this._offIdentitySync(); this._offIdentitySync = null; }
     if (this._revHoldTimer) { clearTimeout(this._revHoldTimer); this._revHoldTimer = null; }

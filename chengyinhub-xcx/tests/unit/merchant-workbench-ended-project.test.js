@@ -358,7 +358,7 @@ test('本人待接受章节邀请进入项目卡，普通待审申请不得混�
     '待接受邀请走原招商浏览入口，不能先要求已承接的private home');
 });
 
-// L07-011:七路加载各自触发重建;内容没变不再整表 setData,空列表不重播入场动画
+// L07-011:同一轮更新只重建一次;内容没变不再整表 setData,空列表不重播入场动画
 test('项目卡重建内容不变时不重复下发,空列表不触发入场动画', () => {
   const page = loadPage();
   const patches = [];
@@ -381,6 +381,54 @@ test('项目卡重建内容不变时不重复下发,空列表不触发入场动�
   empty.refreshProjectCards();
   empty.refreshProjectCards();
   assert.equal(emptyPatches.some((keys) => keys.includes('pmProj')), false, '没有卡片时不播入场');
+});
+
+test('同一轮更新里多路加载只重建一次项目卡,下一轮变化再重建', () => {
+  const page = loadPage();
+  const ticks = [];
+  global.wx.nextTick = (fn) => { ticks.push(fn); };
+  const builds = [];
+  const rebuild = page._rebuildProjectCards;
+  page._rebuildProjectCards = function () { builds.push(1); return rebuild.call(this, ...arguments); };
+  const running = { id: 2, topicId: 2, status: 1, topicName: '进行中的路线', startDate: '2000-01-01', endDate: '2999-12-31' };
+  const upcoming = { id: 3, topicId: 3, status: 1, topicName: '还没开始的路线', startDate: '2999-12-01' };
+  try {
+    page.data.todo = { byProject: [] };
+    page._todoError = false;
+    page.loadJoinList(1);
+    page.loadHostProjects(1);
+    requests.find((item) => item.url === '/api/registration/merchant/list').success({
+      code: 200,
+      data: { rows: [running] },
+    });
+    requests.find((item) => item.url === '/api/project/my').success({
+      code: 200,
+      data: { rows: [{ id: 10, bizType: 'topic', title: '主办主题', startTime: '2000-01-01', endTime: '2999-12-31' }], activeTotal: 1 },
+    });
+    assert.equal(builds.length, 0, '同一轮里还没到更新点,先不重建');
+    assert.equal(ticks.length, 1, '同一轮多路加载只排一次重建');
+    assert.equal(page.data.projectCards.length, 0);
+    ticks.shift()();
+    assert.equal(builds.length, 1);
+    assert.equal(page.data.projectCards.length, 2, '这一轮落地的是两路都写完后的最新项目');
+
+    page._projectList = [running, upcoming];
+    page.refreshProjectCards();
+    assert.equal(ticks.length, 1);
+    ticks.shift()();
+    assert.equal(builds.length, 2, '下一轮真有变化仍要重建');
+    assert.equal(page.data.projectCards.filter((card) => card.title === '还没开始的路线').length, 1);
+
+    page._projectList = [running];
+    page.refreshProjectCards();
+    page.clearMerchantScopedData();
+    assert.equal(page.data.projectCards.length, 0);
+    ticks.splice(0).forEach((fn) => fn());
+    assert.equal(page.data.projectCards.length, 0, '直接清空后,同一轮还没落地的重建不得把旧卡写回来');
+    assert.equal(builds.length, 2);
+  } finally {
+    delete global.wx.nextTick;
+  }
 });
 
 // L07-082:三处待办空态同源,且不带 byProject(缺它才是「未取到」)
