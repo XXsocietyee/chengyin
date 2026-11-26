@@ -465,7 +465,10 @@ public class PlayNodeQueryApplication {
                     spoilerState.remove("answerReveal");   // 双保险:传 null 已不会带正文
                     m.putAll(spoilerState);
                 }
-                m.put("feedbackText", tpl.getFeedbackText());
+                // 文字反馈只在已有完成事实后下发。解题前下发会让客户端把这段话当成答案。
+                if (read.doneNodeIds != null && read.doneNodeIds.contains(n.getId())) {
+                    m.put("feedbackText", tpl.getFeedbackText());
+                }
                 m.put("photoRequireDesc", tpl.getPhotoRequireDesc());
                 m.put("audioUrl", tpl.getAudioUrl());
                 m.put("audioDuration", tpl.getAudioDuration());

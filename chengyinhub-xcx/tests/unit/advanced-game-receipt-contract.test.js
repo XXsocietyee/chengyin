@@ -153,7 +153,9 @@ test('★负控：响应丢失 ⇒ unknown，不得写成失败，也不得放�
 
   assert.equal(game.data.unknown, true, 'unknown 必须置位');
   assert.equal(game.data.error, '', 'unknown 不能被写成 error —— 那是在对用户说「失败了」');
-  assert.match(game.data.unknownText, /勿重复提交|核对/);
+  assert.equal(game.data.originalRetryable, true);
+  assert.match(game.data.unknownText, /重新提交原请求/);
+  assert.doesNotMatch(game.data.unknownText, /勿重复提交/);
 
   const before = game.calls.length;
   await game.action('DRAW', {});
@@ -208,9 +210,91 @@ test('回读本身也失败 ⇒ 保持 unknown 锁定，不猜结论', async () 
   await new Promise(setImmediate);
   await new Promise(setImmediate);
 
-  assert.equal(game.data.unknown, true, '确认不上就得一直锁着');
-  assert.equal(game.data.readingBack, false, '要能再点一次确认');
-  assert.match(game.data.unknownText, /勿重复提交/);
+  assert.equal(game.data.unknown, true, '没送达仍停在原请求，等玩家决定');
+  assert.equal(game.data.readingBack, false, '要能再点一次原请求');
+  assert.equal(game.data.originalRetryable, true);
+  assert.match(game.data.unknownText, /重新提交原请求/);
+  assert.equal(game.calls.filter(call => call.method === 'POST').length, 1, '回读失败不得自动再发');
+});
+
+function flush() {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
+test('回执 404 提供重新提交原请求，只重发同一幂等键和版本一次', async () => {
+  const game = createGame([
+    { err: new Error('timeout') },
+    { res: { code: 404, data: { intentNotExecuted: true } } },
+    okAction(4),
+  ]);
+  await game.action('DRAW', { pick: 1 });
+  await flush();
+  await flush();
+  assert.equal(game.data.originalRetryable, true);
+  assert.equal(game.data.unknown, true);
+  const first = game.calls[0].data;
+  assert.equal(game.calls.filter(call => call.method === 'POST').length, 1);
+  await game.resubmitOriginal();
+  const posts = game.calls.filter(call => call.method === 'POST');
+  assert.equal(posts.length, 2);
+  assert.equal(posts[1].data.idempotencyKey, first.idempotencyKey);
+  assert.equal(posts[1].data.version, first.version);
+  assert.deepEqual(posts[1].data.payload, { pick: 1 });
+  assert.equal(game.data.unknown, false);
+  await flush();
+  assert.equal(game.calls.filter(call => call.method === 'POST').length, 2);
+});
+
+test('网关 502 与再次 404 都不自动连发', async () => {
+  const game = createGame([
+    { res: { code: 502, httpStatus: 502, msg: 'bad gateway' } },
+    { res: { code: 502, httpStatus: 502, msg: 'bad gateway' } },
+    { res: { code: 404, httpStatus: 404, data: { intentNotExecuted: true } } },
+  ]);
+  await game.action('DRAW', { pick: 1 });
+  await flush();
+  await flush();
+  assert.equal(game.data.originalRetryable, true);
+  assert.equal(game.calls.filter(call => call.method === 'POST').length, 1);
+  await game.resubmitOriginal();
+  await flush();
+  const posts = game.calls.filter(call => call.method === 'POST');
+  assert.equal(posts.length, 2);
+  assert.equal(posts[1].data.idempotencyKey, posts[0].data.idempotencyKey);
+  assert.equal(posts[1].data.version, posts[0].data.version);
+  assert.equal(game.data.originalRetryable, true);
+  await flush();
+  assert.equal(game.calls.filter(call => call.method === 'POST').length, 2);
+  const wxml = require('node:fs').readFileSync(require.resolve('../../pages/play/components/advanced-game/index.wxml'), 'utf8');
+  assert.match(wxml, /bindtap="resubmitOriginal">重新提交原请求/);
+});
+
+test('本地锁到期只解除锁定，不自动重发', async () => {
+  const game = createGame([
+    { err: new Error('timeout') },
+    { res: { code: 404, data: { intentNotExecuted: true } } },
+  ]);
+  await game.action('DRAW', { pick: 1 });
+  await flush();
+  await flush();
+  assert.equal(game.data.originalRetryable, true);
+  const posts = game.calls.filter(call => call.method === 'POST').length;
+  game.armLockExpiry(Date.now() - 120000);
+  assert.equal(game.data.unknown, false);
+  assert.equal(game.data.originalRetryable, false);
+  assert.equal(game.calls.filter(call => call.method === 'POST').length, posts);
+
+  const stale = createGame([]);
+  const key = stale.pendingKey();
+  wx.setStorageSync(key, {
+    command: { sessionId: 42, version: 3, idempotencyKey: 'stale', action: 'DRAW' },
+    state: { sessionId: 42, version: 3 },
+    lockedAt: 1,
+  });
+  stale.start();
+  assert.equal(wx.getStorageSync(key), undefined);
+  assert.equal(stale.calls.length, 0);
+  assert.equal(stale.data.unknown, false);
 });
 
 test('★同一 version 上重试复用同一幂等键 —— 服务端 replay 才能生效', async () => {

@@ -49,7 +49,11 @@ public class AdvancedActionReceiptReader {
             if (found != null && !found.equals(view)) throw new ServiceException("原请求回执存在冲突", 409);
             found = view;
         }
-        if (found == null) throw new ServiceException("尚未查到原请求回执，结果仍待确认", 404);
+        if (found == null) {
+            // 账本没有这一键:不是已提交的不确定结果。重放仍走原幂等键,这里不写状态。
+            throw new ServiceException("尚未查到原请求回执，结果仍待确认", 404)
+                    .setData(Map.of("intentNotExecuted", true));
+        }
         return Map.of("sessionId", sessionId.toString(), "idempotencyKey", requestId,
                 "view", CheckReceiptProjection.response(found));
     }

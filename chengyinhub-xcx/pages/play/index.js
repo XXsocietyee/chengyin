@@ -3239,8 +3239,7 @@ Page({
         });
         const evidenceOnly = node.playerTask.inputType === 'PHOTO'
           && node.playerTask.completionPolicy === 'EVIDENCE_ONLY';
-        const submissionId = result.receipt.result && result.receipt.result.submissionId;
-        cyToast(evidenceOnly ? '证据已记录' : (submissionId ? ('核验编号 ' + submissionId) : '任务已提交'), { icon: evidenceOnly ? 'none' : 'success' });
+        cyToast(evidenceOnly ? '证据已记录' : '任务已提交', { icon: evidenceOnly ? 'none' : 'success' });
         this.setData({ 'gameModule.write': {
           status: 'confirmed', requestId,
           message: evidenceOnly ? '证据已记录' : '任务已记录',
@@ -4937,8 +4936,9 @@ Page({
       puzzleScore: n.puzzleScore == null ? null : Number(n.puzzleScore),
       completionMode: n.completionMode || '',
       // P-10:feedbackText 是模板「文字反馈」= 完成后给的话(编辑器占位就是「恭喜你解开了……」),
-      // 只在答对时用(passText);答错兜底永远不拿它,否则服务端没带原因时答错会显示一句祝贺。
-      feedback: '答案还没咬合，再看看四周……', passText: String(n.feedbackText || '').trim(),
+      // 只在节点已有完成事实时留下(passText)。解题前即使响应里带了它,也不当答案、也不当完成反馈。
+      // 答错兜底永远不拿它,否则服务端没带原因时答错会显示一句祝贺。答对后的答案只认回执 answerReveal。
+      feedback: '答案还没咬合，再看看四周……', passText: n.done ? String(n.feedbackText || '').trim() : '',
       photoDesc: n.photoRequireDesc || '', audio: secureOwnMedia(n.audioUrl), audioDur: (n.audioDuration ? n.audioDuration + '″' : ''),
       medalName: shopDay ? '' : (n.medalName || ''), medalImg: shopDay ? '' : (n.medalImg || ''), medalStyle: shopDay ? '' : (n.medalStyle || 'glow'), couponId: shopDay ? 0 : (n.couponId || 0),
       // 后端 /nodes 新下发的券公开投影(name/amount/endTime;无 code):券页据此显示真面额

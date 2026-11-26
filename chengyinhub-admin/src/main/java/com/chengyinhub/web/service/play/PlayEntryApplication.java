@@ -150,6 +150,7 @@ public class PlayEntryApplication {
         PlayerNodeProgress progProbe = new PlayerNodeProgress();
         progProbe.setMemberId(memberId);
         progProbe.setActivityId(progActId);
+        progProbe.setTopicId(tId);
         List<PlayerNodeProgress> doneList = playerNodeProgressService.selectPlayerNodeProgressList(progProbe);
         List<Long> doneNodeIds = new ArrayList<>();
         Map<Long, Date> doneAtMap = new LinkedHashMap<>(); // P0 剧情成书:完成时间(前端按"我的完成顺序"排手记)

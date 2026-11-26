@@ -975,6 +975,7 @@
         <view class="fx-msg__ops" wx:if="{{item.role=='ai'}}">
           <view class="fx-msg__op" wx:if="{{item.audioUrl}}" bindtap="toggleNpcVoice" data-idx="{{index}}"
                 aria-role="button" aria-label="{{shopNpc.voiceId === item.id ? '停止语音' : '播放语音'}}" hover-class="cy-pressed" hover-stay-time="80">{{shopNpc.voiceId === item.id ? '停止' : '播放'}}</view>
+          <text wx:if="{{item.audioUrl}}">AI 合成语音</text>
           <view class="fx-msg__op" bindtap="copyNpcMsg" data-text="{{item.text}}"
                 aria-role="button" aria-label="复制这条回答" hover-class="cy-pressed" hover-stay-time="80">复制</view>
           <view class="fx-msg__op" bindtap="retryNpcMsg" data-idx="{{index}}"
@@ -1900,7 +1901,6 @@
           <text class="gmod__task-evidence-status" wx:if="{{item.taskEvidence.statusText}}">{{item.taskEvidence.statusText}}</text>
           <view class="gmod__submission" wx:if="{{item.submission}}">
             <text>{{item.submission.statusLabel}}</text>
-            <text wx:if="{{item.submission.status === 'PENDING'}}">核验编号 {{item.submission.submissionId}}</text>
             <text wx:if="{{item.submission.status === 'REJECTED' && item.submission.decisionReason}}">
               驳回原因：{{item.submission.decisionReason}}
             </text>
