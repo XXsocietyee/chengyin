@@ -31,7 +31,8 @@
         name="{{item.name}}" cover="{{item.coverUrl || item.coverImage || item.photo || ''}}" logo="{{item.logo || ''}}"
         address="{{item.address || ''}}" latitude="{{item.latitude}}" longitude="{{item.longitude}}" nav="{{true}}" available-time="{{item.businessTime || item.availableTime || ''}}"
         capacity="{{item.capacity}}" charge-type="{{item.chargeType}}" coop-open="{{item.coopOpen}}"
-        suit-types="{{item.suitActivityTypes || item.chapterText || ''}}" />
+        suit-types="{{item.suitActivityTypes || item.chapterText || ''}}"
+        distance="{{item.distanceText}}" />
       <view class="contact-action" wx:if="{{!item.memberId && item.canCall}}">
         <cy-btn variant="secondary" size="sm" bindtap="callMerchant"
           loading="{{actionPendingKey === 'call:' + item.phone}}" disabled="{{!!actionPendingKey}}"

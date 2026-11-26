@@ -1,4 +1,5 @@
 const moneyFormat = require('../../../utils/money-format.js')
+const { distanceText } = require('../../../utils/geo.js')
 const toast = require('../../../utils/toast.js');
 const modal = require('../../../utils/modal.js');
 const app = getApp();
@@ -69,6 +70,14 @@ function validInvitableRow(row) {
     && (row.replacementOfOfferId == null ||
       (validReplacementId(row.chapterId) && validReplacementId(row.replacementOfOfferId)))
     && validChapterNames(row.chapterNames));
+}
+
+function merchantDistanceText(value) {
+  if (typeof value === 'string' && value.trim() === '') return '';
+  if (value == null || value === '') return '';
+  const meters = Number(value);
+  if (!Number.isFinite(meters)) return '';
+  return distanceText(meters);
 }
 
 function isLocationPermissionFailure(value) {
@@ -400,10 +409,11 @@ Page({
     order.forEach(function (k) { byKey[k].rowKey = k; });
     const list = order.map(function (k) { return byKey[k]; })
       .filter(function (m) { return m.coopOpen !== 0 && m.coopOpen !== '0'; });
-    // L07-165:距离只排序,不上卡片
+    // L07-165:有距离才写卡片文案;缺距离留空,不写成 0。排序仍按距离,无距离垫底。
     list.forEach(function (m) {
       m.chapterText = (m.chapterNames && m.chapterNames.length)
         ? '可承接 · ' + m.chapterNames.join('、') : '';
+      m.distanceText = merchantDistanceText(m.distance);
     });
     // 无距离(没坐标 / 不在附近半径内)一律垫底,不占前排
     list.sort(function (a, b) {

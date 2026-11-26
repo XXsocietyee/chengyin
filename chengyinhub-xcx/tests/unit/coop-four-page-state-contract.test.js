@@ -568,8 +568,8 @@ test('附近页拒绝非法 topicId，不写成 0；刷新保留旧列表并区�
   requests[1].success({ code: 200, data: [] })
   await flush()
   assert.equal(page.data.merchants[0].name, '旧商家')
-  // L07-165(业主默认 B):不显示距离就不算展示字段;真实距离 0 仍按最近排在前面
-  assert.equal('distanceText' in page.data.merchants[0], false)
+  // L07-165:真实距离 0 仍按最近排在前面,卡片写「0 米」
+  assert.equal(page.data.merchants[0].distanceText, '0 米')
 
   page.onPullDownRefresh()
   assert.equal(locationCalls.length, 2)
@@ -919,10 +919,27 @@ test('附近商家:带主题拒绝定位时照样读可承接商家', async () =
   assert.match(page.data.refreshErrorText, /定位/)
 })
 
-// L07-165(业主默认 B):距离只排序、不上卡片
-test('附近商家按距离排序但不生成展示用距离', () => {
+// L07-165:有距离的行在商家卡上展示;缺距离不显示 0;名单仍按距离排序
+test('附近商家有距离就展示在卡片上,缺距离留空,仍按距离排序', () => {
   const src = fs.readFileSync(path.join(ROOT, 'pages/coop/nearby/index.js'), 'utf8')
-  assert.doesNotMatch(src, /distanceText/)
+  assert.match(src, /m\.distanceText = merchantDistanceText\(m\.distance\)/)
+  assert.doesNotMatch(src, /merchantDistanceText\([^)]*\)\s*\|\|\s*0/)
   const wxml = fs.readFileSync(path.join(ROOT, 'pages/coop/nearby/index.wxml'), 'utf8')
-  assert.doesNotMatch(wxml, /distance/)
+  assert.match(wxml, /distance="\{\{item\.distanceText\}\}"/)
+  const card = fs.readFileSync(path.join(ROOT, 'components/cy/merchant-card/index.wxml'), 'utf8')
+  assert.match(card, /wx:if="\{\{distance\}\}"[^>]*>\s*<text>\{\{distance\}\}<\/text>/)
+  const { page } = loadPage('pages/coop/nearby/index.js')
+  const rows = page.merge([
+    { id: 1, memberId: 1, name: '远店', distance: 1800 },
+    { id: 2, memberId: 2, name: '无距离', distance: null },
+    { id: 3, memberId: 3, name: '近店', distance: '320' },
+    { id: 4, memberId: 4, name: '零距离', distance: 0 },
+  ], [])
+  assert.deepEqual(JSON.parse(JSON.stringify(rows.map((row) => row.name))), ['零距离', '近店', '远店', '无距离'])
+  assert.equal(rows[0].distanceText, '0 米')
+  assert.equal(rows[1].distanceText, '320 米')
+  assert.equal(rows[2].distanceText, '1.8 公里')
+  assert.equal(rows[3].distanceText, '')
+  const blank = page.merge([{ id: 5, memberId: 5, name: '空距离', distance: '' }], [])
+  assert.equal(blank[0].distanceText, '')
 })
