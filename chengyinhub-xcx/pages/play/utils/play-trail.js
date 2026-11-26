@@ -30,17 +30,21 @@ function createPlayTrail(storage, sessionKey, now) {
   const line = createRouteLine();
   let points = [];
   let startedAt = 0, savedAt = 0, dirty = false;
+  // 没有本局键时只在内存里记:不能读、也不能覆盖按主题/场次留下的上一局。
+  const scoped = typeof sessionKey === 'string' && sessionKey.trim() !== '';
   const key = storeKey();
-  try {
-    const saved = storage && storage.getStorageSync ? storage.getStorageSync(key) : null;
-    if (saved && saved.key === sessionKey && Array.isArray(saved.points)) {
-      points = saved.points.filter((q) => q && Number.isFinite(q.lat) && Number.isFinite(q.lng));
-      startedAt = Number(saved.startedAt) || 0;
-    }
-  } catch (e) { points = []; }
+  if (scoped) {
+    try {
+      const saved = storage && storage.getStorageSync ? storage.getStorageSync(key) : null;
+      if (saved && saved.key === sessionKey && Array.isArray(saved.points)) {
+        points = saved.points.filter((q) => q && Number.isFinite(q.lat) && Number.isFinite(q.lng));
+        startedAt = Number(saved.startedAt) || 0;
+      }
+    } catch (e) { points = []; }
+  }
 
   function persist(force) {
-    if (!dirty || !storage || !storage.setStorageSync) return;
+    if (!scoped || !dirty || !storage || !storage.setStorageSync) return;
     const t = clock();
     if (!force && t - savedAt < SAVE_MS) return;
     savedAt = t; dirty = false;
@@ -48,7 +52,7 @@ function createPlayTrail(storage, sessionKey, now) {
   }
 
   return {
-    key: sessionKey,
+    key: scoped ? sessionKey : '',
     note(loc) {
       if (!loc) return false;
       const lat = Number(loc.latitude), lng = Number(loc.longitude);
@@ -71,6 +75,7 @@ function createPlayTrail(storage, sessionKey, now) {
     persist() { persist(true); },
     clear() {
       points = []; startedAt = 0; dirty = false; line.reset();
+      if (!scoped) return;
       try { if (storage && storage.removeStorageSync) storage.removeStorageSync(key); } catch (e) { /* noop */ }
     },
   };

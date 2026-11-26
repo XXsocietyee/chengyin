@@ -5507,14 +5507,23 @@ Page({
   },
   /* 第九轮 m2 第 1 项:我走过的路(亮线 + 光晕),只在地图露出、页面在前台时推给地图 */
   _playTrail() {
-    // L01-020:轨迹按「主题/场次 + 本局局号」分键:同一主题重开一局不再接上上一局的线;
-    // 本机副本超过 24 小时就丢,走过的精确路径不在手机里一直留着。
-    const runId = String((this._routeState || {}).sessionId || '');
-    const key = this._sessionKey() + (runId ? '#' + runId : '');
-    if (!this._trail || this._trail.key !== key) {
-      this._trail = createPlayTrail(wx, key);
+    // L01-020:按「主题/场次 + 本局」分键。本局是路线局;没有路线局时用这一局的 runKey。
+    // 局号未定只记在内存里,不读只按主题/场次留下的线。本机副本超过 24 小时就丢。
+    const runId = String(precisePlayId((this._routeState || {}).sessionId) || this._serverRunKey || '');
+    const key = runId ? this._sessionKey() + '#' + runId : '';
+    if (this._trail && this._trail.key === key) return this._trail;
+    const previous = this._trail;
+    const carried = previous && !previous.key ? previous.points() : null;
+    if (previous && previous.key) previous.persist();
+    this._trail = key ? createPlayTrail(wx, key) : createPlayTrail(null, '');
+    if (key) {
       const started = this._trail.startedAt();
       if (started && Date.now() - started > PLAY_TRAIL_TTL_MS) this._trail.clear();
+    }
+    if (carried) carried.forEach((p) => this._trail.note({ latitude: p.lat, longitude: p.lng }));
+    if (previous && !this._themeHidden && !this._playDisposed) {
+      const visible = this._trailVisible();
+      this.setData({ fmTrail: visible ? this._trail.lines().concat(this._teamTrailLines ? this._teamTrailLines() : []) : [] });
     }
     return this._trail;
   },
@@ -5526,6 +5535,7 @@ Page({
     return !!(this.data.navMap || this.data.storyMap || this.data.chapterFull || (this.data.nav && this.data.nav.active));
   },
   _flushTrail(force) {
+    if (!(this._themeHidden || this._playDisposed)) this._playTrail();
     if (this._themeHidden || this._playDisposed || !this._trail) return;
     if (!force && !this._trailVisible()) return;
     const now = Date.now();
