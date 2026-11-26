@@ -88,6 +88,38 @@ function feedbackRows(config, rows) {
 // 选择玩法的标签条:每个分类最多四行,标签按顺序轮流落到各行(宽度随字数,不强行对齐)。
 function tagRows(items) { const rows = [[], [], [], []]; items.forEach((item, i) => rows[i % 4].push(item)); return rows.filter(row => row.length); }
 function summary(row) { return !row ? '未配置' : [row.reply, (row.costs || []).length ? '消耗 ' + row.costs.length + ' 项' : '', (row.effects || []).length ? '效果 ' + row.effects.length + ' 项' : '', row.nextStepId ? '进入 ' + row.nextStepId : ''].filter(Boolean).join(' · ') || '无额外处理'; }
+// 玩法视图真正读到的那一层(L04-011)。题干、说明、骰面文案这类逐字输入不在里面，签名不变就不重建整份视图。
+const LEGACY_FIELDS = { ballShake: ['timed', 'seconds'], typeIn: ['seconds'], sort: ['maxAttempts'], qa: ['maxTries', 'multi'], photoCheck: ['maxTries'], estimate: ['maxTries'], pricePair: ['maxTries'], hiddenObject: ['maxTries'] };
+function optionDeps(rows) { return (rows || []).map(row => ({ name: row && (row.label || row.text || row.title || row.name) || '', after: row && row.after || null })); }
+function viewDeps(config, validationMethod, category) {
+  const c = config || {}, sections = {}, legacy = {};
+  Object.keys(c).forEach(key => {
+    const section = c[key];
+    if (section && typeof section === 'object' && !Array.isArray(section) && (Object.prototype.hasOwnProperty.call(section, 'enabled') || Object.prototype.hasOwnProperty.call(section, 'mode'))) sections[key] = { on: section.enabled === true, mode: section.mode || '' };
+  });
+  Object.keys(LEGACY_FIELDS).forEach(key => {
+    const section = c[key]; if (!section) return;
+    const row = {};
+    LEGACY_FIELDS[key].forEach(field => { if (section[field] != null) row[field] = section[field]; });
+    if (Object.keys(row).length) legacy[key] = row;
+  });
+  return {
+    validationMethod: Number(validationMethod) || 0, category: category || '全部', sections, legacy,
+    scan: c.scan ? { on: !!c.scan.enabled, kind: c.scan.kind || '', reply: c.scan.reply || '' } : null,
+    outcome: c.outcomeRules || null,
+    options: { qa: optionDeps(c.qa && c.qa.options), pricePair: optionDeps(c.pricePair && c.pricePair.items), blindTaste: optionDeps(c.blindTaste && c.blindTaste.options), predict: optionDeps(c.predict && c.predict.options), random: optionDeps(c.random && c.random.items) },
+    draw: c.random ? c.random.drawCount : null,
+    diceCount: c.diceRoll ? c.diceRoll.diceCount : null,
+    faces: ((c.diceRoll && c.diceRoll.faces) || []).map(face => (face && typeof face === 'object' ? { after: face.after || null } : null)),
+    coin: c.coinFlip ? { heads: !!c.coinFlip.heads, tails: !!c.coinFlip.tails, headsAfter: c.coinFlip.heads && c.coinFlip.heads.after || null, tailsAfter: c.coinFlip.tails && c.coinFlip.tails.after || null } : null,
+    branch: ((c.branch && c.branch.steps) || []).map(step => ({ id: step && step.id, title: (step && step.title) || '', ready: !!(step && typeof step.body === 'string' && step.body.trim()), options: ((step && step.options) || []).map(row => ({ after: row && row.after || null })) })),
+    timer: c.timer ? { on: !!c.timer.enabled, seconds: c.timer.durationSeconds, timeout: c.timer.timeoutResult } : null,
+    window: c.timeWindow ? { on: !!c.timeWindow.enabled, from: c.timeWindow.openFrom, to: c.timeWindow.openTo } : null,
+    board: c.leaderboard ? { on: !!c.leaderboard.enabled, metric: c.leaderboard.metric, limit: c.leaderboard.limit } : null,
+    multi: c.multiplayer ? { on: !!c.multiplayer.enabled } : null,
+    rules: c.interactionRules || null, tools: c.interactionTools || null, clues: c.clues || null, variants: c.variants || null,
+  };
+}
 function wholeConfigError(page, advanced) {
   const cfg = require('../utils/publish/advanced-game-config.js');
   const opts = page._advancedValidateOpts ? page._advancedValidateOpts() : {};
@@ -212,7 +244,15 @@ const methods = {
     if (patch) this._setFormState(patch);
   },
 
-  _refreshR5Editor() { const effectScopeOptions = tools.TARGETS.map(item => { const config = clone(this.data.advanced); config.interactionRules = Object.assign({}, config.interactionRules, { targetScope: item.key }); return Object.assign({}, item, { reason: matrix.validate(this._supportMatrix, Object.assign({}, this.data.formData, { advancedConfigJson: config }), this._supportContext) || (item.key !== 'OWNER' && this._supportContext?.runtime?.runtimeScope && !(this._supportContext.runtime.runtimeScope === 'TEAM' && this._supportContext.runtime.worldMode === 'WORLD_SHARED') ? '仅全场共享的组队主题可用' : '') }); }); this._setR5View(effectScopeOptions, view(this.data.advanced, this.data.formData.validationMethod, this._supportMatrix, this._supportContext, this.data.r5Editor?.category)); },
+  // 高级配置里视图真正用到的部分变了才重建(L04-011)。题干逐字输入签名不变，直接返回，不整份 setData。
+  _refreshR5Editor() {
+    const deps = JSON.stringify(viewDeps(this.data.advanced, this.data.formData && this.data.formData.validationMethod, this.data.r5Editor && this.data.r5Editor.category));
+    const ctx = JSON.stringify(this._supportContext || null);
+    if (deps === this._r5Deps && ctx === this._r5Ctx && this._r5Matrix === this._supportMatrix) return;
+    this._r5Deps = deps; this._r5Ctx = ctx; this._r5Matrix = this._supportMatrix;
+    const effectScopeOptions = tools.TARGETS.map(item => { const config = clone(this.data.advanced); config.interactionRules = Object.assign({}, config.interactionRules, { targetScope: item.key }); return Object.assign({}, item, { reason: matrix.validate(this._supportMatrix, Object.assign({}, this.data.formData, { advancedConfigJson: config }), this._supportContext) || (item.key !== 'OWNER' && this._supportContext?.runtime?.runtimeScope && !(this._supportContext.runtime.runtimeScope === 'TEAM' && this._supportContext.runtime.worldMode === 'WORLD_SHARED') ? '仅全场共享的组队主题可用' : '') }); });
+    this._setR5View(effectScopeOptions, view(this.data.advanced, this.data.formData.validationMethod, this._supportMatrix, this._supportContext, this.data.r5Editor?.category));
+  },
   // 只把变了的键送去渲染层(L04-011):整份 r5Editor 约 17KB,每次输入都整份 setData 会拖慢打字
   _setR5View(effectScopeOptions, next) {
     const current = this.data.r5Editor, patch = {};

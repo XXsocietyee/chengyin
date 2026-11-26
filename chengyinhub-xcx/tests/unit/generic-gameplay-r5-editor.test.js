@@ -647,6 +647,75 @@ test('L04-012 逐字输入成功反馈：只按路径写这一行，r5Editor 只
   assert.equal(p.data.advanced.outcomeRules.fail.reply, '再想想'); assert.equal(p.data.advanced.outcomeRules.version, 1);
 });
 
+test('L04-011 模板字段逐字输入不重建整份 r5Editor；视图用到的配置变了才刷新', () => {
+  const r5Keys = [];
+  const watch = (p) => {
+    r5Keys.length = 0;
+    const set = p.setData;
+    p.setData = function (patch, done) {
+      Object.keys(patch).forEach(key => { if (key === 'r5Editor' || key.startsWith('r5Editor')) r5Keys.push(key); });
+      return set.call(this, patch, done);
+    };
+  };
+  const primed = (advanced) => {
+    const p = page();
+    p.data.advanced = cfg.parse(advanced).value;
+    p._refreshR5Editor();
+    p.data.r5Editor.gameSummary = 'STALE';
+    watch(p);
+    return p;
+  };
+  const title = primed(base());
+  title.onAdvancedField(event({ section: 'qa', field: 'title' }, '新题干'));
+  assert.equal(title.data.advanced.qa.title, '新题干');
+  assert.equal(title.data.r5Editor.gameSummary, 'STALE', '题干逐字输入不重建玩法视图');
+  assert.deepEqual(r5Keys, []);
+
+  const options = primed(base());
+  options.data.optionItems = [{ text: 'A', isCorrect: true }, { text: 'B', isCorrect: false }];
+  options.onOptionTextChange(event({ index: 0 }, '甲'));
+  assert.equal(options.data.optionItems[0].text, '甲');
+  assert.equal(options.data.r5Editor.gameSummary, 'STALE');
+  assert.deepEqual(r5Keys, []);
+
+  const labels = primed(base());
+  labels.data.gameKey = 'qaPick';
+  labels.data.gameSection = 'qa';
+  labels.updateAdvancedRow(event({ path: 'qa.options', index: 0, field: 'label' }, '甲选项'));
+  assert.equal(labels.data.advanced.qa.options[0].label, '甲选项');
+  assert.equal(labels.data.r5Editor.optionAfterRows[0].label, '选「甲选项」之后');
+  assert.equal(r5Keys.includes('r5Editor'), false);
+  assert.equal(r5Keys.includes('r5Editor.gameGroups'), false);
+  assert.ok(r5Keys.includes('r5Editor.optionAfterRows'));
+
+  const dice = primed({ schemaVersion: 1, diceRoll: { enabled: true, mode: 'd6', diceCount: 1, faces: ['A', 'B', 'C', 'D', 'E', 'F'] }, outcomeRules: { version: 1, pass: {}, fail: {} } });
+  dice.onDiceFace(event({ index: 0 }, '去钟楼'));
+  assert.equal(dice.data.advanced.diceRoll.faces[0], '去钟楼', '打开的骰面输入仍是刚打的字');
+  assert.equal(dice.data.r5Editor.gameSummary, 'STALE');
+  assert.equal(r5Keys.includes('r5Editor'), false);
+
+  const scan = primed(Object.assign(base(), { scan: { enabled: true, kind: 'TEXT', reply: '' } }));
+  scan.data.formData.validationMethod = 4;
+  scan._r5Deps = '';
+  scan._refreshR5Editor();
+  scan.data.r5Editor.gameSummary = 'STALE';
+  r5Keys.length = 0;
+  scan.onAdvancedField(event({ section: 'scan', field: 'reply' }, '欢迎'));
+  assert.equal(scan.data.advanced.scan.reply, '欢迎', '扫完回复面板仍显示当前输入');
+  assert.equal(scan.data.r5Editor.scanSummary, '欢迎');
+  assert.equal(r5Keys.includes('r5Editor'), false);
+  assert.equal(r5Keys.includes('r5Editor.gameGroups'), false);
+  assert.ok(r5Keys.includes('r5Editor.scanSummary'));
+
+  const typed = primed({ schemaVersion: 1, typeIn: { enabled: true, text: 'abc', seconds: 10 } });
+  typed.onAdvancedField(event({ section: 'typeIn', field: 'seconds', numeric: '1' }, '19'));
+  assert.equal(typed.data.advanced.typeIn.seconds, 19);
+  assert.equal(typed.data.r5Editor.legacyRows.find(row => row.path === 'typeIn.seconds').displayValue, '19');
+  assert.equal(r5Keys.includes('r5Editor'), false);
+  assert.equal(r5Keys.includes('r5Editor.gameGroups'), false);
+  assert.ok(r5Keys.includes('r5Editor.legacyRows'));
+});
+
 test('L04-030 采用路径(直接 fillFormWithTemplateData)也带上类别芯片', () => {
   const p = page();
   p.fillFormWithTemplateData({ title: '库模板', validationMethod: 5, advancedConfigJson: JSON.stringify(base()), sysCategoryList: [{ id: 3, categoryName: '历史' }, { id: 4, categoryName: '建筑' }] });

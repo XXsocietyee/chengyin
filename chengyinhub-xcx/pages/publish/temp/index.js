@@ -1583,6 +1583,8 @@ Page({
       }
       if (want.effects) this._refreshEffectResources();
       if (want.support) this._refreshSupportMatrix();
+      // 支持矩阵没跑时，高级配置仍可能改到玩法视图(旧限时秒数等)。签名没变的字段在 _refreshR5Editor 里直接跳过。
+      else if (this._refreshR5Editor && Object.keys(next).some((key) => key === 'advanced' || key.indexOf('advanced.') === 0)) this._refreshR5Editor();
       if (want.outcome) this._refreshOutcomeContract();
       if (want.check) this._syncCheckDerived();
       if (want.qa) this._syncQaAnswerError();
