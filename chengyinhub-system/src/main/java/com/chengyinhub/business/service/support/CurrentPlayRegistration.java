@@ -168,7 +168,7 @@ public final class CurrentPlayRegistration {
             if(fact!=null && fact.withholds(memberId)) continue;
             CmsRegistration current=registrations.selectCmsRegistrationByIdForUpdate(snapshot.getId());
             if(!currentOwner(current,memberId,ownerType,ownerId)) continue;
-            if(!passesValueRules(current,activity,ownerType,ownerId,now,originallyRequiresPaid,continuing)) continue;
+            if(!passesValueRules(current,activity,ownerType,now,originallyRequiresPaid,continuing)) continue;
             valid.add(current);
             if(firstOnly) return valid;
         }
@@ -180,7 +180,7 @@ public final class CurrentPlayRegistration {
             if(containsId(valid,fact.getRegistrationId())) continue;
             CmsRegistration current=registrations.selectCmsRegistrationById(fact.getRegistrationId());
             if(!ownedScope(current,ownerType,ownerId)) continue;
-            if(!passesValueRules(current,activity,ownerType,ownerId,now,originallyRequiresPaid,continuing)) continue;
+            if(!passesValueRules(current,activity,ownerType,now,originallyRequiresPaid,continuing)) continue;
             valid.add(current);
             if(firstOnly) return valid;
         }
@@ -198,7 +198,7 @@ public final class CurrentPlayRegistration {
             if(!Integer.valueOf(2).equals(current.getPaymentStatus())) continue;
             GiftPlayFact giftFact=giftFacts.get(fact.getRegistrationId());
             if(giftFact!=null && !giftFact.claimedBy(current.getMemberId())) continue;
-            if(!passesValueRules(current,activity,ownerType,ownerId,now,originallyRequiresPaid,continuing)) continue;
+            if(!passesValueRules(current,activity,ownerType,now,originallyRequiresPaid,continuing)) continue;
             valid.add(current);
             if(firstOnly) return valid;
         }
@@ -221,16 +221,12 @@ public final class CurrentPlayRegistration {
         throw new IllegalStateException(ownerType==1L ? "当前自玩资格已失效" : "当前报名资格已失效");
     }
     /** 原口径的值/时效/撤销判定，行归属另判（礼品行 member_id 仍是买家）。 */
-    private static boolean passesValueRules(CmsRegistration current,CmsActivity activity,long ownerType,Long ownerId,
-            Date now,boolean originallyRequiresPaid,boolean continuing) {
+    private static boolean passesValueRules(CmsRegistration current,CmsActivity activity,long ownerType,Date now,
+            boolean originallyRequiresPaid,boolean continuing) {
         if(current==null) return false;
         if((originallyRequiresPaid || Integer.valueOf(3).equals(current.getPurchaseKind()))
                 && !Integer.valueOf(2).equals(current.getPaymentStatus())) return false;
         if(ownerType==1L && !continuing && current.getExpiresAt()!=null && !current.getExpiresAt().after(now)) return false;
-        // 商品发放的探索票是 owner_type=1，ownerId 就是主题。没有场次，不用活动结束时间挡进章节。
-        if(ownerType==1L && Integer.valueOf(3).equals(current.getPurchaseKind())) {
-            return current.getOwnerId()!=null && current.getOwnerId().equals(ownerId);
-        }
         String deny=ExploreTicketUsePolicy.rejection(current.getPurchaseKind(),activity==null?null:activity.getEndDate(),now);
         if(deny!=null) throw new IllegalStateException(deny);
         return true;

@@ -4429,51 +4429,29 @@ public class CmsRegistrationServiceImpl implements ICmsRegistrationService, IReg
                 || operatorMemberId == null || operatorMemberId <= 0) {
             throw new IllegalStateException("商家主体或核销操作人无效");
         }
-        if (registration == null || registration.getId() == null || registration.getOwnerId() == null) {
+        if (registration == null || registration.getId() == null || registration.getOwnerId() == null
+                || !Long.valueOf(2L).equals(registration.getOwnerType())) {
             throw new IllegalStateException("报名单类型或关联活动无效");
         }
-        boolean claimedTopicExplore = Long.valueOf(1L).equals(registration.getOwnerType())
-                && Integer.valueOf(PurchaseKind.EXPLORE_PASS).equals(registration.getPurchaseKind())
-                && topicId != null && topicId.equals(registration.getOwnerId());
-        if (!claimedTopicExplore && !Long.valueOf(2L).equals(registration.getOwnerType())) {
-            throw new IllegalStateException("报名单类型或关联活动无效");
-        }
-        // 主题探索票先锁主题，再锁报名。不另造活动。活动票仍是活动锁在报名锁之前。
-        if (claimedTopicExplore) {
-            CmsTopic topic = cmsTopicMapper.selectCmsTopicByIdForUpdate(topicId);
-            if (topic == null || Integer.valueOf(2).equals(topic.getDelFlag())) {
-                throw new IllegalStateException("探索票所属主题不可用");
-            }
-        }
-        CmsActivity activity = claimedTopicExplore ? null : assertActivityRedeemable(registration);
+        CmsActivity activity = assertActivityRedeemable(registration);
         CmsRegistration current = cmsRegistrationMapper.selectCmsRegistrationByIdForUpdate(registration.getId());
         if (current == null || !Integer.valueOf(2).equals(current.getPaymentStatus())
                 || !Integer.valueOf(2).equals(current.getRegistrationStatus())) {
             throw new IllegalStateException("订单未完成支付、已退款或已失效，无法核销");
         }
-        boolean sameBuyer = registration.getOwnerId().equals(current.getOwnerId())
-                && java.util.Objects.equals(registration.getMemberId(), current.getMemberId());
-        boolean topicExplore = claimedTopicExplore && sameBuyer
-                && Long.valueOf(1L).equals(current.getOwnerType())
-                && Integer.valueOf(PurchaseKind.EXPLORE_PASS).equals(current.getPurchaseKind())
-                && topicId.equals(current.getOwnerId());
-        boolean activityExplore = !claimedTopicExplore && sameBuyer
-                && Long.valueOf(2L).equals(current.getOwnerType())
-                && activity != null && topicId != null && topicId.equals(activity.getTopicId());
-        if (!topicExplore && !activityExplore) {
-            throw new IllegalStateException(claimedTopicExplore
-                    ? "订单与当前主题不一致，无法核销" : "订单与当前活动或路线不一致，无法核销");
+        if (!Long.valueOf(2L).equals(current.getOwnerType())
+                || !registration.getOwnerId().equals(current.getOwnerId())
+                || !java.util.Objects.equals(registration.getMemberId(), current.getMemberId())
+                || activity == null || topicId == null || !topicId.equals(activity.getTopicId())) {
+            throw new IllegalStateException("订单与当前活动或路线不一致，无法核销");
         }
         registration = current;
-        // A包：按章核销同样拒绝非探索票。活动票还要看场次结束时间；主题票没有场次，只看票自己的到期时间。
+        // A包：按章核销同样拒绝非探索票与已到期场次探索票(master 已先校验 ownerType=2 再锁活动)。
         if (!Integer.valueOf(PurchaseKind.EXPLORE_PASS).equals(registration.getPurchaseKind())) {
             throw new IllegalStateException("探索票或路线归属已变化，请重新扫码");
         }
-        Date useEnd = topicExplore ? registration.getExpiresAt() : activity.getEndDate();
-        if (!(topicExplore && useEnd == null)) {
-            String useRejection = ExploreTicketUsePolicy.rejection(registration.getPurchaseKind(), useEnd, new Date());
-            if (useRejection != null) throw new IllegalStateException(useRejection);
-        }
+        String useRejection = ExploreTicketUsePolicy.rejection(registration.getPurchaseKind(), activity.getEndDate(), new Date());
+        if (useRejection != null) throw new IllegalStateException(useRejection);
         if (cmsRegistrationMapper.hasActiveManualRefundCaseForUpdate(registration.getId())) {
             throw new IllegalStateException("订单正在人工退款处理中，暂不可核销");
         }

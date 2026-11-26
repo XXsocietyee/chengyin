@@ -2,7 +2,6 @@ package com.chengyinhub.web.service.verify;
 
 import com.chengyinhub.business.domain.CmsActivity;
 import com.chengyinhub.business.domain.CmsRegistration;
-import com.chengyinhub.business.domain.CmsTopic;
 import com.chengyinhub.business.domain.RegistrationSeat;
 import com.chengyinhub.business.service.*;
 import com.chengyinhub.business.service.impl.QrcodeServiceImpl;
@@ -121,24 +120,12 @@ class RegistrationTicketApplicationTest {
         AjaxResult denied = AjaxResult.error("请先登录"); when(owner.issueDynCode(0L, 31L, 2)).thenReturn(denied);
         assertSame(denied, controller.issueDynCode(31L, 2)); verify(owner).issueDynCode(0L, 31L, 2);
     }
-    @Test void topicExplorePassIssuesATopicCodeWhenOwnerIdIsTheTopic() {
-        ICmsTopicService topics = mock(ICmsTopicService.class);
-        ReflectionTestUtils.setField(application, "topicService", topics);
+    @Test void explorePassWithoutAnActivityDoesNotIssueACodeOrInventAnActivity() {
         order.setOwnerType(1L); order.setOwnerId(80L); order.setPurchaseKind(3); order.setOrderNum(1L);
-        CmsTopic topic = new CmsTopic(); topic.setId(80L); topic.setDelFlag(0);
-        when(topics.selectCmsTopicById(80L)).thenReturn(topic);
         AjaxResult response = application.issueDynCode(51L, 31L, null);
-        Map<?, ?> data = (Map<?, ?>) response.get("data");
-        assertEquals(200, response.get("code"));
-        assertEquals("topic", data.get("type"));
+        assertEquals("探索票所属活动不可用", response.get("msg"));
+        assertNull(response.get("data"));
         verifyNoInteractions(activities);
-    }
-    @Test void missingTopicExplorePassDoesNotInventAnActivity() {
-        ICmsTopicService topics = mock(ICmsTopicService.class);
-        ReflectionTestUtils.setField(application, "topicService", topics);
-        order.setOwnerType(1L); order.setOwnerId(80L); order.setPurchaseKind(3); order.setOrderNum(1L);
-        when(topics.selectCmsTopicById(80L)).thenReturn(null);
-        assertEquals("探索票所属主题不可用", application.issueDynCode(51L, 31L, null).get("msg"));
-        verifyNoInteractions(activities);
+        verify(qr, never()).generateInlineQrcode(anyString(), anyInt(), anyInt());
     }
 }

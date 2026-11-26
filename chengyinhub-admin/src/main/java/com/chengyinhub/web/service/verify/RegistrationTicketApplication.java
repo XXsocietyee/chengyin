@@ -2,10 +2,8 @@ package com.chengyinhub.web.service.verify;
 
 import com.chengyinhub.business.domain.CmsActivity;
 import com.chengyinhub.business.domain.CmsRegistration;
-import com.chengyinhub.business.domain.CmsTopic;
 import com.chengyinhub.business.service.ICmsActivityService;
 import com.chengyinhub.business.service.ICmsRegistrationService;
-import com.chengyinhub.business.service.ICmsTopicService;
 import com.chengyinhub.business.service.IPerkLedgerService;
 import com.chengyinhub.business.service.RegistrationSeatService;
 import com.chengyinhub.business.service.impl.QrcodeServiceImpl;
@@ -15,7 +13,6 @@ import com.chengyinhub.common.utils.OwnershipUtils;
 import com.chengyinhub.common.utils.VerifyDynCodeUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -40,9 +37,6 @@ public class RegistrationTicketApplication {
     private final String dynSecret;
     /** V-02:新码签发即作废同报名单同类型的旧码。 */
     private final RegistrationDynCodeLedger dynCodeLedger;
-    /** 主题上的探索票用它确认 ownerId 真是主题。测试用手写构造时可以不注入。 */
-    @Autowired(required = false)
-    private ICmsTopicService topicService;
 
     public RegistrationTicketApplication(ICmsRegistrationService registrationService,
             RegistrationSeatService registrationSeatService, ICmsActivityService activityService,
@@ -55,21 +49,6 @@ public class RegistrationTicketApplication {
         this.qrcodeService = qrcodeService;
         this.dynSecret = dynSecret;
         this.dynCodeLedger = dynCodeLedger;
-    }
-
-    /** owner_type=1 且 purchase_kind=3，并且 ownerId 能对上未删除的主题。对不上就不是这张票。 */
-    private CmsTopic topicOwnedExplore(CmsRegistration reg) {
-        if (reg == null || !Long.valueOf(1L).equals(reg.getOwnerType())
-                || !Integer.valueOf(3).equals(reg.getPurchaseKind())
-                || reg.getOwnerId() == null || topicService == null) {
-            return null;
-        }
-        CmsTopic topic = topicService.selectCmsTopicById(reg.getOwnerId());
-        if (topic == null || Integer.valueOf(2).equals(topic.getDelFlag())
-                || !reg.getOwnerId().equals(topic.getId())) {
-            return null;
-        }
-        return topic;
     }
 
     public AjaxResult issueDynCode(Long actorMemberId, Long registrationId, Integer seatNo) {
@@ -128,16 +107,8 @@ public class RegistrationTicketApplication {
             String rejection = ExploreTicketUsePolicy.rejection(reg.getPurchaseKind(), activity.getEndDate(), new Date());
             if (rejection != null) return AjaxResult.error(rejection);
         } else if (Integer.valueOf(3).equals(reg.getPurchaseKind())) {
-            // 商品发放的探索票是 owner_type=1，ownerId 就是主题。不另造一场活动。
-            CmsTopic topic = topicOwnedExplore(reg);
-            if (topic == null) {
-                return AjaxResult.error(Long.valueOf(1L).equals(ownerType)
-                        ? "探索票所属主题不可用" : "探索票所属活动不可用");
-            }
-            if (reg.getExpiresAt() != null) {
-                String rejection = ExploreTicketUsePolicy.rejection(reg.getPurchaseKind(), reg.getExpiresAt(), new Date());
-                if (rejection != null) return AjaxResult.error(rejection);
-            }
+            // 没有对上的活动就不造一场，也不出码。
+            return AjaxResult.error("探索票所属活动不可用");
         }
         String type = selectedSeat == null
                 ? ((ownerType != null && ownerType.longValue() == 2L) ? "activity" : "topic")

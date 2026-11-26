@@ -167,31 +167,6 @@ public class RegistrationRedemptionApplication {
      * ⇒ 非空即认;为空则回落主题真源 product_type;两级都判不出 ⇒ false ⇒ 走 ①② 原路。
      * fail-safe 方向:判不清就当 ①,不会把存量单误切到 ③ 的按章核销上而永远核销不了。
      */
-    /** 商品发放的探索票：owner_type=1，ownerId 是主题，不是活动。 */
-    private boolean isTopicExploreRegistration(CmsRegistration registration) {
-        return registration != null
-                && Long.valueOf(1L).equals(registration.getOwnerType())
-                && Integer.valueOf(PurchaseKind.EXPLORE_PASS).equals(registration.getPurchaseKind())
-                && registration.getOwnerId() != null;
-    }
-
-    private CmsTopic liveTopic(Long topicId) {
-        if (topicId == null || topicService == null) return null;
-        CmsTopic topic = topicService.selectCmsTopicById(topicId);
-        if (topic == null || Integer.valueOf(2).equals(topic.getDelFlag()) || !topicId.equals(topic.getId())) {
-            return null;
-        }
-        return topic;
-    }
-
-    /** 活动壳探索票用活动上的主题；主题壳探索票的 ownerId 就是主题。不另造活动。 */
-    private Long exploreTopicId(ScanContext ctx) {
-        if (ctx == null || ctx.registration == null) return null;
-        if (ctx.activity != null && ctx.activity.getTopicId() != null) return ctx.activity.getTopicId();
-        if (isTopicExploreRegistration(ctx.registration)) return ctx.registration.getOwnerId();
-        return null;
-    }
-
     private boolean isExplorePass(CmsRegistration registration, CmsActivity activity) {
         if (registration == null) {
             return false;
@@ -419,7 +394,7 @@ public class RegistrationRedemptionApplication {
             // F10:没有商家身份时,只有「自己承接」位置的作者本人可以继续;其余人原样拿到鉴权拒绝,
             // 不暴露核销码对应订单的任何状态。
             ctx = resolveExploreScanContext(code);
-            Long topicId = ctx.error == null ? exploreTopicId(ctx) : null;
+            Long topicId = ctx.error == null && ctx.activity != null ? ctx.activity.getTopicId() : null;
             if (topicId == null || perkLedgerService == null
                     || !perkLedgerService.hasLiveAuthorSupply(topicId, principalMemberId)) {
                 return new AjaxResult(e.getCode() == null ? com.chengyinhub.common.constant.HttpStatus.ERROR : e.getCode(), e.getMessage());
@@ -427,7 +402,7 @@ public class RegistrationRedemptionApplication {
             access = new MerchantAccessContext(principalMemberId, null, principalMemberId, null);
         }
         if (ctx.error != null) return ctx.error;
-        return doRedeemExploreChapter(ctx.registration, ctx.activity, chapterId, exploreTopicId(ctx),
+        return doRedeemExploreChapter(ctx.registration, ctx.activity, chapterId, ctx.activity.getTopicId(),
                 access.getOwnerMemberId(), principalMemberId, access.getRoleCode());
     }
 
@@ -583,22 +558,6 @@ public class RegistrationRedemptionApplication {
      * 不该被这里的断言拒掉。⇒ 两个入口共享 {@link #resolveScanContext},各自加自己那一道。
      */
     private ScanContext resolveExploreScanContext(String code) {
-        CmsRegistration peeked = resolveRegistrationByScanCode(code);
-        if (peeked != null && isTopicExploreRegistration(peeked)) {
-            Integer paid = peeked.getPaymentStatus();
-            if (paid == null || paid != 2) {
-                return ScanContext.fail(notRedeemed("订单未完成支付或已退款，无法核销"));
-            }
-            if (liveTopic(peeked.getOwnerId()) == null) {
-                return ScanContext.fail(notRedeemed("探索票所属主题不可用"));
-            }
-            if (peeked.getExpiresAt() != null) {
-                String rejection = ExploreTicketUsePolicy.rejection(
-                        peeked.getPurchaseKind(), peeked.getExpiresAt(), new Date());
-                if (rejection != null) return ScanContext.fail(notRedeemed(rejection));
-            }
-            return ScanContext.ok(peeked, null);
-        }
         ScanContext ctx = resolveScanContext("activity", code);
         if (ctx.error != null) {
             return ctx;
@@ -958,20 +917,6 @@ public class RegistrationRedemptionApplication {
                     }
                     // 闸过了 ⇒ 这里保证是 owner_type=1 的主题单 ⇒ 下面把 ownerId 当 topicId 用是安全的。
                     Long topicId = cmsRegistration.getOwnerId();
-                    if (Integer.valueOf(PurchaseKind.EXPLORE_PASS).equals(cmsRegistration.getPurchaseKind())) {
-                        // 主题上的探索票按章核销。ownerId 就是主题，不把它当成活动整单结掉。
-                        if (liveTopic(topicId) == null) {
-                            return notRedeemed("探索票所属主题不可用");
-                        }
-                        if (cmsRegistration.getExpiresAt() != null) {
-                            String rejection = ExploreTicketUsePolicy.rejection(
-                                    cmsRegistration.getPurchaseKind(), cmsRegistration.getExpiresAt(), new Date());
-                            if (rejection != null) return notRedeemed(rejection);
-                        }
-                        MerchantAccessContext access = exploreRedeemAccess(memberId, topicId);
-                        return redeemExploreChapter(cmsRegistration, null, topicId,
-                                access.getOwnerMemberId(), memberId, access.getRoleCode());
-                    }
                     boolean hasOrganizer = topicHasOrganizer(topicId);
                     boolean isOrganizerMember = hasOrganizer && isTopicOrganizer(topicId, memberId);
                     boolean isOrganizer = hasOrganizer && clubMemberService.isTopicOwner(topicId, memberId);
