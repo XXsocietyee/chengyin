@@ -1485,6 +1485,45 @@ Page({
   },
 
   // ===== 基本信息字段 =====
+  // L04-001:按本次写入的字段决定要刷新的派生视图。存盘形状仍是 setData 的那一份 patch。
+  _affectedRefreshers: function (keys) {
+    const want = {};
+    const mark = (name) => { want[name] = true; };
+    const has = (pred) => keys.some(pred);
+    const advancedKey = (key) => key === 'advanced' || key.indexOf('advanced.') === 0;
+    const sectionKey = (name) => (key) => key === 'advanced' || key === 'advanced.' + name
+      || key.indexOf('advanced.' + name + '.') === 0 || key.indexOf('advanced.' + name + '[') === 0;
+    const formKey = (field) => (key) => key === 'formData' || key === 'formData.' + field
+      || key.indexOf('formData.' + field + '.') === 0 || key.indexOf('formData.' + field + '[') === 0;
+    if (has(advancedKey)) {
+      mark('_refreshEffectResources');
+      mark('_refreshSupportMatrix');
+      mark('_refreshOutcomeContract');
+      mark('_syncCheckDerived');
+      mark('_syncQuesto');
+      mark('refreshPreviewState');
+    }
+    if (has((key) => sectionKey('qa')(key) || sectionKey('sort')(key) || sectionKey('match')(key) || sectionKey('classify')(key)
+      || key === 'gameSection' || key === 'gameKey')) mark('_syncSegments');
+    if (has(sectionKey('qa'))) mark('_syncQaAnswerError');
+    if (has((key) => key === 'gameKey' || key === 'gameSection' || formKey('validationMethod')(key)
+      || formKey('preferenceJson')(key) || formKey('sensorType')(key) || formKey('sensorConfig')(key))) {
+      mark('_refreshSupportMatrix');
+    }
+    if (has((key) => formKey('validationMethod')(key) || formKey('preferenceJson')(key))) mark('_refreshOutcomeContract');
+    if (has((key) => key === 'storyBeats' || key.indexOf('storyBeats.') === 0 || key.indexOf('storyBeats[') === 0)) mark('_syncClueContent');
+    const previewFields = ['title', 'description', 'validationMethod', 'questionName', 'questionAnswer', 'preferenceJson',
+      'couponId', 'feedbackText', 'medalImg', 'medalName', 'audioUrl', 'sensorType', 'sensorConfig'];
+    if (has((key) => previewFields.some((field) => formKey(field)(key))
+      || key === 'moduleList' || key.indexOf('moduleList') === 0
+      || key === 'availableModules' || key.indexOf('availableModules') === 0
+      || key === 'selectedCategoryIds' || key.indexOf('selectedCategoryIds') === 0
+      || key === 'interactionType' || key === 'optionQuestion'
+      || key === 'optionItems' || key.indexOf('optionItems') === 0
+      || key === 'gameKey' || key === 'gameSection')) mark('refreshPreviewState');
+    return ['_refreshEffectResources', '_refreshSupportMatrix', '_refreshOutcomeContract', '_syncCheckDerived',
+      '_syncQaAnswerError', '_syncQuesto', '_syncSegments', '_syncClueContent', 'refreshPreviewState'].filter((name) => want[name]);
+  },
   _setFormState: function (patch, callback, options) {
     const previousRefs = Object.keys(patch).some(key => key === 'advanced' || key.startsWith('advanced.'))
       ? templateTools.reservedRefs(this.data.advanced) : null;
@@ -1500,6 +1539,7 @@ Page({
       this.data.dirty = true;
       next.submitError = '';
     }
+    const refreshers = this._affectedRefreshers(Object.keys(next).filter((key) => key !== 'submitError'));
     this.setData(next, () => {
       if (!(options && options.pristine) && previousRefs && this.data.advanced.interactionRules?.resourceSlots) {
         const advanced = JSON.parse(JSON.stringify(this.data.advanced));
@@ -1507,14 +1547,7 @@ Page({
         templateTools.cleanSlots(advanced, previousRefs);
         if (JSON.stringify(advanced.interactionRules) !== previous) this.setData({ 'advanced.interactionRules': advanced.interactionRules || {} });
       }
-      this._refreshEffectResources();
-      this._refreshSupportMatrix();
-      this._refreshOutcomeContract();
-      this._syncCheckDerived();   // 开关玩法段 / 改次数都会改变「能放宽什么」
-      this._syncQaAnswerError(); this._syncQuesto();
-      this._syncSegments();
-      this._syncClueContent();
-      this.refreshPreviewState();
+      refreshers.forEach((name) => this[name]());
       if (callback) callback.call(this);
     });
   },

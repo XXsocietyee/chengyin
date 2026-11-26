@@ -7,8 +7,11 @@ import com.chengyinhub.business.mapper.CmsRegistrationMerchantMapper;
 import com.chengyinhub.business.mapper.MemberVisitedPoiMapper;
 import com.chengyinhub.business.mapper.RoamMapper;
 import com.chengyinhub.business.service.IGrowthService;
+import com.chengyinhub.business.service.IRoamHangoutService;
 import com.chengyinhub.business.service.impl.RoamSessionWriteService;
+import com.chengyinhub.common.annotation.RateLimiter;
 import com.chengyinhub.common.core.domain.AjaxResult;
+import com.chengyinhub.common.enums.LimitType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -19,6 +22,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -341,5 +346,43 @@ class ApiRoamCoordinateBoundaryTest
         assertEquals(Boolean.FALSE, r.get("truncated"));
         assertEquals(1, ((java.util.List<RoamPoi>) r.get("data")).size());
         assertEquals(null, ((java.util.List<RoamPoi>) r.get("data")).get(0).getGalleryJson());
+    }
+
+    @Test
+    void nearbyQueriesShareTheCheckinLimiterAndCannotSpanAThousandKilometres() throws Exception
+    {
+        RateLimiter checkinLimit = ApiRoamController.class.getMethod("checkin", String.class, Double.class, Double.class, Double.class, Double.class)
+                .getAnnotation(RateLimiter.class);
+        RateLimiter poisLimit = ApiRoamController.class.getMethod("pois", Double.class, Double.class, Integer.class)
+                .getAnnotation(RateLimiter.class);
+        RateLimiter entryLimit = ApiRoamController.class.getMethod("entryNearby", Double.class, Double.class, Integer.class)
+                .getAnnotation(RateLimiter.class);
+        assertNotNull(checkinLimit);
+        assertNotNull(poisLimit);
+        assertNotNull(entryLimit);
+        assertEquals(checkinLimit.time(), poisLimit.time());
+        assertEquals(checkinLimit.count(), poisLimit.count());
+        assertEquals(LimitType.MEMBER, poisLimit.limitType());
+        assertEquals(poisLimit.time(), entryLimit.time());
+        assertEquals(poisLimit.count(), entryLimit.count());
+        assertEquals(LimitType.MEMBER, entryLimit.limitType());
+
+        when(roamMapper.selectPoisNear(anyDouble(), anyDouble(), anyDouble(), anyDouble(), any(), anyInt()))
+                .thenReturn(Collections.emptyList());
+        assertEquals(200, controller.pois(NEAR_LAT, NEAR_LNG, 1_000_000).get("code"));
+        org.mockito.ArgumentCaptor<Double> minLat = org.mockito.ArgumentCaptor.forClass(Double.class);
+        org.mockito.ArgumentCaptor<Double> maxLat = org.mockito.ArgumentCaptor.forClass(Double.class);
+        verify(roamMapper).selectPoisNear(minLat.capture(), maxLat.capture(), anyDouble(), anyDouble(), any(), anyInt());
+        double span = maxLat.getValue() - minLat.getValue();
+        double capSpan = ApiRoamController.NEARBY_QUERY_RADIUS_CAP_M / 111320.0 * 2;
+        assertTrue(span <= capSpan + 1e-6, "1000km request must be capped, span=" + span);
+        assertTrue(span > 3000 / 111320.0, "capped query stays wider than the 3km default");
+
+        IRoamHangoutService hangouts = mock(IRoamHangoutService.class);
+        when(hangouts.nearby(anyLong(), anyDouble(), anyDouble(), anyInt())).thenReturn(Collections.emptyMap());
+        ReflectionTestUtils.setField(controller, "roamHangoutService", hangouts);
+        assertEquals(200, controller.entryNearby(NEAR_LAT, NEAR_LNG, 1_000_000).get("code"));
+        verify(hangouts).nearby(org.mockito.ArgumentMatchers.eq(PLAYER), org.mockito.ArgumentMatchers.eq(NEAR_LAT),
+                org.mockito.ArgumentMatchers.eq(NEAR_LNG), org.mockito.ArgumentMatchers.eq(ApiRoamController.NEARBY_QUERY_RADIUS_CAP_M));
     }
 }

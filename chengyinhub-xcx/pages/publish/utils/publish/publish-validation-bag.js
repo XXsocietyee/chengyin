@@ -65,12 +65,15 @@ function buildValidationBag(state) {
       }
     }
 
-    const editorPolicy = proEditorPolicy.evaluateProfessionalDraft({
-      formData,
-      clubId: formData.clubId,
-      pendingMaterials: state.pendingMaterials,
-      categoryIds: selectedCategoryIds,
-    });
+    // L03-007:主按钮刷新已经算过同一份草稿,调用方传入就复用,不再算第二遍。
+    const editorPolicy = state.editorPolicy && Array.isArray(state.editorPolicy.blockingIssues)
+      ? state.editorPolicy
+      : proEditorPolicy.evaluateProfessionalDraft({
+        formData,
+        clubId: formData.clubId,
+        pendingMaterials: state.pendingMaterials,
+        categoryIds: selectedCategoryIds,
+      });
     editorPolicy.blockingIssues.forEach((issue) => {
       if (issue.key === 'pendingMaterials') {
         bag.add('pendingMaterials', issue.message);

@@ -1458,7 +1458,7 @@ Page({
     const scope = this._roamReadScope(), seq = this._roamPoiSeq = (this._roamPoiSeq || 0) + 1, current = () => scope() && seq === this._roamPoiSeq; // 连续重拉只认最后一次,旧回包晚到不覆盖新结果
     // L05-043(业主默认项 A):筛选面板早已没有入口,不再读旧的本机筛选设置,统一用默认 3 公里
     const radiusM = ROAM_POI_RADIUS_M;
-    return req('/api/roam/pois', 'GET', { lat: String(c.lat), lng: String(c.lng), radius: String(radiusM) }, { silentError: !!(opts && opts.silent) }).then(async (res) => {
+    return req('/api/roam/pois', 'GET', { lat: String(c.lat), lng: String(c.lng), radius: String(radiusM) }, { silentError: !!(opts && opts.silent) }).then((res) => {
       if (!current()) return;
       // 网络故障 / 非 200 / 形态不对:地图上这些点既没被证实也没被证伪,一律不说「这一带没有」
       const got = !netFail(res) && apiOk(res) ? placeMap.unwrapPois(res) : null;
@@ -1466,10 +1466,11 @@ Page({
         this.setData({ poiEmpty: false }, () => this._syncGoal());
         return;
       }
-      const list = await resolvePlaceMedia(getApp(), got.rows);
-      if (!current()) return;
       this._poiTruncated = got.truncated;
       this._poiFetchedAt = { lat: c.lat, lng: c.lng, radius: radiusM }; // 读成功才记;失败后 10 秒节流一过会再试
+      // L10-001:先把点画上。封面要等许可清单,第一笔不带照片,避免未确认的图闪一下;清单回来再补。
+      const paintRoamPois = (list) => {
+      if (!current()) return;
       this.setData({ poiEmpty: !list.length }, () => this._syncGoal());
       // BL-01:换范围会重拉,上一轮的漫游点位先摘掉(打完卡的由 _mergeSessionDonePois 保留),否则同 id 叠两份。
       // A2.2:玩家走远后的重拉(opts.merge)按 id 去重合并,离新中心 2 倍半径外的旧点才丢。
@@ -1517,6 +1518,12 @@ Page({
       this._pois = this._mergeSessionDonePois(roamPois.concat(rest));
       this._seenSweepHistory();
       this._genIcons().then(() => { if (current()) { this._syncMarkers(); this._syncSparkCircles(); } });
+      };
+      const bare = got.rows.map((row) => !row || typeof row !== 'object' ? row : Object.assign({}, row, {
+        cover: '', coverImg: '', cover_img: '', gallery: [], galleryJson: '[]', photoCredit: '', photo_credit: '',
+      }));
+      paintRoamPois(bare);
+      resolvePlaceMedia(getApp(), got.rows).then((list) => paintRoamPois(list));
     });
   },
 

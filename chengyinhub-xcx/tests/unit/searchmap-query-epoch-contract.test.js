@@ -133,27 +133,30 @@ test('连续两个首页查询时，只接受最后一次查询的响应', () =>
   assert.deepEqual(page.data.list.map((item) => item.id), [30]);
 });
 
-test('切换搜索词后立即移除上一查询的活动与商家地图点', () => {
+test('L05-152 切换搜索词后保留上一查询的地图点，直到新结果写回', () => {
   const { page, requests } = loadPage();
   // L05-153:活动 / 商家点与原始节点留在实例上,视图只收合并后的 markers
-  Object.assign(page, { _activityMarkers: [{ id: 1, kind: 'activity', activityId: 0 }], _merchantNodes: [{ poiId: 9, name: '旧商家' }], _merchantMarkers: [{ id: 1000009, kind: 'merchant', poiId: 9 }] });
+  const activity = { id: 1, kind: 'activity', activityId: 0 };
+  const merchant = { id: 1000009, kind: 'merchant', poiId: 9 };
+  Object.assign(page, { _activityMarkers: [activity], _merchantNodes: [{ poiId: 9, name: '旧商家' }], _merchantMarkers: [merchant] });
   page.setData({
     list: [{ id: 1, name: '旧活动' }],
-    markers: [
-      { id: 1, kind: 'activity', activityId: 0 },
-      { id: 1000009, kind: 'merchant', poiId: 9 },
-    ],
+    markers: [activity, merchant],
     'filterConditions.keyword': '新词',
   });
 
   page.onSearchConfirm();
 
   assert.deepEqual(page.data.list, []);
-  assert.deepEqual((page._activityMarkers || []), []);
-  assert.deepEqual((page._merchantNodes || []), []);
-  assert.deepEqual((page._merchantMarkers || []), []);
-  assert.equal(page.data.markers.some((marker) => marker.kind === 'activity' || marker.kind === 'merchant'), false);
+  assert.deepEqual(page._activityMarkers, [activity]);
+  assert.deepEqual(page._merchantNodes, [{ poiId: 9, name: '旧商家' }]);
+  assert.deepEqual(page._merchantMarkers, [merchant]);
+  assert.deepEqual(page.data.markers, [activity, merchant]);
   assert.deepEqual(requests.map((request) => request.url), ['/api/activity/list', '/api/city/nodes']);
+
+  ok(requests[0], [{ id: 20, name: '新活动', latitude: 31.2, longitude: 121.4 }]);
+  assert.deepEqual(page._activityMarkers, [{ activityId: 20 }]);
+  assert.deepEqual(page._merchantMarkers, [merchant], '商家点仍留到自己的新结果写回');
 });
 
 test('清场后的 setData callback 执行前，旧活动与商家回包也不得写回地图', () => {
@@ -183,18 +186,17 @@ test('清场后的 setData callback 执行前，旧活动与商家回包也不�
   assert.deepEqual(requests.slice(2).map((request) => request.url), ['/api/activity/list', '/api/city/nodes']);
 });
 
-test('拖图、重新定位与筛选都会在新范围请求前清掉旧查询点位', () => {
-  const seedOldQuery = (page) => (Object.assign(page, { _activityMarkers: [{ id: 1, kind: 'activity', activityId: 0 }], _merchantNodes: [{ poiId: 9, name: '旧商家' }], _merchantMarkers: [{ id: 1000009, kind: 'merchant', poiId: 9 }] }), page.setData({
+test('拖图、重新定位与筛选在新结果写回前保留旧地图点', () => {
+  const activity = { id: 1, kind: 'activity', activityId: 0 };
+  const merchant = { id: 1000009, kind: 'merchant', poiId: 9 };
+  const seedOldQuery = (page) => (Object.assign(page, { _activityMarkers: [activity], _merchantNodes: [{ poiId: 9, name: '旧商家' }], _merchantMarkers: [merchant] }), page.setData({
     list: [{ id: 1, name: '旧活动' }],
-    markers: [
-      { id: 1, kind: 'activity', activityId: 0 },
-      { id: 1000009, kind: 'merchant', poiId: 9 },
-    ],
+    markers: [activity, merchant],
   }));
-  const assertFresh = (page, requests, label) => {
-    assert.deepEqual((page._activityMarkers || []), [], `${label} 未清旧活动点`);
-    assert.deepEqual((page._merchantMarkers || []), [], `${label} 未清旧商家点`);
-    assert.equal(page.data.markers.some((marker) => marker.kind === 'activity' || marker.kind === 'merchant'), false);
+  const assertKept = (page, requests, label) => {
+    assert.deepEqual(page._activityMarkers, [activity], `${label} 在新结果前清掉了旧活动点`);
+    assert.deepEqual(page._merchantMarkers, [merchant], `${label} 在新结果前清掉了旧商家点`);
+    assert.deepEqual(page.data.markers, [activity, merchant], label);
     assert.deepEqual(requests.map((request) => request.url), ['/api/activity/list', '/api/city/nodes']);
   };
 
@@ -207,18 +209,18 @@ test('拖图、重新定位与筛选都会在新范围请求前清掉旧查询�
   };
   moved.page.onRegionChange({ type: 'end', causedBy: 'drag' });
   moved.page._flushRegionChange();
-  assertFresh(moved.page, moved.requests, '拖图');
+  assertKept(moved.page, moved.requests, '拖图');
 
   const located = loadPage();
   seedOldQuery(located.page);
   global.wx.getLocation = ({ success }) => success({ latitude: 30.6, longitude: 104.1 });
   located.page.moveToLocation();
-  assertFresh(located.page, located.requests, '重新定位');
+  assertKept(located.page, located.requests, '重新定位');
 
   const filtered = loadPage();
   seedOldQuery(filtered.page);
   filtered.page.searchFilter();
-  assertFresh(filtered.page, filtered.requests, '筛选');
+  assertKept(filtered.page, filtered.requests, '筛选');
 });
 
 test('连续定位与拖图只接受最后一次空间输入，卸载后迟到回调全部失效', () => {

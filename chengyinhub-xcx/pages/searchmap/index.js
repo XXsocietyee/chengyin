@@ -189,11 +189,11 @@ Page({
     this.runFreshQuery();
   },
 
-  // 查询条件或空间范围变化时，旧点位不再代表当前结果；先原子清场，再拉两层新数据。
-  // 网络恢复等同查询刷新走 refreshMapResults，仍保留旧内容并明示 syncing。
+  // 查询条件或空间范围变化时作废旧请求并重置列表。地图点留到新结果写回(L05-152)，
+  // 避免刷新期间整图空白。网络恢复仍走 refreshMapResults，保留旧内容并明示 syncing。
   runFreshQuery(extra) {
-    // setData 的 callback 要等视图层确认后才执行；必须在清场调用前同步作废旧请求，
-    // 否则旧回包能钻进「数据已清空、新请求尚未启动」的窗口，把上一查询重新写回来。
+    // setData 的 callback 要等视图层确认后才执行；必须在发新请求前同步作废旧请求，
+    // 否则旧回包能钻进窗口，把上一查询重新写回来。
     this._listQueryEpoch = (this._listQueryEpoch || 0) + 1;
     this._merchantQueryEpoch = (this._merchantQueryEpoch || 0) + 1;
     const next = extra || {};
@@ -202,7 +202,6 @@ Page({
       : Object.assign({}, this.data.filterConditions, Object.prototype.hasOwnProperty.call(next, 'filterConditions.keyword')
         ? { keyword: next['filterConditions.keyword'] }
         : {});
-    this._activityMarkers = this._merchantMarkers = this._merchantNodes = []; // 只会整体替换,不原地改
     this.setData({
       pageNum: 1,
       list: [],
@@ -213,7 +212,6 @@ Page({
       popVisible: Object.prototype.hasOwnProperty.call(next, 'popVisible') ? next.popVisible : this.data.popVisible,
       filterConditions,
     }, () => {
-      this.rebuildMarkers();
       this.getList();
       this.getMerchantNodes();
     });
