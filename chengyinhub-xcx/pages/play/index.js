@@ -331,6 +331,11 @@ function req(url, method, data, header, silentError) {
           && (response.netFail || response.httpFail || Number(response.code) === 520)) {
         try { data._markIntentUnknown(); } catch (error) { response.msg = error.message + '；原结果仍待确认'; }
       }
+      // L01-022:证明没送达就不沿用这次绑定的局号。原动作号留下,下一次先重读原局再发。
+      if (basic && response.intentNotExecuted && data && typeof data._bindRouteContext === 'function') {
+        try { data._bindRouteContext({ routeSessionId: null }); }
+        catch (error) { /* 解绑失败仍留原动作号,不把没送达改成待确认 */ }
+      }
       resolve(response);
     };
     app.sendRequest({
@@ -6492,6 +6497,8 @@ Page({
     const context = this._beginRouteWriteContext('_arrivalWrite');
     let arrivalRequestId = null;
     const isCurrent = () => this._isRouteWriteContextCurrent(context);
+    let committed = false;
+    let notSent = false;
     // 完成请求在伏笔/步数同步之后才生成,带上同步后的路线版本。
     this._withThoughtSync(() => {
       if (!isCurrent()) return Promise.resolve({ obsolete: true });
@@ -6502,9 +6509,10 @@ Page({
       return req('/api/play/arrive', 'POST', payload);
     }, isCurrent)
       .then((r) => {
-        const current = isCurrent(); that._finishRouteWriteContext(context);
-        if (!current || (r && r.obsolete)) return;
+        // L01-022:先别放行。成功分支里抛错时,catch 还要能认出这次写入仍是当前这一次。
+        if (!isCurrent() || (r && r.obsolete)) return;
         if (r.code == 200 || r.code == '200') {
+          committed = true;
           that._resolveRouteAction('arrive', nodeId);
           that.setData({ arrivalGuard: null });
           that._noteArrivalReading(nodeId, r.data && r.data.arrivalReading);
@@ -6514,6 +6522,7 @@ Page({
           that.onComplete(nodeId, r.data);
         }
         else if (r.errorCode === 'CHECK_REQUIRED') {
+          committed = true;
           that._resolveRouteAction('arrive', nodeId);
           const node = that._nodeById(Number(nodeId));
           if (!node) return;
@@ -6523,8 +6532,9 @@ Page({
         }
         else if (that._handleRouteConflict(r, 'arrive', nodeId)) return;
         else if (r.httpFail) that.recordArrivalHttpUnknown(r.msg, nodeId, 'arrive', via);
-        else if (r.netFail) that.recordArrivalNetworkFailure('打卡请求没有送达', { type: 'arrive', nodeId, via });
+        else if (r.netFail) { notSent = true; that.recordArrivalNetworkFailure('打卡请求没有送达', { type: 'arrive', nodeId, via }); }
         else {
+          committed = true;
           that._resolveRouteAction('arrive', nodeId);
           const guard = arrivalGuardView.project(r, nodeId, arrivalRequestId);
           // U05-01/02:稳定原因码 + 服务端批准的替代站(只列本局真实、未完成的节点)
@@ -6540,9 +6550,10 @@ Page({
         }
       }).catch(() => {
         console.error('[play] arrive handler error');   // L01-022:成功分支里抛错不再被静默吞掉
-        const current = isCurrent(); that._finishRouteWriteContext(context);
-        if (!current) return;
+        if (!isCurrent() || committed || !notSent) return;
         that.recordArrivalNetworkFailure('打卡请求没有送达', { type: 'arrive', nodeId, via });
+      }).finally(() => {
+        that._finishRouteWriteContext(context);
       });
   },
   checkin(nodeId, code, source) {
@@ -6556,6 +6567,8 @@ Page({
     const extra = { nodeId, code, registrationId: this.data.regId || undefined };   // 点击时的输入,同步期间不变
     const context = this._beginRouteWriteContext(isGame ? '_gameWrite' : '_arrivalWrite');
     const isCurrent = () => this._isRouteWriteContextCurrent(context) && (!isGame || this._isLegacyGameCurrent(attempt.viewContext));
+    let committed = false;
+    let notSent = false;
     this._withThoughtSync(() => {
       if (!isCurrent()) return Promise.resolve({ obsolete: true });
       // 完成请求在伏笔/步数同步之后才生成,带上同步后的路线版本。
@@ -6565,10 +6578,11 @@ Page({
       return req('/api/play/checkin', 'POST', payload);
     }, isCurrent)
       .then((r) => {
-        const current = isCurrent(); that._finishRouteWriteContext(context);
-        if (!current || (r && r.obsolete)) return;
+        // L01-022:先别放行。成功分支里抛错时,catch 还要能认出这次写入仍是当前这一次。
+        if (!isCurrent() || (r && r.obsolete)) return;
         // 扫码以"码→节点"为准:用后端返回的 nodeId 点亮(自由定向扫错码不会点亮错节点)
         if (r.code == 200 || r.code == '200') {
+          committed = true;
           that._resolveRouteAction('checkin', nodeId);
           if (isGame) that.clearGameNetworkError();
           const litId = (r.data && r.data.nodeId != null) ? r.data.nodeId : nodeId;
@@ -6581,24 +6595,28 @@ Page({
           if (isGame) that.recordGameHttpUnknown(r.msg);
           else that.recordArrivalHttpUnknown(r.msg, nodeId, 'checkin');
         } else if (r.netFail) {
+          notSent = true;
           if (isGame) that.recordGameNetworkFailure('扫码结果没有送达', attempt);
           else that.recordArrivalNetworkFailure('扫码结果没有送达', { type: 'checkin', nodeId, code });
         } else if (isGame) {
+          committed = true;
           that._resolveRouteAction('checkin', nodeId);
           that._lastGameAttempt = null;
           that.setData({ gNetErr: r.msg || '这枚码对不上这一站', gNetRetryable: false });
           if (that._hasGenericProofFlow()) return that._readGenericProof(nodeId);
         } else {
+          committed = true;
           that._resolveRouteAction('checkin', nodeId);
           that.diegetic(r.msg || '这枚码对不上这一站');
           if (that._hasGenericProofFlow()) return that._readGenericProof(nodeId);
         }
       }).catch(() => {
         console.error('[play] checkin handler error');   // L01-022:成功分支里抛错不再被静默吞掉
-        const current = isCurrent(); that._finishRouteWriteContext(context);
-        if (!current) return;
+        if (!isCurrent() || committed || !notSent) return;
         if (isGame) that.recordGameNetworkFailure('扫码结果没有送达', attempt);
         else that.recordArrivalNetworkFailure('扫码结果没有送达', { type: 'checkin', nodeId, code });
+      }).finally(() => {
+        that._finishRouteWriteContext(context);
       });
   },
   // 2026-09-22 原来这条失败画在底部读数卡的错误条上(带一枚「重试」)。卡随地图层删除后改走
@@ -7169,6 +7187,8 @@ Page({
     const retryAttempt = this._retryGameAttempt || null;
     const context = this._beginRouteWriteContext('_gameWrite');
     const isCurrent = () => this._isRouteWriteContextCurrent(context) && this._isLegacyGameCurrent(viewContext);
+    let committed = false;
+    let notSent = false;
     const that = this;
     const attempt = { type: 'photo', nodeId, pic, viewContext };
     this._lastGameAttempt = attempt;
@@ -7177,10 +7197,10 @@ Page({
       return req('/api/play/photo', 'POST', attempt.payload);
     }, isCurrent)
       .then((r) => {
-        const current = isCurrent();
-        that._finishRouteWriteContext(context);
-        if (!current) return;
+        // L01-022:先别放行。成功分支里抛错时,catch 还要能认出这次写入仍是当前这一次。
+        if (!isCurrent()) return;
         if (r.code == 200 || r.code == '200') {
+          committed = true;
           that._resolveRouteAction('photo', nodeId);
           that.clearGameNetworkError();
           that.onComplete(nodeId, r.data);
@@ -7189,8 +7209,10 @@ Page({
         else if (r.httpFail) {
           that.recordGameHttpUnknown(r.msg);
         } else if (r.netFail) {
+          notSent = true;
           that.recordGameNetworkFailure('照片上传没有送达', attempt);
         } else {
+          committed = true;
           that._resolveRouteAction('photo', nodeId);
           that._lastGameAttempt = null;
           that.setData({ gNetErr: r.msg || '照片未上传成功，请重新选择', gNetRetryable: false });
@@ -7198,10 +7220,10 @@ Page({
         }
       }).catch(() => {
         console.error('[play] photo handler error');   // L01-022:成功分支里抛错不再被静默吞掉
-        const current = isCurrent();
-        that._finishRouteWriteContext(context);
-        if (!current) return;
+        if (!isCurrent() || committed || !notSent) return;
         that.recordGameNetworkFailure('照片上传没有送达', attempt);
+      }).finally(() => {
+        that._finishRouteWriteContext(context);
       });
   },
   submitGame() {
@@ -7228,6 +7250,8 @@ Page({
     const retryAttempt = this._retryGameAttempt || null;
     const context = this._beginRouteWriteContext('_gameWrite');
     const isCurrent = () => this._isRouteWriteContextCurrent(context) && this._isLegacyGameCurrent(viewContext);
+    let committed = false;
+    let notSent = false;
     const attempt = { type: 'answer', nodeId: g.nodeId, answer, viewContext };
     const that = this;
     this._withThoughtSync(() => {
@@ -7237,17 +7261,17 @@ Page({
       return req('/api/play/answer', 'POST', attempt.payload, undefined, true);
     }, isCurrent)
       .then((r) => {
-        const current = isCurrent();
-        that._finishRouteWriteContext(context);
-        if (!current) return;
-        if (r.code == 200 || r.code == '200') { that._resolveRouteAction('answer', g.nodeId); that._forceStartFix = false; that.clearGameNetworkError(); that._answerRight(g.nodeId, r.data, r.msg); }   // P-11:答对先在题卡里停一拍「对了」+ 揭示 / 碎片,再回故事流
+        // L01-022:先别放行。成功分支里抛错时,catch 还要能认出这次写入仍是当前这一次。
+        if (!isCurrent()) return;
+        if (r.code == 200 || r.code == '200') { committed = true; that._resolveRouteAction('answer', g.nodeId); that._forceStartFix = false; that.clearGameNetworkError(); that._answerRight(g.nodeId, r.data, r.msg); }   // P-11:答对先在题卡里停一拍「对了」+ 揭示 / 碎片,再回故事流
         else if (that._handleRouteConflict(r, 'answer', g.nodeId)) return;
         // 请求没送到 ≠ 服务端判你答错。原码把 code!=200 一律记 wrongCount++,断网提交两次
         // 就满足 canReveal(wc>=2) —— 系统替你答错两次、直接把答案揭示了。
         else if (r.httpFail) that.recordGameHttpUnknown(r.msg);
-        else if (r.netFail) that.recordGameNetworkFailure('提交没送出去，检查网络后重试', attempt);
+        else if (r.netFail) { notSent = true; that.recordGameNetworkFailure('提交没送出去，检查网络后重试', attempt); }
         // 还没到站(50 米围栏)不是答错:按提示条显示,不标红、不计错(实走 A20)
         else if (r.errorCode === 'ARRIVE_FIRST') {
+          committed = true;
           that._resolveRouteAction('answer', g.nodeId);
           that._lastGameAttempt = null;
           that.setData({ gWrong: false, gNetErr: r.msg || '先到这一站附近，再开始作答', gNetRetryable: false });
@@ -7259,6 +7283,7 @@ Page({
           }
         }
         else {
+          committed = true;
           that._resolveRouteAction('answer', g.nodeId);
           that._lastGameAttempt = null;
           // ★ 只有后端标了「答案错」(data.answerWrong)才计一次错。业务拒绝(活动已结束/未报名/
@@ -7272,10 +7297,10 @@ Page({
         }
       }).catch(() => {
         console.error('[play] answer handler error');   // L01-022:成功分支里抛错不再被静默吞掉
-        const current = isCurrent();
-        that._finishRouteWriteContext(context);
-        if (!current) return;
+        if (!isCurrent() || committed || !notSent) return;
         that.recordGameNetworkFailure('提交没送出去，检查网络后重试', attempt);
+      }).finally(() => {
+        that._finishRouteWriteContext(context);
       });
   },
   _legacyHintBusinessKey(nodeId) {
@@ -7419,6 +7444,8 @@ Page({
     const retryAttempt = this._retryGameAttempt || null;
     const context = this._beginRouteWriteContext('_gameWrite');
     const isCurrent = () => this._isRouteWriteContextCurrent(context) && this._isLegacyGameCurrent(viewContext);
+    let committed = false;
+    let notSent = false;
     const attempt = { type: 'puzzleReveal', nodeId: g.nodeId, viewContext };
     this._lastGameAttempt = attempt;
     this._withThoughtSync(() => {
@@ -7426,10 +7453,10 @@ Page({
       return req('/api/play/puzzle/reveal', 'POST', attempt.payload);
     }, isCurrent)
       .then((r) => {
-        const current = isCurrent();
-        this._finishRouteWriteContext(context);
-        if (!current) return;
+        // L01-022:先别放行。成功分支里抛错时,catch 还要能认出这次写入仍是当前这一次。
+        if (!isCurrent()) return;
         if (r.code == 200 || r.code == '200') {
+          committed = true;
           this._resolveRouteAction('puzzleReveal', g.nodeId);
           this.clearGameNetworkError();
           const answer = (r.data && r.data.answerReveal) || '答案已揭示';
@@ -7441,8 +7468,9 @@ Page({
           });
         } else if (this._handleRouteConflict(r, 'puzzleReveal', g.nodeId)) return;
         else if (r.httpFail) this.recordGameHttpUnknown(r.msg);
-        else if (r.netFail) this.recordGameNetworkFailure('查看答案请求没有送达', attempt);
+        else if (r.netFail) { notSent = true; this.recordGameNetworkFailure('查看答案请求没有送达', attempt); }
         else {
+          committed = true;
           this._resolveRouteAction('puzzleReveal', g.nodeId);
           this._lastGameAttempt = null;
           cyToast(r.msg || '暂时不能查看答案');
@@ -7450,10 +7478,11 @@ Page({
       })
       .catch(() => {
         console.error('[play] puzzleReveal handler error');   // L01-022:成功分支里抛错不再被静默吞掉
-        const current = isCurrent();
-        this._finishRouteWriteContext(context);
-        if (!current) return;
+        if (!isCurrent() || committed || !notSent) return;
         this.recordGameNetworkFailure('查看答案请求没有送达', attempt);
+      })
+      .finally(() => {
+        this._finishRouteWriteContext(context);
       });
   },
 
