@@ -40,7 +40,7 @@ test('页面接入:帖子 tab 顶部挂公告块,loadPosts(接口)与已读后�
   assert.ok(wxml.indexOf("activeTab === 'posts'") < wxml.indexOf('cy-club-pinned-notice'))
   assert.ok(wxml.indexOf('cy-club-pinned-notice') < wxml.indexOf('post-composer-collapsed'))
   const js = fs.readFileSync(path.join(root, 'pages/club/detail/index.js'), 'utf8')
-  assert.equal((js.match(/pinnedNotices: clubPinnedNotice\.pick/g) || []).length, 2) // 接口 + 已读后刷新(PG-023 演示分支已删)
+  assert.equal((js.match(/pinnedNotices: clubPinnedNotice\.pick/g) || []).length, 3) // 接口 + 已读后刷新 + 置顶就地更新(PG-023 演示分支已删)
 })
 
 // AUDIT-1122 L08-112

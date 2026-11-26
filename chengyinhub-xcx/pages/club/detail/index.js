@@ -478,6 +478,75 @@ function normalizeClubPost(p, clubOwnerId) {
   });
 }
 
+// 原帖(不含转发条目)是否置顶。转发条目在映射里被固定成未置顶,不能拿它当公告位置。
+function isOriginalPinnedPost(p) {
+  return !!(p && p.itemType !== 'repost' && !p.isRepostItem && (p.isPinned === true || Number(p.isPinned) === 1));
+}
+
+function originalPostIndex(posts, postId) {
+  const list = Array.isArray(posts) ? posts : [];
+  for (let i = 0; i < list.length; i += 1) {
+    const row = list[i];
+    if (!row || row.itemType === 'repost' || row.isRepostItem) continue;
+    if (String(row.id) === String(postId)) return i;
+  }
+  return -1;
+}
+
+// 置顶成功后只改屏幕上已有的这一条。置顶帖本来就在列表前部(服务端 pinned_at 倒序):
+// 新置顶的放到这组最前,已经置顶的维持现在的相对顺序。取消置顶按非置顶原帖的 id 倒序插回去,
+// 转发条目留在原位。找不到这条原帖,或回包点名的不是它,返回 null。
+function placeClubPostPin(posts, postId, pinned, patch) {
+  const list = Array.isArray(posts) ? posts : [];
+  const index = originalPostIndex(list, postId);
+  if (index < 0) return null;
+  const data = patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : null;
+  if (data && data.id != null && data.id !== '' && String(data.id) !== String(postId)) return null;
+  const current = list[index];
+  let nextPinned = !!pinned;
+  if (data && Object.prototype.hasOwnProperty.call(data, 'isPinned') && data.isPinned != null && data.isPinned !== '') {
+    nextPinned = data.isPinned === true || Number(data.isPinned) === 1;
+  }
+  let version = Number(current.version || 0);
+  if (data && data.version != null && data.version !== '' && Number.isFinite(Number(data.version))) {
+    version = Number(data.version);
+  } else if (isOriginalPinnedPost(current) !== nextPinned) {
+    version += 1;
+  }
+  const updated = Object.assign({}, current, {
+    isPinned: nextPinned,
+    noticeBadge: Number(current.type) === 2 ? (nextPinned ? '公告 · 置顶' : '公告') : (current.noticeBadge || ''),
+    version: version,
+  });
+  if (!nextPinned) updated.pinnedAt = null;
+  else if (data && Object.prototype.hasOwnProperty.call(data, 'pinnedAt')) updated.pinnedAt = data.pinnedAt;
+  if (isOriginalPinnedPost(current) === nextPinned) {
+    const same = list.slice();
+    same[index] = updated;
+    return same;
+  }
+  const pinnedRows = [];
+  const rest = [];
+  list.forEach(function (row, rowIndex) {
+    if (rowIndex === index) return;
+    if (isOriginalPinnedPost(row)) pinnedRows.push(row);
+    else rest.push(row);
+  });
+  if (nextPinned) return [updated].concat(pinnedRows, rest);
+  const id = Number(updated.id);
+  let at = rest.length;
+  if (Number.isSafeInteger(id)) {
+    for (let i = 0; i < rest.length; i += 1) {
+      const row = rest[i];
+      if (!row || row.itemType === 'repost' || row.isRepostItem) continue;
+      const other = Number(row.id);
+      if (Number.isSafeInteger(other) && other < id) { at = i; break; }
+    }
+  }
+  rest.splice(at, 0, updated);
+  return pinnedRows.concat(rest);
+}
+
 function enrichClub(club) {
   if (!club) return club;
   // 服务端文本过滤会把 x<y 存成 x&lt;y;这几项都按纯文本展示,在这里解码一次。
@@ -2194,12 +2263,14 @@ Page({
     });
   },
 
-  // forcePinned:只给「撤销取消置顶」用 —— 撤销时列表可能还没回读,不能再按当前 isPinned 取反
+  // forcePinned:只给「撤销取消置顶」用 —— 撤销必须把这一条置回去,不靠当前 isPinned 再取反
   onTogglePin(e, forcePinned) {
-    const post = this.findPost(e.currentTarget.dataset.id);
+    const postId = e.currentTarget.dataset.id;
+    const postIndex = originalPostIndex(this.data.posts, postId);
+    const post = postIndex < 0 ? null : this.data.posts[postIndex];
     if (!post || !this.data.canModerateContent || Number(post.type) !== 2) return;
     const that = this;
-    const pinned = typeof forcePinned === 'boolean' ? forcePinned : Number(post.isPinned) !== 1;
+    const pinned = typeof forcePinned === 'boolean' ? forcePinned : !isOriginalPinnedPost(post);
     this._postRequestIntents = this._postRequestIntents || {};
     const intent = planClubPostRequestIntent('club-post-pin', {
       clubId: this.data.clubId,
@@ -2221,15 +2292,30 @@ Page({
         else if (isExplicitClientFailure(res)) {
           clearClubPostRequestIntent(intent, that._postRequestIntents);
         }
-        // 2026-10-23 弹层规范:取消置顶可撤销 —— 提示条留「撤销」,点了就按原样置顶回去
-        if (res.code == '200' && !pinned) {
-          cyToast.undo('已取消置顶', {
-            onUndo() { that.onTogglePin({ currentTarget: { dataset: { id: post.id } } }, true); },
+        if (res.code == '200') {
+          const posts = placeClubPostPin(that.data.posts, post.id, pinned, res && res.data);
+          if (!posts) {
+            cyToast('操作失败');
+            return;
+          }
+          // 还在飞的整页回读作废,免得它把刚改的这一条盖回去。这里不发新的列表请求。
+          that._postsEpoch = (that._postsEpoch || 0) + 1;
+          const nowPinned = isOriginalPinnedPost(posts[originalPostIndex(posts, post.id)]);
+          that.setData({
+            posts: posts,
+            pinnedNotices: clubPinnedNotice.pick(posts, that.data.clubId, null, app.getUserID && app.getUserID()),
           });
-        } else {
-          cyToast((res && res.msg) || (res.code == '200' ? '已更新' : '操作失败'));
+          // 2026-10-23 弹层规范:取消置顶可撤销 —— 提示条留「撤销」,点了就按原样置顶回去
+          if (!nowPinned) {
+            cyToast.undo('已取消置顶', {
+              onUndo() { that.onTogglePin({ currentTarget: { dataset: { id: post.id } } }, true); },
+            });
+          } else {
+            cyToast((res && res.msg) || '已更新');
+          }
+          return;
         }
-        if (res.code == '200') that.loadPosts();
+        cyToast((res && res.msg) || '操作失败');
       },
       fail() { cyToast('网络异常，请重试'); },
       successStatusAbnormal(res, statusCode) {

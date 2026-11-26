@@ -229,6 +229,108 @@ test('L08-004 点赞成功只改这条帖(含转发条目),不重拉帖子列表
   assert.deepEqual(page.data.posts.map((p) => [p.isLiked, p.likeCount]), [[true, 3], [false, 0], [true, 3]]);
 });
 
+function pinFeed() {
+  return [
+    { id: 50, feedKey: '50', type: 2, isPinned: true, version: 2, content: '旧置顶', contents: '旧置顶', noticeBadge: '公告 · 置顶', createTime: '2026-11-01 10:00:00' },
+    { id: 40, feedKey: '40', type: 0, isPinned: false, version: 1, content: '普通', createTime: '2026-11-04 10:00:00' },
+    { id: 30, feedKey: 'r9', type: 2, isPinned: false, isRepostItem: true, version: 1, content: '转发公告', createTime: '2026-11-03 12:00:00' },
+    { id: 30, feedKey: '30', type: 2, isPinned: false, version: 4, content: '待置顶', contents: '待置顶', noticeBadge: '公告', createTime: '2026-11-03 10:00:00' },
+    { id: 20, feedKey: '20', type: 0, isPinned: false, version: 1, content: '更早', createTime: '2026-11-02 10:00:00' },
+  ];
+}
+
+function watchToasts() {
+  const toasts = [];
+  global.wx.showToast = (opts) => { toasts.push(opts && opts.title); };
+  return toasts;
+}
+
+// 页面跑在 vm 里,成功路径换上的数组不是本测试域的 Array,先拷出来再比。
+function feedKeys(posts) {
+  return Array.from(posts, (p) => p.feedKey);
+}
+
+test('L08-004 置顶成功只改屏幕上的这条帖并归到置顶区,不重拉列表', () => {
+  const { page, requests } = loadClubDetail();
+  const toasts = watchToasts();
+  page.setData({ clubId: 7, canModerateContent: true, posts: pinFeed() });
+  page.loadPosts();
+  const stale = requests.find((r) => r.url === '/api/club/post/list');
+  page.onTogglePin({ currentTarget: { dataset: { id: 30 } } });
+  const pin = requests.find((r) => r.url === '/api/club/post/pin');
+  assert.ok(pin);
+  assert.equal(JSON.parse(pin.data).pinned, true);
+  assert.equal(JSON.parse(pin.data).version, 4, '置顶打在原帖上,不打在前面的转发条目');
+  pin.success({ code: '200', msg: '已置顶', data: { id: 30, isPinned: 1, version: 5 } });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 1, '成功不再发列表请求');
+  assert.deepEqual(feedKeys(page.data.posts), ['30', '50', '40', 'r9', '20']);
+  assert.equal(page.data.posts[0].isPinned, true);
+  assert.equal(page.data.posts[0].noticeBadge, '公告 · 置顶');
+  assert.equal(page.data.posts[0].version, 5);
+  assert.equal(page.data.posts[0].content, '待置顶');
+  assert.equal(page.data.posts[3].isRepostItem, true);
+  assert.equal(page.data.posts[3].isPinned, false);
+  assert.deepEqual(Array.from(page.data.pinnedNotices, (n) => n.id), [30, 50]);
+  assert.equal(toasts.pop(), '已置顶');
+  stale.success({ code: '200', data: [{ id: 1, type: 0, content: '过期列表', isPinned: 0 }] });
+  assert.deepEqual(feedKeys(page.data.posts), ['30', '50', '40', 'r9', '20'], '迟到的整页回读不盖住置顶');
+
+  page.onTogglePin({ currentTarget: { dataset: { id: 30 } } });
+  const unpin = requests.filter((r) => r.url === '/api/club/post/pin').pop();
+  assert.equal(JSON.parse(unpin.data).pinned, false);
+  assert.equal(JSON.parse(unpin.data).version, 5);
+  const listsBeforeUndo = requests.filter((r) => r.url === '/api/club/post/list').length;
+  unpin.success({ code: '200', msg: '已取消置顶', data: { id: 30, isPinned: 0, version: 6 } });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, listsBeforeUndo);
+  assert.deepEqual(feedKeys(page.data.posts), ['50', '40', 'r9', '30', '20']);
+  assert.equal(page.data.posts[3].isPinned, false);
+  assert.equal(page.data.posts[3].noticeBadge, '公告');
+  assert.equal(page.data.posts[3].version, 6);
+  assert.deepEqual(Array.from(page.data.pinnedNotices, (n) => n.id), [50]);
+  assert.equal(toasts.pop(), '已取消置顶');
+
+  page.onTogglePin({ currentTarget: { dataset: { id: 30 } } }, true);
+  const undo = requests.filter((r) => r.url === '/api/club/post/pin').pop();
+  assert.equal(JSON.parse(undo.data).pinned, true, '撤销按原样置顶回去');
+  assert.equal(JSON.parse(undo.data).version, 6);
+  undo.success({ code: '200', msg: '已置顶', data: { id: 30, isPinned: 1, version: 7 } });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, listsBeforeUndo);
+  assert.deepEqual(feedKeys(page.data.posts), ['30', '50', '40', 'r9', '20']);
+  assert.equal(page.data.posts[0].version, 7);
+  assert.equal(page.data.posts[0].isPinned, true);
+});
+
+test('L08-004 置顶回包对不上屏幕上的帖或版本冲突时不改列表', () => {
+  const { page, requests } = loadClubDetail();
+  const toasts = watchToasts();
+  page.setData({ clubId: 7, canModerateContent: true, posts: pinFeed() });
+  const before = page.data.posts.map((p) => [p.feedKey, p.isPinned, p.version]);
+  page.onTogglePin({ currentTarget: { dataset: { id: 30 } } });
+  const pin = requests.find((r) => r.url === '/api/club/post/pin');
+  pin.success({ code: 409, msg: '公告已被修改，请刷新后重试' });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0);
+  assert.deepEqual(page.data.posts.map((p) => [p.feedKey, p.isPinned, p.version]), before);
+  assert.equal(toasts.pop(), '公告已被修改，请刷新后重试');
+
+  page.onTogglePin({ currentTarget: { dataset: { id: 30 } } });
+  const missing = requests.filter((r) => r.url === '/api/club/post/pin').pop();
+  page.setData({ posts: page.data.posts.filter((p) => p.feedKey !== '30') });
+  const gone = page.data.posts.map((p) => p.feedKey);
+  missing.success({ code: '200', msg: '已置顶', data: { id: 30, isPinned: 1, version: 5 } });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0);
+  assert.deepEqual(page.data.posts.map((p) => p.feedKey), gone);
+  assert.equal(toasts.pop(), '操作失败');
+
+  page.setData({ posts: pinFeed() });
+  page.onTogglePin({ currentTarget: { dataset: { id: 30 } } });
+  const mismatch = requests.filter((r) => r.url === '/api/club/post/pin').pop();
+  const again = page.data.posts.map((p) => [p.feedKey, p.isPinned, p.version]);
+  mismatch.success({ code: '200', msg: '已置顶', data: { id: 99, isPinned: 1, version: 5 } });
+  assert.deepEqual(page.data.posts.map((p) => [p.feedKey, p.isPinned, p.version]), again);
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0);
+  assert.equal(toasts.pop(), '操作失败');
+});
+
 test('L08-006 只有日期的 endDate:最后一天仍算未结束', () => {
   const { page, requests } = loadClubDetail();
   page.setData({ clubId: 7 });
