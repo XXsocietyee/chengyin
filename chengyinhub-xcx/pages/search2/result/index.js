@@ -52,7 +52,6 @@ Page({
     everLoaded: false,
     activeResultType: 'all',
     resultTabs: DEFAULT_RESULT_TABS,
-    resultGroups: [],
     visibleResults: []
   },
 
@@ -104,7 +103,7 @@ Page({
     if (ownerChanged || back && (queryChanged || unfinished)) this.runSearch();
     else if (back) {
       if (this._content) this._content.seq = this._searchSeq; // onHide 作废了序号;不重搜时把已搜完的内容分页接回,否则加载更多的回包被丢、一直转圈
-      this.setData({ visibleResults: [] }, () => this.updateVisibleResults());
+      this.commitResults(this._resultGroups); // L05-161:当前页签的行一次写回
     }
   },
   onHide() { if (this.data.merchantView) merchantTheme.merchantPageRestore();
@@ -128,11 +127,11 @@ Page({
     const queryKey = resultQueryKey(keyword, categoryId, filters);
     this._issuedQuery = queryKey;
     const preserveExisting = this._resultOwner === owner && this._resultQueryKey === queryKey
-      && (this.data.resultGroups || []).some((group) => (group.items || []).length > 0);
+      && (this._resultGroups || []).some((group) => (group.items || []).length > 0);
     const previousGroups = {};
     // 合并搜索的主题/活动/帖文刷新时整体替换(已删除结果与城市不残留);原接口路径六类都保留上一次成功内容。
     const contentType = (type) => useUnified && ['topic', 'activity', 'post'].includes(type);
-    if (preserveExisting) (this.data.resultGroups || []).forEach((group) => { if (!contentType(group.type)) previousGroups[group.type] = group.items || []; });
+    if (preserveExisting) (this._resultGroups || []).forEach((group) => { if (!contentType(group.type)) previousGroups[group.type] = group.items || []; });
     const seq = (this._searchSeq || 0) + 1;
     this._searchSeq = seq;
     this._resultOwner = owner;
@@ -150,11 +149,10 @@ Page({
     clearTimeout(this._searchSkeletonTimer);
 
     if (preserveExisting) {
-      this.setData({ searchLoading: true, showSearchSkeleton: false, searchError: '',
-        resultGroups: (this.data.resultGroups || []).filter(group => !contentType(group.type)) });
-      this.updateVisibleResults();
+      const kept = (this._resultGroups || []).filter(group => !contentType(group.type));
+      this.commitResults(kept, { searchLoading: true, showSearchSkeleton: false, searchError: '' });
     } else {
-      this.setData({ searchLoading: true, showSearchSkeleton: false, searchError: '', activeResultType: 'all', resultTabs: DEFAULT_RESULT_TABS, resultGroups: [], visibleResults: [] });
+      this.commitResults([], { searchLoading: true, showSearchSkeleton: false, searchError: '', activeResultType: 'all', resultTabs: DEFAULT_RESULT_TABS });
       if (requests.length) {
         this._searchSkeletonTimer = setTimeout(() => {
           if (isCurrent() && this.data.searchLoading && !this.data.visibleResults.length) {
@@ -174,17 +172,15 @@ Page({
       })));
       this._searchDoneAt = Date.now();
       const hasResults = resultGroups.some((group) => group.items.length > 0), allFailed = failed === requests.length; this._resultQueryKey = hasResults || failed === 0 ? queryKey : this._resultQueryKey;
-      this.setData({
+      this.commitResults(resultGroups, {
         searchLoading: false,
         showSearchSkeleton: false,
         everLoaded: this.data.everLoaded || hasResults,
         searchError: failed > 0 && !hasResults
           ? (allFailed ? '搜索服务暂不可用，请重试' : '部分搜索没有完成，请重试后再确认结果')
           : '',
-        resultGroups: resultGroups,
         resultTabs: DEFAULT_RESULT_TABS.concat(discoverSearch.resultTabs(resultGroups, !this.data.merchantView))
       });
-      this.updateVisibleResults();
       if (failed > 0 && hasResults) toast('部分搜索没有完成，结果可能不全');
     };
     const finish = () => {
@@ -213,7 +209,7 @@ Page({
         if (!isCurrent() || settled) return;
         if (recoverReadSession(this, app, res, function (anonymous) {
           this._searchSeq++; this._content = null; this._contentGroups = [];
-          this.setData({ resultGroups: [], visibleResults: [], resultTabs: DEFAULT_RESULT_TABS,
+          this.commitResults([], { resultTabs: DEFAULT_RESULT_TABS,
             searchLoading: false, showSearchSkeleton: false, searchError: '',
             contentLoading: false, contentHasMore: false, contentError: '', contentEnabled: false });
         }, this.runSearch, status)) return;
@@ -300,7 +296,7 @@ Page({
       settled = true; state.loading = false;
       if (recoverReadSession(this, app, res, function (anonymous) {
         this._searchSeq++; this._content = null; this._contentGroups = [];
-        this.setData({ resultGroups: [], visibleResults: [], resultTabs: DEFAULT_RESULT_TABS,
+        this.commitResults([], { resultTabs: DEFAULT_RESULT_TABS,
           searchLoading: false, showSearchSkeleton: false, contentLoading: false, contentHasMore: false,
           contentError: '', contentEnabled: false });
       }, this.runSearch, status)) return;
@@ -319,12 +315,16 @@ Page({
       }
       if (code === 401 || code === 403) {
         state.items = []; state.page = 0; this._contentGroups = [];
-        this.setData({ resultGroups: this.data.resultGroups.filter(g => !['topic', 'activity', 'post'].includes(g.type)) });
-        this.updateVisibleResults();
+        this._resultGroups = (this._resultGroups || []).filter(g => !['topic', 'activity', 'post'].includes(g.type));
       }
-      this.setData({ resultTabs: DEFAULT_RESULT_TABS.concat(discoverSearch.resultTabs(this.data.resultGroups, !this.data.merchantView)),
-        contentLoading: false, contentError: code === 503 ? '内容搜索暂未开放，可稍后重试'
-        : code === 403 ? '当前身份不能查看这些内容' : '内容搜索未完成，重试本页' });
+      const nextTabs = DEFAULT_RESULT_TABS.concat(discoverSearch.resultTabs(this._resultGroups, !this.data.merchantView));
+      const contentError = code === 503 ? '内容搜索暂未开放，可稍后重试'
+        : code === 403 ? '当前身份不能查看这些内容' : '内容搜索未完成，重试本页';
+      if (code === 401 || code === 403) {
+        this.commitResults(this._resultGroups, { resultTabs: nextTabs, contentLoading: false, contentError: contentError });
+        return;
+      }
+      this.setData({ resultTabs: nextTabs, contentLoading: false, contentError: contentError });
     };
     app.sendRequest({
       url: '/api/search/unified', method: 'GET', hideLoading: true, autoErrorToast: false,
@@ -340,27 +340,28 @@ Page({
         state.items = discoverSearch.mergeResults(state.items, result.items);
         this._contentGroups = state.types.map(type => ({ type, label: discoverSearch.labelOf(type, !this.data.merchantView),
           items: state.items.filter(item => item.type === type) }));
-        const groups = this._contentGroups.concat(this.data.resultGroups.filter(g => !['topic', 'activity', 'post'].includes(g.type)));
-        this.setData({ resultGroups: groups, contentLoading: false, contentError: '',
+        const groups = this._contentGroups.concat((this._resultGroups || []).filter(g => !['topic', 'activity', 'post'].includes(g.type)));
+        this.commitResults(groups, { contentLoading: false, contentError: '',
           contentHasMore: result.count > 0 && page * 12 < result.total,
           everLoaded: this.data.everLoaded || state.items.length > 0,
           resultTabs: DEFAULT_RESULT_TABS.concat(discoverSearch.resultTabs(groups, !this.data.merchantView)) });
-        this.updateVisibleResults();
       }, fail: failed, successStatusAbnormal: failed
     });
   },
 
-  updateVisibleResults() {
-    const type = this.data.activeResultType;
-    const groups = this.data.resultGroups || [];
-    const visibleResults = groups.reduce((all, group) => {
-      return type === 'all' || discoverSearch.tabKeyOf(group.type, !this.data.merchantView) === type ? all.concat(group.items) : all;
+  // L05-161:分组不进页面数据。当前页签的行和一起变的状态一次 setData。
+  commitResults(groups, extra) {
+    const patch = extra || {};
+    const type = Object.prototype.hasOwnProperty.call(patch, 'activeResultType') ? patch.activeResultType : this.data.activeResultType;
+    this._resultGroups = groups || [];
+    const visibleResults = this._resultGroups.reduce((all, group) => {
+      return type === 'all' || discoverSearch.tabKeyOf(group.type, !this.data.merchantView) === type ? all.concat(group.items || []) : all;
     }, []);
-    this.setData({ visibleResults: visibleResults }); // 卡片入场只走 cy-fly-in(新挂上的卡才飞),不再叠一层整表重播
+    this.setData(Object.assign({ visibleResults: visibleResults }, patch));
   },
 
   onResultTab(e) {
-    this.setData({ activeResultType: e.detail.key }, () => this.updateVisibleResults());
+    this.commitResults(this._resultGroups, { activeResultType: e.detail.key });
   },
 
   goResult(e) {

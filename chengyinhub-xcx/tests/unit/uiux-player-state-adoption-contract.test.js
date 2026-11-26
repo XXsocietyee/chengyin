@@ -206,12 +206,13 @@ test('搜索当前 tab 恰好为空时，仍按全部分组判断是否存在旧
   const { page, requests } = loadSearchResultPage();
   page.setData({ keyword: '咖啡', categoryId: '8' });
   resolveSearchBatch(runSearchBatch(page, requests));
-  const previousGroups = page.data.resultGroups;
+  const previousGroups = page._resultGroups;
   page.setData({ activeResultType: 'missing-type', visibleResults: [] });
 
   runSearchBatch(page, requests);
 
-  assert.deepEqual(page.data.resultGroups, previousGroups);
+  assert.deepEqual(page._resultGroups, previousGroups);
+  assert.equal(Object.prototype.hasOwnProperty.call(page.data, 'resultGroups'), false);
   assert.equal(page.data.activeResultType, 'missing-type');
 });
 

@@ -6,7 +6,7 @@ const path = require('node:path')
 const vm = require('node:vm')
 const { createRequire } = require('node:module')
 
-// L05-159 / L05-160 / L05-178:搜索结果页的请求次数与俱乐部拒绝文案。
+// L05-159 / L05-160 / L05-161 / L05-178:搜索结果页的请求次数、列表写入与俱乐部拒绝文案。
 const TOPIC = '/api/template/topic-template/list'
 function mount(sharedApp) {
   const file = path.resolve(__dirname, '../../pages/search2/result/index.js')
@@ -118,4 +118,38 @@ test('合并搜索打开后遇到 503 就关掉,之后不再先撞一次', () =>
   assert.equal(urls(reqs).filter(u => u === '/api/search/unified').length, before)
   assert.ok(urls(reqs).includes('/api/topic/list'))
   assert.ok(urls(reqs).includes('/api/activity/list'))
+})
+
+test('L05-161 结果列表一次写入,当前页签的行还在,分组不进页面数据', () => {
+  const { page, reqs } = mount()
+  page.runSearch()
+  let listWrites = 0
+  const orig = page.setData.bind(page)
+  page.setData = function (patch) {
+    if (Object.prototype.hasOwnProperty.call(patch, 'visibleResults')) {
+      listWrites += 1
+      assert.equal(Object.prototype.hasOwnProperty.call(patch, 'resultGroups'), false)
+    }
+    orig(patch)
+  }
+  reqs.forEach(r => r.success({ code: 200, data: r.url === '/api/activity/list'
+    ? { rows: [{ id: 1, name: '夜行' }] }
+    : r.url === '/api/club/list'
+      ? { rows: [{ id: 2, name: '夜行俱乐部' }] }
+      : [] }))
+  assert.equal(listWrites, 1, '各路到齐后列表只写一次')
+  assert.equal(page.data.resultGroups, undefined)
+  assert.equal(page.data.visibleResults.length, 2)
+  listWrites = 0
+  page.onResultTab({ detail: { key: 'activity' } })
+  assert.equal(listWrites, 1, '切页签一次写完')
+  assert.equal(page.data.activeResultType, 'activity')
+  assert.equal(page.data.visibleResults.length, 1)
+  assert.equal(page.data.visibleResults[0].type, 'activity')
+  page.onHide()
+  listWrites = 0
+  page.onShow()
+  assert.equal(listWrites, 1, '回到本页一次写回')
+  assert.equal(page.data.visibleResults.length, 1)
+  assert.equal(page.data.visibleResults[0].type, 'activity')
 })
