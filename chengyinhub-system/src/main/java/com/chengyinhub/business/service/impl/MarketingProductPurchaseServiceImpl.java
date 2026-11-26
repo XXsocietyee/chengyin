@@ -305,7 +305,7 @@ public class MarketingProductPurchaseServiceImpl implements IMarketingProductPur
 
     @Override
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NEVER)
-    public Map<String, Object> prepareCashPayment(long callerMemberId, String orderNo, String payChannel) {
+    public Map<String, Object> prepareCashPayment(long callerMemberId, String orderNo, String payChannel, String clientPlatform) {
         requireMember(callerMemberId);
         if (!cashChannel.enabled()) {
             throw MarketingProductException.conflict(cashChannel.unavailableReason(),
@@ -324,6 +324,11 @@ public class MarketingProductPurchaseServiceImpl implements IMarketingProductPur
         }
         if (!wechatPayService.isReady()) {
             throw MarketingProductException.paymentRequired("PAYMENT_UNAVAILABLE", "支付服务暂不可用");
+        }
+        if (com.chengyinhub.business.service.support.PaymentPlatformGuard.isIos(clientPlatform)
+                && order.getTotalCashAmount() != null && order.getTotalCashAmount().signum() > 0) {
+            throw MarketingProductException.conflict("IOS_VIRTUAL_PAY",
+                    com.chengyinhub.business.service.support.PaymentPlatformGuard.IOS_VIRTUAL_MESSAGE);
         }
         boolean appChannel = payChannel != null && "APP".equalsIgnoreCase(payChannel.trim());
         String description = paymentDescription(order);

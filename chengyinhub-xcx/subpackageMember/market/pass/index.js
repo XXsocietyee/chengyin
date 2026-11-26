@@ -175,8 +175,11 @@ Page({
   _payCash(order) {
     const blocked = order.payment && order.payment.blockedReason
     if (blocked) { this.setData({ buying: false, buyError: mv.reasonText(blocked) }); return }
+    var cashPlatform = ''
+    try { cashPlatform = wx.getSystemInfoSync().platform || '' } catch (e) { cashPlatform = '' }
     app.sendRequest({
-      url: '/api/marketing/product/orders/' + encodeURIComponent(order.orderNo) + '/pay', method: 'POST',
+      url: '/api/marketing/product/orders/' + encodeURIComponent(order.orderNo) + '/pay'
+        + (cashPlatform ? ('?clientPlatform=' + encodeURIComponent(cashPlatform)) : ''), method: 'POST',
       hideLoading: true, autoErrorToast: false,
       success: (res) => {
         const p = isBizOk(res) && res.data && res.data.payParams

@@ -118,6 +118,31 @@ class RegistrationOrderCreateGateImplTest {
     }
 
     @Test
+    void paidTopicRejectsExplicitIosWhileXpayOff() {
+        when(topicService.selectCmsTopicById(100L)).thenReturn(topicWithPrice(new BigDecimal("19.90")));
+        when(wechatPayService.isReady()).thenReturn(true);
+        RegistrationRequest request = topicRequest(100L);
+        request.setClientPlatform("ios");
+
+        RegistrationCheckoutException ex = assertThrows(RegistrationCheckoutException.class,
+                () -> gate().validate(7L, request));
+        assertEquals(403, ex.getCode());
+        assertEquals("iOS 暂不支持购买该票种", ex.getMessage());
+    }
+
+    @Test
+    void paidActivityRejectsExplicitIosJsapi() {
+        stubQuote(quote("MATCH", new BigDecimal("30.00")));
+        when(wechatPayService.isReady()).thenReturn(true);
+        RegistrationRequest request = activityRequest("MATCH");
+        request.setClientPlatform("iPhone");
+
+        RegistrationCheckoutException ex = assertThrows(RegistrationCheckoutException.class,
+                () -> gate().validate(7L, request));
+        assertEquals(403, ex.getCode());
+    }
+
+    @Test
     void paidTopicPassesWhenPaymentReady() {
         when(topicService.selectCmsTopicById(100L)).thenReturn(topicWithPrice(new BigDecimal("19.90")));
         when(wechatPayService.isReady()).thenReturn(true);

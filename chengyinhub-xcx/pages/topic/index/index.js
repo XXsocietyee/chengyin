@@ -899,7 +899,10 @@ Page({
   _paySeatOrder(order) {
     const blocked = order.payment && order.payment.blockedReason;
     if (blocked) { this._seatOrderFail(productOrder.reasonText(blocked)); return; }
-    app.sendRequest({ url: '/api/marketing/product/orders/' + encodeURIComponent(order.orderNo) + '/pay', method: 'POST', hideLoading: true, autoErrorToast: false,
+    var seatPlatform = '';
+    try { seatPlatform = wx.getSystemInfoSync().platform || ''; } catch (e) { seatPlatform = ''; }
+    app.sendRequest({ url: '/api/marketing/product/orders/' + encodeURIComponent(order.orderNo) + '/pay'
+      + (seatPlatform ? ('?clientPlatform=' + encodeURIComponent(seatPlatform)) : ''), method: 'POST', hideLoading: true, autoErrorToast: false,
       success: (res) => {
         const p = res && String(res.code) === '200' && res.data && res.data.payParams;
         if (!p) { this._seatOrderFail(productOrder.reasonText(res && res.reasonCode)); return; }
@@ -1457,7 +1460,10 @@ Page({
           realName: realName,
           phone: phone,
           isUsePoint: 0,
-          requestId: requestId
+          requestId: requestId,
+          clientPlatform: (function () {
+            try { return wx.getSystemInfoSync().platform || ''; } catch (e) { return ''; }
+          })()
         };
         // OR-003:带上结算层报价的签名,服务端按它判价是否变过(老报价没有 quoteSign 就不带,沿用原链路)
         const quoted = that._checkoutFacts && that._checkoutFacts.quote;
@@ -1963,7 +1969,9 @@ Page({
         loading.hide();
         that._unknownPolling = false;
         that._selfPlaySubmitting = false;
-        that._showCheckoutFailure(res && res.errMsg || '支付失败');
+        that._showCheckoutFailure(res && res.paymentLaunched
+          ? '支付结果未确认，请到订单查看，勿重复支付'
+          : (res && res.errMsg || '支付失败'));
         that._trackBuy('pay_fail', { reason: that._payFailReason || 'unknown' });
         // 付款失败不清幂等键,同一意图重试复用
       },
