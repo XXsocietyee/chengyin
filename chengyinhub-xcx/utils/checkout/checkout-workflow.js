@@ -143,17 +143,23 @@ function createCheckoutWorkflow(deps) {
         return;
       }
       state = 'paying';
-      var paymentSettled = false; // 终态已落定(成功/取消/失败),之后不再核对
+      var paymentSettled = false; // 终态已落定(成功/取消),之后不再核对
       var callbackReceived = false; // SDK 真回调只处理一次
       var reconcileToken = 0;
-      // E-B7:核对原订单(超时旁路 / 用户点「刷新订单状态」/ 轮询共用)。
-      // 它只读服务端终态:确认已付才结算;其余一律停在 unknown,绝不把「还没回调」当失败或丢弃真回调。
-      function reconcile() {
+      // E-B7:核对原订单(超时旁路 / 收银台非取消失败 / 用户点「刷新订单状态」/ 轮询共用)。
+      // 它只读服务端终态:确认已付才结算;其余一律停在 unknown,绝不把「还没回调」或「收银台已打开但 fail」当失败。
+      // unconfirmedCopy:收银台已经拉起后的非取消失败专用。玩家可能已扣款,这句话不能改成请重试。
+      function reconcile(unconfirmedCopy) {
         if (!current(run) || paymentSettled) return false;
         var token = ++reconcileToken;
+        function unknownNotice(verifyRes) {
+          if (unconfirmedCopy) return { ok: false, status: 'unknown', errMsg: unconfirmedCopy };
+          return verifyRes && verifyRes.status === 'unknown' ? verifyRes
+            : { ok: false, status: 'unknown', errMsg: '支付结果未知，请到订单查看，暂不要重复支付' };
+        }
         if (!verifyPayment) {
           state = 'unknown';
-          call(handlers.onPayUnknown, { ok: false, status: 'unknown', errMsg: '支付结果未知，请到订单查看，暂不要重复支付' });
+          call(handlers.onPayUnknown, unknownNotice());
           return true;
         }
         state = 'verifying';
@@ -169,8 +175,7 @@ function createCheckoutWorkflow(deps) {
             call(handlers.onPaySuccess, data);
           } else {
             state = 'unknown';
-            call(handlers.onPayUnknown, verifyRes && verifyRes.status === 'unknown' ? verifyRes
-              : { ok: false, status: 'unknown', errMsg: '支付结果未知，请到订单查看，暂不要重复支付' });
+            call(handlers.onPayUnknown, unknownNotice(verifyRes));
           }
         });
         if (!settledNow) remember(control);
@@ -214,11 +219,14 @@ function createCheckoutWorkflow(deps) {
             state = 'done';
             call(handlers.onPaySuccess, data);
           }
-        } else {
+        } else if (payRes && payRes.cancelled) {
           paymentSettled = true;
-          state = 'idle'; // 取消/失败可重试
-          if (payRes && payRes.cancelled) call(handlers.onPayCancel);
-          else call(handlers.onPayFail, safePaymentFailure(payRes, '支付失败，请重试'));
+          state = 'idle';
+          call(handlers.onPayCancel);
+        } else {
+          // 收银台已打开。非取消 fail 不能证明没扣款,不能回 idle 再付一次。
+          reconcileCurrent = reconcile;
+          reconcile('支付结果未确认，请到订单查看，勿重复支付');
         }
       }
       // SDK 迟迟没回调:只启动旁路核对原订单,不推断失败、不再拉起支付、也不丢弃随后到达的真回调。

@@ -2029,14 +2029,20 @@ Page({
         loading.hide();
         that._unknownPolling = false;
         that._selfPlaySubmitting = false;
-        that._showCheckoutFailure(res && res.errMsg || '支付失败');
+        // 收银台已拉起后的 SDK 失败不进这里(走 onPayUnknown)。若仍被叫到,也不展示请重试或微信原文。
+        var launched = that._payFailReason === 'sdk_fail';
+        that._showCheckoutFailure(launched
+          ? '支付结果未确认，请到订单查看，勿重复支付'
+          : (res && res.errMsg || '支付失败'));
         that._trackBuy('pay_fail', { reason: that._payFailReason || 'unknown' });
         // 付款失败不清幂等键,同一意图重试复用
       },
-      onPayUnknown: function () {
+      onPayUnknown: function (res) {
         loading.hide();
         that._selfPlaySubmitting = false;
-        if (!that._unknownPolling) that._showPaymentUnknown(); // 轮询/手动刷新仍不明时不重复弹窗
+        var launchedUnconfirmed = !!(res && res.errMsg === '支付结果未确认，请到订单查看，勿重复支付');
+        if (launchedUnconfirmed) that._showCheckoutFailure(res.errMsg);
+        if (!that._unknownPolling) that._showPaymentUnknown(launchedUnconfirmed ? res.errMsg : '');
       }
     });
 
@@ -2056,13 +2062,13 @@ Page({
    * E-B7:支付结果未知。只提供「刷新订单状态」(核对原订单,不建新单)并在后台轮询一小段时间;
    * 确认已付走 onPaySuccess → _onSelfPlayPaid;SDK 真回调迟到也照常处理(workflow 不再丢它)。
    */
-  _showPaymentUnknown() {
+  _showPaymentUnknown(content) {
     const that = this;
     if (that._unknownPolling) { toast('还在确认支付结果，请稍候'); return; }
     that._unknownPolling = true;
     modal.show({
       title: '支付结果待确认',
-      content: '暂不要重复支付。可以刷新订单状态，确认后会自动进入通行证。',
+      content: content || '暂不要重复支付。可以刷新订单状态，确认后会自动进入通行证。',
       confirmText: '刷新订单状态',
       cancelText: '稍后再说',
       success(res) {
