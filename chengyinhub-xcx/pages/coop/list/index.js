@@ -34,6 +34,10 @@ function failureText(value, fallback) {
 function stopPullDownRefresh() {
   if (typeof wx.stopPullDownRefresh === 'function') wx.stopPullDownRefresh();
 }
+function routeText(value) {
+  if (value == null || value === '') return '';
+  try { return decodeURIComponent(String(value)); } catch (error) { return String(value); }
+}
 
 // 俱乐部承接申请(coop_club_apply)在收发件箱里的整形,见 utils/coop-invite-view.js
 const { isApplyList, decorateApplies, badgeOf, INVITE_BADGE } = require('../../../utils/coop-invite-view.js');
@@ -162,7 +166,7 @@ Page({
        管理员看不出本主题到底有没有申请。入口带上 topicId,这里只显示这条主题的协作;
        清除后回到全局。过滤只作用于渲染,四路请求仍是全量(不为一个筛选改后端契约)。 */
     this._topicFilter = options && options.topicId ? String(options.topicId) : '';
-    this._topicFilterName = options && options.topicName ? decodeURIComponent(String(options.topicName)) : '';
+    this._topicFilterName = options && options.topicName ? routeText(options.topicName) : '';
     if (this._topicFilter) {
       // 与下面 tab 的处理同因:onLoad 里同步写会当场记进未收口的创建流程(渲染层会报
       // expect FLOW_INITIAL_CREATION end but get FLOW_DATA_OBSERVER)。文案先算好,
@@ -205,8 +209,20 @@ Page({
     this._officialLoading = false;
     this._actionPendingKey = '';
     this._navigating = false;
-    if (this._workflow) this._workflow.destroy();
+    this._stopPageTimers();
+    if (this._workflow) { this._workflow.destroy(); this._workflow = null; }
     merchantTheme.merchantPageRestore();
+  },
+
+  // page-motion 入场计时器挂在页面实例上。卸载后必须清掉,否则离开页面仍会 setData。
+  _stopPageTimers() {
+    if (this._pmListTimer) { clearTimeout(this._pmListTimer); this._pmListTimer = null; }
+    const counters = this._pmCounters;
+    if (!counters) return;
+    Object.keys(counters).forEach((key) => {
+      if (typeof counters[key] === 'function') counters[key]();
+      counters[key] = null;
+    });
   },
 
   _recoverReadSession(value, epoch, key) {

@@ -11,12 +11,24 @@ function canonicalStatus(value) {
 
 const { yuan } = require('../../../../utils/money-format.js');
 
-// L07-163(业主 2026-11-24 选 B):净额还没核算(未结算或缺字段)时写「待核算」,不写 ¥0.0 —— 商家会以为没拿到钱。
+// L07-163:净额是数字(含 0)就显示净额。净额为 null 而 amount 有数时显示 amount。
+// 英雄区与「我的分润」同一口径。两边都不是数字才写「待核算」,不把 null 收成 ¥0.0。
 const PENDING_NET = '待核算';
 
 function money(value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return yuan(value);
+}
+
+function shownMoney(value) {
+  const text = money(value);
+  return text == null ? PENDING_NET : text;
+}
+
+// 真实 0 必须留下:不能用 ||,否则净额 0 会掉进 amount 或「待核算」。
+function merchantShareText(record) {
+  const raw = record && record.netAmount == null ? record.amount : record.netAmount;
+  return shownMoney(raw);
 }
 
 function numericValue(value) {
@@ -82,14 +94,14 @@ function buildMerchantTimeline(record, status) {
 function buildMerchantSettlementDetail(input) {
   const record = input || {};
   const status = merchantStatus(record);
-  const amount = money(Object.prototype.hasOwnProperty.call(record, 'netAmount') ? record.netAmount : record.amount);
+  const amount = merchantShareText(record);
   const heads = numericValue(record.verifiedHeads);
   return {
     key: `mybiz:${record.id == null ? '' : record.id}`,
     title: record.topicName || (record.topicId ? `主题 #${record.topicId}` : '未命名主题'),
     perspective: '承接分润',
     amountLabel: '我的分润',
-    amount: amount || PENDING_NET,
+    amount: amount,
     status: status.text,
     statusVariant: status.variant,
     lines: compact([
@@ -100,7 +112,7 @@ function buildMerchantSettlementDetail(input) {
       line('shareRule', '分润方式', shareRule(record)),
       line('original', '原始应结', money(record.originalAmount)),
       line('adjustment', '已执行调整', money(record.executedAdjustmentAmount)),
-      line('income', '我的分润', amount || PENDING_NET, true),
+      line('income', '我的分润', amount, true),
     ]),
     timeline: buildMerchantTimeline(record, status),
   };

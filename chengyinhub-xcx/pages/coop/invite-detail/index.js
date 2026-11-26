@@ -140,8 +140,8 @@ Page({
     const identity = identityKey();
     const sameIdentity = this._detailIdentity === identity;
     const previous = this.data.invite;
-    if (!sameIdentity) this._draftSnapshot = null;
-    else if (previous) this._draftSnapshot = { id: previous.inviteId, box: this.data.box,
+    if (!sameIdentity || !previous) this._draftSnapshot = null;
+    else this._draftSnapshot = { id: previous.inviteId, box: this.data.box,
       status: previous.status, draft: this.data.draft };
     this._detailIdentity = identity;
     this._detailEpoch = (this._detailEpoch || 0) + 1;
@@ -153,11 +153,14 @@ Page({
     // L07-059:同一身份刷新时保留已显示的邀约(不打回骨架、不丢滚动);换身份才清空
     const keep = sameIdentity && !!previous && this.data.state === 'ready';
     this._keepOnRefresh = keep;
+    this._perkOpenOnRefresh = !!(sameIdentity && this.data.showPerkPick);
     if (!keep) this.setData({ state: 'loading', invite: null });
-    this.setData({ errorText: '', submitting: false,
-      draft: sameIdentity ? this.data.draft : '', draftError: '',
+    // 同一身份刷新不回写 draft:请求飞行中继续打的字若被 setData 成开请求时的快照,理由会被截断。
+    const refreshPatch = { errorText: '', submitting: false, draftError: '',
       showPerkPick: false, perkSaving: false, perkState: 'idle', perkErrorText: '',
-      reviewSheetShow: false, myReviewStars: '', reviewVerifying: false, actionReceipt: '', actionError: '' });
+      reviewSheetShow: false, myReviewStars: '', reviewVerifying: false, actionReceipt: '', actionError: '' };
+    if (!sameIdentity) refreshPatch.draft = '';
+    this.setData(refreshPatch);
     const that = this;
     const ctx = this._captureContext();
     const done = () => { if (fromPull && typeof wx.stopPullDownRefresh === 'function') wx.stopPullDownRefresh(); };
@@ -188,7 +191,8 @@ Page({
         const draft = that._draftSnapshot;
         const keepDraft = draft && String(draft.id) === String(hit.inviteId)
           && draft.box === ctx.box && Number(draft.status) === Number(hit.status);
-        that.applyInvite(hit, keepDraft ? draft.draft : '');
+        // 用此刻的 draft,不用开请求时的快照:刷新期间继续输入不能被旧快照盖掉。状态变了才清空。
+        that.applyInvite(hit, keepDraft ? that.data.draft : '', keepDraft ? { keepLiveDraft: true } : null);
         that._draftSnapshot = null;
         // 2026-10-31 P-6 已读回执:受邀方打开 = 已读(发起方那一行的三格状态条走到「已读」)。
         // 后端只认受邀方本人、只写一次;回执写不上不影响看邀约与处理(失败走默认提示)。
@@ -208,7 +212,7 @@ Page({
     });
   },
 
-  applyInvite(inv, draft) {
+  applyInvite(inv, draft, options) {
     this._detailEpoch = (this._detailEpoch || 0) + 1;
     this._perkEpoch = (this._perkEpoch || 0) + 1;
     this._contacting = false;
@@ -224,12 +228,15 @@ Page({
       // 稿上这一栏是必填:撤回要给对方一个理由,现码 _cancelAsInitiator 也是空理由直接拦
       kind = 'withdraw'; label = '撤回理由(必填，会发给对方)'; ph = '说明为什么撤回这条邀约…';
     }
-    this.setData({
+    const explainFrozenSupply = !!(this._perkOpenOnRefresh && inv.termsFrozen);
+    this._perkOpenOnRefresh = false;
+    const patch = {
       state: 'ready', invite: inv, submitting: false,
       statusText: STATUS_LABEL[status] || '',
       tone: TONE[status] || 'closed',
-      inputKind: kind, inputLabel: label, inputPlaceholder: ph, draft: draft || '', draftError: '',
-      actionReceipt: '', actionError: '',
+      inputKind: kind, inputLabel: label, inputPlaceholder: ph, draftError: '',
+      actionReceipt: '',
+      actionError: explainFrozenSupply ? '条款已锁定，不能再申报供给' : '',
       // 欠保证金时给唯一实心入口(搬走的动作不在这里重复);!legacyReadonly 与搬走的卡片闸一致
       depositActionVisible: status === 1 && !inv.legacyReadonly && !!inv.depositDueText,
       projectActionVisible: status === 1 && !inv.legacyReadonly
@@ -239,7 +246,10 @@ Page({
       myReviewStars: '',
       reviewVerifying: false,
       partnerCredit: null,
-    });
+    };
+    // 同一条、同一状态的刷新不把 draft 写回输入框,飞行中的按键留在 data.draft 里。
+    if (!(options && options.keepLiveDraft)) patch.draft = draft || '';
+    this.setData(patch);
     if (status === 1 && !inv.legacyReadonly) this.loadMyReview(inv);
     this.loadPartnerCredit(inv);
   },
@@ -522,6 +532,10 @@ Page({
     if (!this._isCurrent(ctx)) return;
     const inv = this.data.invite;
     if (!inv || inv.legacyReadonly || this._perkLoading) return;
+    if (inv.termsFrozen) {
+      this.setData({ showPerkPick: false, actionReceipt: '', actionError: '条款已锁定，不能再申报供给' });
+      return;
+    }
     if (inv.identityError || !parseInviteId(inv.inviteId)) return;
     const inviteId = inv.inviteId;
     const TYPE = ['礼品', '优惠券', '折扣'];
@@ -598,6 +612,10 @@ Page({
     const inv = this.data.invite;
     const inviteId = inv && inv.inviteId;
     if (!inv || !parseInviteId(inviteId)) return;
+    if (inv.termsFrozen) {
+      this.setData({ showPerkPick: false, perkSaving: false, actionReceipt: '', actionError: '条款已锁定，不能再申报供给' });
+      return;
+    }
     const ids = this.data.perkTemplates.filter(function (t) { return t.checked; }).map(function (t) { return t.id; });
     const that = this;
     this.setData({ perkSaving: true, actionReceipt: '', actionError: '' });
