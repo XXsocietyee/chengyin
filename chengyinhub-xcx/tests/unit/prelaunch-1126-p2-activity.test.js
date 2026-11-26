@@ -43,6 +43,7 @@ function mount(rel) {
   const requests = [];
   const tips = [];
   const modals = [];
+  const payments = [];
   const app = {
     globalData: { user_id: 9 },
     getUserID: () => 9,
@@ -71,6 +72,7 @@ function mount(rel) {
     showModal() {},
     showLoading() {},
     hideLoading() {},
+    requestPayment(options) { payments.push(options); },
   };
   const req = createRequire(file);
   vm.runInNewContext(read(rel), {
@@ -107,7 +109,7 @@ function mount(rel) {
     triggerEvent() {},
     selectComponent: () => null,
   });
-  return { page, requests, tips, modals, definition, app };
+  return { page, requests, tips, modals, payments, definition, app };
 }
 
 test('own comment appends one row and returning does not reload the post or comments', async () => {
@@ -208,8 +210,89 @@ test('profile load failure stays on the signup page and keeps a chosen participa
   assert.match(h.page.data.profileError, /个人资料没加载出来/);
   assert.equal(h.page.data.userInfo.realName, '林一');
   assert.match(read('pages/activity/baoming/baoming.wxml'), /profileError/);
-  assert.match(read('pages/activity/baoming/baoming.js'), /未扣款，可重试/);
+  assert.match(read('pages/activity/baoming/baoming.js'), /支付结果未确认，请到订单查看，勿重复支付/);
   assert.match(read('pages/activity/baoming/baoming.js'), /支付结果待确认/);
+});
+
+test('a launched payment failure tells the player to check the order and hides WeChat errMsg', () => {
+  const h = mount('pages/activity/baoming/baoming.js');
+  const previousWx = global.wx;
+  global.wx = {
+    showLoading() {},
+    hideLoading() {},
+    showToast() {},
+    getStorageSync() { return ''; },
+    setStorageSync() {},
+    removeStorageSync() {},
+  };
+  const sentence = '支付结果未确认，请到订单查看，勿重复支付';
+  const raw = 'requestPayment:fail system error trace_id=internal-123';
+  const payParams = {
+    timeStamp: '1', nonceStr: 'n', package: 'prepay_id=x', signType: 'RSA', paySign: 's',
+  };
+  try {
+    h.page.setData({
+      pageState: 'ready',
+      activityId: 100,
+      selectedTicket: { id: 1, price: 50 },
+      selectedAddress: { id: 1, fullName: '林一', mobilePhone: '13800138000' },
+      userInfo: { realName: '林一', phone: '13800138000', email: '', point: 0 },
+      hostShareChecked: true,
+      hostShareConsentReady: true,
+      totalAmount: 50,
+      paymentReady: true,
+      merchantClosed: false,
+      quoteRefusal: '',
+    });
+    h.page._hostShareConsentReady = true;
+    h.page._quoteSign = 'qs_ok';
+    h.page._signupSubscriptionRequested = true;
+    h.page._initWorkflow();
+    h.page.handlePayment();
+    const create = h.requests.find((item) => item.url === '/api/registration/create');
+    assert.ok(create, '应先建单再拉起支付');
+    create.success({
+      code: '200',
+      data: { registrationId: 1001, payableAmount: 50, payParams },
+    });
+    assert.equal(h.payments.length, 1);
+    h.payments[0].fail({ errMsg: raw });
+
+    const sheet = h.page.data.resultSheet;
+    const shown = [sheet.title, sheet.sub, sheet.why, h.page.data.submitError].join('\n');
+    assert.equal(sheet.kind, 'fail');
+    assert.equal(sheet.title, '这笔没有付成功');
+    assert.equal(sheet.sub, sentence);
+    assert.equal(sheet.why, '');
+    assert.equal(h.page.data.submitError, sentence);
+    assert.equal(shown.includes(raw), false);
+    assert.doesNotMatch(shown, /requestPayment:fail/);
+    assert.doesNotMatch(`${sheet.sub}\n${sheet.why}`, /未扣款/);
+
+    h.page.handlePayment();
+    const retry = h.requests.filter((item) => item.url === '/api/registration/create').at(-1);
+    retry.success({
+      code: '200',
+      data: { registrationId: 1002, payableAmount: 50, payParams },
+    });
+    h.payments.at(-1).fail({ errMsg: 'requestPayment:fail cancel' });
+    assert.equal(h.tips.at(-1), '您已取消支付');
+    assert.equal(h.page.data.resultSheet.show, false);
+
+    h.page.handlePayment();
+    const beforePanel = h.payments.length;
+    h.requests.filter((item) => item.url === '/api/registration/create').at(-1).success({
+      code: '200',
+      data: { registrationId: 1003, payableAmount: 0, payParams: { timeStamp: '' } },
+    });
+    assert.equal(h.payments.length, beforePanel, '缺支付参数时不得拉起收银台');
+    assert.equal(h.page.data.resultSheet.sub, '未扣款，可重试');
+    assert.equal(h.page.data.resultSheet.why, '支付发起失败，请重试');
+  } finally {
+    if (h.page._workflow) h.page._workflow.destroy();
+    if (previousWx) global.wx = previousWx;
+    else delete global.wx;
+  }
 });
 
 test('a refused broadcast recovery stays on the card', () => {

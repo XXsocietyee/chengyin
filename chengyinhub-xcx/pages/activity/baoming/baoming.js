@@ -1570,7 +1570,14 @@ Page({
           paySign: p.paySign,
           success: function () { cb({ ok: true }); },
           fail: function (res) {
-            cb({ ok: false, cancelled: res.errMsg === 'requestPayment:fail cancel', errMsg: res.errMsg });
+            var cancelled = !!(res && res.errMsg === 'requestPayment:fail cancel');
+            // 面板已经拉起。非取消的失败不能再当成「还没扣款」:微信可能已经扣了,只是回调失败。
+            cb({
+              ok: false,
+              cancelled: cancelled,
+              errMsg: res && res.errMsg,
+              paymentLaunched: !cancelled
+            });
           }
         });
       },
@@ -1967,15 +1974,20 @@ Page({
         that.cancelPendingOrder({ openOrderWhenStuck: true });
       },
       onPayFail: function (res) {
-        const message = (res && res.errMsg) || '支付失败，请重试';
+        // 收银台已拉起且不是用户取消:玩家可能已经扣款。不要写「未扣款」,也不要把微信 errMsg 摆上屏。
+        // 建单失败、缺支付参数、拉起面板之前的网络失败没有 paymentLaunched,仍用原来的文案。
+        const launched = !!(res && res.paymentLaunched);
+        const unconfirmed = '支付结果未确认，请到订单查看，勿重复支付';
+        const message = launched ? unconfirmed : ((res && res.errMsg) || '支付失败，请重试');
         cyLoading.hide();
         that.setData({
           isPaying: false, verifyingPayment: false, submitError: message,
           // 面板负责「说清楚发生了什么」并自愈;重试出口是页内那条 submitError,
           // 它一直留在页上 —— 恢复动作不能放进会自己消失的面板里。
           // 原来这里还会再 app.tips 一次,和面板+页内错误就是同一句话说三遍,故去掉。
-          resultSheet: { show: true, kind: 'fail', title: '这笔没有付成功', sub: '未扣款，可重试',
-            meta: '', pill: '', why: message, primaryText: '', secondaryText: '', duration: SUCCESS_HOLD_MS },
+          resultSheet: { show: true, kind: 'fail', title: '这笔没有付成功',
+            sub: launched ? unconfirmed : '未扣款，可重试',
+            meta: '', pill: '', why: launched ? '' : message, primaryText: '', secondaryText: '', duration: SUCCESS_HOLD_MS },
         }, () => that.refreshPaymentState());
         that.cancelPendingOrder({ stayOnPage: true });
       },
