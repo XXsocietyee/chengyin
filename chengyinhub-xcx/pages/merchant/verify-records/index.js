@@ -11,6 +11,7 @@ const {
   countByStatus,
   groupRecords,
   todayView,
+  pageContinues,
 } = require('./view-model.js');
 const PAGE_SIZE = 50;
 // L07-007:首读只读 1 页就上屏,其余交给触底续读(原先最多串行 20 页才出第一屏)
@@ -127,8 +128,7 @@ Page({
         const items = isSuccess(res) ? shapeRecordList(res.data) : null;
         if (!items) { if (settle()) failed(res); return; }
         collected.push.apply(collected, items);
-        const total = Number(res.data.total) || 0;
-        const more = items.length === PAGE_SIZE && collected.length < total;
+        const more = pageContinues(items.length, collected.length, res.data && res.data.total, PAGE_SIZE);
         if (more && pageNum < MAX_PAGES) { readPage(pageNum + 1); return; }
         if (!settle()) return;
         // MC-020:超过首批上限不再静默截断 —— 记下续读页,分段计数标「+」,触底按需续读。
@@ -186,8 +186,7 @@ Page({
         if (!items) { toast((!isSuccess(res) && res && res.msg) || '加载失败，请重试'); return; }
         const seen = new Set((this._items || []).map(item => item.id));
         const all = (this._items || []).concat(items.filter(item => !seen.has(item.id)));
-        const total = Number(res.data.total) || 0;
-        this._morePage = items.length === PAGE_SIZE && all.length < total ? pageNum + 1 : 0;
+        this._morePage = pageContinues(items.length, all.length, res.data && res.data.total, PAGE_SIZE) ? pageNum + 1 : 0;
         this.applyItems(all, this.data.bucket);
       },
       fail: () => { this._loadingMore = false; toast('加载失败，请重试'); },

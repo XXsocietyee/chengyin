@@ -18,6 +18,8 @@ const { toTimestamp } = require('../../../utils/datetime.js');
 
 const PAGE_SIZE = 20;
 const CAMPAIGNS_PROBE_MS = 5 * 60 * 1000;
+// L07-025:进行中的导出按 1.5s 查状态,最多 20 次;到点停下来,让人稍后再查
+const EXPORT_POLL_MAX_TRIES = 20;
 // 联系号码失败半屏的自愈时长,与 cy-result-sheet 默认档一致(2s)。
 const RESULT_SHEET_MS = 2000;
 
@@ -149,6 +151,11 @@ Page({
   },
   onHide() {
     this._hidden = true;
+    if (this._debounce) {
+      clearTimeout(this._debounce);
+      this._debounce = null;
+      this._dirty = true;
+    }
     if (this._exportTimer) { clearTimeout(this._exportTimer); this._exportTimer = null; }
     merchantTheme.merchantPageRestore();
   },
@@ -858,6 +865,8 @@ Page({
     if (!this.data.canExport || ['PENDING', 'RUNNING'].includes(this.data.exportState)) return;
     const isCurrent = this._scopeGuard();
     if (!isCurrent()) return;
+    this._exportTries = 0;
+    this._exportFailures = 0;
     this.setData({ exportState: 'PENDING', exportError: '', exportTask: null });
     app.sendRequest({
       hideLoading: true,
@@ -889,7 +898,12 @@ Page({
     if (this._exportPolling || !task || !strictPositiveSafeId(task.id)
         || !['PENDING', 'RUNNING'].includes(this.data.exportState)) return;
     const isCurrent = this._scopeGuard();
-    if (!isCurrent()) return;
+    if (!isCurrent() || this._hidden || this._unloaded) return;
+    if ((this._exportTries || 0) >= EXPORT_POLL_MAX_TRIES) {
+      if (!this.data.exportError) this.setData({ exportError: '导出仍在进行，可稍后再次查询' });
+      return;
+    }
+    this._exportTries = (this._exportTries || 0) + 1;
     this._exportPolling = true;
     app.sendRequest({
       hideLoading: true,
@@ -918,12 +932,17 @@ Page({
     });
   },
 
-  // L07-025:失败退避 1.5s→3s→6s…最长 30s,连续 6 次失败停下等「重新查询」;离开页面停表,回来续查
+  // L07-025:失败退避 1.5s→3s→6s…最长 30s,连续 6 次失败停下。
+  // 状态一直是进行中时,每 1.5s 最多再查 20 次,然后说明仍在进行、可稍后再次查询。离开页面停表。
   _scheduleExportPoll(failed) {
     if (!['PENDING', 'RUNNING'].includes(this.data.exportState) || !this.data.exportTask) return;
     if (this._hidden || this._unloaded) return;
     this._exportFailures = failed ? (this._exportFailures || 0) + 1 : 0;
     if (this._exportFailures > 6) return;
+    if ((this._exportTries || 0) >= EXPORT_POLL_MAX_TRIES) {
+      if (!failed) this.setData({ exportError: '导出仍在进行，可稍后再次查询' });
+      return;
+    }
     if (this._exportTimer) clearTimeout(this._exportTimer);
     this._exportTimer = setTimeout(() => {
       this._exportTimer = null;
@@ -938,6 +957,7 @@ Page({
       this._exportTimer = null;
     }
     this._exportFailures = 0;
+    this._exportTries = 0;
     this.setData({ exportError: '' });
     this._pollExport();
   },

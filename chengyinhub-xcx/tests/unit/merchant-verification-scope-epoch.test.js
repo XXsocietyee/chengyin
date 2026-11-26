@@ -53,6 +53,22 @@ beforeEach(() => {
   require(PAGE_PATH);
 });
 
+function settleMemberCache() {
+  requests.forEach((request) => {
+    if (request._cacheSettled) return;
+    if (request.url === '/api/user/info') {
+      request._cacheSettled = true;
+      request.success({ code: 200, data: { role: 'merchant' } });
+    } else if (request.url === '/api/merchant/info') {
+      request._cacheSettled = true;
+      request.success({ code: 200, data: { name: '店' } });
+    } else if (request.url === '/api/game/session/merchant/entries') {
+      request._cacheSettled = true;
+      request.success({ code: 200, data: [] });
+    }
+  });
+}
+
 function makePage() {
   const page = Object.assign({}, pageConfig);
   page.data = JSON.parse(JSON.stringify(pageConfig.data));
@@ -232,8 +248,8 @@ for (const order of ['show-before-success', 'success-before-show']) {
   });
 }
 
-// L07-010:同一账号 60s 内回到工作台只重读待办/看板/消息;下拉刷新仍走整条读取链
-test('工作台 60s 内返回只重读易变数据,下拉刷新走整链', () => {
+// L07-010:同一会员且身份/资料/用户/入口已加载时,回来不再重打这四样;下拉刷新仍走整链
+test('工作台已加载后返回不重读身份资料和入口,下拉刷新走整链', () => {
   wx.showModal = () => {};
   const page = makePage();
   const access = {
@@ -245,6 +261,7 @@ test('工作台 60s 内返回只重读易变数据,下拉刷新走整链', () =>
   };
   const confirm = () => requests.filter((r) => r.url === '/api/merchant/access/me').at(-1).success(access);
   const urlsAfter = (n) => requests.slice(n).map((r) => r.url);
+  const count = (url) => requests.filter((r) => r.url === url).length;
   page.onShow(); confirm();
   assert.ok(urlsAfter(0).includes('/api/project/my'), '首次进入走整链');
   // 项目三路回齐后离开(在途或失败时返回仍走整链,见下方复审用例)
@@ -253,15 +270,30 @@ test('工作台 60s 内返回只重读易变数据,下拉刷新走整链', () =>
     else if (r.url === '/api/registration/merchant/list') r.success({ code: 200, data: { rows: [] } });
     else if (r.url === '/api/merchant/chapter-application/mine') r.success({ code: 200, data: [] });
   });
+  settleMemberCache();
+  const accessCount = count('/api/merchant/access/me');
+  const infoCount = count('/api/merchant/info');
+  const userCount = count('/api/user/info');
+  const entryCount = count('/api/game/session/merchant/entries');
   let mark = requests.length;
-  page.onHide(); page.onShow(); confirm();
+  page.onHide(); page.onShow();
   const light = urlsAfter(mark);
+  assert.equal(count('/api/merchant/access/me'), accessCount, '同一会员已加载后不再请求 access/me');
+  assert.equal(count('/api/merchant/info'), infoCount, '不再重读店铺资料');
+  assert.equal(count('/api/user/info'), userCount, '不再重读用户资料');
+  assert.equal(count('/api/game/session/merchant/entries'), entryCount, '不再重读本站入口');
   assert.ok(light.includes('/api/merchant/todo-summary'));
   assert.ok(light.includes('/api/merchant/dashboard'));
-  assert.ok(!light.includes('/api/project/my'), '60s 内返回不重读项目列表');
-  assert.ok(!light.includes('/api/user/info'));
+  assert.ok(!light.includes('/api/project/my'), '普通返回不重读项目列表');
+  page._lastFullLoadAt = 0;
+  mark = requests.length;
+  page.onHide(); page.onShow();
+  assert.equal(count('/api/merchant/access/me'), accessCount, '超过 60 秒也不因计时重读身份');
+  assert.ok(!urlsAfter(mark).includes('/api/merchant/info'));
+  assert.ok(!urlsAfter(mark).includes('/api/user/info'));
   mark = requests.length;
   page.onShow({ preserveVerification: true }); confirm();
+  assert.ok(urlsAfter(mark).includes('/api/merchant/access/me'), '下拉刷新重新确认身份');
   assert.ok(urlsAfter(mark).includes('/api/project/my'), '下拉刷新仍走整链');
 });
 
@@ -279,24 +311,29 @@ test('工作台:接受邀约或发布活动后返回立刻重读项目列表,普
     else if (r.url === '/api/merchant/chapter-application/mine') r.success({ code: 200, data: [] });
   });
   const projectReadsAfter = (n) => requests.slice(n).filter((r) => r.url === '/api/project/my').length;
-  page.onShow(); confirm(); settleProjects();
+  const accessCount = () => requests.filter((r) => r.url === '/api/merchant/access/me').length;
+  page.onShow(); confirm(); settleProjects(); settleMemberCache();
+  const loadedAccess = accessCount();
   let mark = requests.length;
-  page.onHide(); page.onShow(); confirm(); settleProjects();
-  assert.equal(projectReadsAfter(mark), 0, '普通返回仍走 60s 缓存');
+  page.onHide(); page.onShow();
+  assert.equal(projectReadsAfter(mark), 0, '普通返回仍不重读项目列表');
+  assert.equal(accessCount(), loadedAccess, '普通返回不再请求 access/me');
   // 接受合作邀约(coop/list、coop/invite-detail、topic/merchantinfo 写同一标记)
   page.onHide(); app.globalData.merchantWorkbenchStale = true;
   mark = requests.length;
-  page.onShow(); confirm(); settleProjects();
+  page.onShow(); settleProjects();
   assert.ok(projectReadsAfter(mark) > 0, '接受邀约后返回立刻重读项目列表');
+  assert.equal(accessCount(), loadedAccess, '补项目列表时不重读身份');
   assert.equal(app.globalData.merchantWorkbenchStale, false, '标记只用一次');
   mark = requests.length;
-  page.onHide(); page.onShow(); confirm(); settleProjects();
+  page.onHide(); page.onShow();
   assert.equal(projectReadsAfter(mark), 0, '之后的普通返回回到缓存');
   // 发布活动(publish/activity 成功回调写同一标记)
   page.onHide(); app.globalData.merchantWorkbenchStale = true;
   mark = requests.length;
-  page.onShow(); confirm();
+  page.onShow();
   assert.ok(projectReadsAfter(mark) > 0, '发布活动后返回立刻重读项目列表');
+  assert.equal(accessCount(), loadedAccess);
 });
 
 // L07-010 复审:轻量回读开了「我的消息」三路等待,经营动态这一路也必须重读,否则合并永远不落定、新消息不上屏
@@ -310,12 +347,14 @@ test('工作台 60s 内返回:我的消息各路都重读,新会话能上屏', (
     if (r.url === '/api/im/conversations') r.success({ code: 200, data: conversations });
     else if (r.url === '/api/merchant/events') r.success({ code: 200, data: [] });
   });
-  page.onShow(); confirm(); settleInbox(0, []);
+  page.onShow(); confirm(); settleInbox(0, []); settleMemberCache();
   assert.equal(page.data.inboxLoaded, true);
   assert.deepEqual(page.data.inboxItems, []);
+  const accessCount = requests.filter((r) => r.url === '/api/merchant/access/me').length;
   const mark = requests.length;
-  page.onHide(); page.onShow(); confirm();
-  assert.ok(!requests.slice(mark).some((r) => r.url === '/api/project/my'), '仍是轻量回读');
+  page.onHide(); page.onShow();
+  assert.equal(requests.filter((r) => r.url === '/api/merchant/access/me').length, accessCount, '已加载后不再请求 access/me');
+  assert.ok(!requests.slice(mark).some((r) => r.url === '/api/project/my'), '仍不重读项目列表');
   settleInbox(mark, [{ conversationId: 5, type: 1, lastMsgText: '新消息', lastMsgAt: new Date().toISOString(), unread: 1, counterparty: { nickname: '玩家' } }]);
   assert.deepEqual(page.data.inboxItems.map((item) => item.key), ['conv-5'], '返回后新会话要上屏');
 });
@@ -334,8 +373,8 @@ test('工作台整链未回齐就离开,60s 内回来仍重读项目列表', () 
   assert.equal(page.data.hostLoading, false, '项目列表不能一直停在加载中');
 });
 
-// 复审:60s 内回来但岗位权限变了(资金读权被收回),不能沿用轻量回读留着旧的累计收入
-test('工作台 60s 内返回但资金读权被收回:走整链,累计收入不再上屏', () => {
+// 复审:已加载的同一会员回来不再重读身份,所以撤权要等下拉刷新才从屏上拿掉
+test('工作台已加载后返回不重读身份,下拉刷新才收起被收回的资金读权', () => {
   wx.showModal = () => {};
   const page = makePage();
   const withFinance = { code: 200, data: { active: true, merchant: { id: 101, name: '店' }, roleCode: 'MERCHANT_OWNER',
@@ -345,10 +384,17 @@ test('工作台 60s 内返回但资金读权被收回:走整链,累计收入不�
   const confirm = (access) => requests.filter((r) => r.url === '/api/merchant/access/me').at(-1).success(access);
   page.onShow(); confirm(withFinance);
   requests.filter((r) => r.url === '/api/merchant/dashboard').forEach((r) => r.success({ code: 200, data: { revenue: 88 } }));
+  settleMemberCache();
   assert.equal(page.data.dashboardData.revenue, '88.00');
-  page.onHide(); page.onShow(); confirm(withoutFinance);
+  const accessCount = requests.filter((r) => r.url === '/api/merchant/access/me').length;
+  page.onHide(); page.onShow();
+  assert.equal(requests.filter((r) => r.url === '/api/merchant/access/me').length, accessCount);
+  assert.equal(page.data.merchantAccess.canReadFinance, true);
+  assert.equal(page.data.dashboardData.revenue, '88.00', '普通返回不拿掉已显示的收入');
+  page.onShow({ preserveVerification: true });
+  confirm(withoutFinance);
   assert.equal(page.data.merchantAccess.canReadFinance, false);
-  assert.equal(page.data.dashboardData.revenue, null, '收回资金读权后累计收入不能留在屏上');
+  assert.equal(page.data.dashboardData.revenue, null, '下拉刷新后收回资金读权,累计收入不再上屏');
 });
 
 // L07-070:下拉刷新在看板与待办都回来后才收起,不是固定 800ms

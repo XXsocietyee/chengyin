@@ -41,6 +41,16 @@ Page({
   onShow() {
     this._hidden = false;
     merchantTheme.merchantPageShow && merchantTheme.merchantPageShow();
+    if (this._pickerReturn) {
+      this._pickerReturn = false;
+      const owner = galleryIdentity();
+      if (owner && owner === this._galleryIdentity) {
+        if (this._saveOutcome) {
+          const settle = this._saveOutcome; this._saveOutcome = null; settle();
+        }
+        return;
+      }
+    }
     const changed = this._syncIdentity();
     if (changed) {
       const gate = this.selectComponent && this.selectComponent('#cy-access-gate');
@@ -52,6 +62,12 @@ Page({
     if (this._galleryIdentity && (changed || this._resumeRead)) this.load();
   },
   onHide() {
+    if (this._systemPickerOpen) {
+      this._systemPickerOpen = false;
+      this._pickerReturn = true;
+      merchantTheme.merchantPageRestore && merchantTheme.merchantPageRestore();
+      return;
+    }
     this._hidden = true;
     this._loginEpoch = (this._loginEpoch || 0) + 1;
     this._resumeRead = this._resumeRead || this._loadInFlight;
@@ -194,7 +210,9 @@ Page({
     const that = this;
     const owner = this._dataIdentity;
     const epoch = this._identityEpoch;
+    this._systemPickerOpen = true;
     app.chooseImage(function (images) {
+      that._systemPickerOpen = false;
       if (!that._currentIdentity(owner) || that._hidden || epoch !== that._identityEpoch
           || !images || !images.length || !that._canEdit()) return;
       // L07-099:按 URL 作 key ⇒ 同一张图不重复加入

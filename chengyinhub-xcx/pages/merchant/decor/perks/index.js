@@ -122,6 +122,10 @@ Page({
     this._deleteEpoch = (this._deleteEpoch || 0) + 1;
     this._loadInFlight = false;
     this._pendingSaveReadback = null;
+    if (this._backGuardTimer) {
+      clearTimeout(this._backGuardTimer);
+      this._backGuardTimer = null;
+    }
     merchantTheme.merchantPageRestore && merchantTheme.merchantPageRestore();
   },
 
@@ -204,7 +208,11 @@ Page({
     const n = this.data;
     if (n.formVisible || n.discardVisible) {
       this.setData({backGuardOff: true});
-      setTimeout(() => { if (!this._destroyed) this.setData({backGuardOff: false}); }, 50);
+      if (this._backGuardTimer) clearTimeout(this._backGuardTimer);
+      this._backGuardTimer = setTimeout(() => {
+        this._backGuardTimer = null;
+        if (!this._destroyed) this.setData({backGuardOff: false});
+      }, 50);
     }
   },
   discardForm(){this.setData({form:JSON.parse(this._formAtOpen),discardVisible:false,formVisible:false});this.refreshSaveState();},

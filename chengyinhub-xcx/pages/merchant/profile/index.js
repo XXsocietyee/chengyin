@@ -12,6 +12,10 @@ const app = getApp();
 const merchantTheme = require('../../../utils/merchant-theme.js');
 const { merchantHomeUrl } = require('../../../utils/merchant-home-link.js');
 
+function safeDecode(value) {
+  try { return decodeURIComponent(String(value || '')); } catch (error) { return String(value || ''); }
+}
+
 const POI_HOST = '/subpackageRoam/poi-detail/index';
 const UNAVAILABLE_MSG = '商家不存在或未开放';
 
@@ -40,7 +44,7 @@ Page({
     this.setData({
       id: id,
       topicId: opts.topicId || '',
-      topicName: opts.topicName ? decodeURIComponent(opts.topicName) : '',
+      topicName: opts.topicName ? safeDecode(opts.topicName) : '',
       canBack: typeof getCurrentPages === 'function' && getCurrentPages().length > 1,
     });
 

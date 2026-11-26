@@ -40,8 +40,13 @@ function imageList(value) {
   return items.map(imageUrl).filter(Boolean);
 }
 
-function requestFailureText(error) {
-  return displayText(error && (error.msg || error.message || error.errMsg));
+function requestFailureText(error, fallback) {
+  var text = displayText(error && (error.msg || error.message));
+  if (!text || text.length > 60 || /[\r\n]/.test(text)
+      || /typeerror|syntaxerror|urierror|referenceerror|rangeerror|evalerror|cannot read|is not a function|is not defined|request:fail|[a-z]*exception|\bat\s+\S+\(/i.test(text)) {
+    return fallback || '';
+  }
+  return text;
 }
 
 function isNetworkFailure(error) {
@@ -316,7 +321,7 @@ Page({
           bootstrapState: 'error',
           bootstrapError: networkFailure
             ? '网络连接失败，请检查网络后重新检查'
-            : requestFailureText(error) || '暂时无法确认申请状态，请重试',
+            : requestFailureText(error, '暂时无法确认申请状态，请重试'),
           bootstrapErrorKind: networkFailure ? 'network' : 'error'
         });
       }
@@ -713,7 +718,7 @@ Page({
           submitting: false,
           submitError: networkFailure
             ? '网络连接失败，已填写的资料会保留，请重新提交'
-            : requestFailureText(error) || '提交未完成，请稍后重试',
+            : requestFailureText(error, '提交未完成，请稍后重试'),
           submitErrorKind: networkFailure ? 'network' : 'data'
         });
       }

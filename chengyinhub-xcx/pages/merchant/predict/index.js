@@ -22,6 +22,8 @@ function shapeRound(row) {
   // L07-127(a):缺 daysLeft 是「未知」,不能当 0 天红字吓人
   const known = row && row.daysLeft != null && row.daysLeft !== '' && Number.isFinite(Number(row.daysLeft));
   const days = known ? Number(row.daysLeft) : null;
+  const betKnown = row && row.betCount != null && row.betCount !== '' && Number.isFinite(Number(row.betCount));
+  const betCount = betKnown ? Number(row.betCount) : null;
   return {
     rid: String((row && row.nodeId) || '') + ':' + String((row && row.playDay) || ''),
     nodeId: (row && row.nodeId) || 0,
@@ -29,10 +31,8 @@ function shapeRound(row) {
     nodeName: (row && row.nodeName) || '未命名节点',
     question: (row && row.question) || '',
     options: options,
-    betCount: Number((row && row.betCount) || 0),
-    betText: Number((row && row.betCount) || 0) > 0
-      ? (row.betCount + ' 个人选了这一轮')
-      : '这一轮还没有人选',
+    betCount: betCount,
+    betText: !betKnown ? '' : (betCount > 0 ? (betCount + ' 个人选了这一轮') : '这一轮还没有人选'),
     optionText: options.length + ' 个选项',
     daysLeft: days,
     // 0 天不是「还剩 0 天」,是「今天不给就没了」—— 后者才让人现在就动手

@@ -37,7 +37,7 @@
         </view>
 
         <text class="pdm-q">{{item.question}}</text>
-        <view class="pdm-bets">{{item.betText}}</view>
+        <view class="pdm-bets" wx:if="{{item.betText}}">{{item.betText}}</view>
 
         <block wx:if="{{openId === item.rid}}">
           <view class="pdm-pick-hint">选出正确答案</view>

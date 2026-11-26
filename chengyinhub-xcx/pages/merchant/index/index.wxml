@@ -148,7 +148,7 @@
         <!-- 卡片只铺前几条,总数得报真实的 joinTotal/hostProjectTotal(取自全量 list,
              不是被截断的那份),否则 30 个项目会被说成 4 个;2026-09-16 起只数未结束的,
              已结束的项目仍可在「全部」完整列表页里查到 -->
-        <view class="rv-section-more" wx:if="{{joinTotal || hostProjectTotal}}" bindtap="goPublishedProjects" aria-role="button" aria-label="查看全部 {{joinTotal + hostProjectTotal || 0}} 个项目" hover-class="cy-pressed" hover-stay-time="80"><text>全部 {{joinTotal + hostProjectTotal}}</text><cy-icon name="arrow-right" size="24" /></view>
+        <view class="rv-section-more" wx:if="{{projectTotalKnown ? (joinTotal || hostProjectTotal) : projectCards.length}}" bindtap="goPublishedProjects" aria-role="button" aria-label="{{projectTotalKnown ? ('查看全部 ' + (joinTotal + hostProjectTotal) + ' 个项目') : '查看全部项目'}}" hover-class="cy-pressed" hover-stay-time="80"><text wx:if="{{projectTotalKnown}}">全部 {{joinTotal + hostProjectTotal}}</text><text wx:else>全部</text><cy-icon name="arrow-right" size="24" /></view>
       </view>
 
       <!-- 首载没有任何项目时才整块骨架:半份数据渲成卡片,商家会读到「今日无待办」这种
@@ -185,9 +185,9 @@
             </view>
           </view>
           </view>
-          <view class="rv-project-item rv-project-more" wx:if="{{joinTotal + hostProjectTotal > projectCards.length}}"
+          <view class="rv-project-item rv-project-more" wx:if="{{projectTotalKnown && joinTotal + hostProjectTotal > projectCards.length}}"
                 bindtap="goPublishedProjects" hover-class="rv-tap" hover-stay-time="80" aria-role="button"
-                aria-label="查看全部项目，还有 {{(joinTotal + hostProjectTotal - projectCards.length) || 0}} 个">
+                aria-label="查看全部项目，还有 {{joinTotal + hostProjectTotal - projectCards.length}} 个">
             <view class="rv-project-more-c rv-project-more-c--3"></view>
             <view class="rv-project-more-c rv-project-more-c--2"></view>
             <view class="rv-project-more-c rv-project-more-c--1">

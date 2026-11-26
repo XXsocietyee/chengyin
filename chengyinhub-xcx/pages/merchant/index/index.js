@@ -84,6 +84,7 @@ Page({
     hostProjectTotal: 0,
     hostLoading: true,
     hostError: false,
+    projectTotalKnown: false,
     gameEntryLoading: true,
     displayName: '商家',
     businessStatus: 1, // 1营业中 0已打烊
@@ -462,7 +463,13 @@ Page({
   },
 
   loadMerchantGameEntries() {
-    if (!this._gameSessionClient) return;
+    const memberId = this._accessMemberId || this._fullLoadMember || '';
+    if (!this._gameSessionClient) {
+      // 没有入口客户端就没有可发的请求;别让「加载中」把已读完的工作台永远挡在整链重读外面
+      this._entriesLoadedMember = memberId;
+      if (this.data.gameEntryLoading) this.setData({ gameEntryLoading: false });
+      return;
+    }
     const generation = this._gameSummaryGeneration || 0;
     if (this._merchantGameEntryTask && typeof this._merchantGameEntryTask.abort === 'function') {
       this._merchantGameEntryTask.abort();
@@ -475,6 +482,7 @@ Page({
       this._merchantGameEntryTask = null;
       if (result && result.status === 'ready') {
         this._merchantGameEntries = result.data;
+        this._entriesLoadedMember = memberId;
         this.setData({ gameEntryLoading: false });
       } else {
         this._merchantGameEntries = [];
@@ -672,6 +680,7 @@ Page({
       this.setData({
         joinTotal: 0, joinLoading: false, joinError: false,
         hostProjectTotal: 0, hostLoading: false, hostError: false,
+        projectTotalKnown: false,
         projectCards: [],
       });
     }
@@ -701,6 +710,8 @@ Page({
   clearMerchantScopedData() {
     // L07-010:换主体后第一次回到页面必须走整条读取链
     this._lastFullLoadAt = 0;
+    this._merchantInfoMember = '';
+    this._entriesLoadedMember = '';
     if (this._verificationWorkflow) {
       this._verificationWorkflow.destroy();
       this._verificationWorkflow = null;
@@ -732,6 +743,7 @@ Page({
       hostProjectTotal: 0,
       hostLoading: true,
       hostError: false,
+      projectTotalKnown: false,
       todo: emptyTodo(),
       todoLoading: true,
       projectCards: [],
@@ -755,9 +767,14 @@ Page({
   },
 
   refreshJoinRequestState() {
+    const joinLoading = !!(this._legacyJoinLoading || this._chapterJoinLoading);
+    const joinError = !!(this._legacyJoinError || this._chapterJoinError);
+    const hostKnown = this.data.hostProjectTotal != null && !this.data.hostLoading && !this.data.hostError;
     this.setData({
-      joinLoading: !!(this._legacyJoinLoading || this._chapterJoinLoading),
-      joinError: !!(this._legacyJoinError || this._chapterJoinError),
+      joinLoading: joinLoading,
+      joinError: joinError,
+      projectTotalKnown: !!(this.data.merchantAccess && this.data.merchantAccess.canManageProjects
+        && hostKnown && !joinLoading && !joinError),
     });
   },
 
@@ -786,6 +803,13 @@ Page({
     merchantTheme.merchantPageShow(); this._navigating = false; this._hidden = false;
     // L07-002:系统相机让本页 onHide/onShow 一次。扫码往返不算离开:保留核销 epoch,不重跑整条读取链
     if (this._hiddenForScan) { this._hiddenForScan = false; return; }
+    // 选章/选点/系统选择器把页面藏起来再回来:同一主体不重读整条数据集,换了登录人仍走身份链
+    if (this._pickerReturn) {
+      this._pickerReturn = false;
+      this._systemPickerOpen = false;
+      const memberId = String(app.getUserID() || '');
+      if (memberId && memberId === this._pickerMember) return;
+    }
     if (this.data && this.data.msgOpen) this.setData({ msgOpen: false });
     // 回到页面不剥掉已确认的游戏入口卡(否则项目列先缩后涨);换主体时 clearMerchantScopedData 才清。
     this.resetGameStationSummaries();
@@ -795,13 +819,18 @@ Page({
     if (!(options && options.preserveVerification === true)) {
       this._verificationEpoch = (this._verificationEpoch || 0) + 1;
     }
-    // L07-010:同一账号 60s 内回到工作台只重读易变的三块(待办/看板/消息);
-    // 下拉刷新(preserveVerification)、换账号换主体、超过 60s 仍走整条读取链
+    // L07-010:同一会员、身份/资料/用户/入口都已在手上时,回来不再重打这四样。
+    // 换会员或下拉刷新才整链重读。接受合作/发布活动只补项目列表(业主 2026-11-24)。
     const memberId = String(app.getUserID() || '');
-    // 接受合作邀约 / 发布活动后回来:项目列表立刻整链重读(业主 2026-11-24)
+    // 接受合作邀约 / 发布活动后回来:项目列表立刻重读
     // 标记写在 app.globalData.merchantWorkbenchStale(写方:coop/invite-detail、topic/merchantinfo、publish/activity)
     const stale = !!(app.globalData && app.globalData.merchantWorkbenchStale === true);
     if (stale) app.globalData.merchantWorkbenchStale = false;
+    const pullRefresh = !!(options && options.preserveVerification === true);
+    if (!pullRefresh && this._staticHomeReady(memberId)) {
+      this._resumeLoadedHome(stale);
+      return;
+    }
     this._lightReload = !stale && !(options && options.preserveVerification === true)
       && this._fullLoadMember === memberId && Date.now() - (this._lastFullLoadAt || 0) < 60000
       // 上一轮项目列表还在途或失败:下面 enterConsole 推进 epoch 会丢掉在途回包,只能整链重读
@@ -810,6 +839,34 @@ Page({
     //   玩家没有商家入口、商家注册后也不会看到这一页,整屏「登录后查看 / 没有商家身份」
     //   只会拦到自己人(2026-09-16 裁决)。
     this.enterConsole();
+  },
+
+  // 同一会员且这四样已经回来:access/me、店铺资料、用户资料、本站入口。项目还在转或失败不算。
+  _staticHomeReady(memberId) {
+    if (!memberId || this._fullLoadMember !== memberId || this._accessMemberId !== memberId) return false;
+    const access = this.data && this.data.merchantAccess;
+    if (!access || !access.active || this.data.consoleError || this.data.consoleLogin || this.data.consoleDenied) return false;
+    if (access.canWriteProfile && this._merchantInfoMember !== memberId) return false;
+    if (this._userInfoMember !== memberId) return false;
+    if (this._gameSessionClient) {
+      if (this.data.gameEntryLoading || this._entriesLoadedMember !== memberId) return false;
+    } else if (this.data.gameEntryLoading) return false;
+    if (access.canManageProjects && (this.data.joinLoading || this.data.hostLoading || this.data.joinError || this.data.hostError)) return false;
+    return true;
+  },
+
+  // 已加载的工作台回来:待办/看板/消息照旧刷新;合作或发布后的标记只补项目列表。
+  _resumeLoadedHome(stale) {
+    const dataEpoch = (this._dataEpoch || 0) + 1;
+    this._dataEpoch = dataEpoch;
+    this._dataMemberId = String(app.getUserID() || '');
+    const access = this.data.merchantAccess;
+    if (stale && access && access.canManageProjects) {
+      this.loadJoinList(dataEpoch);
+      this.loadChapterProjectList(dataEpoch);
+      this.loadHostProjects(dataEpoch);
+    }
+    this.loadVolatileConsole(access, dataEpoch);
   },
 
   enterConsole(authRetryUsed) {
@@ -992,6 +1049,7 @@ Page({
       success(res) {
         if (!that.isCurrentDataEpoch(dataEpoch)) return;
         if (res.code === '200' || res.code === 200) {
+          that._merchantInfoMember = String(app.getUserID() || '');
           that.setData({ merchantInfo: res.data });
           that.refreshProfileHeader(res.data, that._userInfo);
         }
@@ -1226,7 +1284,7 @@ Page({
       success(res) {
         if (!that.isCurrentDataEpoch(dataEpoch)) return;
         if (!(res && (res.code === '200' || res.code === 200) && res.data && isRecordList(res.data.rows))) {
-          that.setData({ hostLoading: false, hostError: true });
+          that.setData({ hostLoading: false, hostError: true, projectTotalKnown: false });
           that.refreshProjectCards();
           return;
         }
@@ -1242,17 +1300,20 @@ Page({
         // 列表只请求一页 10 条,拿这一页数会把 30 个项目说成 10 个。判据在后端与卡片
         // 状态签同源(isEndedProject:档期未知不算结束),前端不再自己数。
         const activeTotal = finiteCount(res.data.activeTotal);
+        const hostKnown = activeTotal !== null;
         that._hostProjectList = rows;
         that.setData({
-          hostProjectTotal: activeTotal === null ? 0 : activeTotal,
+          hostProjectTotal: activeTotal,
           hostLoading: false,
           hostError: false,
+          projectTotalKnown: hostKnown && !that.data.joinLoading && !that.data.joinError
+            && !!(that.data.merchantAccess && that.data.merchantAccess.canManageProjects),
         });
         that.refreshProjectCards();
       },
       fail() {
         if (!that.isCurrentDataEpoch(dataEpoch)) return;
-        that.setData({ hostLoading: false, hostError: true });
+        that.setData({ hostLoading: false, hostError: true, projectTotalKnown: false });
         that.refreshProjectCards();
       },
     });
@@ -1315,7 +1376,7 @@ Page({
   },
 
   // 走查 v2 R02(业主 10-30):叠层展开后每条 × = 标为已读,底下「清空」= 全部标为已读。
-  // 会话走站内消息同一个 /api/im/read(失败照常 toast 一次);邀请和经营动态没有已读接口,记在本机(按账号)。
+  // 会话走站内消息同一个 /api/im/read(一次一个 conversation_id);邀请和经营动态没有已读接口,记在本机(按账号)。
   inboxReadStore() { return 'merchant_inbox_read_' + String((app.getUserID && app.getUserID()) || ''); },
 
   inboxReadMap() {
@@ -1326,19 +1387,27 @@ Page({
   markInboxRead(items) {
     const map = this.inboxReadMap();
     const at = Date.now();
-    const unread = [];
-    items.forEach((item) => {
+    const list = items || [];
+    list.forEach((item) => {
+      if (!item) return;
       map[inboxReadKey(item)] = at;
-      if (item.kind === 'conversation' && item.unread) unread.push(item.conversationId);
     });
-    // L07-016:一键已读逐条串行发,首个失败即停,最多一条报错提示(原先最多 50 条并发、各自 toast)
-    const next = (i) => {
-      if (i >= unread.length) return;
-      app.sendRequest({ url: '/api/im/read', method: 'POST', hideLoading: true,
-        data: { conversation_id: unread[i] },
-        success: (res) => { if (res && String(res.code) === '200') next(i + 1); } });
-    };
-    next(0);
+    // L07-016:/api/im/read 只收一个 conversation_id。本机仍记下全部,请求只发当前这一屏
+    // (最多叠层上的几条),成功后不再顺着预览里最多 50 条未读往下打。
+    const visibleKeys = {};
+    (this.data.inboxItems || []).forEach((item) => {
+      if (item && item.key) visibleKeys[item.key] = true;
+    });
+    const seen = {};
+    list.forEach((item) => {
+      if (!item || item.kind !== 'conversation' || !item.unread || item.conversationId == null) return;
+      if (!visibleKeys[item.key] || seen[item.conversationId]) return;
+      seen[item.conversationId] = true;
+      app.sendRequest({
+        url: '/api/im/read', method: 'POST', hideLoading: true, silentError: true,
+        data: { conversation_id: item.conversationId },
+      });
+    });
     const keys = Object.keys(map).sort((a, b) => map[b] - map[a]).slice(0, 300);
     const kept = {};
     keys.forEach((k) => { kept[k] = map[k]; });
@@ -1770,8 +1839,17 @@ Page({
       merchantTheme.merchantPageRestore();
       return;
     }
+    const sceneId = this.data && this.data.sceneCurrent && this.data.sceneCurrent.id;
+    if (this._systemPickerOpen
+        || sceneId === 'merchant-chapter-picker'
+        || sceneId === 'merchant-station-picker'
+        || (this.data.manualChoice && this.data.manualChoice.show)) {
+      this._pickerReturn = true;
+      this._pickerMember = String(app.getUserID() || '');
+    }
     this._hidden = true;
     this._businessActionEpoch = (this._businessActionEpoch || 0) + 1;
+    this.stopRevenueCount();
     if (this._refreshEndTimer) {
       clearTimeout(this._refreshEndTimer);
       this._refreshEndTimer = null;

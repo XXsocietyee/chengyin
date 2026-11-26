@@ -23,7 +23,7 @@ test('identity mismatch still fails closed', () => {
   assert.equal(shapeCustomerDetail(base(), 10), null);
 });
 
-// L07-022:弹窗里写完后的静默刷新断网只提示,不把整页翻成错误态
+// L07-022:弹窗里写完后的静默刷新断网不提示,屏上的行留着;下次打开可以再读
 test('silent reload network failure keeps the page state', () => {
   let def = null;
   const requests = [];
@@ -43,8 +43,16 @@ test('silent reload network failure keeps the page state', () => {
     page._merchantAccess = { canReadCrm: true };
     page._customerMemberId = 9;
     page.data.pageState = 'ready';
+    page.data.detail = { summary: { customerMemberId: 9 }, merchantTags: [{ id: 1, tagName: '常客' }] };
+    page.data.noteHistory = [{ id: 3, content: '上次备注' }];
     page.loadDetail(true);
     requests.at(-1).fail();
     assert.equal(page.data.pageState, 'ready');
+    assert.equal(page.data.detail.merchantTags[0].tagName, '常客');
+    assert.equal(page.data.noteHistory[0].content, '上次备注');
+    assert.deepEqual(toasts, []);
+    const before = requests.length;
+    page.loadDetail();
+    assert.equal(requests.length, before + 1, '下次打开仍可重新读取');
   } finally { Object.assign(global, prev); }
 });
