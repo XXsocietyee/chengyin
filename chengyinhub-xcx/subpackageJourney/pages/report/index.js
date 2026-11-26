@@ -2,6 +2,11 @@ const api = require('../../utils/journey-api.js');
 const view = require('../../utils/journey-view.js');
 const app = getApp();
 
+function queryText(value) {
+  if (!value) return '';
+  try { return decodeURIComponent(String(value)); } catch (e) { return ''; }
+}
+
 /* P7 本局战报：真实结束回执后进入，「我的记录」可按 runId 重开同一局。
  * 只读：读取不补完局、不发奖、不建局。名次(P9/§23.4)与回忆(P8)用同页面板承接。 */
 
@@ -25,7 +30,7 @@ Page({
       topicId: view.isId(o.topicId) ? o.topicId : '',
       runId: view.isId(o.runId) ? o.runId : ''
     };
-    this._topicName = o.topicName ? decodeURIComponent(o.topicName) : '';
+    this._topicName = queryText(o.topicName);
     this._clubId = view.isId(o.clubId) ? o.clubId : '';
     this.setData({ registrationId: view.isId(o.registrationId) ? o.registrationId : '',
       cityCode: o.cityCode || '', countryCode: o.countryCode || '', clubId: this._clubId });

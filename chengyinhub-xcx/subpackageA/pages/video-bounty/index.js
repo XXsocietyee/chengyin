@@ -6,6 +6,11 @@ const modal = require('../../../utils/modal.js')
 const { isBizOk } = require('../../../utils/response-shape.js')
 const vb = require('../../utils/video-bounty-view.js')
 
+function queryText(value) {
+  if (!value) return ''
+  try { return decodeURIComponent(String(value)) } catch (e) { return '' }
+}
+
 function get(url, data) {
   return new Promise((resolve) => {
     app.sendRequest({
@@ -44,7 +49,7 @@ Page({
   },
   onLoad(options) {
     this.setData({
-      campaignKey: (options && options.campaignKey) ? decodeURIComponent(options.campaignKey) : '',
+      campaignKey: queryText(options && options.campaignKey),
       topicId: (options && options.topicId) ? String(options.topicId) : ''
     })
     this.load()

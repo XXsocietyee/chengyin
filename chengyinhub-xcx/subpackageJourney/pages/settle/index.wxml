@@ -96,7 +96,7 @@
     </view>
 
     <!-- 评价已提交:居中弹窗(proto pop-rated) -->
-    <view class="st-pop" wx:if="{{thanks}}" aria-role="dialog" aria-label="评价已提交">
+    <view class="st-pop" wx:if="{{thanks && step === 'rate'}}" aria-role="dialog" aria-label="评价已提交">
       <view class="st-pop__mask"></view>
       <view class="st-pop__card">
         <cy-illus name="star" size="180" delay="{{100}}" reduced-motion="{{reduced}}" />

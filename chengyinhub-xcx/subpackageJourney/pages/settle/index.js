@@ -10,6 +10,11 @@ const analytics = require('../../../utils/analytics.js');
 const { isMerchantView } = require('../../../utils/roleGuard.js');
 const app = getApp();
 
+function queryText(value) {
+  if (!value) return '';
+  try { return decodeURIComponent(String(value)); } catch (e) { return ''; }
+}
+
 /* r2-finish 结算流程 → l-after(2026-11-10)按业主批准的原型改:整局走完后 总览 → 排行榜(导航栏以下的近全屏弹层,只有 全体 / 队内)
  * → 评价(五星 + 标签片 + 一句话,可跳过)→ 分享(帖文 / 故事卡,底部一行 分享 + 完成)。
  * 只读服务端事实:战报 /api/play/player-journey/report;评价走既有 /api/comment/add(owner_type 1 主题 / 2 场次)。
@@ -48,7 +53,7 @@ Page({
       topicId: view.isId(o.topicId) ? o.topicId : '',
       runId: view.isId(o.runId) ? o.runId : ''
     };
-    this.setData({ topicName: o.topicName ? decodeURIComponent(o.topicName) : '', navTop: navTopPx(), reduced: !!readReducedMotion() });
+    this.setData({ topicName: queryText(o.topicName), navTop: navTopPx(), reduced: !!readReducedMotion() });
     if (!this._query.activityId && !this._query.topicId) {
       this.setData({ state: 'missing', stateKind: 'missing-param', stateTitle: '链接已失效', stateCta: '返回' });
       return;
@@ -146,7 +151,8 @@ Page({
   _go(step) {
     const i = STEPS.indexOf(step);
     if (i < 0) return;
-    this.setData({ step, stepIndex: i, thanks: false });
+    // L09-059:评价已被受理后,去分享再返回仍是「谢谢」。清掉就会露出原表单,像还能再交一次。
+    this.setData({ step, stepIndex: i, thanks: !!this._rated });
     if (step === 'overview') this._enterOverview();
     if (step === 'rank') {
       // 近全屏弹层从下方升起

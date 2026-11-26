@@ -25,6 +25,10 @@ function seenBefore() {
 function markSeen() {
   try { wx.setStorageSync(SEEN_KEY, { uid: String(app.getUserID ? app.getUserID() || '' : ''), at: Date.now() }) } catch (e) { /* 记不上就下次再播一遍 */ }
 }
+function queryText(value) {
+  if (!value) return '';
+  try { return decodeURIComponent(String(value)); } catch (e) { return ''; }
+}
 
 // D-116(业主 2026-11-11「加预下载」):弱网下首帧不能是黑的。进页先把序列帧 WebP 解码进图片缓存(getImageInfo,帧图本来就在本分包内,不增主包):
 // 完整版 intro 前 3 张 + 待机第 0 张立刻拉,其余 intro / idle 排在后面低并发补;失败一律吞掉(播放器照旧按需挂图)。
@@ -89,11 +93,15 @@ Page({
       : idle
     warmFrames(order, () => !this._unloaded)
   },
-  onUnload() { this._unloaded = true; (this._t || []).forEach(clearTimeout) },
+  onUnload() {
+    this._unloaded = true;
+    (this._t || []).forEach(clearTimeout);
+    if (this._endT) { clearTimeout(this._endT); this._endT = 0; }
+  },
   /** 开通成功:眉题 / 标题 / 正文只写上一页带来的服务端事实 */
   _paidCopy(o) {
     const count = /^\d+$/.test(String(o.count || '')) ? String(o.count) : ''
-    const until = o.until ? decodeURIComponent(String(o.until)) : ''
+    const until = queryText(o.until)
     return {
       eb: '通行证 · 已开通',
       h: count ? count + ' 个主题，全部可玩' : '已开通',
@@ -107,7 +115,8 @@ Page({
     this.setData({ idleOn: true, step: { grad: true, eb: true, h: true, p: true, btn: true, skip: false } })
     // 待机层淡入盖住完整版的最后一帧后,再把完整版层拆掉
     const ms = this.data.reduced ? 0 : 420
-    this._endT = setTimeout(() => { if (!this._unloaded) this.setData({ introOn: false }) }, ms)
+    if (this._endT) clearTimeout(this._endT)
+    this._endT = setTimeout(() => { this._endT = 0; if (!this._unloaded) this.setData({ introOn: false }) }, ms)
   },
   onIntroEnd() { if (!this._unloaded) this._end() },
   onSkip() { this._go() },

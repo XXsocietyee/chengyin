@@ -23,7 +23,7 @@
     <view class="eo-row eo-row--asset" wx:for="{{assets}}" wx:key="key">
       <view class="eo-row__ic"><cy-icon name="{{item.icon}}" size="36" /></view>
       <text class="eo-row__t eo-row__main">{{item.label}}</text>
-      <text class="eo-row__amt">{{money.amount(item.amount)}}</text>
+      <text class="eo-row__amt">{{item.unknown ? '金额待确认' : money.amount(item.amount)}}</text>
     </view>
     <text class="eo-none" wx:if="{{assetsError}}" bindtap="retryAssets" aria-role="button" aria-label="重新加载我的资产" hover-class="cy-pressed" hover-stay-time="80">没加载出来，点这里重试</text>
   </view>

@@ -47,6 +47,21 @@ test('L09-059 评价受理后回到评价步再提交不发第二条', async () 
   assert.equal(h.sent.length, 1); assert.equal(h.page.data.thanks, true);
 });
 
+test('L09-059 去分享再返回仍是谢谢，且不再发第二条', async () => {
+  const h = mountSettle([{ code: 200 }]);
+  h.page.createSelectorQuery = () => ({ select() { return { fields() { return { exec() {} }; } }; } });
+  h.page.submitRate(); await settleTick();
+  assert.equal(h.sent.length, 1); assert.equal(h.page.data.thanks, true);
+  h.page.goShare();
+  assert.equal(h.page.data.step, 'share');
+  assert.equal(h.page.data.thanks, true);
+  h.page.onBack();
+  assert.equal(h.page.data.step, 'rate');
+  assert.equal(h.page.data.thanks, true);
+  h.page.submitRate(); await settleTick();
+  assert.equal(h.sent.length, 1);
+});
+
 test('L09-059 失败后改了内容换新 request_id,没改则复用', async () => {
   const h = mountSettle(['net', 'net', { code: 200 }]);
   h.page.submitRate(); await settleTick();

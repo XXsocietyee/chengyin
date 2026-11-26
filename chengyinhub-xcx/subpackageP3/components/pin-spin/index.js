@@ -15,7 +15,7 @@ Component({
   },
   lifetimes: {
     ready() { this._dead = false; this._theta = 0; this._vel = 0; this._init(); },
-    detached() { this._dead = true; this._stop(); },
+    detached() { this._dead = true; this.pause(); },
   },
   methods: {
     _init() {
@@ -86,6 +86,7 @@ Component({
       const TWO_PI = Math.PI * 2, that = this;
       if (this.data.reduced) {
         this._theta = Math.round(this._theta / TWO_PI) * TWO_PI + Math.PI; this._draw();
+        if (that._flipT) { clearTimeout(that._flipT); that._flipT = 0; }
         that._flipT = setTimeout(function () { that._flipT = 0; if (that._dead) return; that._theta = Math.round(that._theta / TWO_PI) * TWO_PI; that._draw(); }, 1000);
         return;
       }

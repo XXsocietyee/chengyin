@@ -27,7 +27,23 @@ Page({
   onLoad(options) {
     this._registrationId = view.isId(options && options.registrationId) ? String(options.registrationId) : '';
     if (!this._registrationId) { this.setData({ state: 'missing', stateKind: 'missing-param', stateTitle: '链接已失效', stateCta: '返回' }); return; }
+    // 首次 onShow 紧跟 onLoad,不连打两次席位接口
+    this._deferShowRefresh = true;
     this.load();
+  },
+
+  // 从资料页或后台回来:席位可能已被领取,昵称也可能刚改过。转赠半屏里已填的称呼和手机号留着。
+  onShow() {
+    if (!this._registrationId || this._unloaded) return;
+    if (this._deferShowRefresh) { this._deferShowRefresh = false; return; }
+    this.load();
+    if (this._extrasRead) this._loadMe();
+  },
+
+  onUnload() {
+    this._unloaded = true;
+    this._epoch = (this._epoch || 0) + 1;
+    this._meEpoch = (this._meEpoch || 0) + 1;
   },
 
   _pending() { try { return wx.getStorageSync(INVITE_KEY + this._registrationId) || ''; } catch (e) { return ''; } },
@@ -42,7 +58,7 @@ Page({
     const epoch = this._epoch = (this._epoch || 0) + 1;
     if (this.data.state !== 'ready') this.setData({ state: 'loading', stateKind: 'loading', stateTitle: '加载中', stateCta: '' });
     api.seats(app, this._registrationId).then(res => {
-      if (epoch !== this._epoch) return;
+      if (epoch !== this._epoch || this._unloaded) return;
       if (!api.ok(res) || !res.data) {
         const denied = Number(res && res.code) === 403 || (res && res.httpStatus === 403);
         this.setData({ state: denied ? 'denied' : 'error', stateKind: denied ? 'no-permission' : 'data',
@@ -77,8 +93,14 @@ Page({
         if (m) this.setData({ tiles: m.tiles });
       });
     }
+    this._loadMe();
+  },
+
+  _loadMe() {
+    const epoch = this._meEpoch = (this._meEpoch || 0) + 1;
     app.sendRequest({ url: '/api/user/info', method: 'POST', hideLoading: true, autoErrorToast: false,
       success: res => {
+        if (epoch !== this._meEpoch || this._unloaded || this.data.state !== 'ready') return;
         const u = res && String(res.code) === '200' && res.data;
         if (!u) return;
         const name = String(u.nickname || '').trim();

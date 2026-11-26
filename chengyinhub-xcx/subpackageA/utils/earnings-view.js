@@ -92,11 +92,26 @@ function sourceBreakdown(rows, now) {
 }
 
 /** 我的资产三行:可提现 / 待结算(活动未结束 + 客诉期) / 客诉处理中(有才出) */
+function knownAmount(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toFixed(2) : null;
+}
 function assetRows(stages) {
   if (!stages) return [];
-  const pending = Number(stages.pending || 0) + (stages.complaintPeriod || []).reduce((s, x) => s + Number(x.amount || 0), 0);
+  // 费率算不出时服务端会带 amountsKnown=false,数字是低估值,不能显示成 0
+  if (stages.amountsKnown === false) {
+    return [
+      { key: 'withdrawable', label: '可提现', icon: 'finance', unknown: true },
+      { key: 'pending', label: '待结算', icon: 'clock', unknown: true },
+    ];
+  }
+  const pendingPart = knownAmount(stages.pending);
+  const pending = (pendingPart == null ? 0 : Number(pendingPart))
+    + (stages.complaintPeriod || []).reduce((s, x) => s + (knownAmount(x && x.amount) == null ? 0 : Number(x.amount)), 0);
+  const withdrawable = knownAmount(stages.withdrawable);
   const rows = [
-    { key: 'withdrawable', label: '可提现', icon: 'finance', amount: Number(stages.withdrawable || 0).toFixed(2) },
+    { key: 'withdrawable', label: '可提现', icon: 'finance', amount: withdrawable == null ? null : withdrawable, unknown: withdrawable == null },
     { key: 'pending', label: '待结算', icon: 'clock', amount: pending.toFixed(2) },
   ];
   if (Number(stages.disputed) > 0) rows.push({ key: 'disputed', label: '客诉处理中', icon: 'warning', amount: Number(stages.disputed).toFixed(2) });
