@@ -6,7 +6,12 @@ const app = getApp();
 const { chinaParts } = require('../../../utils/datetime.js');
 const { refundRuleText } = require('../utils/refund-tiers.js'); // L06-010/L06-112:直接取真源,不在循环里 require 转出壳
 const pad2 = (n) => String(n).padStart(2, '0');
-const mdhm = (p) => pad2(p.month) + '-' + pad2(p.day) + ' ' + pad2(p.hours) + ':' + pad2(p.minutes);
+// 日期串里没有「时:分」就不补 00:00。数字时间戳和 Date 自带钟点,仍显示。
+const hasClockPart = (value) => typeof value !== 'string' || /(?:[ T])\d{1,2}:\d{1,2}/.test(value);
+const mdhm = (p, source) => {
+  const date = pad2(p.month) + '-' + pad2(p.day);
+  return hasClockPart(source) ? date + ' ' + pad2(p.hours) + ':' + pad2(p.minutes) : date;
+};
 // 详情载荷上的喜欢标记。0/false 也是答案,不能当成「没给」。这三个字段都没有,就不猜心。
 function topicLikeFlag(topic) {
   if (!topic || typeof topic !== 'object') return null;
@@ -2520,21 +2525,25 @@ Page({
     if (!isRecordList(list) || list.length === 0) return [];
     
     for (let i = 0; i < list.length; i++) {
-      // L06-010:按中国时区解析(utils/datetime),缺时分/ISO 格式都不抛错;解析不了就不出这一段文字
+      // L06-010:按中国时区解析(utils/datetime)。缺钟点不抛,日期照显示,缺的那一侧钟点留空;解析不了就不出这一段文字。
       const sp = list[i]['startTime'] ? chinaParts(list[i]['startTime']) : null;
-      if (sp) list[i]['monthDayTime'] = mdhm(sp);
+      if (sp) list[i]['monthDayTime'] = mdhm(sp, list[i]['startTime']);
       const ep = list[i]['endTime'] ? chinaParts(list[i]['endTime']) : null;
-      if (ep) list[i]['endMonthDayTime'] = mdhm(ep);
-      
+      if (ep) list[i]['endMonthDayTime'] = mdhm(ep, list[i]['endTime']);
 
-      // 探店日场次卡:同日场次压成「MM-DD HH:mm–HH:mm」,跨日保留两端全量
+      // 探店日场次卡:同日场次压成「MM-DD HH:mm–HH:mm」,跨日保留两端全量。缺钟点不补 00:00,也不留悬空的连接号。
       if (list[i]['monthDayTime'] && list[i]['endMonthDayTime']) {
         const sd = list[i]['monthDayTime'].slice(0, 5), ed = list[i]['endMonthDayTime'].slice(0, 5);
-        list[i]['sessionTimeText'] = sd === ed
-          ? (list[i]['monthDayTime'] + '–' + list[i]['endMonthDayTime'].slice(6))
-          : (list[i]['monthDayTime'] + ' ~ ' + list[i]['endMonthDayTime']);
+        if (sd !== ed) {
+          list[i]['sessionTimeText'] = list[i]['monthDayTime'] + ' ~ ' + list[i]['endMonthDayTime'];
+        } else {
+          const endClock = list[i]['endMonthDayTime'].slice(6);
+          list[i]['sessionTimeText'] = endClock
+            ? (list[i]['monthDayTime'] + '–' + endClock)
+            : list[i]['monthDayTime'];
+        }
       } else {
-        list[i]['sessionTimeText'] = list[i]['monthDayTime'] || '';
+        list[i]['sessionTimeText'] = list[i]['monthDayTime'] || list[i]['endMonthDayTime'] || '';
       }
       // 退改一律显示平台三档,不显示票上存的 refund_rule 原文(业主 2026-11-03)。
       list[i]['refundRuleText'] = refundRuleText(list[i]);
