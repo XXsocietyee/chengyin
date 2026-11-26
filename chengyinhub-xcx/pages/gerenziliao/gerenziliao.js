@@ -516,7 +516,7 @@ Page({
       this.setData({
         userInfo: { name: '', introduction: '', website: '', caseIntroducton: '',
           avatar: '', tag_ids: '', casePics: '', wechat: '', phone: '' },
-        phoneMasked: '', avatarSrc: '', casePicsList: [], tempCasePics: [],
+        phoneMasked: '', avatarSrc: '', avatarUploading: false, casePicsList: [], tempCasePics: [],
         tempWechat: '', tempIntroduction: '', tempName: '', nicknameState: '', nicknameHint: '',
         nicknameSuggestions: [], nicknameSuggesting: false, nicknameSuggestError: '', selectedCategoryIds: [],
         categoryList: [],
@@ -557,7 +557,8 @@ Page({
   },
 
   refreshSaveState: function () {
-    const canSave = !!(this.data.userInfo.name || '').trim();
+    // L10-191:头像上传没返回前保存键保持禁用;返回后仍只看姓名是否可存。
+    const canSave = !!(this.data.userInfo.name || '').trim() && !this.data.avatarUploading;
     if (canSave !== this.data.canSave) this.setData({ canSave });
   },
 
@@ -800,12 +801,15 @@ Page({
       onUploadStart(filePaths) {
         if (!that.currentProfileContext(context) || !filePaths || !filePaths[0]) return;
         previousSrc = that.data.avatarSrc;
-        that.setData({ avatarSrc: filePaths[0], avatarReviewText: '', avatarUploading: true });
+        that.setData({ avatarSrc: filePaths[0], avatarReviewText: '', avatarUploading: true }, () => that.refreshSaveState());
       },
-      // 上传失败退回原头像;返回 false 让 chooseImage 照常弹失败提示
+      // 上传失败退回原头像;返回 false 让 chooseImage 照常弹失败提示。
+      // 上传标记只在这一次返回里清掉,不能在请求发出去之前就放开保存。
       onUploadDone(r) {
-        if (that.currentProfileContext(context)) that.setData({ avatarUploading: false });
-        if (!r.ok && previousSrc !== null && that.currentProfileContext(context)) that.setData({ avatarSrc: previousSrc });
+        if (!that.currentProfileContext(context)) return false;
+        const patch = { avatarUploading: false };
+        if (!r.ok && previousSrc !== null) patch.avatarSrc = previousSrc;
+        that.setData(patch, () => that.refreshSaveState());
         return false;
       }
     });
