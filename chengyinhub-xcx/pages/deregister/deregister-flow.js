@@ -84,12 +84,54 @@ function initialData() {
     showNoticeSheet: false,
     smsSending: false,
     smsSent: false,
+    smsResendLocked: false,
     smsError: '',
     submitting: false,
     applyError: '',
     canceling: false,
     cancelError: '',
   };
+}
+
+function smsResendCooling(page) {
+  return !!(page.data.smsSent && Number.isFinite(page._smsSentAt) && Date.now() - page._smsSentAt < 60000);
+}
+
+function clearSmsResendTimer(page) {
+  if (!page._smsResendTimer) return;
+  clearTimeout(page._smsResendTimer);
+  page._smsResendTimer = null;
+}
+
+function disarmSmsResendLock(page) {
+  page._smsResendGen = (page._smsResendGen || 0) + 1;
+  clearSmsResendTimer(page);
+}
+
+// 冷却结束才把「重新发送」放开。隐藏期间计时继续;卸载会先拆掉这个计时器。
+function armSmsResendLock(page) {
+  clearSmsResendTimer(page);
+  const sentAt = page._smsSentAt;
+  if (!Number.isFinite(sentAt)) return;
+  const remain = 60000 - (Date.now() - sentAt);
+  if (remain <= 0) {
+    if (page.data.smsResendLocked) page.setData({ smsResendLocked: false });
+    return;
+  }
+  const generation = (page._smsResendGen || 0) + 1;
+  page._smsResendGen = generation;
+  const timer = setTimeout(() => {
+    if (page._smsResendTimer === timer) page._smsResendTimer = null;
+    if (generation !== page._smsResendGen || page._detached || page._unloaded) return;
+    if (page._smsSentAt !== sentAt || !page.data.smsSent) return;
+    if (smsResendCooling(page)) {
+      armSmsResendLock(page);
+      return;
+    }
+    if (page.data.smsResendLocked) page.setData({ smsResendLocked: false });
+  }, remain);
+  if (timer && typeof timer.unref === 'function') timer.unref();
+  page._smsResendTimer = timer;
 }
 
 const methods = {
@@ -198,7 +240,10 @@ const methods = {
         const preserveForm = keepSnapshot && this.data.status === 'ELIGIBLE' && data.status === 'ELIGIBLE';
         const patch = { status: data.status, blockers, verificationMethod: data.status === 'ELIGIBLE' ? verificationMethod : 'UNAVAILABLE',
           statusError: '', canceling: false, cancelError: '' };
-        if (!preserveForm) Object.assign(patch, { phone: '', phoneMasked: '', smscode: '', confirmed: false, canApply: false, smsSent: false });
+        if (!preserveForm) {
+          disarmSmsResendLock(this);
+          Object.assign(patch, { phone: '', phoneMasked: '', smscode: '', confirmed: false, canApply: false, smsSent: false, smsResendLocked: false });
+        }
         this._statusMemberId = memberId;
         this.setData(patch, () => { if (preserveForm) this.refreshApplyState(); });
       },
@@ -224,14 +269,19 @@ const methods = {
 
   sendSms() {
     if (this.data.smsSending || this.data.status !== 'ELIGIBLE' || this.data.verificationMethod !== 'SMS') return;
-    // L10-043:发送成功后 60 秒内的「重新发送」不再发请求(每次 2 个请求 + 一条短信)。
-    if (this.data.smsSent && this._smsSentAt && Date.now() - this._smsSentAt < 60000) return;
+    // L10-043:发出去之后「重新发送」保持禁用。冷却内的点击不再读手机号、也不再发短信。
+    if (smsResendCooling(this)) {
+      if (!this.data.smsResendLocked) this.setData({ smsResendLocked: true });
+      if (!this._smsResendTimer) armSmsResendLock(this);
+      return;
+    }
+    disarmSmsResendLock(this);
     const token = (this._smsToken || 0) + 1;
     this._smsToken = token;
     const memberId = String(app.getUserID && app.getUserID() || '');
     // 隐藏不换号:这一次发送继续。卸载会递增 _smsToken;换号则 memberId 对不上。
     const smsCurrent = () => token === this._smsToken && memberId === String(app.getUserID && app.getUserID() || '');
-    this.setData({ smsSending: true, smsSent: false, smsError: '' });
+    this.setData({ smsSending: true, smsSent: false, smsError: '', smsResendLocked: false });
     sendUiStateRequest(app, '/api/user/info', {
       method: 'POST', data: { member_id: app.getUserID() },
       success: (res) => {
@@ -247,7 +297,8 @@ const methods = {
             if (!smsCurrent()) return;
             if (isOk(smsRes)) {
               this._smsSentAt = Date.now();
-              this.setData({ phone, phoneMasked: phone.slice(-4), smsSending: false, smsSent: true, smsError: '' });
+              this.setData({ phone, phoneMasked: phone.slice(-4), smsSending: false, smsSent: true, smsError: '', smsResendLocked: true });
+              armSmsResendLock(this);
               return;
             }
             this.setData({ smsSending: false, smsSent: false, smsError: failureText(smsRes, '验证码发送失败，请重试') });
@@ -408,7 +459,10 @@ const methods = {
     this._readLoginPending = false;
     this._statusToken = (this._statusToken || 0) + 1;
     // L10-042:页面隐藏时不作废在途短信。卸载和换号不带 keepSms,仍作废。
-    if (!(options && options.keepSms)) this._smsToken = (this._smsToken || 0) + 1;
+    if (!(options && options.keepSms)) {
+      this._smsToken = (this._smsToken || 0) + 1;
+      disarmSmsResendLock(this);
+    }
     this._applyToken = (this._applyToken || 0) + 1;
     this._cancelToken = (this._cancelToken || 0) + 1;
     this._reconcileToken = (this._reconcileToken || 0) + 1;
