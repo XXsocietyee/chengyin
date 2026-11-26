@@ -439,10 +439,11 @@ Page({
   retryLoadMore() { this.loadMore(); },
 
   // 加时间分隔 + 解析卡片(老卡片无 cardType → generic,走现有渲染路径)
-  decorate(list) {
-    let last = 0;
+  // previousTime:上一条的 createTime 时间戳。单条补装饰时用它,避免把这条当成列表开头。
+  _decorateRows(list, previousTime) {
+    let last = previousTime || 0;
     const that = this;
-    const decorated = list.map(function (m) {
+    return list.map(function (m) {
       const t = m.createTime ? toTimestamp(String(m.createTime)) : 0;
       let divider = '';
       if (!last || (t - last) > 5 * 60 * 1000) divider = fmtAbs(t);
@@ -470,8 +471,12 @@ Page({
       // 对方气泡上方「名字·时间」一行直接用会话对方名 {{name}}(L08-137:不再逐条拷一份进消息行)。
       return Object.assign({}, m, { timeDivider: divider, noticeTime: t ? fmtAbs(t) : '', activityNotice: !!activityNotice, card: card, cardTarget, systemRecord, currentOriginalUrl, genericAction, genericButtons, displayContent: displayContent });
     });
-    if (that._reviewMessageId && !that._reviewMatches(decorated.find(row => String(row.id) === String(that._reviewMessageId)))) that.closeReviewResult();
-    that.fetchTopics(decorated);
+  },
+
+  decorate(list) {
+    const decorated = this._decorateRows(list, 0);
+    if (this._reviewMessageId && !this._reviewMatches(decorated.find(row => String(row.id) === String(this._reviewMessageId)))) this.closeReviewResult();
+    this.fetchTopics(decorated);
     return decorated;
   },
 
@@ -577,37 +582,33 @@ Page({
     const receipt = sendRecovery.begin(owner, conversationId, payload.client_message_id);
     if (!receipt) { app.tips && app.tips('原消息请求未能保存，请稍后重试'); return false; }
     const tmpId = retryId || 'tmp_' + payload.client_message_id;
-    let msgs = this.data.msgs.slice();
     if (retryId) {
-      const index = msgs.findIndex(m => m.id === retryId && m.failed && !m.sending);
+      const index = this.data.msgs.findIndex(m => m.id === retryId && m.failed && !m.sending);
       if (index < 0) return;
-      msgs[index] = Object.assign({}, msgs[index], { sending: true, failed: false });
+      this._putMessage(index, Object.assign({}, this.data.msgs[index], { sending: true, failed: false }), { sending: true });
     } else {
       const card = payload.msg_type === 3 ? JSON.parse(payload.extra_json) : null;
-      msgs.push({ id: tmpId, senderId: owner, msgType: payload.msg_type, content: payload.content,
+      this._putMessage(this.data.msgs.length, { id: tmpId, senderId: owner, msgType: payload.msg_type, content: payload.content,
         extraJson: payload.extra_json, card, clientMessageId: payload.client_message_id,
-        sendPayload: payload, sending: true, failed: false, timeDivider: '' });
+        sendPayload: payload, sending: true, failed: false, timeDivider: '' }, { sending: true });
     }
-    this.setData({ msgs, sending: true });
     this.scrollBottom();
     const viewCurrent = this._viewGuard();
     const current = () => viewCurrent() && sendRecovery.current(receipt);
     const finish = (res) => {
       if (!current()) return;
-      const list = this.data.msgs.slice();
-      const index = list.findIndex(m => m.id === tmpId);
+      const index = this.data.msgs.findIndex(m => m.id === tmpId);
       if (index >= 0) {
         const id = res && res.data && res.data.id;
         const validId = (typeof id === 'number' || (typeof id === 'string' && /^[1-9]\d*$/.test(id)))
           && Number.isSafeInteger(Number(id)) && Number(id) > 0;
         if (isBizOk(res) && validId) {
           sendRecovery.complete(receipt);
-          list.splice(index, 1);
-          this.setData({ msgs: list });
-          this._mergeMessages([res.data]);
+          const delivered = Object.assign({}, res.data);
+          if (!delivered.clientMessageId) delivered.clientMessageId = payload.client_message_id;
+          this._mergeMessages([delivered]);
         } else {
-          list[index] = Object.assign({}, list[index], { sending: false, failed: true });
-          this.setData({ msgs: list });
+          this._putMessage(index, Object.assign({}, this.data.msgs[index], { sending: false, failed: true }));
           // 200 但 data.id 不合法时 msg 是「操作成功」,不能当失败提示(2026-09-17 拍板)。
           if (!isBizOk(res) && res && res.msg) app.tips && app.tips(res.msg);
         }
@@ -621,14 +622,78 @@ Page({
     return true;
   },
 
+  // 只改一条消息的视图。先写入 data,再按序号 setData,这样已经在屏上的气泡不会整表重绘。
+  _putMessage(index, message, extra) {
+    if (!this.data.msgs) this.data.msgs = [];
+    if (index === this.data.msgs.length) this.data.msgs.push(message);
+    else this.data.msgs[index] = message;
+    this.setData(Object.assign({ ['msgs[' + index + ']']: message }, extra || {}));
+  },
+
+  _messageStamp(message) {
+    return message && message.createTime ? toTimestamp(String(message.createTime)) : 0;
+  },
+
+  _sameMessage(left, right) {
+    return left.id == right.id || (right.clientMessageId
+      && left.clientMessageId === right.clientMessageId && left.senderId == right.senderId);
+  },
+
+  // L08-118:新消息按序号补上或替换,只装饰变了的行。往前翻历史仍整表重排(每条的位置都变了)。
+  _patchIncomingMessages(incoming) {
+    if (!incoming || !incoming.length) return false;
+    const existing = this.data.msgs || [];
+    const list = existing.slice();
+    incoming.forEach(message => {
+      const index = list.findIndex(row => this._sameMessage(row, message));
+      if (index >= 0) list[index] = message;
+      else list.push(message);
+    });
+    list.sort(compareMessages);
+    if (list.length < existing.length) return false;
+    let changedAt = 0;
+    while (changedAt < existing.length && list[changedAt] === existing[changedAt]) changedAt += 1;
+    const known = new Set(existing);
+    // 沿用现有数组的构造，避免另起一个数组后序号补丁和整表断言对不上。
+    const output = list.slice();
+    const fresh = [];
+    for (let i = 0; i < list.length; i += 1) {
+      if (i < changedAt) { output[i] = list[i]; continue; }
+      const row = list[i];
+      const previous = i > 0 ? this._messageStamp(output[i - 1]) : 0;
+      if (known.has(row)) {
+        const [next] = this._decorateRows([row], previous);
+        output[i] = (next.timeDivider || '') === (row.timeDivider || '') ? row : next;
+      } else {
+        const [next] = this._decorateRows([row], previous);
+        output[i] = next;
+        fresh.push(next);
+      }
+    }
+    if (this._reviewMessageId) {
+      const reviewed = fresh.find(row => String(row.id) === String(this._reviewMessageId));
+      if (reviewed && !this._reviewMatches(reviewed)) this.closeReviewResult();
+    }
+    if (fresh.length) this.fetchTopics(fresh);
+    const patch = {};
+    for (let i = changedAt; i < output.length; i += 1) {
+      if (output[i] !== existing[i]) patch['msgs[' + i + ']'] = output[i];
+    }
+    const sending = output.some(row => row.sending);
+    if (sending !== this.data.sending) patch.sending = sending;
+    this.data.msgs = output;
+    if (Object.keys(patch).length) this.setData(patch);
+    return true;
+  },
+
   _mergeMessages(incoming, prepend) {
     // 新的不可见投影也使在途旧公开投影失效。
     if (incoming.some(m => m.content === '路线已不可用')) this._topicEpoch = (this._topicEpoch || 0) + 1;
+    if (!prepend && this._patchIncomingMessages(incoming)) return;
     const list = prepend ? incoming.slice() : this.data.msgs.slice();
     const additions = prepend ? this.data.msgs : incoming;
     additions.forEach(message => {
-      const index = list.findIndex(m => m.id == message.id || (message.clientMessageId
-        && m.clientMessageId === message.clientMessageId && m.senderId == message.senderId));
+      const index = list.findIndex(m => this._sameMessage(m, message));
       if (index >= 0) { if (!prepend) list[index] = message; }
       else list.push(message);
     });
