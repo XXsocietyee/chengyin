@@ -250,7 +250,7 @@ Page({
   onShareAppMessage() {
     const token = this._giftToken
     if (!token) return { title: this.data.card.name, path: '/subpackageMember/market/pass/index?id=' + encodeURIComponent(this._id) }
-    this.setData({ giftShared: true })
+    // 微信在拉起转发菜单时就调用这里,用户仍可取消。不能当成已经发给好友,否则关掉面板会跳过未发出确认。
     return { title: '送你一份「' + this.data.card.name + '」', path: '/subpackageMember/market/gift/index?token=' + encodeURIComponent(token) }
   },
   goBack() {

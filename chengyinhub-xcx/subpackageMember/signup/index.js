@@ -324,8 +324,9 @@ Page({
     const previousIndex = previous ? list.findIndex(item => item.wKey === previous.wKey) : -1;
     const want = this._wantTopicId && (this._topic || {}).state !== 'loading' ? topicTicketIndex(list, this._wantTopicId) : -2; if (want > -2) this._wantTopicId = ''; const currentIndex = want >= 0 ? want : previousIndex >= 0 ? previousIndex : 0; // 主题票到了才定位,只定一次
     const cur = list[currentIndex] || {};
+    // L09-040:只交模板和票动作要读的字段;空列表 map 之后仍是空,不补占位票
     this.setData({
-      ticketList: list,
+      ticketList: list.map(ticketView),
       currentSwiperTicket: currentIndex,
       // (原 topicBg 字段已退役,见 data 注释)
       walletState: state,
@@ -763,6 +764,35 @@ function pageTurn(n, dx, vx) {
   return 0;
 }
 /* 卡面文字:类型 · 剩几天(有到期日才写),状态不是待使用时写状态;tab 归类 */
+/* L09-040:setData 不带整行报名(cmsTopic / cmsActivity 的介绍、章节、封面数组)。
+   模板读 w* / topicCompleted;点票、入场码、队伍读 id、kind、状态、ownerId、席位。
+   ownerId 与 _ticketTarget / teamOf 同一口径:cms*.id 优先,没有才用报名上的 ownerId。 */
+function ticketView(item) {
+  const nested = item.kind === 'activity' ? item.cmsActivity : item.cmsTopic;
+  const ownerId = (nested && nested.id) || item.ownerId;
+  const view = {
+    id: item.id,
+    kind: item.kind,
+    wKey: item.wKey,
+    wTitle: item.wTitle,
+    wSub: item.wSub,
+    wImg: item.wImg || '',
+    wColor: item.wColor,
+    wTag: item.wTag || '',
+    wLocked: !!item.wLocked,
+    wExpiry: item.wExpiry || '',
+    topicCompleted: item.topicCompleted === true,
+    registrationStatus: item.registrationStatus,
+    paymentStatus: item.paymentStatus,
+  };
+  if (ownerId) view.ownerId = ownerId;
+  if (Object.prototype.hasOwnProperty.call(item, 'wNoGame')) view.wNoGame = item.wNoGame === true;
+  if (item.wSeat) {
+    view.wSeat = true;
+    if (item.topicId) view.topicId = item.topicId;
+  }
+  return view;
+}
 /* 主题票在票夹里的位置:票是 ownerType=1 的主题票,主题号取 cmsTopic.id,缺了才取 ownerId */
 function topicTicketIndex(list, topicId) {
   const want = String(topicId || '');

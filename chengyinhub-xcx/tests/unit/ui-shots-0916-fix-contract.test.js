@@ -165,7 +165,7 @@ async function previewWith(rows, profileSource) {
   return component.data
 }
 
-// UI-7:预览要能翻页取够未结束项目 —— 按次序喂每一页,返回 { data, requests }。
+// 按次序喂每一页。生产路径只发第一页;负控把翻页接回去时才会出现后续请求。
 async function previewSeq(pages, profileSource) {
   const { component, requests } = loadProfile(profileSource)
   const pending = component.loadProjectPreview()
@@ -269,15 +269,34 @@ test('我的项目预览:全部结束或成功空列表时隐藏整区,不展示
   assert.doesNotMatch(projectSection, /<cy-empty/)
 })
 
-// UI-7:第一页 8 条全结束时,必须继续翻页把后面进行中的项目取进预览(而不是整块空)。
-test('UI-7 我的项目预览:第一页全结束时继续翻页,取够进行中的项目', async () => {
+// L09-010:第一页全结束、或进行中不足 8 条,都只发这一页,有几条显示几条。
+test('L09-010 我的项目预览:第一页全结束时不翻页,预览收起', async () => {
   const endedPage = Array.from({ length: 8 }, (_, i) => ({ id: 100 + i, name: '已结束 ' + i, startDate: '2020-01-01', endDate: '2020-02-01' }))
-  const { data, requests } = await previewSeq([endedPage, [{ id: 7, name: '第二页进行中', startDate: '2020-01-01', endDate: '2099-12-31' }]])
-  assert.equal(requests.filter((r) => r.url === '/api/topic/list').length, 2, '第一页零进行中时必须翻第二页')
-  assert.deepEqual(data.projectPreviewList.map((item) => item.id), [7])
+  const { component, requests } = loadProfile()
+  const pending = component.loadProjectPreview()
+  requests.at(-1).success({ code: 200, data: { rows: endedPage, total: 16 } })
+  await pending
+  assert.equal(requests.filter((r) => r.url === '/api/topic/list').length, 1, '满页且全结束也不发第二页')
+  assert.equal(requests[0].data.pageNum, 1)
+  assert.equal(requests[0].data.is_my, 1)
+  assert.deepEqual(component.data.projectPreviewList, [])
 })
 
-test('UI-7 我的项目预览:取够 8 条进行中就停,不继续翻', async () => {
+test('L09-010 我的项目预览:本页进行中不足 8 条就显示这些,不发第二页', async () => {
+  const rows = [
+    ...Array.from({ length: 6 }, (_, i) => ({ id: 100 + i, name: '已结束 ' + i, startDate: '2020-01-01', endDate: '2020-02-01' })),
+    { id: 7, name: '进行中', startDate: '2020-01-01', endDate: '2099-12-31' },
+    { id: 8, name: '还没开始', startDate: '2099-01-01', endDate: '2099-12-31' },
+  ]
+  const { component, requests } = loadProfile()
+  const pending = component.loadProjectPreview()
+  requests.at(-1).success({ code: 200, data: { rows, total: 20 } })
+  await pending
+  assert.equal(requests.filter((r) => r.url === '/api/topic/list').length, 1)
+  assert.deepEqual(component.data.projectPreviewList.map((item) => item.id), [7, 8])
+})
+
+test('L09-010 我的项目预览:一页凑满 8 条进行中就显示这 8 条', async () => {
   const livePage = Array.from({ length: 8 }, (_, i) => ({ id: 200 + i, name: '进行中 ' + i, startDate: '2020-01-01', endDate: '2099-12-31' }))
   const { data, requests } = await previewSeq([livePage, [{ id: 999, name: '不该被取', startDate: '2020-01-01', endDate: '2099-12-31' }]])
   assert.equal(requests.filter((r) => r.url === '/api/topic/list').length, 1, '取够 8 条就不该再翻页')
@@ -285,11 +304,14 @@ test('UI-7 我的项目预览:取够 8 条进行中就停,不继续翻', async (
   assert.equal(data.projectPreviewList.some((item) => item.id === 999), false)
 })
 
-test('UI-7 我的项目预览负控:去掉翻页,第二页的进行中项目必须消失 ⇒ 用例真红', async () => {
-  const source = mutated(read('subpackageMember/components/cy/profile/index.js'), 'return fetchPage(pageNum + 1);', 'render(); return;')
+test('L09-010 负控:重新接上翻页后,第二页进行中项目会进预览 ⇒ 用例真红', async () => {
+  const source = mutated(read('subpackageMember/components/cy/profile/index.js'),
+    '// L09-010: 本页到此为止,不按剩余条数翻下一页。',
+    'if (live.length < PAGE_SIZE && rows.length >= PAGE_SIZE && pageNum < 5) return fetchPage(pageNum + 1);')
   const endedPage = Array.from({ length: 8 }, (_, i) => ({ id: 100 + i, name: '已结束 ' + i, startDate: '2020-01-01', endDate: '2020-02-01' }))
-  const { data } = await previewSeq([endedPage, [{ id: 7, name: '第二页进行中', startDate: '2020-01-01', endDate: '2099-12-31' }]], source)
-  assert.deepEqual(data.projectPreviewList, [], '负控应复现「只取第一页 → 预览为空」')
+  const { data, requests } = await previewSeq([endedPage, [{ id: 7, name: '第二页进行中', startDate: '2020-01-01', endDate: '2099-12-31' }]], source)
+  assert.equal(requests.filter((r) => r.url === '/api/topic/list').length, 2, '负控应复现翻到第二页')
+  assert.deepEqual(data.projectPreviewList.map((item) => item.id), [7], '负控应复现第二页进行中项目进预览')
 })
 
 test('我的项目预览负控:去掉过滤后已结束项目必须重新出现', async () => {

@@ -37,7 +37,10 @@ Page({
     if (!this._orderNo) { this.setData({ state: 'missing' }); return }   // PG-041:缺单号落缺参态,不给「重试」空单号请求
     this.load()
   },
-  onUnload() { this._unloaded = true },
+  onUnload() {
+    this._unloaded = true
+    if (this._payTask) this._payTask.cancel()
+  },
   load() {
     if (!this._orderNo) { this.setData({ state: 'missing' }); return }
     const seq = (this._seq = (this._seq || 0) + 1)
@@ -56,7 +59,9 @@ Page({
     this.setData({ busy: true, notice: '' })
     const platform = pp.platformOf(wx)
     const canPay = pp.channelState(platform, { xpay: { available: true } }, this._canVirtual).channel === 'XPAY'
-    payFlow.resume({ request, wx }, this._orderNo, canPay).then((r) => {
+    const task = payFlow.resume({ request, wx }, this._orderNo, canPay)
+    this._payTask = task
+    task.then((r) => {
       if (this._unloaded) return
       this.setData({ busy: false })
       if (r.state === 'cancelled') cyToast(pp.WORDS.PAY_CANCELLED)

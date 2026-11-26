@@ -360,3 +360,54 @@ test('P-27 / F13:城市定向通关后卡上标签写「已通关」(标签不�
   assert.equal(page.data.ticketList[0].wSub, '11月2日 13:35')
   assert.match(wxml(), /topicCompleted \? '查看记录' : '开始游戏'/)
 })
+
+test('L09-040:setData 的票只留模板和票动作要读的字段,空列表保持空', () => {
+  const { page, sandbox } = loadPage()
+  page._topic = { list: [], state: 'empty' }
+  page._activity = { list: [], state: 'empty' }
+  page.rebuildTicketList()
+  assert.deepEqual(page.data.ticketList, [])
+  assert.equal(page.data.walletState, 'empty')
+
+  page._topic = { list: [{ id: 1, registrationStatus: 1, ownerId: 9,
+    cmsTopic: { id: 9, name: '未付', chapters: [{ id: 1 }], intro: '整段介绍' } }], state: 'ready' }
+  page.rebuildTicketList()
+  assert.deepEqual(page.data.ticketList, [], '未付票滤掉后不补占位票')
+
+  page._topic = { list: [{
+    id: 11, registrationStatus: 2, paymentStatus: 2, ownerId: 7, memberId: 99,
+    exploreProgress: { redeemed: 1, required: 2 },
+    cmsTopic: { id: 501, name: '梧桐路线', imgUrl: 'cover.jpg', productType: 1, intro: '整段介绍', chapters: [{ id: 1 }] },
+  }], state: 'ready' }
+  page._activity = { list: [{
+    id: 22, registrationStatus: 2, paymentStatus: 2, ownerId: 8,
+    cmsActivity: { id: 63, name: '周末场次', topicId: 0, templateId: 0, intro: '场次介绍', chapters: [{ id: 2 }] },
+  }], state: 'ready' }
+  page._seat = { list: [{ invitationId: 12, ownerType: 1, ownerId: 41, topicId: 41, topicName: '老城夜游', topicCover: 'c.jpg', usableUntil: '2099-01-01 00:00:00' }] }
+  page.rebuildTicketList()
+  const topic = page.data.ticketList.find(item => item.id === 11)
+  const activity = page.data.ticketList.find(item => item.id === 22)
+  const seat = page.data.ticketList.find(item => item.wKey === 'seat-12')
+  assert.deepEqual(Object.keys(topic).sort(), ['id', 'kind', 'ownerId', 'paymentStatus', 'registrationStatus', 'topicCompleted', 'wColor', 'wExpiry', 'wImg', 'wKey', 'wLocked', 'wSub', 'wTag', 'wTitle'])
+  assert.equal(topic.wTitle, '梧桐路线')
+  assert.equal(topic.wImg, 'cover.jpg')
+  assert.equal(topic.ownerId, 501, '点票用 cmsTopic.id,不退回报名 ownerId')
+  assert.equal(topic.cmsTopic, undefined)
+  assert.deepEqual(Object.keys(activity).sort(), ['id', 'kind', 'ownerId', 'paymentStatus', 'registrationStatus', 'topicCompleted', 'wColor', 'wExpiry', 'wImg', 'wKey', 'wLocked', 'wNoGame', 'wSub', 'wTag', 'wTitle'])
+  assert.equal(activity.wNoGame, true)
+  assert.equal(activity.ownerId, 63)
+  assert.equal(activity.cmsActivity, undefined)
+  assert.equal(seat.wSeat, true)
+  assert.equal(seat.ownerId, 41)
+  assert.equal(seat.topicId, 41)
+  assert.equal(seat.cmsTopic, undefined)
+  page._myTeams = { '2:63': { id: 7, title: '队' } }
+  page.data.currentSwiperTicket = page.data.ticketList.indexOf(activity)
+  page.syncCurrentTeam()
+  assert.equal(page.data.currentTeam.id, 7)
+  page.goTicket({ currentTarget: { dataset: { index: page.data.ticketList.indexOf(topic) } } })
+  assert.equal(sandbox.navigations[0].url, '/pages/play/index?topicId=501&registrationId=11&entry=ticket&topicName=' + encodeURIComponent('梧桐路线'))
+  page._navigating = false
+  page.goTicket({ currentTarget: { dataset: { index: page.data.ticketList.indexOf(seat) } } })
+  assert.equal(sandbox.navigations[1].url, '/pages/play/index?topicId=41&entry=ticket&topicName=' + encodeURIComponent('老城夜游'))
+})

@@ -60,7 +60,10 @@ Page({
     this.load()
   },
   onHide() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1 },
-  onUnload() { this._unloaded = true },
+  onUnload() {
+    this._unloaded = true
+    if (this._payTask) this._payTask.cancel()
+  },
   // L09-102
   // 「确认中」时去订单页付完回来,要重读开通状态,别还顶着「未开通」和旧的确认中提示
   onShow() {
@@ -107,7 +110,9 @@ Page({
     this._confirmOrderNo = ''
     // 同一次购买意图(套餐不变)重试沿用同一个 requestId,服务端按它幂等,不会重复下单
     if (!this._intent || this._intent.plan !== v.selected || this._intent.owner !== session.memberId(app)) this._intent = { plan: v.selected, requestId: payFlow.newRequestId(), owner: session.memberId(app) }
-    payFlow.purchase({ request, wx }, v.selected, v.channel, { requestId: this._intent.requestId }).then((r) => {
+    const task = payFlow.purchase({ request, wx }, v.selected, v.channel, { requestId: this._intent.requestId })
+    this._payTask = task
+    task.then((r) => {
       if (this._unloaded) return
       this.setData({ buying: false })
       if (r.state === 'paid') { this._intent = null; this._celebrate(r.order); return }

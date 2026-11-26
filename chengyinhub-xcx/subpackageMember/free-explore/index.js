@@ -29,14 +29,43 @@ Page({
     this._purchaseRequestId = options && typeof options.requestId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(options.requestId) ? options.requestId : '';
   },
   identity() { return bundle.exactId(app.getUserID()) + '|' + String(app.getAuthorization() || ''); },
+  // L09-038
+  // 切走复制笔记、或页面被盖住时，未提交的评价正文、星级和预约表（商家、日期、时间）留在本页内存。
+  // 同一账号回来放回。换号、销毁、以及评价/预约已经离开本机（待确认）时不放回。草稿不进 storage。
+  captureDraft() {
+    const reviewLeft = !!this.data.reviewPending;
+    const reserveLeft = !!this.data.reservePending;
+    const review = !reviewLeft && this.data.review && typeof this.data.review === 'object' ? Object.assign({}, this.data.review) : null;
+    const reserveForm = !reserveLeft && this.data.reserveForm && typeof this.data.reserveForm === 'object' ? Object.assign({}, this.data.reserveForm) : null;
+    if (!review && !reserveForm) return null;
+    return {
+      identity: this._identity, review, reserveForm,
+      reviewContent: review ? String(this.data.reviewContent || '') : '',
+      reviewRating: review && Number.isInteger(this.data.reviewRating) ? this.data.reviewRating : 5,
+    };
+  },
+  restoreDraft(kept) {
+    if (!kept || kept.identity !== this._identity) return;
+    const patch = {};
+    if (kept.review && !this.data.reviewPending) {
+      patch.review = kept.review;
+      patch.reviewContent = kept.reviewContent;
+      patch.reviewRating = kept.reviewRating;
+    }
+    if (kept.reserveForm && !this.data.reservePending) patch.reserveForm = kept.reserveForm;
+    if (Object.keys(patch).length) this.setData(patch);
+  },
   onShow() {
     this._epoch = (this._epoch || 0) + 1; this._hidden = false;
     this._confirming = false; this._storageBlocked = false;
+    const kept = this._keptDraft;
+    this._keptDraft = null;
     this._identity = this.identity(); this._owner = bundle.exactId(app.getUserID());
     this.clearView();
     if (!this._owner || !app.getAuthorization()) { this.setData({ error: '请登录后查看' }); return; }
     if (!this._registrationId && !this._topicId && !this._purchaseRequestId) { this.setData({ missingParam: true }); return; }
     this.restorePending();
+    this.restoreDraft(kept);
     this.reload();
   },
   restorePending() {
@@ -64,8 +93,11 @@ Page({
       }
     } catch (error) { this._storageBlocked = true; this.setData({ error: '本机记录读取失败，暂不能操作，可刷新查看' }); }
   },
-  onHide() { this._hidden = true; this._epoch++; this.clearView(); },
-  onUnload() { this.onHide(); this._unloaded = true; },
+  onHide() {
+    this._keptDraft = this.captureDraft();
+    this._hidden = true; this._epoch++; this.clearView();
+  },
+  onUnload() { this.onHide(); this._keptDraft = null; this._unloaded = true; },
   reserveKey() { return 'free_explore_reserve_v1:' + this._owner + ':' + this._registrationId; },
   swapKey() { return 'free_explore_swap_v1:' + this._owner + ':' + this._registrationId; },
   key() { return 'free_explore_cancel_v1:' + this._owner + ':' + this._registrationId; },
