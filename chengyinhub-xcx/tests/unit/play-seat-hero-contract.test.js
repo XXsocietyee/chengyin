@@ -71,6 +71,8 @@ test('4b. 物理返回由 page-container 守卫消费(0 尺寸、无遮罩、aft
   assert.match(pc[0], /duration="\{\{0\}\}"/)
   assert.match(pc[0], /bind:afterleave="onHeroNativeBack"/)
   assert.match(method('onHeroNativeBack'), /closeHero\(/)
+  assert.match(WXML, /wx:if="\{\{mode==2 && !chapStory\.show && !shopNpc\.show\}\}"/, '故事流或分身开着时不挂 hero 的 page-container')
+  assert.match(WXML, /<page-container wx:if="\{\{!shopNpc\.show\}\}" show="\{\{chapStory\.show\}\}"/, '分身开着时不挂故事流的 page-container')
 })
 
 test('5. hero 层结构:背景模糊图 + 卡片克隆 + 正文 + 进店 CTA,且瓦片带 data-idx 供量矩形', () => {

@@ -181,13 +181,24 @@ test('L01-003 伏笔没变时步数回包不重排整章', async () => {
 test('L01-009 回前台五分钟内不重复拉功能开关,拉取中不先把社区入口关掉', async () => {
   const h = load();
   let loads = 0, resolveFlags;
-  h.app.loadFeatureFlags = () => { loads++; return new Promise(r => { resolveFlags = r; }); };
+  h.app.globalData = { features: { communityPostRead: true, communityPostWrite: true } };
+  h.app._communityFeatureOwner = '7';
+  h.app._communityFeatureAuthorization = 'tok';
+  h.app.loadFeatureFlags = () => {
+    loads++;
+    h.app.globalData.features = { communityPostRead: false, communityPostWrite: false };
+    h.app._communityFeatureOwner = null;
+    h.app._communityFeatureAuthorization = null;
+    return new Promise(r => { resolveFlags = r; });
+  };
   let can = true;
   h.app.canUseCommunity = () => can;
   const page = realPage(h.definition, { communityPostWrite: true }, ['_syncCommunityEntry']);
   page._syncCommunityEntry();
   assert.equal(loads, 1);
   assert.equal(page.data.communityPostWrite, true, '回包前不改入口');
+  assert.equal(h.app.globalData.features.communityPostWrite, true, '回包前不把全站开关清掉');
+  assert.equal(h.app._communityFeatureOwner, '7');
   resolveFlags({}); await tick();
   assert.equal(page.data.communityPostWrite, true);
   can = false;
@@ -197,6 +208,7 @@ test('L01-009 回前台五分钟内不重复拉功能开关,拉取中不先把�
   page._communityFlagsAt -= 5 * 60000 + 1;
   page._syncCommunityEntry();
   assert.equal(loads, 2);
+  assert.equal(h.app.globalData.features.communityPostWrite, true, '再次拉取仍先放回旧开关');
 });
 
 test('L01-013 路线状态回包被判为旧投影拒收时,解锁并还原同步前的站点', async () => {
@@ -246,6 +258,62 @@ test('L01-034 故事流被整屏层盖住时判定为遮挡,浮尘循环据此�
   page.data.album = { show: false }; page.data.playKit = { show: true, pop: true }; assert.equal(page._chfullCovered(), false);
   page.data.playKit = { show: true, pop: false }; assert.equal(page._chfullCovered(), true);
   page.data.chapStory = { show: true }; assert.equal(page._chfullCovered(), false);
+});
+
+test('L01-019 本站任务打字只写这一节点的凭证字段,不整表替换 gameModule.nodes', () => {
+  const h = load();
+  const nodes = [
+    { nodeId: 30, marker: 'OTHER', playerTask: { inputType: 'TEXT', prompt: '别的站' }, taskEvidence: { text: '留下' } },
+    { nodeId: 31, marker: 'TARGET', clue: '线索原文', playerTask: { taskCode: 'WORD', inputType: 'TEXT', prompt: '看铭牌' }, taskEvidence: { text: '' } },
+  ];
+  const page = realPage(h.definition, { gameModule: { nodes } }, ['onPlayerTaskTextInput']);
+  const patches = [];
+  page.setData = (patch) => { patches.push(patch); };
+  const event = (value, node = 31) => ({ currentTarget: { dataset: { node } }, detail: { value } });
+
+  page.onPlayerTaskTextInput(event('  现场口令  '));
+  page.onPlayerTaskTextInput(event('ab'));
+  assert.equal(patches.length, 2);
+  for (const patch of patches) {
+    assert.deepEqual(Object.keys(patch), ['gameModule.nodes[1].taskEvidence']);
+    const blob = JSON.stringify(patch);
+    assert.equal(blob.includes('OTHER'), false);
+    assert.equal(blob.includes('TARGET'), false);
+    assert.equal(blob.includes('线索原文'), false);
+    assert.equal(blob.includes('看铭牌'), false);
+    assert.equal(blob.includes('留下'), false);
+    assert.equal('gameModule.nodes' in patch, false);
+  }
+  const filled = patches[0]['gameModule.nodes[1].taskEvidence'];
+  assert.equal(filled.type, 'TEXT');
+  assert.equal(filled.ready, true);
+  assert.equal(filled.text, '  现场口令  ');
+  assert.deepEqual(filled.evidenceUrls, ['text:' + encodeURIComponent('现场口令')]);
+  assert.equal(filled.statusText, '文字凭证已填写');
+  assert.equal(page.data.gameModule.nodes, nodes);
+
+  patches.length = 0;
+  page.onPlayerTaskTextInput(event('   '));
+  const blank = patches[0]['gameModule.nodes[1].taskEvidence'];
+  assert.equal(blank.ready, false);
+  assert.equal(blank.text, '   ');
+  assert.deepEqual(blank.evidenceUrls, []);
+  assert.equal(blank.statusText, '');
+
+  patches.length = 0;
+  page.onPlayerTaskTextInput(event('x'.repeat(301)));
+  assert.equal(patches[0]['gameModule.nodes[1].taskEvidence'].text.length, 300);
+
+  patches.length = 0;
+  page.onPlayerTaskTextInput(event('第一站', 30));
+  assert.deepEqual(Object.keys(patches[0]), ['gameModule.nodes[0].taskEvidence']);
+
+  patches.length = 0;
+  nodes[0].playerTask = { inputType: 'SCAN' };
+  page.onPlayerTaskTextInput(event('扫码站', 30));
+  page.onPlayerTaskTextInput(event('没有这站', 99));
+  page.onPlayerTaskTextInput({ currentTarget: { dataset: {} }, detail: {} });
+  assert.equal(patches.length, 0);
 });
 
 test('L01-020 同一主题新的一局不接上一局的轨迹;超过 24 小时的本机轨迹丢弃', () => {
@@ -381,6 +449,29 @@ test('L01-076 旧版本地键同一页只清一次,不随轮询反复读写存�
   page._dropLegacyKey('game_player_pending_701'); page._dropLegacyKey('game_player_pending_701');
   assert.equal(reads, 1); assert.equal(removes, 1);
   assert.equal(global.wx.getStorageSync('game_player_pending_701'), '');
+});
+
+test('L01-011 相机/扫码等短系统界面触发的 onHide 不 POST 暂停快照;真正离开仍写', async () => {
+  const h = load();
+  const page = realPage(h.definition, { topicId: 31 }, ['onHide', '_suspendForeground', '_persistRunSession', '_runSessionScope', '_queueRunSync',
+    '_boundPlayOwner', '_playMember', '_capturePlayLoginContext', '_isPlayAccountCurrent', '_adoptFirstLogin', '_sessionParams', '_sessionKey', '_armSystemUiCover']);
+  page._boundPlayOwner();
+  page._runStarted = true;
+  page._routeState = { sessionId: '7' };
+  page._sessionClock = { isPaused: () => false, pause() {}, elapsedSeconds: () => 12 };
+  global.getCurrentPages = () => [page];
+  global.wx.scanCode = (opts) => { page.onHide(); if (opts && opts.complete) opts.complete(); };
+  page._armSystemUiCover();
+  const saves = () => h.requests.filter(r => r.url === '/api/play/run-session/save').length;
+  const flush = async () => { for (let i = 0; i < 4; i++) await tick(); };
+  global.wx.scanCode({ onlyFromCamera: true });
+  await flush();
+  assert.equal(saves(), 0, '扫码盖住本页时不写服务端');
+  global.getCurrentPages = () => [page, { route: 'pages/other/index' }];
+  page._systemUiCover = 0;
+  page.onHide();
+  await flush();
+  assert.equal(saves(), 1, '真正离开仍写服务端');
 });
 
 test('L01-011 切后台 30 秒内同一暂停态只写一次服务端快照;暂停态变了、离页、结束后照写', async () => {

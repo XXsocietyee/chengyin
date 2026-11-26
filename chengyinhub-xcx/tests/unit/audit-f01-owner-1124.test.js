@@ -93,6 +93,22 @@ function guestPage(h) {
   return page
 }
 
+test('L01-014 访客在本页登录后不必等 onShow,_playOwner 接上新用户并重读', () => {
+  const h = load('')
+  const page = realPage(h.definition, { topicId: 31, loading: false }, LOGIN.concat(['_reloadAfterGuestLogin']))
+  page._playOwner = ''
+  page._playLoginContext = page._capturePlayLoginContext()
+  page._playDisposed = false
+  page._themeHidden = false
+  page.loads = []
+  page.loadData = function (first) { if (this._isPlayAccountCurrent()) this.loads.push(first) }
+  h.app.uid = '7'
+  assert.equal(page._isPlayAccountCurrent(), true)
+  assert.equal(page._playOwner, '7')
+  assert.notEqual(page._playOwner, '')
+  assert.deepEqual(page.loads, [true])
+})
+
 test('L01-014 默认 A:访客在本页第一次登录后,回到页面直接整页重读,不被送回首页', () => {
   const h = load('')
   const page = guestPage(h)

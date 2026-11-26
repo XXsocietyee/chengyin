@@ -37,5 +37,5 @@ for (const oldOutcome of ['success', 'fail']) test('older route ' + oldOutcome +
   else h.requests[0].fail({});
   assert.equal(await old, false);
   assert.deepEqual(h.applied, [{ revision: 12 }]);
-  assert.equal(h.notices.length, 2, 'only the two initial loading notices are expected');
+  assert.equal(h.notices.length, 0, 'refresh no longer locks before the reply, and a stale reply adds no lock notice');
 });
