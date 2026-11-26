@@ -66,10 +66,11 @@ Page({
     this._homeCityConsentEpoch = (this._homeCityConsentEpoch || 0) + 1;
     this.setData({ homeCityBusy: false, homeCityError: '' });
     this._mediaHidden = false;
-    // L10-044:媒体面板默认收起;只有展开着才在返回时重读,收起时等用户点开再读。
-    if (!this.data.pendingAuthorization && this.data.mediaOpen) this.loadOwnMedia();
+    // L10-044:同一账号的列表还新鲜时,隐藏后再回来不重拉;首次打开、换账号、失败重试仍读。
+    if (!this.data.pendingAuthorization && !this.mediaListFresh()
+        && (this.data.mediaOpen || this.mediaAccountDiffers())) this.loadOwnMedia();
   },
-  onHide() { this.invalidateRoamRevoke(); this.clearMediaState(); },
+  onHide() { this.invalidateRoamRevoke(); this.retainMediaAcrossHide(); },
 
   invalidateRoamRevoke() {
     this._roamRevokeHidden = true;
@@ -92,6 +93,27 @@ Page({
   mediaScopeLive(scope) {
     const now = this.mediaScope();
     return !this._mediaHidden && scope.epoch === now.epoch && scope.owner === now.owner && scope.token === now.token;
+  },
+  mediaListFresh() {
+    const saved = this._mediaRowsScope;
+    if (!saved) return false;
+    const now = this.mediaScope();
+    return saved.epoch === now.epoch && saved.owner === now.owner && saved.token === now.token;
+  },
+  mediaAccountDiffers() {
+    const saved = this._mediaRowsScope;
+    if (!saved) return false;
+    const now = this.mediaScope();
+    return saved.owner !== now.owner || saved.token !== now.token;
+  },
+  retainMediaAcrossHide() {
+    const keep = this.mediaListFresh();
+    this._mediaHidden = true;
+    this._mediaEpoch = (this._mediaEpoch || 0) + 1;
+    if (keep) this._mediaRowsScope = { epoch: this._mediaEpoch, owner: this._mediaRowsScope.owner, token: this._mediaRowsScope.token };
+    if (this._mediaDownload && this._mediaDownload.abort) this._mediaDownload.abort();
+    this._mediaDownload = null;
+    this.setData({ mediaLoading: false, mediaBusyId: '', mediaPreviewUrl: '', mediaPreviewType: '' });
   },
   requestOwnMedia(url, method, scope, done) {
     let settled = false;
@@ -244,8 +266,8 @@ Page({
   closeMediaPreview() { this.setData({ mediaPreviewUrl: '', mediaPreviewType: '' }); }, toggleMediaPanel() {
     const open = !this.data.mediaOpen;
     this.setData({ mediaOpen: open });
-    // L10-044:首次展开才读
-    if (open && !this.data.pendingAuthorization && !this.data.mediaLoading) this.loadOwnMedia();
+    // L10-044:展开时直接用已载入的行;没有新鲜列表(首次或上次失败)才读。
+    if (open && !this.data.pendingAuthorization && !this.data.mediaLoading && !this.mediaListFresh()) this.loadOwnMedia();
   },
   copyApprovedMedia(event) {
     const row = this.ownMediaFromEvent(event);

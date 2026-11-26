@@ -40,8 +40,9 @@ test('actual preview endpoint yields ephemeral author URL; hide and unload clear
   assert.equal(state.calls[1].url, '/api/media/asset/12/preview');
   state.calls[1].success({ code: 200, data: { authorPreviewUrl: 'https://media.invalid/private?expires=300' } });
   assert.equal(page.data.mediaPreviewType, 'AUDIO'); page.onHide(); assert.equal(page.data.mediaPreviewUrl, '');
-  page.onShow(); state.calls[2].success({ code: 200, data: rows('HOLD') }); page.previewOwnMedia(event); page.onUnload();
-  state.calls[3].success({ code: 200, data: { authorPreviewUrl: 'https://media.invalid/stale' } }); assert.equal(page.data.mediaPreviewUrl, '');
+  assert.equal(page.data.mediaRows[0].assetId, '12'); page.onShow(); assert.equal(state.calls.length, 2);
+  page.previewOwnMedia(event); page.onUnload();
+  state.calls[2].success({ code: 200, data: { authorPreviewUrl: 'https://media.invalid/stale' } }); assert.equal(page.data.mediaPreviewUrl, '');
 });
 test('stale callback cannot repopulate another account or rotated token', () => {
   const { state, page } = load(); const old = state.calls[0]; state.member = 10; state.token = 'fixture-token-b'; page.onShow();
@@ -123,14 +124,20 @@ test('author pagination preserves exact long cursors and rejects duplicates and 
   page.loadOlderMedia(); state.calls[2].success({ code: 200, data: [{ assetId: 9007199254740993, reviewState: 'HOLD' }] }); assert.equal(page.data.mediaRows.length, 50);
   page.loadOwnMedia(); state.calls[3].success({ code: 200, data: [{ assetId: '9223372036854775808', reviewState: 'HOLD' }] }); assert.deepEqual(page.data.mediaRows, []);
 });
-test('older media requests clear on hide account switch and authentication failures', () => {
-  for (const failure of ['hide', 'account', 401, 403]) {
+test('older media requests clear on account switch and authentication failures', () => {
+  for (const failure of ['account', 401, 403]) {
     const { state, page } = load(); state.calls[0].success({ code: 200, data: fullPage('70') }); page.loadOlderMedia();
-    if (failure === 'hide') { page.onHide(); state.calls[1].success({ code: 200, data: rows('REJECTED') }); }
-    else if (failure === 'account') { state.member = 10; state.token = 'other-token'; state.calls[1].success({ code: 200, data: rows('REJECTED') }); }
+    if (failure === 'account') { state.member = 10; state.token = 'other-token'; state.calls[1].success({ code: 200, data: rows('REJECTED') }); }
     else state.calls[1].fail({ code: failure }, failure);
     assert.deepEqual(page.data.mediaRows, []); assert.equal(page.data.mediaHasMore, false); assert.equal(page._mediaBeforeId, '');
   }
+});
+test('L10-044:隐藏不丢掉已载入的媒体页,迟到的更早一页也不写进来', () => {
+  const { state, page } = load(); state.calls[0].success({ code: 200, data: fullPage('70') }); page.loadOlderMedia();
+  page.onHide(); state.calls[1].success({ code: 200, data: rows('REJECTED') });
+  assert.equal(page.data.mediaRows.length, 50); assert.equal(page.data.mediaRows[0].assetId, '70');
+  assert.equal(page.data.mediaError, ''); assert.equal(page.data.mediaHasMore, true); assert.equal(page._mediaBeforeId, '21');
+  page.onShow(); assert.equal(state.calls.length, 2);
 });
 test('older media failed request stays recoverable and refresh invalidates its late result', () => {
   const { state, page } = load(); state.calls[0].success({ code: 200, data: fullPage('70') }); page.loadOlderMedia();
@@ -158,4 +165,22 @@ test('L10-044:面板收起时进入/返回页面不读本人媒体,首次展开�
   page.toggleMediaPanel();
   assert.equal(state.calls.length, 1);
   assert.equal(page.data.mediaOpen, true);
+});
+test('L10-044:隐藏保留媒体行,同账号新鲜列表不重拉,换账号和失败仍再读,收起后再展开用已载入的行', () => {
+  const { state, page } = load();
+  state.calls[0].success({ code: 200, data: rows('HOLD') });
+  page.toggleMediaPanel(); page.onHide();
+  assert.equal(page.data.mediaRows[0].assetId, '12');
+  page.onShow(); assert.equal(state.calls.length, 1);
+  page.toggleMediaPanel();
+  assert.equal(state.calls.length, 1); assert.equal(page.data.mediaRows[0].assetId, '12');
+  page.loadOwnMedia(); state.calls[1].fail({ code: 500 });
+  assert.match(page.data.mediaError, /失败/);
+  page.onHide(); page.onShow();
+  assert.equal(state.calls.length, 3); assert.equal(state.calls[2].url, '/api/media/asset/list');
+  state.calls[2].success({ code: 200, data: rows('APPROVED') });
+  state.member = 10; state.token = 'fixture-token-b'; page.onShow();
+  assert.equal(state.calls[3].url, '/api/media/asset/list');
+  state.calls[3].success({ code: 200, data: [{ assetId: 80, mediaType: 'AUDIO', reviewState: 'HOLD' }] });
+  assert.deepEqual(page.data.mediaRows.map(row => row.assetId), ['80']);
 });
