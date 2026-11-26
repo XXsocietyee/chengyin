@@ -60,6 +60,15 @@ public interface ICmsActivityService
     int countPendingRegistrations(Long activityId);
 
     /**
+     * 该活动下【支付中】({@code payment_status=1})的报名数。
+     *
+     * <p>玩家已经拉起微信支付、渠道结果还没落成已支付时是 1。它不是已付款(2)，也不是待支付(0)。
+     * 删除只软删活动；回调随后把单置 2 时，「取消活动 → 全额退」已经找不到这场。
+     * 钱尚未确认到账，拒绝时不能引导退款。
+     */
+    int countPayingRegistrations(Long activityId);
+
+    /**
      * 开卖报名数：cms_registration.owner_type=2 且 payment_status ∈ {0待支付,1支付中,2已支付}。
      * 已关单/失败(3)与已退款(4)不算开卖。未支付也算开卖。
      */

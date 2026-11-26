@@ -45,6 +45,11 @@ import static org.mockito.Mockito.when;
  *
  * <p>⚠️ 负控(已实测):删 controller 里的待支付 if ⇒ {@code pendingOrder_cannotDelete} 红。
  * 两道闸都返回 error(),故断言文案区分是哪道拦的,防「拆一道另一道接住」。
+ *
+ * <p><b>E3-C1-01</b>:拉起微信支付后是 {@code payment_status=1}。已付闸只看 2、待支付闸只看 0,
+ * 1 会被放行;回调再把单置 2 时活动已软删,「取消活动 → 全额退」找不到这场。
+ * 这道闸只说有人正在支付、暂时不能删除,不引导退还尚未确认的钱。
+ * 删掉支付中 if ⇒ {@code payingOrder_cannotDelete} 红。
  */
 class ActivityDeletePayWindowTest {
 
@@ -143,6 +148,24 @@ class ActivityDeletePayWindowTest {
 
         assertEquals(200, ((Integer) r.get("code")).intValue(), "已关单不该堵死删除,实际:" + r.get("msg"));
         verify(activityMapper).updateCmsActivity(any());
+    }
+
+    /** 已拉起微信支付(status=1)⇒ 拒。钱还没确认，不能删，也不能拿退款文案打发。 */
+    @Test
+    void payingOrder_cannotDelete() {
+        CmsRegistration paying = new CmsRegistration();
+        paying.setPaymentStatus(1);
+        givenRegistrationRows(1, Collections.singletonList(paying));
+
+        AjaxResult r = delete();
+
+        assertEquals(500, ((Integer) r.get("code")).intValue(), "有人正在支付必须拒删");
+        String msg = String.valueOf(r.get("msg"));
+        assertTrue(msg.contains("正在支付"), "得指明是支付中这道闸拦的。实际:" + msg);
+        assertTrue(msg.contains("不能删除"), "实际:" + msg);
+        assertTrue(!msg.contains("退款") && !msg.contains("付费报名"),
+                "支付尚未确认到账，不能引导退款，也不能误用已付闸文案。实际:" + msg);
+        verify(activityMapper, never()).updateCmsActivity(any());
     }
 
     /** 已支付 ⇒ 拒。原有那道闸不能被我改丢。 */

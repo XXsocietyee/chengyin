@@ -1033,6 +1033,23 @@ public class CmsActivityServiceImpl implements ICmsActivityService
     }
 
     /**
+     * 支付中({@code payment_status=1})的报名数。玩家已拉起微信支付，结果尚未落成已支付。
+     * 口径与 {@link #countPendingRegistrations} 相同，只换支付状态。
+     */
+    @Override
+    public int countPayingRegistrations(Long activityId)
+    {
+        if (activityId == null) {
+            return 0;
+        }
+        CmsRegistration q = new CmsRegistration();
+        q.setOwnerType(2L);
+        q.setOwnerId(activityId);
+        q.setPaymentStatus(1);
+        return cmsRegistrationMapper.countCmsRegistrationList(q);
+    }
+
+    /**
      * 开卖 = cms_registration 上仍活着的单：payment_status 0 待支付 / 1 支付中 / 2 已支付。
      * 3 支付失败(含关单)与 4 已退款不算；未支付也算开卖。
      */
