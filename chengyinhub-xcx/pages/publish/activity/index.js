@@ -502,7 +502,10 @@ Page({
     if (target >= 0 && target !== this.data.step) {
       this.setData({ step: target, progress: buildProgress(STEPS, target) }, () => this.refreshPrimaryActionState())
     }
-    setTimeout(() => {
+    if (this._scrollTimer) clearTimeout(this._scrollTimer)
+    this._scrollTimer = setTimeout(() => {
+      this._scrollTimer = null
+      if (this._unloaded) return
       wx.pageScrollTo({ selector, duration: 250, offsetTop: 24 })
     }, 60)
   },
@@ -919,6 +922,7 @@ Page({
     if (this._leftForTemplate && this._formBootstrapped) { this._leftForTemplate = false; this.getTempList() } },
   onUnload() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1;
     this._unloaded = true
+    if (this._scrollTimer) { clearTimeout(this._scrollTimer); this._scrollTimer = null }
     this._activityIdentityToken = (this._activityIdentityToken || 0) + 1
     this._accessRequestToken = (this._accessRequestToken || 0) + 1
     this._templateRequestToken = (this._templateRequestToken || 0) + 1

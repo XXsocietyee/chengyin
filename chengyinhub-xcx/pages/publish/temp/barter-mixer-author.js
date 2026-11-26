@@ -17,6 +17,7 @@
  *   试玩预览也不带(advanced-game-preview 的 barter / mixer 两条)。
  */
 
+const { advancedFieldPatch } = require('./form-patch.js');
 const advancedGameConfig = require('../utils/publish/advanced-game-config.js');
 const toast = require('../../../utils/toast.js');
 
@@ -39,7 +40,8 @@ const ICON_OPTIONS = [{ key: '', label: '不用图标' }].concat(
 const GOAL_KINDS = [{ key: 'need', label: '换到' }, { key: 'keep', label: '留住' }];
 
 const clone = (value) => JSON.parse(JSON.stringify(value == null ? null : value));
-const rowId = (prefix) => prefix + '_' + Date.now().toString(36) + Math.floor(Math.random() * 1000);
+let rowSerial = 0;
+const rowId = (prefix) => prefix + '_' + Date.now().toString(36) + '_' + (++rowSerial).toString(36);
 const list = (value) => (Array.isArray(value) ? value : []);
 
 /** 这件物品还被谁引用着(背包 / 目标 / 换物)。删物品前要问它 —— 悬空引用服务端整份判死。 */
@@ -52,9 +54,13 @@ function itemUsed(barter, id) {
 const methods = {
   /** 改一份新的 advanced 写回页面;mutate 返回 false = 这一下不写(到上限 / 不该改)。 */
   _bxEdit(mutate) {
-    const next = clone(this.data.advanced);
+    const before = this.data.advanced;
+    const next = clone(before);
     if (mutate(next) === false) return;
-    this._setFormState({ advanced: next, advancedConfigError: '' });
+    const patch = advancedFieldPatch(before, next);
+    if (!patch) return;
+    patch.advancedConfigError = '';
+    this._setFormState(patch);
   },
 
   /* ---- 以物换物 ---- */

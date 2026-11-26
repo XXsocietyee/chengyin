@@ -200,3 +200,51 @@ test('L04-019 连续输入只在停手 300ms 后发一次搜索', () => {
     assert.equal(requests[0].data.keyword, '张三丰')
   } finally { global.setTimeout = realSet; global.clearTimeout = realClear }
 })
+
+test('L04-019 停手前回来的旧关键词回包不能盖住最新输入', () => {
+  let def
+  const sent = []
+  global.getApp = () => ({
+    getPageSize: () => 10,
+    getTotalPage: () => 1,
+    getRequestErrorMessage: (res, fallback) => (res && res.msg) || fallback,
+    sendRequest: (o) => sent.push(o),
+  })
+  global.Component = (d) => { def = d }
+  const timers = []
+  const realSet = global.setTimeout, realClear = global.clearTimeout
+  global.setTimeout = (fn, ms) => { timers.push({ fn, ms, live: true }); return timers.length }
+  global.clearTimeout = (id) => { if (timers[id - 1]) timers[id - 1].live = false }
+  const fire = () => {
+    const live = timers.filter((t) => t.live)
+    live.forEach((t) => { t.live = false })
+    live.forEach((t) => t.fn())
+    return live
+  }
+  try {
+    delete require.cache[require.resolve(COMPONENT)]
+    require(COMPONENT)
+    const c = Object.assign({}, def.methods, {
+      data: Object.assign({}, def.data, { ids: '', list: [] }),
+      setData(p) { Object.assign(this.data, p) },
+      triggerEvent() {},
+    })
+    c.onSearchInput({ detail: { value: '张' } })
+    assert.equal(fire().length, 1)
+    assert.equal(sent.length, 1)
+    assert.equal(sent[0].data.keyword, '张')
+    c.onSearchInput({ detail: { value: '张三' } })
+    assert.equal(sent.length, 1, '还没停手,不能再发 /api/user/list')
+    sent[0].success({ code: '200', data: { rows: [{ id: 1, nickname: '张旧' }], total: 1 } })
+    sent[0].complete()
+    assert.deepEqual(c.data.list, [], '旧词回包丢掉')
+    assert.equal(c.data.nodata, false, '旧词回包不能把当前输入收成空列表')
+    assert.equal(fire().length, 1)
+    assert.equal(sent.length, 2)
+    assert.equal(sent[1].data.keyword, '张三')
+    sent[1].success({ code: '200', data: { rows: [{ id: 2, nickname: '张三' }], total: 1 } })
+    sent[1].complete()
+    assert.equal(c.data.list[0].nickname, '张三')
+    assert.equal(c.data.loading, false)
+  } finally { global.setTimeout = realSet; global.clearTimeout = realClear }
+})

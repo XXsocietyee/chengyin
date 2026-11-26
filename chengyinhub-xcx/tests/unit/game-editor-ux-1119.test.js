@@ -100,7 +100,7 @@ test('2 玩法规则按所选玩法预填,作者改过不覆盖', () => {
   assert.equal(layout.shouldPrefillRules(['我自己写的'], null), false)
   assert.equal(layout.shouldPrefillRules(pick, pick), true, '仍是上次自动填的,换玩法时跟着换')
   assert.equal(layout.shouldPrefillRules([pick[0] + '!', pick[1], pick[2]], pick), false, '改过一步就不碰')
-  assert.match(JS, /this\._prefillRuleSteps\(\);\s*this\.refreshPreviewState\(\);/)
+  assert.match(JS, /this\._setFormState\(patch, function \(\) \{ this\._prefillRuleSteps\(\); \}, \{ pristine: !authorEdit \}\)/)
 })
 
 test('3 商铺类型只在商家(scope=MERCHANT)出现', () => {

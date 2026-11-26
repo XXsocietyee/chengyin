@@ -22,8 +22,15 @@ const data = {
 
 const methods = {
   _initCheckCtx(options) {
-    this._checkCtxRaw = options && options.checkCtx;
-    this._checkCtx = ctxUtil.parse(this._checkCtxRaw);
+    const raw = options && options.checkCtx;
+    // 同一段已经读坏的 checkCtx 不再解析(L04-045)
+    if (this._checkCtx && this._checkCtx.error && raw === this._checkBrokenRaw) return;
+    this._storeCheckCtx(raw, ctxUtil.parse(raw));
+  },
+  _storeCheckCtx(raw, ctx) {
+    this._checkCtxRaw = raw;
+    this._checkCtx = ctx;
+    this._checkBrokenRaw = ctx && ctx.error ? raw : undefined;
   },
   _refreshCheckView(adv) {
     const ctx = this._checkCtx;
@@ -57,7 +64,12 @@ const methods = {
     this.setData({ checkOpen: this.data.checkOpen === key ? '' : key });
   },
   retryCheckCtx() {
-    this._checkCtx = ctxUtil.parse(this._checkCtxRaw);
+    // 坏字符串再解析还是同一条错。上下文没换就只把已有的错留在界面上。
+    if (this._checkCtx && this._checkCtx.error && this._checkCtxRaw === this._checkBrokenRaw) {
+      this._refreshCheckView();
+      return;
+    }
+    this._storeCheckCtx(this._checkCtxRaw, ctxUtil.parse(this._checkCtxRaw));
     this._refreshCheckView();
   },
   pickCheckSkill(e) {

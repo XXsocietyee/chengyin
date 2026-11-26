@@ -189,3 +189,36 @@ test('保存:加上属性值的加值(var)与魔鬼交易随序列化原样带�
   assert.deepEqual(saved.mods, [{ when: { op: 'HAS_CONDITION', value: 'night_owl' }, var: 'counter.observe', label: '有特质 · 夜行者' }]);
   assert.deepEqual(saved.bargain, { label: '换一次更稳的手', bonus: 2, effects: [{ op: 'ADD_CONDITION', value: 'night_owl' }] });
 });
+
+test('L04-045 检定上下文读坏后，同一段不再解析，只留着这次的错', () => {
+  const broken = '%E0%A4%A';
+  const original = ctxUtil.parse;
+  const calls = [];
+  ctxUtil.parse = (raw) => { calls.push(raw); return original(raw); };
+  try {
+    const p = page(undefined);
+    calls.length = 0;
+    p._initCheckCtx({ checkCtx: broken });
+    assert.deepEqual(calls, [broken]);
+    p.retryCheckCtx();
+    assert.deepEqual(calls, [broken], '再试不解析同一段坏字符串');
+    assert.equal(p.data.checkView.skillState, 'error');
+    assert.equal(p.data.checkView.skillValue, '—');
+    const shown = JSON.stringify(p.data.checkView);
+    p._initCheckCtx({ checkCtx: broken });
+    p.retryCheckCtx();
+    assert.deepEqual(calls, [broken]);
+    assert.equal(JSON.stringify(p.data.checkView), shown, '已有的错还在');
+    const encoded = ctxUtil.query(RULES).slice('&checkCtx='.length);
+    p._checkCtxRaw = encoded;
+    p.retryCheckCtx();
+    assert.deepEqual(calls, [broken, encoded], '上下文换了才重新读取');
+    assert.equal(p.data.checkView.skillState, 'ok');
+    assert.equal(p.data.checkView.skillValue, '不加属性');
+  } finally {
+    ctxUtil.parse = original;
+  }
+  assert.doesNotMatch(WXML, /没有读取成功，请再试一次|加上属性，重新读取/);
+  assert.match(WXML, /skillState === 'error'[\s\S]*没有读取成功。/);
+  assert.match(WXML, /skillState === 'error'\}\}\" class="cg-ios-row is-static"/);
+});

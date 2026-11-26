@@ -205,6 +205,12 @@ test('编辑流:从空白起一路填到可存,结果过服务端校验', () => 
   const ev = (dataset, value) => ({ currentTarget: { dataset }, detail: { value } });
   page.data.advanced.barter.title = '换一张车票';
   page.bxItemAdd(); page.bxItemAdd();
+  const now = Date.now; const rnd = Math.random; Date.now = () => 1700000000000; Math.random = () => 0;
+  try {
+    const again = host('barter'); again.bxItemAdd(); again.bxItemAdd();
+    const added = again.data.advanced.barter.items.slice(-2).map((it) => it.id);
+    assert.notEqual(added[0], added[1], '同一毫秒连加两件物品 id 不撞');
+  } finally { Date.now = now; Math.random = rnd; }
   page.data.advanced.barter.items.forEach((it, i) => { it.name = ['回形针', '杯垫', '旧书', '车票'][i]; });
   assert.equal(page.data.advanced.barter.items.length, 4);
   page.bxStartPick(ev({ index: 0 }, 0));

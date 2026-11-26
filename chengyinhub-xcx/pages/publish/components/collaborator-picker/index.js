@@ -43,9 +43,11 @@ Component({
     detached() { clearTimeout(this._searchTimer); },
   },
   methods: {
-    // 停手 300ms 再搜(L04-019):逐键发 /api/user/list 既压服务端又让列表闪
+    // 停手 300ms 再搜(L04-019):逐键发 /api/user/list 既压服务端又让列表闪。
+    // 字一变就把在途回包作废——新请求还在等停手时,旧词结果不能落下来。
     onSearchInput(e) {
       this.setData({ searchKeyword: e.detail.value });
+      this._requestEpoch = (this._requestEpoch || 0) + 1;
       clearTimeout(this._searchTimer);
       this._searchTimer = setTimeout(() => {
         this.setData({ list: [], page_no: 1, nodata: false, hasMore: false });
@@ -80,6 +82,8 @@ Component({
       const keyword = String(this.data.searchKeyword || '').trim();
       const requestedPage = pageNo || this.data.page_no;
       const isFirstPage = requestedPage === 1;
+      const stillLatest = () => epoch === this._requestEpoch
+        && keyword === String(this.data.searchKeyword || '').trim();
       this.setData({ loading: true, loadError: '' });
       app.sendRequest({
         hideLoading: true,
@@ -91,7 +95,7 @@ Component({
           keyword,
         },
         success: (res) => {
-          if (epoch !== this._requestEpoch) return;
+          if (!stillLatest()) return;
           if (res.code != '200') {
             this.setData({
               loadError: app.getRequestErrorMessage(res, '服务返回异常，重试会重新拉取一次'),
@@ -126,14 +130,14 @@ Component({
           });
         },
         fail: () => {
-          if (epoch !== this._requestEpoch) return;
+          if (!stillLatest()) return;
           this.setData({
             loadError: '网络异常，请重试',
             loadErrorPage: requestedPage,
           });
         },
         complete: () => {
-          if (epoch !== this._requestEpoch) return;
+          if (!stillLatest()) return;
           this.setData({
             loading: false,
             nodata: !this.data.loadError && this.data.list.length < 1,

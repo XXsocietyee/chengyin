@@ -1,3 +1,4 @@
+const { advancedFieldPatch } = require('./form-patch.js');
 const catalog = require('../utils/publish/node-game-catalog.js');
 const after = require('../utils/publish/outcome-after.js');
 const tools = require('../utils/publish/template-tools.js');
@@ -87,6 +88,11 @@ function feedbackRows(config, rows) {
 // 选择玩法的标签条:每个分类最多四行,标签按顺序轮流落到各行(宽度随字数,不强行对齐)。
 function tagRows(items) { const rows = [[], [], [], []]; items.forEach((item, i) => rows[i % 4].push(item)); return rows.filter(row => row.length); }
 function summary(row) { return !row ? '未配置' : [row.reply, (row.costs || []).length ? '消耗 ' + row.costs.length + ' 项' : '', (row.effects || []).length ? '效果 ' + row.effects.length + ' 项' : '', row.nextStepId ? '进入 ' + row.nextStepId : ''].filter(Boolean).join(' · ') || '无额外处理'; }
+function wholeConfigError(page, advanced) {
+  const cfg = require('../utils/publish/advanced-game-config.js');
+  const opts = page._advancedValidateOpts ? page._advancedValidateOpts() : {};
+  return cfg.validate(advanced, opts) || matrix.validate(page._supportMatrix, Object.assign({}, page.data.formData, { advancedConfigJson: advanced }), page._supportContext) || '';
+}
 const data = { cgOut: '', pvVerdict: { show: false, kind: 'win', text: '', images: [] }, fbOpenPass: false, fbOpenFail: false, sheetPick: '', sheetPickItem: null, sheetNavAnchor: '', toolPickerOpen: false, toolPickerItems: [], toolPickerHint: '', voiceSheetOpen: false, musicSheetOpen: false, musicDraft: { title: '', audioUrl: '', fileName: '', loop: true }, musicError: '',
   scanReplyKinds: [{ key: 'TEXT', label: '文字' }, { key: 'VOICE', label: '语音' }, { key: 'IMAGE', label: '图片' }, { key: 'OVERLAY', label: '显形' }],
   scanSheetOpen: false, toolSheetKey: '', r5PanelError: '', effectScopeOptions: [], r5Editor: view({}, 0), afterEditor: { show: false, path: '', draft: after.empty(), error: '' } };
@@ -149,14 +155,42 @@ const methods = {
     this.setData({ toolSheetKey: key });
   },
   closeR5ToolSheet() { this._restoreR5Snapshot('tool'); this.closeToolSheet(); this.setData({ toolSheetKey: '', r5PanelError: '' }); },
+  // 附加规则这张单自己的错(L04-009)。整份配置里排在前面的错不拿来挡完成。
+  _r5SheetOwnError() {
+    const key = this.data.toolSheetKey;
+    if (!key || tools.TOOLS.some(item => item.key === key)) return '';
+    const current = this.data.advanced;
+    const before = this._r5Snapshot_tool && this._r5Snapshot_tool.advanced;
+    if (!current || !before || !current[key]) return '';
+    const now = wholeConfigError(this, current);
+    if (now && now !== wholeConfigError(this, before)) {
+      const reverted = clone(current);
+      reverted[key] = clone(before[key]);
+      if (wholeConfigError(this, reverted) !== now) return now;
+    }
+    const cfg = require('../utils/publish/advanced-game-config.js');
+    const opts = this._advancedValidateOpts ? this._advancedValidateOpts() : {};
+    const host = cfg.parse({ schemaVersion: 1, qa: { enabled: true, mode: 'PICK', title: '题', maxTries: 0, options: [{ id: 'a', label: 'A', correct: true }, { id: 'b', label: 'B', correct: false }] }, outcomeRules: { version: 1, pass: {}, fail: {} } }).value;
+    const withSheet = clone(host);
+    withSheet[key] = clone(current[key]);
+    const over = cfg.validate(withSheet, opts);
+    return over && over !== cfg.validate(host, opts) ? over : '';
+  },
   saveR5ToolSheet() {
     const isTool = tools.TOOLS.some(item => item.key === this.data.toolSheetKey);
-    if (isTool && !this.saveTool()) return false;
-    const error = this._validateR5Panel('tool');
-    // 互动工具已由 saveTool 写回并关了面板:报错是别处没填好,工具算存下,错误留在编辑页上,
-    // 不能留着 toolSheetKey 让 `toolSheetKey && !toolSheetOpen` 冒出一张空的附加规则面板(L04-009)
-    if (error && !(isTool && !this.data.toolSheetOpen)) { this.setData({ r5PanelError: error }); return false; }
-    delete this._r5Snapshot_tool; this.closeToolSheet(); this.setData({ toolSheetKey: '', r5PanelError: error || '' }); this._refreshR5Editor(); return !error;
+    if (isTool) {
+      const result = tools.apply(this.data.toolKey, this.data.toolDraft, this.data.advanced);
+      if (result.error) return this.saveTool();
+      const before = this._r5Snapshot_tool && this._r5Snapshot_tool.advanced;
+      if (before) {
+        const introduced = wholeConfigError(this, result.value);
+        if (introduced && introduced !== wholeConfigError(this, before)) { this.setData({ r5PanelError: introduced }); return false; }
+      }
+      if (!this.saveTool()) return false;
+    }
+    const own = this._r5SheetOwnError();
+    if (own) { this.setData({ r5PanelError: own }); return false; }
+    delete this._r5Snapshot_tool; this.closeToolSheet(); this.setData({ toolSheetKey: '', r5PanelError: '' }); this._refreshR5Editor(); return true;
   },
   // 移除即生效(L04-005):丢掉开面板时的快照并关面板,否则「退出」还原快照、「完成」写回 toolDraft,工具又回来了
   removeR5Tool(e) {
@@ -170,10 +204,12 @@ const methods = {
   pickEffectScope(e) {
     const option = this.data.effectScopeOptions[Number(e.detail.value)]; if (!option || option.reason) return;
     if ((this.data.advanced.interactionTools || {}).plans && option.key !== 'OWNER') { require('../../../utils/toast.js')('请先移除投票工具'); return; }
-    const config = clone(this.data.advanced); config.interactionRules = Object.assign({}, config.interactionRules);
+    const before = this.data.advanced;
+    const config = clone(before); config.interactionRules = Object.assign({}, config.interactionRules);
     if (option.key === 'OWNER') delete config.interactionRules.targetScope; else config.interactionRules.targetScope = option.key;
     if (!Object.keys(config.interactionRules).length) delete config.interactionRules;
-    this._setFormState({ advanced: config });
+    const patch = advancedFieldPatch(before, config);
+    if (patch) this._setFormState(patch);
   },
 
   _refreshR5Editor() { const effectScopeOptions = tools.TARGETS.map(item => { const config = clone(this.data.advanced); config.interactionRules = Object.assign({}, config.interactionRules, { targetScope: item.key }); return Object.assign({}, item, { reason: matrix.validate(this._supportMatrix, Object.assign({}, this.data.formData, { advancedConfigJson: config }), this._supportContext) || (item.key !== 'OWNER' && this._supportContext?.runtime?.runtimeScope && !(this._supportContext.runtime.runtimeScope === 'TEAM' && this._supportContext.runtime.worldMode === 'WORLD_SHARED') ? '仅全场共享的组队主题可用' : '') }); }); this._setR5View(effectScopeOptions, view(this.data.advanced, this.data.formData.validationMethod, this._supportMatrix, this._supportContext, this.data.r5Editor?.category)); },
@@ -211,9 +247,9 @@ const methods = {
     const option = PARTICIPATION.find((row, i) => row.key === value || i === Number(value)); if (!option) return;
     const shown = ((this.data.r5Editor || {}).participationOptions || []).find(row => row.key === option.key);
     if (shown && shown.reason) return;   // 第十二轮 k7 N5:任务站不能选直接参与,理由写在选项上
-    const config = clone(this.data.advanced); config.scan.enabled = option.key === 'scan';
+    const scan = Object.assign({}, this.data.advanced.scan, { enabled: option.key === 'scan' });
     this._r5ParticipationChanged = true;
-    this._setFormState({ advanced: config, 'formData.validationMethod': option.value });
+    this._setFormState({ 'advanced.scan': scan, 'formData.validationMethod': option.value });
   },
   openAfterSheet(e) { const path = e.currentTarget.dataset.path; const row = this.data.r5Editor.afterRows.find(row => row.path === path); if (!row || row.disabled) return; this._r5AfterNextPicked = false; this._takeR5Snapshot('after'); this.setData({ afterEditor: { show: true, inline: !!e.currentTarget.dataset.inline, path, draft: Object.assign(after.empty(), clone(row.draft)), error: '' } }); },
   closeAfterSheet() { this._restoreR5Snapshot('after'); this._r5AfterNextPicked = false; this.setData({ afterEditor: { show: false, inline: false, path: '', draft: after.empty(), error: '' }, afterOpen: '', afterNewValue: false, afterAdd: { show: false, open: '' } }); },
@@ -247,7 +283,30 @@ const methods = {
     if (!row || !row.has) { this.setData({ [flag]: false }); return; }
     require('../../../utils/modal.js').show({ title: '关掉' + row.label + '？', content: '这条反馈的文字、配图和消耗效果会一起清空', confirmText: '清空', success: res => { if (res.confirm) clear(); else this.setData({ 'r5Editor.fbRows': [] }, () => this._refreshR5Editor()); } });
   },
-  inputOutcomeReply(e) { const path = e.currentTarget.dataset.path, value = e.detail.value; this._writeOutcomeRow(path, row => { row.reply = value; }); },
+  // 逐字只写 reply 这一字段(L04-012)。没有结果规则时才补上 outcomeRules，不 clone、不回传整份 advanced。
+  inputOutcomeReply(e) {
+    const path = e.currentTarget.dataset.path;
+    const value = e.detail.value == null ? '' : String(e.detail.value);
+    const key = String(path || '').split('.')[1];
+    if (key !== 'pass' && key !== 'fail') return;
+    const rules = this.data.advanced && this.data.advanced.outcomeRules;
+    if (!rules) {
+      const outcomeRules = after.defaultRules(this.data.advanced);
+      if (value) outcomeRules[key] = { reply: value };
+      this._setFormState({ 'advanced.outcomeRules': outcomeRules });
+      return;
+    }
+    const row = rules[key];
+    if (value) {
+      if (row && typeof row === 'object') this._setFormState({ ['advanced.outcomeRules.' + key + '.reply']: value });
+      else this._setFormState({ ['advanced.outcomeRules.' + key]: { reply: value } });
+      return;
+    }
+    if (!row || typeof row !== 'object' || row.reply == null) return;
+    const next = Object.assign({}, row);
+    delete next.reply;
+    this._setFormState({ ['advanced.outcomeRules.' + key]: next });
+  },
   uploadOutcomeImage(e) {
     const path = e.currentTarget.dataset.path, current = (after.get(this.data.advanced, path) || {}).images || [];
     const remain = after.IMAGE_MAX - current.length; if (remain <= 0) return;
@@ -299,11 +358,21 @@ const methods = {
   saveMusicSheet() {
     const draft = this.data.musicDraft;
     if (!draft.audioUrl) { this.setData({ musicError: '请上传背景音乐' }); return; }
-    const config = clone(this.data.advanced);
+    const before = this.data.advanced;
+    const config = clone(before);
     config.backgroundMusic = Object.assign({ audioUrl: draft.audioUrl, loop: !!draft.loop }, String(draft.title || '').trim() ? { title: String(draft.title).trim().slice(0, 40) } : {});
-    this._setFormState({ advanced: config }); this.setData({ musicSheetOpen: false });
+    const patch = advancedFieldPatch(before, config);
+    if (patch) this._setFormState(patch);
+    this.setData({ musicSheetOpen: false });
   },
-  removeMusicTool() { const config = clone(this.data.advanced); delete config.backgroundMusic; this._setFormState({ advanced: config }); this.setData({ musicSheetOpen: false }); },
+  removeMusicTool() {
+    const before = this.data.advanced;
+    const config = clone(before);
+    delete config.backgroundMusic;
+    const patch = advancedFieldPatch(before, config);
+    if (patch) this._setFormState(patch);
+    this.setData({ musicSheetOpen: false });
+  },
   pickAfterNextStep(e) { const row = this.data.r5Editor.nextStepOptions[Number(e.detail.value)]; if (row && !row.reason && !this.data.r5Editor.nextDisabledReason) { this._r5AfterNextPicked = true; this.setData({ 'afterEditor.draft.next': row.key }); } },
   inputAfterReply(e) { this.setData({ 'afterEditor.draft.reply': e.detail.value }); },
   inputAfterRow(e) {
@@ -333,7 +402,9 @@ const methods = {
     let index = 1; while (slots.some(slot => slot.key === 'value_' + index) || tools.reservedRefs(config).has('value_' + index)) index++;
     if (slots.length >= 20) { this.setData({ 'afterEditor.error': '最多声明 20 项需要的资源' }); return; }
     slots.push({ key: 'value_' + index, kind: 'VALUE', label, required: true });
-    config.interactionRules = Object.assign({}, config.interactionRules, { resourceSlots: slots }); this._setFormState({ advanced: config });
+    config.interactionRules = Object.assign({}, config.interactionRules, { resourceSlots: slots });
+    const patch = advancedFieldPatch(this.data.advanced, config);
+    if (patch) this._setFormState(patch);
   },
 };
 // 玩法规则预填用的步骤:与结果反馈的 1-2-3 步同一份文字(2026-11-19 主人:作者不必写两遍)
