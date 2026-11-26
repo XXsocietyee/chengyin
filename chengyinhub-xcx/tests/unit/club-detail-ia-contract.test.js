@@ -458,7 +458,10 @@ test('从发布/邀请/主办视图返回会重拉 owner 数据，首展不与 o
   page.onShow()
   assert.equal(reloads, 0, '首次 onShow 应交给 onLoad 请求')
   page.onShow()
-  assert.equal(reloads, 1, '返页必须重拉 loadAll，进而刷新 topics/project/my/coop/list')
+  assert.equal(reloads, 0, '没标脏不重拉')
+  page._clubDetailDirty = true
+  page.onShow()
+  assert.equal(reloads, 1, '从会改数据的子页返回才重拉 loadAll')
 })
 
 test('普通成员首展仍由 onLoad 单飞，返页只先回读详情关系，失权后清掉旧名单', () => {

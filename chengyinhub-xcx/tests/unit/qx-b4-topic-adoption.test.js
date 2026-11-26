@@ -62,8 +62,9 @@ test('/use 回包读对象 data.topicId,只有 level=error 计为挡发布', () 
 
 test('素材署名只显示署名 / AI 生成 / 来源待确认,不带私有许可信息', () => {
   assert.equal(a.creditText({ sourceType: 'licensed', attribution: '摄影 张三 CC BY 4.0', aiGenerated: false, sourcePendingConfirmation: false }), '摄影 张三 CC BY 4.0');
-  // r2-create(b4-u02-05「不显示「AI 生成」、「来源待确认」」)
-  assert.equal(a.creditText({ sourceType: 'ai-generated', attribution: null, aiGenerated: true }), '');
+  // N1-04:creditText 在 pages/play 之外,aiGenerated 为真时显示「AI 生成」。来源待确认仍不显示。
+  assert.equal(a.creditText({ sourceType: 'ai-generated', attribution: null, aiGenerated: true }), 'AI 生成');
+  assert.equal(a.creditText({ attribution: '摄影 张三', aiGenerated: true }), '摄影 张三 · AI 生成');
   assert.equal(a.creditText({ sourceType: 'unknown', sourcePendingConfirmation: true }), '');
   assert.equal(a.creditText({ sourceType: 'original', licenseNote: '私有备注', aiModel: 'x' }), '');
   assert.equal(a.creditText(null), '');

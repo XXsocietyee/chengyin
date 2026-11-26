@@ -28,10 +28,12 @@ test('帖子流原位展示置顶公告并提供编辑、置顶和历史入口',
   assert.match(view, /catchtap="onViewPostHistory"/)
 })
 
-test('编辑、置顶和历史都调用独立真接口并在写后回读帖子列表', () => {
+test('编辑、置顶和历史都调用独立真接口;编辑回读列表,置顶只改本地行', () => {
   assert.match(script, /url:\s*'\/api\/club\/post\/update'/)
   assert.match(script, /url:\s*'\/api\/club\/post\/pin'/)
   assert.match(script, /url:\s*'\/api\/club\/post\/history'/)
   assert.match(script, /onEditPost[\s\S]*?that\.loadPosts\(\)/)
-  assert.match(script, /onTogglePin[\s\S]*?that\.loadPosts\(\)/)
+  const pin = script.slice(script.indexOf('onTogglePin(e, forcePinned)'), script.indexOf('onViewPostHistory(e)'))
+  assert.match(pin, /_applyPostPin\(/)
+  assert.doesNotMatch(pin, /loadPosts\(/)
 })

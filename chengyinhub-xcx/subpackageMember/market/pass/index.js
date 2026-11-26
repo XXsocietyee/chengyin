@@ -250,7 +250,7 @@ Page({
   onShareAppMessage() {
     const token = this._giftToken
     if (!token) return { title: this.data.card.name, path: '/subpackageMember/market/pass/index?id=' + encodeURIComponent(this._id) }
-    this.setData({ giftShared: true })
+    // L09-005:分享菜单打开还不是成功分享。这里不能把 giftShared 设为 true,否则 dirty 提前变假,关闭确认会被跳过。
     return { title: '送你一份「' + this.data.card.name + '」', path: '/subpackageMember/market/gift/index?token=' + encodeURIComponent(token) }
   },
   goBack() {

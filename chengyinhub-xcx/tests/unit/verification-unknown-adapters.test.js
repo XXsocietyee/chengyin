@@ -86,10 +86,10 @@ function harness(file, method, transport, request, sharedStorage, sourceOverride
 test('club lifecycle extraction keeps the real inline or block onHide without evaluating Page.data', () => {
   const file = 'pages/club/detail/index.js';
   const source = fs.readFileSync(path.resolve(__dirname, '../..', file), 'utf8');
-  // AUDIT-1122 L08-002:onHide 开头多了系统浮层(扫码 / 看大图)标记的转换
-  const inline = "  onHide() { this._skipShowRefresh = this._overlayPending === true; this._overlayPending = false; this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1; const pending = this._pendingRemoval; this._pendingRemoval = null; if (typeof pending === 'function') pending(); },";
+  // L08-002:onHide 仍是可抽出的生命周期;离开子页时顺手标脏,系统浮层不标。
+  const inline = "  onHide() { const overlay = this._overlayPending === true; this._skipShowRefresh = overlay; this._overlayPending = false; if (!overlay && this._navigating) this._clubDetailDirty = true; this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1; const pending = this._pendingRemoval; this._pendingRemoval = null; if (typeof pending === 'function') pending(); },";
   const multiline = source.replace(inline,
-    "  onHide() {\n    this._skipShowRefresh = this._overlayPending === true; this._overlayPending = false;\n    this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1;\n    const pending = this._pendingRemoval; this._pendingRemoval = null; if (typeof pending === 'function') pending();\n  },");
+    "  onHide() {\n    const overlay = this._overlayPending === true; this._skipShowRefresh = overlay; this._overlayPending = false;\n    if (!overlay && this._navigating) this._clubDetailDirty = true;\n    this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1;\n    const pending = this._pendingRemoval; this._pendingRemoval = null; if (typeof pending === 'function') pending();\n  },");
   assert.notEqual(multiline, source, 'real club lifecycle anchor must remain explicit');
   for (const original of [source, multiline]) {
     const h = harness(file, 'submitClubScan', false, undefined, undefined, original);

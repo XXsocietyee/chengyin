@@ -694,11 +694,7 @@ Page({
     const targets = new Set(this.data.msgs.filter(m => m.card && m.card.cardType === 'route'
       && Number.isSafeInteger(Number(m.id)) && Number(m.id) > 0).map(m => String(m.id)));
     if (!targets.size) return;
-    // 先清除消息本身与缓存的旧投影，其他消息合并也不能复活旧私密名称。
-    const masked = this.data.msgs.map(m => targets.has(String(m.id)) ? Object.assign({}, m, {
-      content: '路线已不可用', extraJson: JSON.stringify({ cardType: 'route', topicId: m.card.topicId })
-    }) : m);
-    this.setData({ msgs: this.decorate(masked) });
+    // L08-117:回包前不把每张路线卡抹成「路线已不可用」。只合并服务端投影,内容已是不可用的 id 才会被打码。
     // 历史游标依据可见时间排序，不能用 id+1 猜一条不存在的游标行。
     let projectionEpoch = this._topicEpoch;
     const visited = new Set();

@@ -111,10 +111,12 @@ test('private history route uses safe projection, never privileged normal detail
 test('historical route revalidation hides cached names and drops older public response after private result', () => {
   const h = harness(); h.page._mergeMessages([{ id: 80, senderId: 2, msgType: 3, content: '[路线] former public', extraJson: '{"cardType":"route","topicId":8}' }]);
   h.page.refreshRouteProjections(); h.page.refreshRouteProjections();
-  assert.equal(h.page.data.topicCache[8].name, '路线已不可用');
+  assert.equal(h.page.data.topicCache[8].name, 'former public', '回包前不先抹成不可用');
+  assert.equal(h.page.data.msgs[0].content, '[路线] former public');
   h.requests[1].success({ code: 200, data: { list: [{ id: 80, senderId: 2, msgType: 3, content: '路线已不可用', extraJson: '{"cardType":"route","topicId":8}' }] } });
   h.requests[0].success({ code: 200, data: { list: [{ id: 80, senderId: 2, msgType: 3, content: '[路线] former public', extraJson: '{"cardType":"route","topicId":8}' }] } });
   assert.equal(h.page.data.topicCache[8].name, '路线已不可用');
+  assert.equal(h.page.data.msgs[0].content, '路线已不可用');
 });
 
 test('same-account re-login with different request credential drops old callback', () => {
@@ -154,14 +156,33 @@ test('route refresh uses real history cursors and masks message as well as cache
   h.page.refreshRouteProjections();
   assert.equal(h.requests[0].data.cursor_id, 0);
   h.page._mergeMessages([committed(100, 'new-text')]);
-  assert.equal(h.page.data.topicCache[8].name, '路线已不可用');
-  assert.equal(h.page.data.msgs[0].content, '路线已不可用');
+  assert.equal(h.page.data.topicCache[8].name, 'former public', '回包前保留当前投影');
+  assert.equal(h.page.data.msgs[0].content, '[路线] former public');
   h.requests[0].success({ code: 200, data: { list: [committed(90, 'newer')], hasMore: true, nextCursor: 90 } });
   assert.equal(h.requests[1].data.cursor_id, 90);
   h.requests[1].success({ code: 200, data: { list: [{ id: 80, senderId: 2, msgType: 3, content: '[路线] current public', extraJson: '{"cardType":"route","topicId":8,"locationCount":2}' }], hasMore: false } });
   assert.equal(h.page.data.topicCache[8].name, 'current public');
   assert.equal(h.page.data.topicCache[8].locationCount, 2);
   assert.equal(h.requests.some(r => r.url === '/api/topic/info-to-user'), false);
+});
+
+test('route refresh masks only ids the server marks unavailable', () => {
+  const h = harness();
+  h.page._mergeMessages([
+    { id: 80, senderId: 2, msgType: 3, content: '[路线] 仍公开', extraJson: '{"cardType":"route","topicId":8}' },
+    { id: 81, senderId: 2, msgType: 3, content: '[路线] 将隐藏', extraJson: '{"cardType":"route","topicId":9}' },
+  ]);
+  h.page.refreshRouteProjections();
+  assert.equal(h.page.data.msgs.find(m => m.id === 80).content, '[路线] 仍公开');
+  assert.equal(h.page.data.msgs.find(m => m.id === 81).content, '[路线] 将隐藏');
+  h.requests.at(-1).success({ code: 200, data: { list: [
+    { id: 80, senderId: 2, msgType: 3, content: '[路线] 仍公开', extraJson: '{"cardType":"route","topicId":8}' },
+    { id: 81, senderId: 2, msgType: 3, content: '路线已不可用', extraJson: '{"cardType":"route","topicId":9}' },
+  ], hasMore: false } });
+  assert.equal(h.page.data.msgs.find(m => m.id === 80).content, '[路线] 仍公开');
+  assert.equal(h.page.data.msgs.find(m => m.id === 81).content, '路线已不可用');
+  assert.equal(h.page.data.topicCache[8].name, '仍公开');
+  assert.equal(h.page.data.topicCache[9].name, '路线已不可用');
 });
 
 test('new private projection defeats an in-flight older public history read', () => {
