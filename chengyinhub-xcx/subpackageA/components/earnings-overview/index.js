@@ -29,11 +29,16 @@ Component({
   },
   pageLifetimes: {
     show() {
-      const next = identityKey();
-      const refresh = this._hidden || this._identity !== next;
+      const hidden = this._hidden;
       this._hidden = false;
       this._clearOtherMember();
-      if (refresh) this.load();
+      if (!hidden) {
+        if (this._identity !== identityKey()) this.load();
+        return;
+      }
+      const kept = this._settled && this._identity === identityKey() && this.data.month && this.data.month.ready
+        && !this.data.monthError && !this.data.assetsError && !this.data.clubError;
+      if (!kept) this.load();
     },
     hide() {
       this._hidden = true;
@@ -65,12 +70,20 @@ Component({
       const member = memberPart(this._identity);
       if (member) this._dataMember = member;
     },
+    _mark(epoch, key, ok) {
+      const slot = this._slots;
+      if (!this._current(epoch) || !slot || slot.epoch !== epoch) return;
+      slot[key] = ok ? 'ok' : 'fail';
+      this._settled = slot.month === 'ok' && slot.assets === 'ok' && slot.club === 'ok';
+    },
     load() {
       if (this._detached || this._hidden) return;
       const next = identityKey();
       const keep = this._keepsShown(next);
       this._identity = next;
       const epoch = this._epoch = (this._epoch || 0) + 1;
+      this._settled = false;
+      this._slots = { epoch, month: '', assets: '', club: this.properties.merchant ? '' : 'ok' };
       if (!keep) this._clearShown();
       this.loadMonth(epoch);
       if (this.properties.merchant) this.loadClubPay(epoch);
@@ -90,18 +103,40 @@ Component({
         success: (res) => {
           if (!this._current(epoch)) { this._clearOtherMember(); return; }
           const ledger = ledgerView(res, { kind: 'merchant' });
-          if (!ledger) { if (!forbidden(res)) this.setData({ clubError: true }); return; }
+          if (!ledger) {
+            const blocked = forbidden(res);
+            if (!blocked) this.setData({ clubError: true });
+            this._mark(epoch, 'club', blocked);
+            return;
+          }
           this._clubItems = earningsView.clubPayMonthItems(ledger.rows, new Date());
           this.setData({ clubError: false });
           this._setMonth();
+          this._mark(epoch, 'club', true);
+        },
+        fail: (res, status) => {
+          if (!this._current(epoch)) return;
+          const blocked = forbidden(res, status);
+          if (!blocked) this.setData({ clubError: true });
+          this._mark(epoch, 'club', blocked);
+        },
+        successStatusAbnormal: (res, status) => {
+          if (!this._current(epoch)) return;
+          const blocked = forbidden(res, status);
+          if (!blocked) this.setData({ clubError: true });
+          this._mark(epoch, 'club', blocked);
         },
         fail: (res, status) => {
           if (!this._current(epoch)) { this._clearOtherMember(); return; }
-          if (!forbidden(res, status)) this.setData({ clubError: true });
+          const blocked = forbidden(res, status);
+          if (!blocked) this.setData({ clubError: true });
+          this._mark(epoch, 'club', blocked);
         },
         successStatusAbnormal: (res, status) => {
           if (!this._current(epoch)) { this._clearOtherMember(); return; }
-          if (!forbidden(res, status)) this.setData({ clubError: true });
+          const blocked = forbidden(res, status);
+          if (!blocked) this.setData({ clubError: true });
+          this._mark(epoch, 'club', blocked);
         },
       });
     },
@@ -114,19 +149,22 @@ Component({
           if (!this._current(epoch)) { this._clearOtherMember(); return; }
           const data = res && res.code == '200' ? res.data : null;
           const rows = data && (data.rows || data.list || data);
-          if (!Array.isArray(rows)) { this.setData({ monthError: true }); return; }
+          if (!Array.isArray(rows)) { this.setData({ monthError: true }); this._mark(epoch, 'month', false); return; }
           this._balanceMonth = Object.assign({ ready: true }, earningsView.monthIncome(rows, new Date(), 3));
           this._rememberMember();
           this.setData({ monthError: false });
           this._setMonth();
+          this._mark(epoch, 'month', true);
         },
         fail: () => {
           if (!this._current(epoch)) { this._clearOtherMember(); return; }
           this.setData({ monthError: true });
+          this._mark(epoch, 'month', false);
         },
         successStatusAbnormal: () => {
           if (!this._current(epoch)) { this._clearOtherMember(); return; }
           this.setData({ monthError: true });
+          this._mark(epoch, 'month', false);
         },
       });
     },
@@ -141,14 +179,17 @@ Component({
             const patch = { assetsError: true };
             if (!this._keepsShown(identityKey())) patch.assets = [];
             this.setData(patch);
+            this._mark(epoch, 'assets', false);
             return;
           }
           this._rememberMember();
           this.setData({ assets: earningsView.assetRows(stages), assetsError: false });
+          this._mark(epoch, 'assets', true);
         },
         fail: () => {
           if (!this._current(epoch)) { this._clearOtherMember(); return; }
           this.setData({ assetsError: true });
+          this._mark(epoch, 'assets', false);
         },
       });
     },

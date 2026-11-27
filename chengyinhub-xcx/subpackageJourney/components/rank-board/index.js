@@ -11,6 +11,13 @@ const HERO_ENTER_MS = 34;
 const ROLL_DELAY_MS = 120;
 const ROLL_MS = 520;
 
+// 榜单面板关起来时组件会卸掉。名次留在这一页上,同一次停留里再打开直接画回去。
+function hostPage() {
+  if (typeof getCurrentPages !== 'function') return null;
+  const pages = getCurrentPages();
+  return pages && pages.length ? pages[pages.length - 1] : null;
+}
+
 /* r2-finish 榜单(战报面板与结算页共用)。
  * 本关口径:队内(服务端给了队伍) / 全体(单关榜) / 队伍(队伍之间榜,服务端有队伍才出);
  * 城市、国家、世界、俱乐部收进「更多」。名次、上榜人数、队伍进度全读服务端;读不到不写 0。
@@ -34,7 +41,7 @@ Component({
   },
   observers: {
     'topicId, activityId, teamId, cityCode, countryCode, clubId': function () { if (!this._attached) return; this._rebuild(); this._probeTeams(); },
-    active(on) { if (on && !this._loadedOnce) this.load(); }
+    active(on) { if (on && !this._loadedOnce) this.load({ reuse: true }); }
   },
   lifetimes: {
     attached() { this._attached = true; this._rebuild(); this._probeTeams(); },
@@ -44,6 +51,17 @@ Component({
     _ctx() {
       const d = this.data;
       return { topicId: d.topicId, cityCode: d.cityCode, countryCode: d.countryCode, clubId: d.clubId, teamId: d.teamId, teamBoard: this._teamBoard === true };
+    },
+    // 同一局、同一张榜(口径 + 累计/本周)。换了局或换了页就对不上。
+    _boardKey(scope, period) {
+      const d = this.data;
+      return [d.preset || '', d.topicId || '', d.activityId || '', d.teamId || '', d.cityCode || '', d.countryCode || '', d.clubId || '', scope || '', period || ''].join('\n');
+    },
+    _rememberBoard(key, rank, state) {
+      const page = hostPage();
+      if (!page || !key || !rank) return;
+      if (!page._rankVisit) page._rankVisit = {};
+      page._rankVisit[key] = { rank, state };
     },
     _settle() { return this.data.preset === 'settle'; },
     // L09-064
@@ -62,7 +80,7 @@ Component({
       this._all = t.primary.concat(t.more);
       this.setData({ tabs: t.primary.map(x => ({ key: x.key, label: x.label })), more: t.more, scope, moreLabel: picked ? picked.label : '更多' });
       if (keepScope && scope === prevScope && this._loadedOnce) return;
-      if (this.data.active) this.load();
+      if (this.data.active) this.load({ reuse: true });
     },
     // 队伍之间榜:服务端有队伍(主题开着队伍看板、本关有队)才出「队伍」页签。
     _probeTeams() {
@@ -112,10 +130,22 @@ Component({
         this._landTimer = setTimeout(() => { this._landTimer = null; motion.haptic({ type: 'light' }); }, ROLL_DELAY_MS + ROLL_MS);
       }
     },
-    load() {
+    load(options) {
       const scope = this.data.scope;
       const tab = (this._all || []).find(t => t.key === scope);
       if (!tab) return;
+      const period = this.data.period;
+      const boardKey = this._boardKey(scope, period);
+      // L09-064:这次停留里已经读过同一张榜,关掉再开用那份名次,不再请求
+      if (options && options.reuse === true) {
+        const page = hostPage();
+        const hit = page && page._rankVisit && page._rankVisit[boardKey];
+        if (hit && hit.rank) {
+          this._loadedOnce = true;
+          this._show(hit.rank, hit.state);
+          return;
+        }
+      }
       this._loadedOnce = true;
       const epoch = this._epoch = (this._epoch || 0) + 1;
       this.setData({ state: this.data.rank ? 'refresh' : 'loading', error: '' });
@@ -130,7 +160,9 @@ Component({
           if (epoch !== this._epoch) return;
           if (!api.ok(res)) { this.setData({ state: 'error', error: (res && res.msg) || '队伍榜暂未加载', rank: null, hero: null }); return; }
           const rank = view.teamBoardView(res.data);
-          this._show(rank, rank.entries.length ? 'ready' : 'empty');
+          const state = rank.entries.length ? 'ready' : 'empty';
+          this._rememberBoard(boardKey, rank, state);
+          this._show(rank, state);
         });
         return;
       }
@@ -139,17 +171,21 @@ Component({
           if (epoch !== this._epoch) return;
           if (!api.ok(res)) { this.setData({ state: 'error', error: res && Number(res.code) === 403 ? '队内榜仅本队成员可看' : '队内榜暂未加载', rank: null, hero: null }); return; }
           const rank = view.teamRankView(res.data);
-          this._show(rank, rank && rank.hasRank ? 'ready' : 'empty');
+          const state = rank && rank.hasRank ? 'ready' : 'empty';
+          this._rememberBoard(boardKey, rank, state);
+          this._show(rank, state);
         });
         return;
       }
-      const requested = { scope, scopeId: tab.scopeId, period: this.data.period };
-      api.rank(app, { scope, scopeId: tab.scopeId, period: this.data.period, limit: 50 }).then(res => {
+      const requested = { scope, scopeId: tab.scopeId, period };
+      api.rank(app, { scope, scopeId: tab.scopeId, period, limit: 50 }).then(res => {
         if (epoch !== this._epoch) return;
         if (!api.ok(res)) { this.setData({ state: 'error', error: (res && res.msg) || '榜单暂未加载', rank: null, hero: null }); return; }
         const rank = view.rankView(res.data, requested);
         if (!rank || rank.mismatch) { this.setData({ state: 'error', error: '榜单暂未加载', rank: null, hero: null }); return; }
-        this._show(rank, rank.entries.length ? 'ready' : 'empty');
+        const state = rank.entries.length ? 'ready' : 'empty';
+        this._rememberBoard(boardKey, rank, state);
+        this._show(rank, state);
       });
     }
   }

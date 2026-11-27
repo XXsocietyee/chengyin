@@ -70,6 +70,21 @@ test('首次拿到记录先隐着渲染再上浮;刷新不重播', async () => {
   clearTimeout(component._pmInTimer)
 })
 
+test('离开页面后邀请累计停在真实值，计时器不再改数字', async () => {
+  global.wx = { getStorageSync: () => '' }
+  const component = loadComponent()
+  component._rewardReady = true
+  component.data.rewardReady = true
+  component.playEarn([], 40)
+  assert.equal(component.data.earnedTotalText, '0')
+  componentConfig.pageLifetimes.hide.call(component)
+  assert.equal(component.data.earnedTotalText, '40')
+  const writes = component.patches.length
+  await new Promise((resolve) => setTimeout(resolve, 1100))
+  assert.equal(component.patches.length, writes)
+  assert.equal(component.data.earnedTotalText, '40')
+})
+
 test('空列表与减少动态效果时不做入场', async () => {
   global.wx = { getStorageSync: () => '' }
   const empty = await loadWith([])

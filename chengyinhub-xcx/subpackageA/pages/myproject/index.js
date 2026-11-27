@@ -187,6 +187,12 @@ Page({
     //   路径(同步抛错 / 页面被顶掉再回来)会把 flag 永远留在 true,按钮就此死掉。
     this._togglingIds = null;
     this._templateActionIds = null;
+    // 申诉里选一张图会走系统相册并触发 onShow。同一账号只改这一处附件,不重拉整份项目列表。
+    const fromPicker = this._systemPickerOpen;
+    this._systemPickerOpen = false;
+    if (changedOwner) this._imageFlowOpen = false;
+    if ((fromPicker || this._imageFlowOpen) && !changedOwner) return;
+    this._imageFlowOpen = false;
     this.reload();
   },
   onHide() {
@@ -475,6 +481,9 @@ Page({
   _openOps(item) {
     if (!this._hasOps(item)) return;
     const opsSeq = this._opsSeq = (this._opsSeq || 0) + 1;
+    // L09-043:半屏只留这张卡的真实报名数。编辑时原样交给 editActivity,不能改写成 0/1。
+    const signupCount = Number(item.signupCount);
+    const soldCount = Number.isFinite(signupCount) && signupCount > 0 ? signupCount : 0;
     this.setData({
       opsSheet: {
         show: true,
@@ -488,7 +497,8 @@ Page({
         canEdit: item.bizType !== 'topic' && !!item._canEdit,
         canCancel: !!item._canCancel, canAudit: !!item._canAudit, state: item.state,
         canSaveAsTemplate: !!item._canSaveAsTemplate,
-        sold: !!item._sold,
+        sold: !!item._sold || soldCount > 0,
+        signupCount: soldCount,
         toggleLabel: item._toggleLabel || '下架',
       }
     });
@@ -526,7 +536,13 @@ Page({
     const ds = { id: p.id, biz: p.biz, online: p.online, title: p.title };
     if (k === 'received') return this.goReceivedApplies();
     if (k === 'edit' && p.biz === 'topic') return this.editTopic(p.id);
-    if (k === 'edit') return this.editActivity({ currentTarget: { dataset: { item: { id: p.id, bizType: 'activity', title: p.title, _sold: !!p.sold, signupCount: p.sold ? 1 : 0 } } } });
+    if (k === 'edit') {
+      const signupCount = Number(p.signupCount);
+      const count = Number.isFinite(signupCount) && signupCount > 0 ? signupCount : 0;
+      return this.editActivity({ currentTarget: { dataset: { item: {
+        id: p.id, bizType: 'activity', title: p.title, _sold: !!p.sold || count > 0, signupCount: count
+      } } } });
+    }
     if (k === 'toggle') return this.toggleStatus({ currentTarget: { dataset: ds } });
     if (k === 'cancel') {
       const cancelDs = { currentTarget: { dataset: { id: p.id, title: p.title } } };
@@ -859,7 +875,10 @@ Page({
     const sheet = this.data.auditSheet;
     if (!sheet.show || !sheet.canAppeal || sheet.pending || sheet.confirmed || this._appealing || (sheet.attachments || []).length >= 6) return;
     const owner = String(app.getUserID()), token = authorization(), epoch = this._auditEpoch;
+    this._systemPickerOpen = true;
+    this._imageFlowOpen = true;
     app.chooseImage(urls => {
+      this._imageFlowOpen = false;
       if (this._unloaded || owner !== String(app.getUserID()) || token !== authorization()
         || epoch !== this._auditEpoch || !this.data.auditSheet.show || this.data.auditSheet.pending || this.data.auditSheet.confirmed) return;
       const refs = (this.data.auditSheet.attachments || []).concat((urls || []).filter(url => typeof url === 'string' && url)).slice(0, 6);

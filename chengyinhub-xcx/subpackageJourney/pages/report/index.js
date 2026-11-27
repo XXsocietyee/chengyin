@@ -2,6 +2,11 @@ const api = require('../../utils/journey-api.js');
 const view = require('../../utils/journey-view.js');
 const app = getApp();
 
+function queryText(value) {
+  if (!value) return '';
+  try { return decodeURIComponent(String(value)); } catch (e) { return ''; }
+}
+
 /* P7 本局战报：真实结束回执后进入，「我的记录」可按 runId 重开同一局。
  * 只读：读取不补完局、不发奖、不建局。名次(P9/§23.4)与回忆(P8)用同页面板承接。 */
 
@@ -25,7 +30,7 @@ Page({
       topicId: view.isId(o.topicId) ? o.topicId : '',
       runId: view.isId(o.runId) ? o.runId : ''
     };
-    this._topicName = o.topicName ? decodeURIComponent(o.topicName) : '';
+    this._topicName = queryText(o.topicName);
     this._clubId = view.isId(o.clubId) ? o.clubId : '';
     this.setData({ registrationId: view.isId(o.registrationId) ? o.registrationId : '',
       cityCode: o.cityCode || '', countryCode: o.countryCode || '', clubId: this._clubId });
@@ -92,13 +97,24 @@ Page({
   },
   closeRank() { this.setData({ rankOpen: false }); },
 
+  // L09-159:本页已经有这一局结束的战报时交给结算页,结算页不再立刻重拉同一局。
+  // 失败或还没结束的不交(handed 也不带),结算页仍自己读。
   openSettle() {
     const r = this.data.report || {};
+    const finished = this.data.state === 'ready' && r.finished === true;
+    this._settleHandoff = finished ? {
+      activityId: String(this._query.activityId || ''),
+      topicId: String(this._query.topicId || ''),
+      runId: r.runId ? String(r.runId) : '',
+      topicName: this._topicName || '',
+      report: r
+    } : null;
     const q = [];
     if (this._query.activityId) q.push('activityId=' + this._query.activityId);
     if (this._query.topicId) q.push('topicId=' + this._query.topicId);
     if (r.runId) q.push('runId=' + r.runId);
     if (this._topicName) q.push('topicName=' + encodeURIComponent(this._topicName));
+    if (finished) q.push('handed=1');
     wx.navigateTo({ url: '/subpackageJourney/pages/settle/index?' + q.join('&') });
   },
 

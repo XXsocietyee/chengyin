@@ -87,6 +87,25 @@ test('未开卖已发布活动显示编辑，点编辑进发布页带 id', () =>
   assert.equal(navigations[0], '/pages/publish/activity/index?id=301');
 });
 
+test('L09-043 操作半屏编辑把真实报名数交给已开卖判断', () => {
+  const page = makePage();
+  loadActivities(page, [activityRow({ signupCount: 4, state: 'running' })]);
+  page.onCardMore({ currentTarget: { dataset: { index: 0 } } });
+  assert.equal(page.data.opsSheet.signupCount, 4);
+  page.onOpsPick({ currentTarget: { dataset: { k: 'edit' } } });
+  assert.equal(navigations.length, 0);
+  assert.ok(toasts.some((t) => t && String(t).indexOf('已有人买票，不能再改这场活动') >= 0));
+
+  sent.length = 0;
+  navigations.length = 0;
+  const open = makePage();
+  loadActivities(open, [activityRow({ signupCount: 0, state: 'notStarted' })]);
+  open.onCardMore({ currentTarget: { dataset: { index: 0 } } });
+  assert.equal(open.data.opsSheet.signupCount, 0);
+  open.onOpsPick({ currentTarget: { dataset: { k: 'edit' } } });
+  assert.equal(navigations.at(-1), '/pages/publish/activity/index?id=301');
+});
+
 test('已开卖活动点编辑留在本页并说明，不进表单；上下架仍在', () => {
   const page = makePage();
   loadActivities(page, [activityRow({ signupCount: 2, state: 'running' })]);

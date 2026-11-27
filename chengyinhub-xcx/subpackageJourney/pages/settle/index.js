@@ -12,6 +12,11 @@ const cyToast = require('../../../utils/toast.js');
 const cyModal = require('../../../utils/modal.js');
 const app = getApp();
 
+function queryText(value) {
+  if (!value) return '';
+  try { return decodeURIComponent(String(value)); } catch (e) { return ''; }
+}
+
 /* r2-finish 结算流程 → l-after(2026-11-10)按业主批准的原型改:整局走完后 总览 → 排行榜(导航栏以下的近全屏弹层,只有 全体 / 队内)
  * → 评价(五星 + 标签片 + 一句话,可跳过)→ 分享(帖文 / 故事卡,保存图片 + 分享 + 完成,支持朋友圈分享与存图后一键复制不剧透小红书文案)。
  * 只读服务端事实:战报 /api/play/player-journey/report;评价走既有 /api/comment/add(owner_type 1 主题 / 2 场次)。 */
@@ -52,12 +57,46 @@ Page({
     if (typeof wx !== 'undefined' && typeof wx.showShareMenu === 'function') {
       wx.showShareMenu({ menus: ['shareAppMessage', 'shareTimeline'] });
     }
-    this.setData({ topicName: o.topicName ? decodeURIComponent(o.topicName) : '', navTop: navTopPx(), reduced: !!readReducedMotion() });
+    this.setData({ topicName: queryText(o.topicName), navTop: navTopPx(), reduced: !!readReducedMotion() });
     if (!this._query.activityId && !this._query.topicId) {
       this.setData({ state: 'missing', stateKind: 'missing-param', stateTitle: '链接已失效', stateCta: '返回' });
       return;
     }
+    // L09-159:只有战报页刚交来的同一局结束战报才直接用;直链没有交接时仍去读。
+    if (this._applyReportHandoff(o)) return;
     this.reload();
+  },
+
+  _applyReportHandoff(options) {
+    if (!options || String(options.handed) !== '1') return false;
+    const hand = this._takeReportHandoff();
+    if (!hand) return false;
+    if (hand.topicName && !this.data.topicName) this.setData({ topicName: hand.topicName });
+    this._showReport(hand.report);
+    return true;
+  },
+
+  _takeReportHandoff() {
+    let pages = [];
+    try { pages = getCurrentPages() || []; } catch (e) { return null; }
+    const candidates = [];
+    if (pages.length >= 2) candidates.push(pages[pages.length - 2]);
+    if (pages.length >= 1) candidates.push(pages[pages.length - 1]);
+    const q = this._query || {};
+    const same = (a, b) => String(a || '') === String(b || '');
+    for (let i = 0; i < candidates.length; i++) {
+      const page = candidates[i];
+      if (!page || page === this || !page._settleHandoff) continue;
+      const route = page.route || page.__route__ || '';
+      if (route && route.indexOf('pages/report/index') < 0) continue;
+      const hand = page._settleHandoff;
+      if (!hand.report || hand.report.finished !== true) { page._settleHandoff = null; continue; }
+      const reportRun = hand.report.runId ? String(hand.report.runId) : '';
+      if (!same(hand.activityId, q.activityId) || !same(hand.topicId, q.topicId) || !same(hand.runId, q.runId) || !same(reportRun, q.runId)) continue;
+      page._settleHandoff = null;
+      return hand;
+    }
+    return null;
   },
 
   onUnload() { this._gone = true; this._unloaded = true; this._clearTimers(); },
@@ -86,11 +125,15 @@ Page({
       }
       // 结算只给结束的局;进行中不出结算(去战报看进度)。
       if (!report.finished) { this.setData({ state: 'error', stateKind: 'not-started', stateTitle: '这一局还没结束', stateCta: '' }); return; }
-      this.setData({ state: 'ready', report });
-      this._enterOverview();
-      this._fillTopicName(report.topicId || this._query.topicId);
-      this._loadOffer(report.topicId || this._query.topicId);
+      this._showReport(report);
     });
+  },
+
+  _showReport(report) {
+    this.setData({ state: 'ready', report });
+    this._enterOverview();
+    this._fillTopicName(report.topicId || this._query.topicId);
+    this._loadOffer(report.topicId || this._query.topicId);
   },
 
   // R4 完局优惠卡:通行证概览 + 在售商品两条只读接口;任一失败只当没有,两样都没有整卡不出。
@@ -120,8 +163,10 @@ Page({
   },
 
   // x-fix4 N-9:从战报/直链进来没带 topicName 时,按主题 id 补主题名,标题不再落「本局」
+  // L09-159:主题名已经有了就不再为标题请求;没有名字这一页只补一次。
   _fillTopicName(topicId) {
-    if (this.data.topicName || !view.isId(topicId)) return;
+    if (this.data.topicName || !view.isId(topicId) || this._topicNameAsked) return;
+    this._topicNameAsked = true;
     app.sendRequest({ url: '/api/topic/info-to-user', method: 'POST', data: { id: topicId }, hideLoading: true, autoErrorToast: false,
       success: res => {
         const d = res && String(res.code) === '200' && res.data;
@@ -150,7 +195,8 @@ Page({
   _go(step) {
     const i = STEPS.indexOf(step);
     if (i < 0) return;
-    this.setData({ step, stepIndex: i, thanks: false });
+    // L09-059:评价已被受理后,去分享再返回仍是「谢谢」。清掉就会露出原表单,像还能再交一次。
+    this.setData({ step, stepIndex: i, thanks: !!this._rated });
     if (step === 'overview') this._enterOverview();
     if (step === 'rank') {
       // 近全屏弹层从下方升起

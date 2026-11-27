@@ -297,10 +297,14 @@ function transferErrors(name, phone) {
 }
 
 /* ——— P1 落地 ——— */
+function safeDecode(value) {
+  if (typeof value !== 'string' || !value) return '';
+  try { return decodeURIComponent(value); } catch (e) { return ''; }
+}
 function landingKind(options) {
   const o = record(options) ? options : {};
   const kind = o.k === 'g' ? 'gift' : o.k === 's' ? 'seat' : o.k === 'r' ? 'referral' : '';
-  const token = typeof o.t === 'string' ? decodeURIComponent(o.t) : '';
+  const token = typeof o.t === 'string' ? safeDecode(o.t) : '';
   return kind && token && token.length <= 512 ? { kind, token } : null;
 }
 
