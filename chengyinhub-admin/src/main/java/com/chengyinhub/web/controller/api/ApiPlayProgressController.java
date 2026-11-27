@@ -37,6 +37,8 @@ public class ApiPlayProgressController extends BaseController {
     private PlayPuzzleCommandApplication playPuzzleCommandApplication;
     @Autowired
     private PlayContentManifestApplication playContentManifestApplication;
+    @Autowired(required = false)
+    private PlaySelfRedeemApplication playSelfRedeemApplication;
 
     /** 角色(Cast)v1:本局玩家档案与剧情分支选择,本局状态归路线运行时(topic_route_session.state_json)。 */
     @Autowired
@@ -166,6 +168,15 @@ public class ApiPlayProgressController extends BaseController {
     public AjaxResult scanEntry(String code)
     {
         return playBasicCommandApplication.scanEntry(currentMemberId(), code);
+    }
+
+    @Operation(summary = "柜台台卡自助核销(玩家扫门店台卡码,返回脱敏昵称+权益名+当日序号)")
+    @RateLimiter(time = 10, count = 60, limitType = LimitType.MEMBER)
+    @PostMapping("/self-redeem")
+    public AjaxResult selfRedeem(String activityId, String topicId, String code, Long nodeId, Long registrationId)
+    {
+        if (playSelfRedeemApplication == null) return error("自助核销服务暂不可用");
+        return playSelfRedeemApplication.selfRedeem(currentMemberId(), activityId, topicId, code, nodeId, registrationId);
     }
 
     @Operation(summary = "答题完成(文字/选项)")

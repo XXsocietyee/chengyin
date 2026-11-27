@@ -131,10 +131,10 @@ Page({
     }, () => {
       // 从选店页扫码进来(intro 快捷扫码路径):落地即弹体验层,和页内扫码同一仪式
       if (String(query && query.justScanned) === '1') this._maybeAutoPopup()
-      // 没有玩法的店从卡片「到店打卡」进来:已到店就直接出示核销码(F08 / FE-GAPS G1)
-      else if (String(query && query.verify) === '1' && node.arrived && !node.done) this.openVerifyCode()
+      // 没有玩法的店:直接出示核销码,跳过定位与手机授权弹窗(§4.2)
+      else if (String(query && query.verify) === '1' && !node.done && (node.arrived || isPerkOnlyShop(node))) this.openVerifyCode()
     })
-    if (node.merchantId) this._loadMerchantConsent()
+    if (node.merchantId && !isPerkOnlyShop(node)) this._loadMerchantConsent()
   },
 
   /** 扫码成功后的体验层分发:有游戏弹游戏,无游戏弹任务卡;未进店不弹(题面也未下发)。 */
@@ -277,12 +277,14 @@ Page({
     if (this.data.game.receipt !== 'unknown') return
     this._resolveGameUnknown()
   },
-  /** 纯权益店的核销码卡:没到店先走「我已到店」(到店成功后自动打开核销码),到了就直接出示 */
+  /** 纯权益店的核销码卡:直接出示核销码,跳过冗余定位弹窗与拍照上传(§4.2) */
   perkCodeTap() {
     const node = this.data.node
     if (!node || node.done || this.data.receipt === 'unknown') return
-    // 门店调整中(P1-9)主按钮不给「我已到店」,这张卡也不能绕过去写到店;交给 openVerifyCode 说明状态
-    if (!node.arrived && !node.supplyState) { this.arriveHere(); return }
+    if (node.supplyState) {
+      this.setData({ feedback: '门店调整中，暂不能出示核销码' })
+      return
+    }
     this.openVerifyCode()
   },
   openTaskCard() { this.setData({ 'task.show': true }) },
@@ -516,7 +518,8 @@ Page({
       this.setData({ feedback: '当前门店身份未确认，不能出示核销码' })
       return
     }
-    if (this.data.merchantConsent !== 'AGREE') {
+    // §4.2 纯权益核销只向门店传脱敏昵称+权益名(不传手机号),跳过逐店手机授权弹窗;有玩法门店保留原授权闸
+    if (!this.data.perkOnly && this.data.merchantConsent !== 'AGREE') {
       const agreed = await this._confirmMerchantConsent()
       if (!agreed) return
     }

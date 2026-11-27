@@ -1310,6 +1310,27 @@ public class PerkLedgerServiceImpl implements IPerkLedgerService {
         return info;
     }
 
+    @Override
+    public Integer dailyRedemptionSerial(Long chapterId, Long merchantId) {
+        if (chapterId == null || merchantId == null) return null;
+        MerchantChapterOffer offer = findLiveOffer(chapterId, merchantId);
+        if (offer == null || offer.getId() == null) return null;
+        try {
+            List<Map<String, Object>> rows = offerMapper.selectDailyUsedByOfferIds(
+                    Collections.singletonList(offer.getId()), OfferRedeemLimits.today().toString());
+            if (rows != null) {
+                for (Map<String, Object> row : rows) {
+                    if (row != null && row.get("usedToday") instanceof Number n && n.intValue() > 0) {
+                        return n.intValue();
+                    }
+                }
+            }
+        } catch (RuntimeException e) {
+            logger.warn("当日核销序号读取失败 chapterId={} merchantId={}", chapterId, merchantId, e);
+        }
+        return null;
+    }
+
     /** uk_offer_merchant_chapter 保证一个商家一章最多一行,故取到即唯一。 */
     private MerchantChapterOffer findLiveOffer(Long chapterId, Long merchantId) {
         List<MerchantChapterOffer> offers = offerMapper.selectByChapter(chapterId);

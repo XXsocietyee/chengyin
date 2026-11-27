@@ -106,6 +106,7 @@ public class PlayEntryApplication {
         boolean trialMode = false;
         boolean leadSpectator = false;
         Date passExpiresAt = null;
+        Long resolvedRegId = null;
         Long clubId = null; // 升级2:俱乐部局判据,响应尾部按它发 myRole
         if (!selfPlay) {
             if (activityId == null) return error("参数有误");
@@ -157,6 +158,7 @@ public class PlayEntryApplication {
             } else {
                 registered = true;
                 passExpiresAt = pass.getExpiresAt();
+                resolvedRegId = PlayNodeQueryApplication.ownedRedeemableRegId(pass, memberId);
                 timeErr = null; // 自玩无场次时效;有效期由通行证 expires_at 管
             }
         }
@@ -254,6 +256,7 @@ public class PlayEntryApplication {
                 nodeList, doneNodeIds, doneAtMap, progressByNode, completedNodeIds, hintCost,
                 hintUnlockedNodeIds, nodes, spoilerAccess, playMode, routeTopic, bargainOffered, routeState);
         read.trialMode = trialMode;
+        read.regId = resolvedRegId;
         read.contentSnapshot = com.chengyinhub.business.service.support.NodeJourneySnapshot.hasContentSnapshots(contentSnapshot)
                 ? contentSnapshot : null;
         read.capabilityDeclaration = com.chengyinhub.business.service.support.ContentCapabilityRequirements.Declaration

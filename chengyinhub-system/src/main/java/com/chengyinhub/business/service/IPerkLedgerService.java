@@ -188,6 +188,12 @@ public interface IPerkLedgerService {
         return java.util.Collections.emptyMap();
     }
 
+    /**
+     * §4.2 台卡自助核销当日序号:读取本店该章生效供给今日已核销笔数(与 claimDailySlot 同源),
+     * 读不到或迁移列未落库返回 null,不影响已成立的核销。
+     */
+    default Integer dailyRedemptionSerial(Long chapterId, Long merchantId) { return null; }
+
     /** 调用方须先按 activity→registration 锁序复核有效票；锁读同 key 的真实回执与权益。 */
     Long findReplayableChapterRedemptionIdForUpdate(Long registrationId, Long topicId,
                                                    Long chapterId, Long merchantId);
