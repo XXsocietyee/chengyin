@@ -250,7 +250,8 @@ test('UG-01 r2:格子按词分组(长短语不再横向滚走);l-kits 2026-11-10
   assert.ok(!/scroll-x/.test(wxml), '不再横向滚动')
   assert.ok(!/placeholder="第 \{\{active/.test(wxml), '不再出「第 N 格」输入栏')
   assert.ok(!/hm__ghost/.test(wxml), '不再用隐藏输入框:原型是看得见的输入框就在格子下面')
-  assert.match(wxml, /<input class="hm__in[^>]*focus="\{\{focused\}\}" cursor="\{\{cursor\}\}" maxlength="\{\{blankCount\}\}"/, '一个输入框接系统键盘,点格子挪光标,字数封顶 = 可编辑格数')
+  assert.match(wxml, /<input class="hm__in[^>]*focus="\{\{focused\}\}" cursor="\{\{cursor\}\}"/, '一个输入框接系统键盘,点格子挪光标')
+  assert.doesNotMatch(wxml, /<input class="hm__in[^>]*maxlength=/, '输入框不设 maxlength,避免截断中文拼音输入法组合态')
   assert.ok(!/<view class="keys"|hm__key/.test(wxml), '不画自定义键盘')
 })
 

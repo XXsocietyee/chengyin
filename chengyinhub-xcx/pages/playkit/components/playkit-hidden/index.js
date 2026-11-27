@@ -43,17 +43,22 @@ Component({
     limitSeconds: { type: Number, value: 0 },
     maxTries: { type: Number, value: 0 },
     used: { type: Number, value: 0 },  // L02-005
+    failureSeq: { type: Number, value: 0 },
   },
-  data: { hits: [], foundCount: 0, frame: '' },
+  data: { hits: [], foundCount: 0, frame: '', submitting: false },
   observers: {
+    failureSeq: function (value) {
+      if (!value || !this.data.submitting) return;
+      this.setData({ submitting: false });
+    },
     'show, targets': function (show) {
-      if (!show) { this._begun = false; this._served = null; return; }
+      if (!show) { this._begun = false; this._served = null; if (this.data.submitting) this.setData({ submitting: false }); return; }
       /* 编辑页试玩没有服务端:命中由作者本机按自己的配置判,写回 targets(found + 点的位置)。
          带着这样的 target 就照它画点、计数,不重开一局;全找到由台面判赢。正式游玩下发的 targets 不带这些字段。 */
       const found = (this.data.targets || []).filter(t => t && t.found && Number.isFinite(t.x) && Number.isFinite(t.y));
       if (found.length) {
         const hits = found.map(t => ({ id: t.id, x: t.x, y: t.y }));
-        this.setData({ hits, foundCount: hits.length });
+        this.setData({ hits, foundCount: hits.length, submitting: false });
         motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
         const stage = this.selectComponent('#cy-play-stage');
         if (hits.length >= this.data.total && stage) stage.win('全找到了');
@@ -66,13 +71,13 @@ Component({
       const stage = this.selectComponent('#cy-play-stage');
       if (!this._begun) {
         this._begun = true;
-        this.setData({ hits: [], foundCount: served });
+        this.setData({ hits: [], foundCount: served, submitting: false });
         if (stage) stage.begin();
         this._fitFrame();
         return;
       }
       if (served === this.data.foundCount) return;
-      this.setData({ foundCount: served });
+      this.setData({ foundCount: served, submitting: false });
       if (before != null && served > before) {
         motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
         if (served >= this.data.total && stage) stage.win('全找到了');
@@ -84,6 +89,7 @@ Component({
       const seen = this._seenUsed;
       this._seenUsed = now;
       if (seen == null || now <= seen || !this.data.show) return;
+      if (this.data.submitting) this.setData({ submitting: false });
       const stage = this.selectComponent('#cy-play-stage');
       if (stage && stage.nudge) stage.nudge();
     },
@@ -106,8 +112,10 @@ Component({
     },
 
     onTapScene(e) {
+      if (this.data.submitting) return;
       const q = wx.createSelectorQuery().in(this);
       q.select('.hd__frame').boundingClientRect((rect) => {
+        if (this.data.submitting) return;
         const t = (e.touches && e.touches[0]) || e.detail || {};
         const p = toPercent(t.clientX != null ? t.clientX : t.x,
                             t.clientY != null ? t.clientY : t.y, rect);
@@ -119,6 +127,7 @@ Component({
           if (stage && stage.nudge) stage.nudge();
           return;
         }
+        this.setData({ submitting: true });
         // 命中与否由服务端判 —— 坐标就是这个玩法的答案
         this.triggerEvent('submit', p);
       }).exec();

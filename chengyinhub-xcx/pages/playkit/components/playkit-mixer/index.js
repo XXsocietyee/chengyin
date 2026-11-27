@@ -81,11 +81,13 @@ Component({
     lastCorrect: { type: Boolean, value: false },
     lastTrackId: { type: String, value: '' },
     lastFeedback: { type: String, value: '' },
+    failureSeq: { type: Number, value: 0 },
   },
   data: {
     rows: [],
     selectedId: '',
     ready: false,
+    submitting: false,
     feedback: '',
     edge: false,
     phase: 'play',          // play 调音台 / stamp 「通过」章 / ab 对比卡
@@ -95,8 +97,12 @@ Component({
     abBars: [],
   },
   observers: {
+    failureSeq: function (value) {
+      if (!value || this._locked() || !this.data.submitting) return;
+      this.setData({ submitting: false });
+    },
     'show, tracks': function (show, tracks) {
-      if (!show) { this._signature = ''; this._stopAudio(); return; }
+      if (!show) { this._signature = ''; this._stopAudio(); if (this.data.submitting) this.setData({ submitting: false }); return; }
       const signature = JSON.stringify(tracks || []);
       if (signature === this._signature) return;
       this._signature = signature;
@@ -108,6 +114,7 @@ Component({
         rows,
         selectedId,
         ready: canConfirm(rows, selectedId),
+        submitting: false,
         feedback: reentry && !this.data.passed ? this.data.lastFeedback : '',
         phase: this.data.passed ? 'ab' : 'play',
         seg: 'before', playing: false, head: 0,
@@ -122,11 +129,11 @@ Component({
       this._seenAttempts = attempts;
       const stage = this.selectComponent('#cy-play-stage');
       if (passed) {
-        this.setData({ feedback: '', phase: 'stamp' });
+        this.setData({ feedback: '', phase: 'stamp', submitting: false });
         if (stage) stage.win('');
         return;
       }
-      this.setData({ feedback: lastFeedback || '' });
+      this.setData({ feedback: lastFeedback || '', submitting: false });
       if (stage && stage.nudge) stage.nudge();
       this._flashEdge();
     },
@@ -159,7 +166,8 @@ Component({
       this.setData({ rows, selectedId: id, ready: canConfirm(rows, id), feedback: '' });
     },
     onConfirm() {
-      if (this._locked() || !this.data.ready) return;
+      if (this._locked() || !this.data.ready || this.data.submitting) return;
+      this.setData({ submitting: true });
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       // ★ 只报选了哪一轨、打开了哪些,不报对错 —— 对错在服务端
       this.triggerEvent('submit', { trackId: this.data.selectedId, unmuted: unmutedIds(this.data.rows) });

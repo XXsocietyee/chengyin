@@ -27,8 +27,8 @@
     </view>
   </view>
   <!-- 2026-11-24 业主:除了答题确认不留按钮 —— 过了之后整屏点一下继续(台面 done-tap),不再出「继续」钮 -->
-  <view wx:if="{{verdict !== 'ok'}}" class="g-btn {{rows.length && verdict !== 'ok' ? '' : 'g-btn--disabled'}} pe pe--up" bindtap="onSubmit"
-        aria-role="button" aria-label="提交排好的顺序" hover-class="g-btn--press" hover-stay-time="80">
-    就这个顺序
+  <view wx:if="{{verdict !== 'ok' && !finished}}" class="g-btn {{rows.length && verdict !== 'ok' && !submitting ? '' : 'g-btn--disabled'}} pe pe--up" bindtap="onSubmit"
+        aria-role="button" aria-label="{{submitting ? '提交中' : '提交排好的顺序'}}" aria-disabled="{{!rows.length || submitting}}" hover-class="g-btn--press" hover-stay-time="80">
+    {{submitting ? '提交中…' : '就这个顺序'}}
   </view>
 </cy-play-stage>

@@ -141,7 +141,7 @@
 
 <cy-playkit-hangman wx:elif="{{kit.type === 'hangman'}}" inline="{{inline}}"
   show="{{show}}" title="{{kit.title}}" slots="{{kit.slots}}" solved="{{kit.solved}}" display="{{kit.display}}" feedback="{{kit.feedback}}" wrong-feedback="{{kit.wrongFeedback}}"
-  input-mode="{{kit.inputMode}}" pool="{{kit.pool}}" howto="{{kit.howto}}" reference-url="{{kit.referenceUrl}}"
+  input-mode="{{kit.inputMode}}" pool="{{kit.pool}}" howto="{{kit.howto}}" reference-url="{{kit.referenceUrl}}" failure-seq="{{kit.failureSeq}}"
   bind:submit="onSubmit" bind:close="onClose" bind:continue="onContinue" bind:reference="onReference" />
 
 <cy-playkit-accusation wx:elif="{{kit.type === 'accusation'}}" inline="{{inline}}"
@@ -159,19 +159,19 @@
   show="{{show}}" title="{{kit.title}}" unit="{{kit.unit}}"
   min="{{kit.min}}" max="{{kit.max}}"
   submitted="{{kit.submitted}}" tier="{{kit.tier}}" guess="{{kit.guess}}" answer="{{kit.answer}}" reveal="{{kit.reveal}}"
-  attempts="{{kit.attempts}}" limit-seconds="{{kit.limitSeconds}}" max-tries="{{kit.maxTries}}"
+  attempts="{{kit.attempts}}" limit-seconds="{{kit.limitSeconds}}" max-tries="{{kit.maxTries}}" failure-seq="{{kit.failureSeq}}"
   bind:submit="onSubmit" bind:verdict="onVerdict" bind:close="onClose" />
 
 <cy-playkit-pricepair wx:elif="{{kit.type === 'pricepair'}}"
   attempts="{{kit.attempts}}" finished="{{kit.finished}}" passed="{{kit.passed}}" last-pick-id="{{kit.lastPickId}}" answer-id="{{kit.answerId}}"
   show="{{show}}" title="{{kit.title}}" items="{{kit.items}}"
-  limit-seconds="{{kit.limitSeconds}}" max-tries="{{kit.maxTries}}"
+  limit-seconds="{{kit.limitSeconds}}" max-tries="{{kit.maxTries}}" failure-seq="{{kit.failureSeq}}"
   bind:submit="onSubmit" bind:verdict="onVerdict" bind:close="onClose" />
 
 <cy-playkit-hidden wx:elif="{{kit.type === 'hidden'}}"
   show="{{show}}" title="{{kit.title}}" image-url="{{kit.imageUrl}}"
   targets="{{kit.targets}}" total="{{kit.total}}"
-  limit-seconds="{{kit.limitSeconds}}" max-tries="{{kit.maxTries}}" used="{{kit.used}}"
+  limit-seconds="{{kit.limitSeconds}}" max-tries="{{kit.maxTries}}" used="{{kit.used}}" failure-seq="{{kit.failureSeq}}"
   bind:submit="onSubmit" bind:verdict="onVerdict" bind:close="onClose" />
 
 <!-- 竞猜转盘与抽卡牌堆都是整屏排版(内容绝对定位贴满台面)。故事流里内嵌时台面高度是 auto,
@@ -181,7 +181,7 @@
   close-at-hour="{{kit.closeAtHour}}" reveal-days="{{kit.revealDays}}" reveal-hour="{{kit.revealHour}}"
   settle-status="{{kit.settleStatus}}" settled-option="{{kit.settledOption}}"
   won="{{kit.won}}" my-option-key="{{kit.myOptionKey}}"
-  closed="{{kit.closed}}" shop-answers="{{kit.shopAnswers}}" skipped="{{kit.skipped}}"
+  closed="{{kit.closed}}" shop-answers="{{kit.shopAnswers}}" skipped="{{kit.skipped}}" failure-seq="{{kit.failureSeq}}"
   bind:submit="onSubmit" bind:skip="onSkip" bind:close="onClose" />
 
 <cy-playkit-random wx:elif="{{kit.type === 'random'}}" style="{{inline ? '--pk-stage-height:1180rpx;--pk-stage-body-pos:absolute' : ''}}"
@@ -256,7 +256,7 @@
 <cy-playkit-sort wx:elif="{{kit.type === 'sort'}}" inline="{{inline}}"
   show="{{show}}" prompt="{{kit.prompt}}" items="{{kit.items}}"
   attempts="{{kit.attempts}}" passed="{{kit.passed}}" finished="{{kit.finished}}"
-  last-correct="{{kit.lastCorrect}}" last-order="{{kit.lastOrder}}"
+  last-correct="{{kit.lastCorrect}}" last-order="{{kit.lastOrder}}" failure-seq="{{kit.failureSeq}}"
   bind:submit="onSubmit" bind:close="onClose" />
 
 <cy-playkit-barter wx:elif="{{kit.type === 'barter'}}" inline="{{inline}}"
@@ -267,7 +267,7 @@
 
 <cy-playkit-match wx:elif="{{kit.type === 'match'}}" inline="{{inline}}"
   show="{{show}}" prompt="{{kit.prompt}}" left="{{kit.left}}" right="{{kit.right}}"
-  attempts="{{kit.attempts}}" passed="{{kit.passed}}" last-correct="{{kit.lastCorrect}}"
+  attempts="{{kit.attempts}}" passed="{{kit.passed}}" last-correct="{{kit.lastCorrect}}" failure-seq="{{kit.failureSeq}}"
   bind:submit="onSubmit" bind:close="onClose" />
 
 <cy-playkit-compare wx:elif="{{kit.type === 'compare'}}" inline="{{inline}}"
@@ -281,7 +281,7 @@
   audio-before="{{kit.audioBefore}}" audio-after="{{kit.audioAfter}}"
   caption-before="{{kit.captionBefore}}" caption-after="{{kit.captionAfter}}"
   max-tries="{{kit.maxTries}}" attempts="{{kit.attempts}}" finished="{{kit.finished}}" passed="{{kit.passed}}"
-  last-correct="{{kit.lastCorrect}}" last-track-id="{{kit.lastTrackId}}" last-feedback="{{kit.lastFeedback}}"
+  last-correct="{{kit.lastCorrect}}" last-track-id="{{kit.lastTrackId}}" last-feedback="{{kit.lastFeedback}}" failure-seq="{{kit.failureSeq}}"
   bind:submit="onSubmit" bind:close="onClose" />
 
 <cy-playkit-classify wx:elif="{{kit.type === 'classify'}}"

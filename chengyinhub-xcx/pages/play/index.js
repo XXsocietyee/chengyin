@@ -8458,10 +8458,18 @@ Page({
     const detail = (e && e.detail) || {};
     const action = detail.action;
     const kit = this._kit();
-    // L01-111:答错计数(不判对错的问答 / 带反馈的分支)两种动作同一套处理
-    const judgedMiss = (action === 'SUBMIT_QA' && kit.type === 'qa' && kit.judge === false && !kit.finished && !kit.passed)
-      || (action === 'CHOOSE' && kit.type === 'branch' && kit.feedback);
-    if (judgedMiss && (detail.sessionId == null || String(detail.sessionId) === String(kit.sessionId))) {
+    // 提交确定失败(非 unknown)时通过 failureSeq 解锁对应玩法组件的防重提交锁
+    const retryableSubmit = (action === 'SUBMIT_QA' && kit.type === 'qa' && !kit.finished && !kit.passed)
+      || (action === 'CHOOSE' && kit.type === 'branch' && kit.feedback)
+      || (action === 'SUBMIT_HANGMAN' && kit.type === 'hangman' && !kit.solved)
+      || (action === 'SUBMIT_SORT' && kit.type === 'sort' && !kit.finished && !kit.passed)
+      || (action === 'SUBMIT_MATCH' && kit.type === 'match' && !kit.passed)
+      || (action === 'SUBMIT_ESTIMATE' && kit.type === 'estimate' && !kit.submitted)
+      || (action === 'SUBMIT_PRICE_PAIR' && kit.type === 'pricepair' && !kit.finished && !kit.passed)
+      || ((action === 'SUBMIT_PREDICT' || action === 'SKIP_CLOSED_PREDICT') && kit.type === 'predict' && !kit.myOptionKey && !kit.skipped)
+      || (action === 'SUBMIT_HIDDEN_OBJECT' && kit.type === 'hidden')
+      || (action === 'SUBMIT_MIXER' && kit.type === 'mixer' && !kit.finished && !kit.passed);
+    if (retryableSubmit && (detail.sessionId == null || String(detail.sessionId) === String(kit.sessionId))) {
       const game = this.selectComponent('#advancedGame');
       if (game && !game.data.unknown) this.setData({ 'playKit.kit.failureSeq': (kit.failureSeq || 0) + 1 });
     }
@@ -8507,6 +8515,12 @@ Page({
     const fail = (msg) => {
       cyToast(msg);
       if (kitNow && kitNow.type === 'photocheck') this._notifyPhotoFail();
+      else if (kitNow && kitNow.type === 'qa') {
+        const cur = this._kit();
+        if (cur && cur.type === 'qa' && !cur.finished && !cur.passed && String(cur.sessionId) === String(kitNow.sessionId)) {
+          this.setData({ 'playKit.kit.failureSeq': (cur.failureSeq || 0) + 1 });
+        }
+      }
     };
     if (!game) { fail('玩法未就绪，请退出后重进'); return; }
     // 双击锁:同一次拍照上传在途时再收到 shoot 直接忽略,避免起第二个必被 advanced-game 静默丢掉的请求。

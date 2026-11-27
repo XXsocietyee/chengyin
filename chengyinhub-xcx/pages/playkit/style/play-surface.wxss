@@ -83,8 +83,10 @@
   justify-content: flex-start;
   gap: var(--cy-space-3);
   /* 上边距由 stage 用真实状态栏高算,通过 --pk-top 传进来(CSS 变量能穿组件边界);
-     兜底 120rpx 是「没有 stage 也不至于顶到胶囊上」。左右和底照原型 20/26px。 */
-  padding: var(--pk-col-pad, var(--pk-top, 120rpx) 40rpx calc(env(safe-area-inset-bottom) + 52rpx));   /* ds-ok */
+     兜底 120rpx 是「没有 stage 也不至于顶到胶囊上」。整屏留出底部 200rpx 让位给绝对定位 .g-btn 并可纵滚,小屏不叠压。 */
+  overflow-y: var(--pk-col-overflow, auto);
+  -webkit-overflow-scrolling: touch;
+  padding: var(--pk-col-pad, var(--pk-top, 120rpx) 40rpx calc(env(safe-area-inset-bottom) + 200rpx));   /* ds-ok */
   box-sizing: border-box;
   text-align: var(--pk-col-text, center);
 }

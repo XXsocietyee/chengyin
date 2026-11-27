@@ -61,21 +61,21 @@
            一道题 + 四张大图,两列、没有底、没有卡;字母和文案压在图下沿;选中上浮,对 = 描边绿,错 = 描边红 + 红字落在题下。 -->
       <!-- ②0 证据表(qa.table,2026-11-24 主人批准的原型):规则 + 记录表在上;点行划掉 / 再点恢复,
            右侧圆点选一行,底部「确认选择」提交。判错:那一行与它违反的规则标红,作者的话落在表下。 -->
-      <view class="qa__tb" wx:elif="{{mode === 'pick' && tableOn}}">
+      <view class="qa__tb {{inline ? 'qa__tb--inline' : ''}}" wx:elif="{{mode === 'pick' && tableOn}}">
         <view class="qa__rules" wx:if="{{ruleList.length}}" aria-role="group" aria-label="规则">
           <view wx:for="{{ruleList}}" wx:key="i" class="qa__rule {{item.hot ? 'is-hot' : ''}} {{item.open ? 'is-open' : ''}}"
                 data-i="{{item.i}}" bindtap="onRule"
-                aria-role="button" aria-label="规则 {{item.k}}：{{item.t}}{{item.hot ? '，没对上' : ''}}"
+                aria-role="button" aria-expanded="{{item.open}}" aria-label="规则 {{item.k}}：{{item.t}}{{item.hot ? '，没对上' : ''}}"
                 hover-class="qa__press" hover-stay-time="80">
             <text class="qa__rule-k">{{item.k}}</text>
             <text class="qa__rule-t">{{item.t}}</text>
           </view>
         </view>
-        <scroll-view class="qa__grid" scroll-x scroll-y>
-          <view class="qa__grid-in">
+        <scroll-view class="qa__grid" scroll-x="{{tableCols.length >= 4}}" scroll-y="{{!inline}}">
+          <view class="qa__grid-in" style="--qa-cols:{{tableCols.length}}">
             <view class="qa__tr qa__tr--h" aria-hidden="true">
               <view class="qa__td" wx:for="{{tableCols}}" wx:key="*this">{{item}}</view>
-              <view class="qa__pick-h"></view>
+              <view class="qa__pick-h">选</view>
             </view>
             <view wx:for="{{tableRows}}" wx:key="id" class="qa__tr {{item.struck ? 'is-struck' : ''}} {{item.state}}">
               <view class="qa__cells" data-i="{{index}}" bindtap="onStrike"
@@ -92,8 +92,11 @@
             </view>
           </view>
         </scroll-view>
-        <view wx:if="{{anyStruck}}" class="qa__restore" bindtap="onRestoreAll"
-              aria-role="button" aria-label="全部恢复" hover-class="qa__press" hover-stay-time="80">全部恢复</view>
+        <view class="qa__tb-bar" wx:if="{{!passed && !finished}}">
+          <text class="qa__tb-cue" aria-hidden="true">点行划掉 · 点右侧圆圈选中</text>
+          <view wx:if="{{anyStruck}}" class="qa__restore" bindtap="onRestoreAll"
+                aria-role="button" aria-label="全部恢复" hover-class="qa__press" hover-stay-time="80">全部恢复</view>
+        </view>
       </view>
 
       <view class="qa__opts qa__opts--pic" wx:elif="{{mode === 'pick' && picGrid}}">
@@ -154,9 +157,9 @@
   </view>
 
   <!-- 故事流内嵌且已答对:下面就是「继续故事」,这里不再叠一枚同义的「继续」(实走复核:两枚白按钮上下摞着) -->
-  <view wx:if="{{!(inline && (passed || finished || ctaLabel === '继续'))}}" class="g-btn {{ctaDisabled ? 'g-btn--disabled' : ''}} {{burning ? 'qa__cta--burn' : ''}}"
+  <view wx:if="{{!(inline && (passed || finished || ctaLabel === '继续'))}}" class="g-btn {{ctaDisabled || submitted ? 'g-btn--disabled' : ''}} {{burning ? 'qa__cta--burn' : ''}}"
         bindtap="onCta"
-        aria-role="button" aria-label="{{ctaLabel}}" hover-class="g-btn--press" hover-stay-time="80">
+        aria-role="button" aria-label="{{ctaLabel}}" aria-disabled="{{ctaDisabled || submitted}}" hover-class="g-btn--press" hover-stay-time="80">
     {{ctaLabel}}
   </view>
 </cy-play-stage>

@@ -185,9 +185,13 @@ Component({
       if (seen == null || now <= seen) return;
       // 次数涨了还没过 = 刚答错(任何题型):台面淡红闪一下(2026-11-24 业主);故事流 / 整屏都走这条回流,不只 settle()
       if (!this.data.passed && typeof this.selectComponent === 'function') { const stage = this.selectComponent('#cy-play-stage'); if (stage && stage.nudge) stage.nudge(); }
-      if (this.data.mode !== 'type' || this.data.passed || this.data.finished) return;
+      if (this.data.passed || this.data.finished) return;
+      if (this.data.mode !== 'type') {
+        if (this.data.submitted) this.setData({ submitted: false });
+        return;
+      }
       const kept = String(this.data.typed || this._submittedText || '');
-      this.setData({ typed: kept, typeWrong: true, selectAll: kept.length, ctaDisabled: !kept.trim(), fbHead: HEAD_NO, feedback: this.data.feedbackText || (this.data.authoredOutcome === 'FAIL' ? '' : RETRY_TEXT) });
+      this.setData({ submitted: false, typed: kept, typeWrong: true, selectAll: kept.length, ctaDisabled: !kept.trim(), fbHead: HEAD_NO, feedback: this.data.feedbackText || (this.data.authoredOutcome === 'FAIL' ? '' : RETRY_TEXT) });
       if (this.data.poolOn) this._paintQaPool();   // 字符池:已放的字不清,按钮按「填满没有」重新亮
     },
     /* 证据表:选项状态 / 题面 / 判错规则一变就重画表(派生到 tableRows / ruleList,不写回被监听的键) */
@@ -201,21 +205,38 @@ Component({
       this.setData({ feedback: '' });
     },
     failureSeq: function (value) {
-      const singlePick = this.data.mode === 'pick' && !this.data.multi;
-      if (!value || this.data.finished || this.data.passed || (this.data.judge !== false && !singlePick)) return;
-      // F04 网络失败:选中状态保留,主按钮变成「重试」
-      const any = this.data.optionList.some(o => o.state === 'is-on');
-      this.setData({ submitted: false, ctaDisabled: !any, ctaLabel: any ? '重试' : this.data.ctaLabel });
+      if (!value || this.data.finished || this.data.passed) return;
+      this._choosingMedia = false;
+      this._multiDismiss = false;
+      if (this.data.mode === 'pick') {
+        // F04 网络失败:选中状态保留,主按钮变成「重试」
+        const any = this.data.optionList.some(o => o.state === 'is-on');
+        this.setData({ submitted: false, ctaDisabled: !any, ctaLabel: any ? '重试' : this.data.ctaLabel });
+        return;
+      }
+      if (this.data.mode === 'shot') {
+        this.setData({ submitted: false, ctaDisabled: false, ctaLabel: '拍一张' });
+        return;
+      }
+      if (this.data.poolOn) {
+        this.setData({ submitted: false, ctaLabel: '重试' });
+        this._paintQaPool();
+        return;
+      }
+      const hasText = !!String(this.data.typed || '').trim();
+      this.setData({ submitted: false, ctaDisabled: !hasText, ctaLabel: hasText ? '重试' : '提交' });
     },
     'show, options, mode, multi, passed, finished, judge, lastOptionId, lastOptionIds, feedbackText, feedbackImages, sessionId, nodeId': function (show, options, mode, multi, passed, finished) {
       if (this._qaDisposed) return;
       this._qaEpoch = (this._qaEpoch || 0) + 1;
       this._pendingEvidence = false;
+      this._multiDismiss = false;
+      this._choosingMedia = false;
       const identity = JSON.stringify([String(this.data.sessionId || ''), String(this.data.nodeId || '')]);
       const fresh = this._qaIdentity !== identity || this._qaVisible !== !!show;
       this._qaIdentity = identity;
       if (fresh) this._submittedText = '';
-      if (fresh) { this._strikeKey = strikeKey(this.data.sessionId, this.data.nodeId); this._strikes = loadStrikes(this._strikeKey); this._ruleOpen = -1; this._ruleHot = 0; }
+      if (fresh) { this._strikeKey = strikeKey(this.data.sessionId, this.data.nodeId); this._strikes = loadStrikes(this._strikeKey); this._ruleOpen = -1; this._ruleClosed = -1; this._ruleHot = 0; this._lastHotRule = 0; }
       this._qaVisible = !!show;
       if (!show) return;
       const chosen = this.data.lastOptionIds && this.data.lastOptionIds.length
@@ -300,8 +321,13 @@ Component({
           line: r.cells.map((c, at) => spec.columns[at] + '：' + (c || '空')).join('，') };
       });
       const hot = done && this.data.passed ? 0 : (Number(this.data.lastRule) || this._ruleHot || 0);
+      if (hot !== this._lastHotRule) {
+        this._lastHotRule = hot;
+        this._ruleClosed = -1;
+      }
       const rules = (Array.isArray(this.data.rules) ? this.data.rules : []).map((r, i) => ({
-        i, k: String((r && r.k) || ''), t: String((r && r.t) || ''), hot: hot === i + 1, open: this._ruleOpen === i,
+        i, k: String((r && r.k) || ''), t: String((r && r.t) || ''), hot: hot === i + 1,
+        open: this._ruleOpen === i || (hot === i + 1 && this._ruleClosed !== i),
       }));
       this.setData({ tableOn: true, tableCols: spec.columns, tableRows: rows, ruleList: rules, anyStruck: !done && rows.some(r => r.struck) });
     },
@@ -326,10 +352,12 @@ Component({
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'light' });
       this._paintTable();
     },
-    /** 点规则:展开 / 收起整句(窄屏上规则默认一行)。 */
+    /** 点规则:展开 / 收起整句(窄屏上规则默认一行;违规标红规则自动展开,再点仍可收起)。 */
     onRule(e) {
       const i = Number(e.currentTarget.dataset.i);
-      this._ruleOpen = this._ruleOpen === i ? -1 : i;
+      const cur = (this.data.ruleList[i] || {}).open;
+      if (cur) { this._ruleOpen = -1; this._ruleClosed = i; }
+      else { this._ruleOpen = i; this._ruleClosed = -1; }
       this._paintTable();
     },
     _qaContext() {
@@ -460,10 +488,15 @@ Component({
          不是「不许碰选项」—— 挡在前面的话,第一次点选项就被自己锁死了。 */
       if (this.data.mode === 'pick' && this.data.multi) {
         motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'light' });
-        const optionList = this.data.optionList.map((o, at) => (
-          at === i ? Object.assign({}, o, { state: o.state === 'is-on' ? '' : 'is-on' }) : o));
+        const clearing = !!this._multiDismiss;
+        this._multiDismiss = false;
+        const optionList = this.data.optionList.map((o, at) => {
+          if (at === i) return Object.assign({}, o, { state: o.state === 'is-on' ? '' : 'is-on' });
+          return clearing && o.state === 'is-wrong' ? Object.assign({}, o, { state: '' }) : o;
+        });
         const any = optionList.some((o) => o.state === 'is-on');
-        this.setData({ optionList: optionList, ctaDisabled: !any });
+        if (clearing) this.setData({ optionList, feedback: '', ctaLabel: '提交', ctaDisabled: !any });
+        else this.setData({ optionList, ctaDisabled: !any });
         return;
       }
     },
@@ -488,6 +521,7 @@ Component({
       if (this.data.finished || this.data.passed || this.data.submitted) return;
       const ids = this.data.optionList.filter((o) => o.state === 'is-on').map((o) => o.id);
       if (!ids.length) return;
+      this.setData({ submitted: true, ctaDisabled: true });
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       this.triggerEvent('submit', { mode: 'pick', optionIds: ids });
     },
@@ -496,23 +530,38 @@ Component({
       if (this.data.ctaDisabled) return;
       if (this._pendingEvidence || this.data.passed) { this.triggerEvent('continue'); return; }
       if (this.data.finished || this.data.submitted) return;
+      // 多选答错后点「重新选择」只清除错误态并回到待选,绝不重复提交错答案
+      if (this._multiDismiss) {
+        this._multiDismiss = false;
+        this.setData({
+          optionList: this.data.optionList.map((o) => (o.state === 'is-wrong' ? Object.assign({}, o, { state: '' }) : o)),
+          feedback: '',
+          ctaLabel: '提交',
+          ctaDisabled: true,
+        });
+        return;
+      }
       if (this.data.mode === 'shot') {
+        if (this._choosingMedia) return;
         const context = this._qaContext();
         if (!this._isQaContextCurrent(context)) return;
+        this._choosingMedia = true;
         /* 拍照:交上来的是**图片地址**,不是「我拍过了」。判不了照片内容,
            但得留痕 —— 商家事后想看玩家到底交了什么,这是唯一的证据。 */
         wx.chooseMedia({
           count: 1, mediaType: ['image'], sourceType: ['camera', 'album'], sizeType: ['compressed'],
           success: (res) => {
+            this._choosingMedia = false;
             if (!this._isQaContextCurrent(context)) return;
             const file = (res && res.tempFiles && res.tempFiles[0]) || {};
             const path = file.tempFilePath || '';
             if (!path) { cyToast('没拿到照片'); return; }
+            this.setData({ submitted: true, ctaLabel: '上传中…' });
             // 带上真实 size:页面交给共享上传入口按生产 10MB 预检(超限不发网络、给可操作提示)。
             // 拿不到 size 时按未知处理(size undefined),仍由服务端拦截,不伪造。
             this.triggerEvent('shoot', { tempFilePath: path, size: file.size });
           },
-          fail: (err) => { if (this._isQaContextCurrent(context)) mediaDenied.guideIfDenied(err); },
+          fail: (err) => { this._choosingMedia = false; if (this._isQaContextCurrent(context)) mediaDenied.guideIfDenied(err); },
         });
         return;
       }
@@ -532,12 +581,14 @@ Component({
         const input = spec ? letterPool.joined(this._qaPool || letterPool.empty(), spec.slots) : '';
         if (!input) return;
         this._submittedText = input;
+        this.setData({ submitted: true, ctaDisabled: true });
         motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
         this.triggerEvent('submit', { mode: 'type', input });
         return;
       }
       if (!String(this.data.typed || '').trim()) return;
       this._submittedText = this.data.typed;
+      this.setData({ submitted: true, ctaDisabled: true });
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       this.triggerEvent('submit', { mode: 'type', input: this.data.typed });
     },
@@ -572,11 +623,12 @@ Component({
         if (stage) stage.win(d.feedback || '');
         return;
       }
-      // 证据表:判错时服务端给的规则序号先标红(故事流里由 lastRule 属性回流,这里接 settle 调用方带来的)
-      if (d.lastRule != null) this._ruleHot = Number(d.lastRule) || 0;
+      // 证据表:判错时服务端给的规则序号先标红并自动展开(故事流里由 lastRule 属性回流,这里接 settle 调用方带来的)
+      if (d.lastRule != null) { this._ruleHot = Number(d.lastRule) || 0; this._ruleClosed = -1; }
       const exhausted = stage ? stage.miss() : true;
       if (stage && stage.nudge) stage.nudge();   // 答错台面淡红闪一下(2026-11-24 起不再抖)
       const pick = this.data.mode === 'pick';
+      this._multiDismiss = !!(pick && multi && !exhausted);
       /* 答错要不要亮出正确答案由商家决定 —— 亮出来这题就没有第二次了。
          亮的方式是把那一条标成对的,不是另起一行写「正确答案:X」:
          那行字会盖过刚才的反馈,人先看到的是判决,不是解释。 */
@@ -603,8 +655,8 @@ Component({
           // 图片选项点选时变淡的其余几张在判错后回到原样,还能再选(原型答错 2.4s 后复位,这里随回执即复位)
           return o.state === 'is-dim' ? Object.assign({}, o, { state: '' }) : o;
         }) : this.data.optionList,
-        ctaLabel: pick ? (multi ? '知道了' : '确认选择') : (exhausted ? this.data.ctaLabel : '再试一次'),
-        // 单选答错后要先另选一条才能再确认;打字题保留了输入,可以直接改了再交
+        ctaLabel: pick ? (multi ? (exhausted ? '提交' : '重新选择') : '确认选择') : (exhausted ? this.data.ctaLabel : '再试一次'),
+        // 单选答错后要先另选一条才能再确认;多选未用尽点「重新选择」清除错误态不重提;打字题保留了输入,可以直接改了再交
         ctaDisabled: exhausted || (pick && !multi) || (this.data.mode === 'type' && !kept.trim()),
       });
       if (this.data.poolOn && !exhausted) this._paintQaPool();   // 字符池:已放的字保留,填满就能直接再交

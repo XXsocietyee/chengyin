@@ -278,10 +278,11 @@ Component({
       this._flashT = setTimeout(() => { this._flashT = null; this.setData({ flash: false }); }, 60);
     },
 
-    /** 判定通过后整屏点一下继续(2026-11-24 业主:除了答题确认不留按钮)。向外冒泡跨组件,宿主 cy-playkit 接住当「收起」。 */
+    /** 判定结束(通过 / 失败 / 超时)或玩法自判完成(doneTap)后整屏点一下继续 / 退出。向外冒泡跨组件,宿主 cy-playkit 接住收起。 */
     onStageTap() {
-      if (this.data.verdict !== 'win' && !this.data.doneTap) return;
-      this.triggerEvent('verdicttap', {}, { bubbles: true, composed: true });
+      const verdict = this.data.verdict;
+      if (verdict !== 'win' && verdict !== 'fail' && !this.data.doneTap) return;
+      this.triggerEvent('verdicttap', { kind: verdict || 'done', timedOut: !!this.data.timedOut }, { bubbles: true, composed: true });
     },
 
     onBack() { this._stopAll(); this._stopServerDeadline(); this.triggerEvent('back'); },

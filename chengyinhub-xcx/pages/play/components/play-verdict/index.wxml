@@ -25,6 +25,7 @@
     </view>
     <!-- 角色信任:这一站改了谁的信任,结果屏也留着「X会记住这件事」(与故事流 .chfull__remember 同一句) -->
     <view class="pv__remember" wx:if="{{remember}}">{{remember}}</view>
-    <!-- 不留「继续」钮(2026-11-24 业主):独立弹出时整屏点一下回故事(onTap) -->
+    <!-- 不留「继续」钮(2026-11-24 业主):独立弹出与台面内均整屏点一下继续,只留极弱提示 -->
   </view>
+  <view class="pv__cue" aria-hidden="true">{{ctaLabel ? ('轻点' + ctaLabel) : '轻点任意处继续'}}</view>
 </view>

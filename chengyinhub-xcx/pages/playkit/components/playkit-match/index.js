@@ -64,6 +64,7 @@ Component({
     attempts: { type: Number, value: 0 },
     passed: { type: Boolean, value: false },
     lastCorrect: { type: Boolean, value: false },
+    failureSeq: { type: Number, value: 0 },
   },
   data: {
     // ⚠️ 派生行换键名(leftRows/rightRows),别写回被监听的 left/right —— 那会自触发死循环
@@ -74,14 +75,20 @@ Component({
     total: 0,
     verdict: '',          // '' 未判 / 'ok' 通过 / 'no' 判错
     lines: [],
+    submitting: false,
   },
   observers: {
+    failureSeq: function (value) {
+      if (!value || this.data.passed || !this.data.submitting) return;
+      this.setData({ submitting: false });
+    },
     'show, left, right': function (show, left, right) {
-      if (!show) { this._configSignature = ''; return; }
+      if (!show) { this._configSignature = ''; if (this.data.submitting) this.setData({ submitting: false }); return; }
       // 服务端回流会把同值的题面数组再赋一遍:题面没变就不重置台面(与停表 / typein 的签名同口径)
       const signature = JSON.stringify([left, right]);
       if (signature === this._configSignature) return;
       this._configSignature = signature;
+      if (this.data.submitting) this.setData({ submitting: false });
       this._paintPairs([], '', left, right);
       const stage = this.selectComponent('#cy-play-stage');
       if (stage) stage.begin();
@@ -92,10 +99,13 @@ Component({
       const seen = this._seenAttempts;
       this._seenAttempts = now;
       if (!(attempts > 0)) return;
-      if (passed && this.data.verdict !== 'ok') { this.setData({ verdict: 'ok' }); return; }
+      if (passed) {
+        if (this.data.verdict !== 'ok' || this.data.submitting) this.setData({ verdict: 'ok', submitting: false });
+        return;
+      }
       if (seen != null && now <= seen) return;
       const verdict = passed ? 'ok' : 'no';
-      if (verdict !== this.data.verdict) this.setData({ verdict });
+      if (verdict !== this.data.verdict || this.data.submitting) this.setData({ verdict, submitting: false });
       // 判错整块抖一下(原型 .phone.shake);不逐条标红 —— 服务端只给整体对错
       if (!passed) { const stage = this.selectComponent('#cy-play-stage'); if (stage && stage.nudge) stage.nudge(); }
     },
@@ -177,8 +187,9 @@ Component({
     },
 
     onSubmit() {
-      // 已通过就不再交(实走 A15:再交只会撞「这一局连线已经结束了」)
-      if (!canSubmit(this.data.pairedCount, this.data.total) || this.data.verdict === 'ok' || this.data.passed) return;
+      // 已通过 / 在途提交不再交:防止连点烧次数或撞「已结束」
+      if (!canSubmit(this.data.pairedCount, this.data.total) || this.data.verdict === 'ok' || this.data.passed || this.data.submitting) return;
+      this.setData({ submitting: true });
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       // ★ 只报玩家连的那些,不报对错 —— 对错在服务端
       this.triggerEvent('submit', { pairs: (this._pairs || []).map((p) => [p[0], p[1]]) });

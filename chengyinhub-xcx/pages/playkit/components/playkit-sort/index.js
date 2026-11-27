@@ -51,6 +51,7 @@ Component({
     passed: { type: Boolean, value: false },
     finished: { type: Boolean, value: false },
     lastCorrect: { type: Boolean, value: false },
+    failureSeq: { type: Number, value: 0 },
   },
   data: {
     // ⚠️ 派生行换键名(rows),别写回被监听的 items —— 那会自触发死循环(见 playkit-observer-selfloop)
@@ -59,10 +60,15 @@ Component({
     dragOffset: 0,      // 正在拖那一行相对它当前格子的偏移(px),跟手
     picked: -1,         // 点选对调:先点的那一行
     verdict: '',        // '' 未判 / 'ok' 通过 / 'no' 判错
+    submitting: false,
   },
   observers: {
+    failureSeq: function (value) {
+      if (!value || this.data.passed || this.data.finished || !this.data.submitting) return;
+      this.setData({ submitting: false });
+    },
     'show, items': function (show, items) {
-      if (!show) { this._configSignature = ''; return; }
+      if (!show) { this._configSignature = ''; if (this.data.submitting) this.setData({ submitting: false }); return; }
       // 服务端回流会把同值的题面数组再赋一遍:题面没变就不重置台面(与停表 / typein 的签名同口径)
       const signature = JSON.stringify(items);
       if (signature === this._configSignature) return;
@@ -71,7 +77,7 @@ Component({
       const serverOrder = (this.data.lastOrder || []).length ? this.data.lastOrder : null;
       const kept = this.data.passed && (serverOrder || passedOrders[signature]);
       const rows = kept ? kept.map((id) => paint(items).find((r) => r.id === id)).filter(Boolean) : paint(items);
-      this.setData({ rows, dragging: -1, dragOffset: 0, picked: -1, verdict: kept ? 'ok' : '' });
+      this.setData({ rows, dragging: -1, dragOffset: 0, picked: -1, verdict: kept ? 'ok' : '', submitting: false });
       const stage = this.selectComponent('#cy-play-stage');
       if (stage) stage.begin();
     },
@@ -80,7 +86,7 @@ Component({
       if (!(attempts > 0)) return;
       const verdict = passed ? 'ok' : 'no';
       if (passed && this._configSignature && this._submittedOrder) passedOrders[this._configSignature] = this._submittedOrder;
-      if (verdict !== this.data.verdict) this.setData({ verdict });
+      if (verdict !== this.data.verdict || this.data.submitting) this.setData({ verdict, submitting: false });
       // 判错整列抖一下(原型 .phone.shake);不逐行标红 —— 服务端只给整体对错
       if (!passed) { const stage = this.selectComponent('#cy-play-stage'); if (stage && stage.nudge) stage.nudge(); }
     },
@@ -149,8 +155,9 @@ Component({
     },
 
     onSubmit() {
-      // 已通过就不再交:再交一次服务端只会回「这一局排序已经结束了」并弹出待确认面板(实走 A15)
-      if (!canSubmit(this.data.rows) || this.data.verdict === 'ok' || this.data.passed) return;
+      // 已通过 / 已结束 / 在途提交均不再交:防止连点烧次数或撞「已结束」
+      if (!canSubmit(this.data.rows) || this.data.verdict === 'ok' || this.data.passed || this.data.finished || this.data.submitting) return;
+      this.setData({ submitting: true });
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       // ★ 只报顺序,不报对错 —— 对错在服务端
       this._submittedOrder = this.data.rows.map((r) => r.id);

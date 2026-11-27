@@ -20,6 +20,18 @@ const { tidyText } = require('../../utils/keep-numerals.js');
 const { PHOTO_VERIFIED_NOTE, PHOTO_FALLBACK_VERDICT, rewardNote } = require('../../utils/sensor-contract.js');
 const cyModal = require('../../../../utils/modal.js');
 
+/** 取景层顶边避开微信胶囊(与 playkit-objectcard 同一条算式):优先胶囊底 + 8px,次选状态栏 + 52px,兜底 96px。 */
+function capsuleSafeTop() {
+  let topSafe = 96;
+  try {
+    const sys = typeof wx !== 'undefined' && (wx.getWindowInfo ? wx.getWindowInfo() : (wx.getSystemInfoSync && wx.getSystemInfoSync()));
+    const menu = typeof wx !== 'undefined' && wx.getMenuButtonBoundingClientRect && wx.getMenuButtonBoundingClientRect();
+    if (menu && menu.bottom > 0) topSafe = Math.round(menu.bottom + 8);
+    else if (sys && sys.statusBarHeight > 0) topSafe = Math.round(sys.statusBarHeight + 52);
+  } catch (e) { /* 拿不到就用默认值 96 */ }
+  return topSafe;
+}
+
 Component({
   behaviors: [reducedMotionBehavior, replayMotionBehavior],
   properties: {
@@ -76,6 +88,14 @@ Component({
     pendingPath: '',
     // 只记录站上相机被拒后才亮出「不拍照，继续」
     skipOffer: false,
+    // 取景层顶部安全位置(px),避让状态栏与微信胶囊
+    viewfinderTop: 96,
+  },
+  lifetimes: {
+    attached() {
+      const top = capsuleSafeTop();
+      if (top !== this.data.viewfinderTop) this.setData({ viewfinderTop: top });
+    },
   },
   observers: {
     'photoFailSeq, photoFailKind': function (seq, kind) {
@@ -141,6 +161,7 @@ Component({
     },
   },
   methods: {
+    _capsuleSafeTop: capsuleSafeTop,
     /**
      * 拍/选一张 → 直接抛给页面走「上传再提交」两步;判定全在服务端。
      *
