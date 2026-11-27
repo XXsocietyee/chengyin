@@ -374,6 +374,8 @@
             <if test="merchant.address != null">address = #{merchant.address},</if>
             <if test="merchant.businessTime != null">business_time = #{merchant.businessTime},</if>
             <if test="merchant.businessLicense != null">business_license = #{merchant.businessLicense},</if>
+            <if test="merchant.coverImage != null">cover_image = #{merchant.coverImage},</if>
+            <if test="merchant.chargeType != null">charge_type = #{merchant.chargeType},</if>
             <if test="merchant.locationLat != null">location_lat = #{merchant.locationLat},</if>
             <if test="merchant.locationLng != null">location_lng = #{merchant.locationLng},</if>
             <if test="merchant.locationVerified != null">location_verified = #{merchant.locationVerified},</if>

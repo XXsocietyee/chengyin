@@ -5,7 +5,7 @@
   <!-- ===== 头部 ===== -->
   <cy-nav-bar title="{{mode==='status' ? '审核状态' : (step===5 ? '提交成功' : '')}}" custom-back bind:back="onHeaderBack" />
   <view class="merchant-apply-nav-spacer" style="height: {{statusBarHeight + navBarHeight}}px;"></view>
-  <view class="wizard-head" wx:if="{{bootstrapState === 'ready' && mode==='form' && step<5 && !introMode}}">
+  <view class="wizard-head" wx:if="{{bootstrapState === 'ready' && mode==='form' && step<5 && !introMode && partnerTier !== 'LIGHT'}}">
     <view class="wizard-head__meta"><text>商家入驻</text><text>{{step}} / 4</text></view>
     <view class="wizard-progress {{morphing ? 'prog--ghost' : ''}}"
       aria-role="progressbar" aria-valuemin="1" aria-valuemax="4" aria-valuenow="{{step}}"
@@ -18,6 +18,13 @@
       <view class="wizard-head__legend" wx:if="{{step < 4}}">标 <text class="req" aria-hidden="true">*</text> 的是必填</view>
     </view>
   </view>
+  <view class="wizard-head" wx:if="{{bootstrapState === 'ready' && mode==='form' && step<5 && !introMode && partnerTier === 'LIGHT'}}">
+    <view class="wizard-head__meta"><text>轻量合作入驻</text><text>4 项免执照</text></view>
+    <view class="wizard-head__copy cy-rise-in">
+      <view class="wizard-head__title">4 项信息快速入驻</view>
+      <view class="wizard-head__legend">零分成引流/权益合作免营业执照与实名</view>
+    </view>
+  </view>
 
   <!-- ===== 开场屏(四步之前,Figma M0) ===== -->
   <view class="intro {{morphing ? 'intro--out' : 'cy-rise-in'}}"
@@ -26,6 +33,7 @@
     <view class="intro__title">把你的店
 放进玩家的路线里</view>
     <view class="intro-cta"><cy-btn variant="primary" accessibilityLabel="开始入驻" bindtap="startForm">开始入驻</cy-btn></view>
+    <view class="intro-cta intro-cta--light"><cy-btn variant="secondary" accessibilityLabel="轻量合作入驻，4 项免执照" bindtap="startLightForm">轻量合作入驻（4 项免执照）</cy-btn></view>
     
     <view class="intro__fine intro__claim" bindtap="openClaim" aria-role="button" aria-label="认领已有门店" hover-class="cy-pressed" hover-stay-time="80">门店已在城瘾上线？认领已有门店</view>
   </view>
@@ -108,8 +116,54 @@
       </cy-card>
     </block>
 
+    <!-- ===== 轻量合作档：4 字段（店名 / 地图位置 / 手机号 / 门头照），免执照与实名 ===== -->
+    <view class="step cy-rise-in" wx:if="{{mode==='form' && step<5 && !introMode && partnerTier === 'LIGHT'}}">
+      <cy-card class="apply-card wizard-card">
+        <view class="frow frow--field" id="apply-field-name">
+          <text class="fl">店铺名称<text class="req" aria-hidden="true">*</text></text>
+          <input class="fi" data-field="name" value="{{name}}" bindinput="onInput" placeholder="门店招牌名称" placeholder-class="ph"
+                 aria-required="true" aria-label="店铺名称，必填" />
+          <cy-inline-error class="field-err" wx:if="{{fieldErrors.name}}" kind="field" title="{{fieldErrors.name}}" />
+        </view>
+        <view class="frow frow--field" id="apply-field-address" bindtap="chooseLocation" aria-role="button" aria-required="true" aria-label="门店位置，必填，点击地图选点" hover-class="cy-pressed" hover-stay-time="80">
+          <text class="fl">门店位置<text class="req" aria-hidden="true">*</text></text>
+          <view class="field-control"><text class="fi {{address ? '' : 'ph'}}">{{address || '点击地图选点'}}</text><cy-icon name="arrow-right" size="28" /></view>
+          <cy-inline-error class="field-err" wx:if="{{fieldErrors.address}}" kind="field" title="{{fieldErrors.address}}" />
+        </view>
+        <view class="frow frow--field" id="apply-field-phone">
+          <text class="fl">联系电话<text class="req" aria-hidden="true">*</text></text>
+          <input class="fi" data-field="phone" value="{{phone}}" bindinput="onInput" type="number" placeholder="11位手机号" placeholder-class="ph"
+                 aria-required="true" aria-label="联系电话，必填" />
+          <cy-inline-error class="field-err" wx:if="{{fieldErrors.phone}}" kind="field" title="{{fieldErrors.phone}}" />
+        </view>
+        <view class="frow frow--field last" id="apply-field-storefrontPhoto">
+          <view class="up-row" aria-role="group" aria-required="true" aria-label="门头照片，必填">
+            <view class="up-left">
+              <text class="fl">门头照片<text class="req" aria-hidden="true">*</text></text>
+            </view>
+            <view class="up-box" wx:if="{{!storefrontPhoto}}" bindtap="uploadStorefrontPhoto" aria-role="button" aria-label="上传门头照片，必填" hover-class="cy-pressed" hover-stay-time="80">
+              <cy-icon class="up-plus" name="plus" size="40" />
+            </view>
+            <view class="up-box has-img" wx:else>
+              <image lazy-load="true" src="{{storefrontPhoto}}" mode="aspectFill" />
+              <view class="up-del" catchtap="removeStorefrontPhoto" aria-role="button" aria-label="删除门头照片" hover-class="cy-pressed" hover-stay-time="80">
+                <view class="up-del__glyph"><cy-icon name="close-sm" size="28" /></view>
+              </view>
+            </view>
+          </view>
+          <cy-inline-error class="field-err" wx:if="{{fieldErrors.storefrontPhoto}}" kind="field" title="{{fieldErrors.storefrontPhoto}}" />
+        </view>
+      </cy-card>
+      <view class="foot">仅限零分成引流/权益合作门店；如需开通直连收款结算，后续补传营业执照与实名即可</view>
+      <view class="light-switch" bindtap="switchToFullTier" aria-role="button" aria-label="切换标准入驻" hover-class="cy-pressed" hover-stay-time="80">需要直连收款结算？切换标准入驻</view>
+      <cy-inline-error class="submit-error" wx:if="{{submitError && partnerTier === 'LIGHT'}}"
+                       kind="{{submitErrorKind || 'data'}}"
+                       title="申请暂未提交" sub="{{submitError}}"
+                       action="重新提交" bind:action="retrySubmit" />
+    </view>
+
     <!-- ===== 步骤1:基础信息 ===== -->
-    <view class="step cy-rise-in" wx:if="{{mode==='form' && step===1 && !introMode}}">
+    <view class="step cy-rise-in" wx:if="{{mode==='form' && step===1 && !introMode && partnerTier !== 'LIGHT'}}">
       <cy-card class="apply-card wizard-card">
         <view class="frow frow--field" id="apply-field-name">
           <text class="fl">店铺名称<text class="req" aria-hidden="true">*</text></text>
@@ -135,7 +189,7 @@
     </view>
 
     <!-- ===== 步骤2:经营信息 ===== -->
-    <view class="step cy-rise-in" wx:if="{{mode==='form' && step===2 && !introMode}}">
+    <view class="step cy-rise-in" wx:if="{{mode==='form' && step===2 && !introMode && partnerTier !== 'LIGHT'}}">
       <cy-card class="apply-card wizard-card">
         <view class="frow frow--field" id="apply-field-address" bindtap="chooseLocation" aria-role="button" aria-required="true" aria-label="店铺地址，必填，点击选择位置" hover-class="cy-pressed" hover-stay-time="80">
           <text class="fl">店铺地址<text class="req" aria-hidden="true">*</text></text>
@@ -159,7 +213,7 @@
     </view>
 
     <!-- ===== 步骤3:资质信息 ===== -->
-    <view class="step cy-rise-in" wx:if="{{mode==='form' && step===3 && !introMode}}">
+    <view class="step cy-rise-in" wx:if="{{mode==='form' && step===3 && !introMode && partnerTier !== 'LIGHT'}}">
       <cy-card class="apply-card wizard-card">
         <view class="up-row" id="apply-field-businessLicense" aria-role="group" aria-required="true" aria-label="营业执照，必填">
           <view class="up-left">
@@ -194,7 +248,7 @@
     </view>
 
     <!-- ===== 步骤4:预览确认 ===== -->
-    <view class="step cy-rise-in" wx:if="{{mode==='form' && step===4 && !introMode}}">
+    <view class="step cy-rise-in" wx:if="{{mode==='form' && step===4 && !introMode && partnerTier !== 'LIGHT'}}">
       <cy-card class="apply-card wizard-card">
         <view class="preview-kv"><text class="pk">店铺名称</text><text class="pv">{{name || '—'}}</text></view>
         <view class="preview-kv"><text class="pk">行业类型</text><text class="pv">{{industryNames || '—'}}</text></view>
@@ -293,8 +347,8 @@
   <view class="bottom wizard-actions" wx:if="{{bootstrapState === 'ready' && mode==='form' && step<5 && !introMode}}">
     <cy-btn variant="primary" class="wizard-primary" disabled="{{!canNext}}" loading="{{submitting}}"
             bind:disabledtap="onNextDisabledTap"
-            accessibilityLabel="{{submitting ? '正在提交商家入驻申请' : (step===4 ? '提交商家入驻申请' : '继续填写商家入驻申请')}}"
-            style="width:100%" bindtap="onNext">{{step===4 ? (submitting ? '提交中…' : '提交申请') : '继续'}}</cy-btn>
+            accessibilityLabel="{{submitting ? '正在提交商家入驻申请' : (partnerTier === 'LIGHT' ? '提交商家入驻申请' : (step===4 ? '提交商家入驻申请' : '继续填写商家入驻申请'))}}"
+            style="width:100%" bindtap="onNext">{{partnerTier === 'LIGHT' ? (submitting ? '提交中…' : '提交申请') : (step===4 ? (submitting ? '提交中…' : '提交申请') : '继续')}}</cy-btn>
   </view>
   <view class="bottom" wx:if="{{bootstrapState === 'ready' && mode==='form' && step===5}}">
     <cy-btn class="done-home" variant="primary" bindtap="onHome">{{slotReturn ? '查看招募位置' : '返回首页'}}</cy-btn>

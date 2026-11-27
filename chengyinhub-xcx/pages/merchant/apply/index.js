@@ -83,6 +83,8 @@ Page({
     businessTime: '',     // 营业时间
     description: '',      // 店铺介绍
     businessLicense: '',  // 营业执照(单张)
+    storefrontPhoto: '',  // §4.3 轻量合作档门头照片(单张，零分成免执照免实名)
+    partnerTier: 'FULL',  // FULL=标准入驻(4步) | LIGHT=轻量合作档(4字段)
     derivatives: [],      // 品牌形象图(多张)
     // RUN-52 发布者实名(第 4 步)。registered 只有真/假:接口不下发姓名与证件号的值。
     identityRegistered: false,
@@ -133,6 +135,9 @@ Page({
     // P0-3:从招商位置页来入驻的,带着主题 / 位置;提交后、通过后回到那个位置
     var topicId = positiveInt(options && options.topicId), chapterId = positiveInt(options && options.chapterId);
     this._recruitSlot = topicId ? { topicId: topicId, chapterId: chapterId } : null;
+    if (options && String(options.tier || options.mode || '').toLowerCase() === 'light') {
+      this.setData({ partnerTier: 'LIGHT', introMode: false });
+    }
     this._formDefaults = { hoursDraft: JSON.parse(JSON.stringify(this.data.hoursDraft)) };
     this.startBootstrap();
   },
@@ -166,10 +171,10 @@ Page({
         realName: '', idCard: '', identityConsented: false, identityRegistered: false,
         industryIds: [], industryNames: '', fieldErrors: {}, hoursErrors: { days: '', time: '' },
         hoursDraft: defaults.hoursDraft || this.data.hoursDraft,
-        mode: 'form', introMode: true, step: 1,
+        mode: 'form', introMode: true, step: 1, partnerTier: 'FULL',
         name: '', phone: '', address: '',
         locationLat: null, locationLng: null, businessTime: '', description: '',
-        businessLicense: '', derivatives: [], canNext: false,
+        businessLicense: '', storefrontPhoto: '', derivatives: [], canNext: false,
         submitting: false, submitError: '', submitErrorKind: '',
         submissionReceipt: null, apply: null, ownedClubs: [], hasOwnedClubs: false
       });
@@ -292,6 +297,7 @@ Page({
             businessTime: keepDraft ? that.data.businessTime : apply.businessTime,
             description: keepDraft ? that.data.description : apply.description,
             businessLicense: keepDraft ? that.data.businessLicense : imageUrl(source.businessLicense),
+            storefrontPhoto: keepDraft ? that.data.storefrontPhoto : (imageUrl(source.coverImage) || imageList(source.derivatives)[0] || ''),
             derivatives: keepDraft ? that.data.derivatives : imageList(source.derivatives)
           }, that.validate);
         } else if (resolved && resolved.kind === 'none') {
@@ -350,6 +356,7 @@ Page({
   // 开场屏 → 第一步。那颗 CTA 会飞上去变成进度条,见 utils/wizard-morph.js。
   startForm() {
     if (this.data.bootstrapState !== 'ready') return;
+    if (this.data.partnerTier !== 'FULL') this.setData({ partnerTier: 'FULL' });
     if (this.data.reducedMotion) {
       this.setData({ introMode: false });
       this.refreshStep(1);
@@ -363,6 +370,17 @@ Page({
     });
   },
 
+  // §4.3 轻量合作档（零分成引流/权益合作门店）：仅 4 字段，免营业执照与 18 位实名。
+  startLightForm() {
+    if (this.data.bootstrapState !== 'ready') return;
+    this.setData({ partnerTier: 'LIGHT', introMode: false, step: 1, fieldErrors: {} }, this.validate);
+  },
+
+  switchToFullTier() {
+    if (this.data.submitting) return;
+    this.setData({ partnerTier: 'FULL', step: 1, fieldErrors: {} }, this.validate);
+  },
+
   endMorph() { wizardMorph.endIntroMorph(this); },
 
   // C3:认领已有门店(sheet 在 components/merchant-claim-sheet,状态与提交都在组件内)
@@ -371,8 +389,11 @@ Page({
 
   onBack() {
     if (this.data.submitting) return;
-    // 第一步往回退到开场屏,不是直接摔出页面
-    if (!this.data.introMode && this.data.step === 1) { this.setData({ introMode: true }); return; }
+    // 第一步或轻量合作单屏往回退到开场屏,不是直接摔出页面
+    if (!this.data.introMode && (this.data.step === 1 || this.data.partnerTier === 'LIGHT')) {
+      this.setData({ introMode: true, partnerTier: 'FULL' });
+      return;
+    }
     if (this.data.step === 1) { this.exitPage(); return; }
     this.refreshStep(this.data.step - 1);
   },
@@ -384,6 +405,7 @@ Page({
 
   onNext() {
     if (!this.data.canNext) return;
+    if (this.data.partnerTier === 'LIGHT') { this.submit(); return; }
     if (this.data.step < 4) { this.refreshStep(this.data.step + 1); }
     else { this.submit(); }
   },
@@ -397,7 +419,13 @@ Page({
   onNextDisabledTap() {
     const d = this.data;
     const errors = {};
-    if (d.step === 1) {
+    if (d.partnerTier === 'LIGHT') {
+      if (!String(d.name || '').trim()) errors.name = '请填写店铺名称';
+      if (!String(d.address || '').trim() || d.locationLat == null || d.locationLng == null) errors.address = '请在地图选择门店位置';
+      if (!d.phone) errors.phone = '请填写联系电话';
+      else if (!isValidMobile(d.phone)) errors.phone = '请填写11位手机号';
+      if (!d.storefrontPhoto) errors.storefrontPhoto = '请上传门头照片';
+    } else if (d.step === 1) {
       if (!d.name) errors.name = '请填写店铺名称';
       // M-16(l5):行业类型必填,同样写在该行下方红字
       if (!d.industryIds.length) errors.industryIds = '请选择行业类型';
@@ -476,7 +504,11 @@ Page({
 
   validate() {
     var d = this.data, ok = false;
-    if (d.step === 1) ok = !!(d.name && isValidMobile(d.phone) && d.industryIds.length);
+    if (d.partnerTier === 'LIGHT') {
+      ok = !!(String(d.name || '').trim() && String(d.address || '').trim()
+        && d.locationLat != null && d.locationLng != null
+        && isValidMobile(d.phone) && d.storefrontPhoto);
+    } else if (d.step === 1) ok = !!(d.name && isValidMobile(d.phone) && d.industryIds.length);
     else if (d.step === 2) ok = !!(d.address && d.businessTime);
     else if (d.step === 3) ok = !!d.businessLicense;
     // 预览确认页的硬性缺项只有实名:姓名 + 身份证号 + 单独同意三项齐了「提交申请」才亮
@@ -598,6 +630,20 @@ Page({
     }, this.validate);
   },
 
+  // ===== 门头照片(轻量合作档必填,单张) =====
+  uploadStorefrontPhoto() {
+    var that = this;
+    var identityTicket = this.identityTicket();
+    this._systemPickerOpen = true;
+    this._imageFlowOpen = true;
+    app.chooseImage(function (urls) {
+      that._imageFlowOpen = false;
+      if (!that.isIdentityTicketCurrent(identityTicket)) return;
+      that.setData({ storefrontPhoto: urls[0] || '', 'fieldErrors.storefrontPhoto': '' }, that.validate);
+    }, 1);
+  },
+  removeStorefrontPhoto() { this.setData({ storefrontPhoto: '' }, this.validate); },
+
   // ===== 营业执照(单张,必填) =====
   uploadLicense() {
     var that = this;
@@ -642,6 +688,9 @@ Page({
     this._submitEpoch = submitEpoch;
     this.setData({ submitting: true, submitError: '', submitErrorKind: '' });
 
+    // §4.3 轻量合作档（零分成）免前置 18 位实名登记，直接提交 4 字段入驻单。
+    if (d.partnerTier === 'LIGHT') { this.sendRegistration(identityTicket, submitEpoch); return; }
+
     // 实名登记是入驻申请【之前】的一发独立写:先落身份、再落入驻单。
     // 顺序不能反 —— /api/merchant/merchant_registration 在服务端对新 Registration 会查实名是否
     // 已登记(ApiMerchantController 的闸),并发发会直接被拦成「请先登记实名信息」。
@@ -665,7 +714,17 @@ Page({
 
   sendRegistration(identityTicket, submitEpoch) {
     var d = this.data, that = this;
-    var payload = {
+    var payload = d.partnerTier === 'LIGHT' ? {
+      id: d.apply && d.apply.status === 2 ? d.apply.id : null,
+      partnerTier: 'LIGHT',
+      name: d.name,
+      phone: d.phone,
+      address: d.address,
+      locationLat: d.locationLat,
+      locationLng: d.locationLng,
+      storefrontPhoto: d.storefrontPhoto,
+      derivatives: d.storefrontPhoto
+    } : {
       id: d.apply && d.apply.status === 2 ? d.apply.id : null,
       name: d.name,
       categoryIds: d.industryIds.join(','),
@@ -793,7 +852,7 @@ function currentIdentityKey() {
 }
 
 // 第五轮 D:字段在页面上的先后,滚动到第一条红字时用。
-const APPLY_FIELD_ORDER = ['name', 'industryIds', 'phone', 'address', 'businessTime', 'businessLicense', 'realName', 'idCard'];
+const APPLY_FIELD_ORDER = ['name', 'industryIds', 'phone', 'address', 'businessTime', 'storefrontPhoto', 'businessLicense', 'realName', 'idCard'];
 
 /** M-16:申请回读里的行业类型(多选列优先,旧数据退回单值 categoryId)。 */
 function industryIdsOf(source) {

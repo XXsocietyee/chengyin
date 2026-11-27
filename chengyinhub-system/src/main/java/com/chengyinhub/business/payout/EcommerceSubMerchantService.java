@@ -1,10 +1,14 @@
 package com.chengyinhub.business.payout;
 
 import com.chengyinhub.business.domain.EcomSubMerchant;
+import com.chengyinhub.business.domain.MmsMerchant;
 import com.chengyinhub.business.mapper.EcomPayoutMapper;
+import com.chengyinhub.business.mapper.MmsMerchantMapper;
+import com.chengyinhub.business.service.impl.MemberIdentityService;
 import com.chengyinhub.common.exception.ServiceException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +29,12 @@ public class EcommerceSubMerchantService {
     private final EcommercePayGateway gateway;
     private final PayoutSwitches switches;
 
+    @Autowired(required = false)
+    private MmsMerchantMapper mmsMerchantMapper;
+
+    @Autowired(required = false)
+    private MemberIdentityService memberIdentityService;
+
     public EcommerceSubMerchantService(EcomPayoutMapper mapper, EcommercePayGateway gateway, PayoutSwitches switches) {
         this.mapper = mapper;
         this.gateway = gateway;
@@ -40,10 +50,34 @@ public class EcommerceSubMerchantService {
         if (ownerId == null || ownerId <= 0) throw new ServiceException("收款主体无效", 400);
     }
 
+    /**
+     * §4.3 分级入驻结算闸：轻量合作门店（零分成）免前置执照与实名，
+     * 但在开通 l-payout2 电商收付通直连结算（登记/提交进件）时必须已补齐营业执照与经营者实名。
+     */
+    void assertMerchantPayoutKycReady(String ownerType, Long ownerId) {
+        if (!OWNER_MERCHANT.equals(ownerType) || mmsMerchantMapper == null || ownerId == null) {
+            return;
+        }
+        MmsMerchant merchant = mmsMerchantMapper.selectMmsMerchantById(ownerId);
+        if (merchant == null) {
+            return;
+        }
+        if (merchant.getBusinessLicense() == null || merchant.getBusinessLicense().trim().isEmpty()) {
+            throw new ServiceException("开通直连收款结算需先补传营业执照", 400);
+        }
+        if (memberIdentityService != null && merchant.getMemberId() != null) {
+            String identityErr = memberIdentityService.checkRegistered(merchant.getMemberId());
+            if (identityErr != null && !identityErr.trim().isEmpty()) {
+                throw new ServiceException("开通直连收款结算需先完成经营者实名登记：" + identityErr, 400);
+            }
+        }
+    }
+
     /** 登记进件（幂等）：同一商家/俱乐部只有一条。 */
     public EcomSubMerchant register(String ownerType, Long ownerId, String operator) {
         requireOwner(ownerType, ownerId);
         if (!switches.ecommerceEnabled()) throw new ServiceException("电商收付通未开启", 409);
+        assertMerchantPayoutKycReady(ownerType, ownerId);
         EcomSubMerchant existing = mapper.selectSubMerchant(ownerType, ownerId);
         if (existing != null) return existing;
         if (mapper.selectSellerMemberId(ownerType, ownerId) == null) throw new ServiceException("收款主体不存在", 404);
@@ -65,6 +99,7 @@ public class EcommerceSubMerchantService {
         if (!switches.ecommerceEnabled()) throw new ServiceException("电商收付通未开启", 409);
         EcomSubMerchant row = mapper.selectSubMerchantById(id);
         if (row == null) throw new ServiceException("进件记录不存在", 404);
+        assertMerchantPayoutKycReady(row.getOwnerType(), row.getOwnerId());
         if (!ApplymentState.DRAFT.name().equals(row.getApplymentState())) throw new ServiceException("进件已提交，请刷新状态", 409);
         EcommercePayGateway.ApplymentSubmitted submitted = gateway.submitApplyment(row.getOutRequestNo(), applymentBody);
         mapper.markApplymentSubmitted(id, submitted == null ? null : submitted.applymentId());

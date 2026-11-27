@@ -1,0 +1,64 @@
+<view class="qjs-shell">
+  <cy-sheet show="{{show}}" footer="{{true}}" title="快速加入路线" closable="{{!submitting}}"
+    maskClosable="{{!submitting}}" bind:close="onClose">
+    <view class="qjs-sub" wx:if="{{chapterName}}">{{chapterName}}</view>
+
+    <block wx:if="{{termsMode !== 'TRAFFIC'}}">
+      <view class="qjs-field">
+        <view class="qjs-label"><text>到店福利</text><text class="qjs-req" aria-hidden="true">*</text></view>
+        <input class="qjs-input" value="{{form.perkDescription}}" maxlength="64"
+          placeholder="例如：美式咖啡一杯 / 招牌甜品一份" disabled="{{submitting}}"
+          placeholder-class="qjs-ph" data-key="perkDescription" bindinput="onInput"
+          aria-required="true" aria-label="到店福利，必填" />
+      </view>
+
+      <view class="qjs-field">
+        <view class="qjs-label"><text>门店原价（元）</text><text class="qjs-req" aria-hidden="true">*</text></view>
+        <input class="qjs-input" type="digit" value="{{form.originalPrice}}"
+          placeholder="填写店内正常售价" disabled="{{submitting}}"
+          placeholder-class="qjs-ph" data-key="originalPrice" bindinput="onInput"
+          aria-required="true" aria-label="门店原价，必填" />
+        <view class="qjs-hint" wx:if="{{perkMinText && !priceBelowMin}}">建议原价不少于 {{perkMinText}}</view>
+        <cy-inline-error wx:if="{{priceBelowMin}}" kind="error" title="该位置要求原价不少于 {{perkMinText}}" />
+      </view>
+    </block>
+
+    <view class="qjs-field">
+      <view class="qjs-label"><text>闲时时段与每日上限</text><text class="qjs-opt">选填</text></view>
+      <view class="qjs-chips">
+        <view class="qjs-chip {{form.offPeakHours === item.value ? 'qjs-chip--on' : ''}}"
+          wx:for="{{hourPresets}}" wx:key="value" data-value="{{item.value}}" bindtap="pickHourPreset"
+          aria-role="button" aria-label="可用时段 {{item.label}}" hover-class="cy-pressed" hover-stay-time="80">
+          {{item.label}}
+        </view>
+      </view>
+      <view class="qjs-row">
+        <input class="qjs-input qjs-half" value="{{form.offPeakHours}}" maxlength="32"
+          placeholder="自定义时段，如 14:00-17:00" disabled="{{submitting}}"
+          placeholder-class="qjs-ph" data-key="offPeakHours" bindinput="onInput"
+          aria-label="闲时可用时段" />
+        <input class="qjs-input qjs-half" type="number" value="{{form.dailyCap}}" maxlength="5"
+          placeholder="每日上限（份）" disabled="{{submitting}}"
+          placeholder-class="qjs-ph" data-key="dailyCap" bindinput="onInput"
+          aria-label="每日接待上限" />
+      </view>
+    </view>
+
+    <view class="qjs-field">
+      <view class="qjs-label"><text>门头照片</text><text class="qjs-opt">默认用入驻照片</text></view>
+      <cy-upload urls="{{photoUrls}}" max="{{1}}" disabled="{{submitting}}" replaceOnTap="{{true}}"
+        bind:add="choosePhoto" bind:remove="removePhoto" />
+    </view>
+
+    <cy-consent-check wx:if="{{termsMode !== 'TRAFFIC'}}" checked="{{form.termsAgreed}}"
+      text="{{consentText}}" bind:change="onTermsAgreedChange" />
+
+    <cy-inline-error wx:if="{{submitError}}" kind="data" title="{{submitError}}" />
+
+    <view slot="footer" class="qjs-actions">
+      <cy-btn variant="primary" loading="{{submitting}}" disabled="{{!canSubmit || submitting}}" bindtap="onSubmit">
+        {{submitting ? '提交中…' : '确认加入'}}
+      </cy-btn>
+    </view>
+  </cy-sheet>
+</view>

@@ -19,6 +19,10 @@ const INCLUDED_OPTIONS = [
 ];
 const { parseRoleNeed } = require('../../../../../utils/role-need.js');
 
+function isTemplateOptional(termsMode) {
+  return termsMode === 'PERK' || termsMode === 'TRAFFIC';
+}
+
 function emptyForm(address) {
   return {
     name: '',
@@ -155,7 +159,8 @@ Component({
     show() {
       if (!this.data.show) return;
       // L06-032:地图选点/选地址回来不重拉;只有去创建过玩法(或上次失败)才重拉模板列表
-      if (this.data.formMode !== 'offer' && (this._templatesStale || this.data.templatesError)) this.loadMyTemplates();
+      if (this.data.formMode !== 'offer' && !isTemplateOptional(this.data.termsMode)
+        && (this._templatesStale || this.data.templatesError)) this.loadMyTemplates();
       if (this.data.formMode === 'offer' && this.data.termsMode === 'PERK') {
         this.loadMyPerkTemplates();
       }
@@ -205,7 +210,7 @@ Component({
         this.refreshSubmitState();
         return;
       }
-      this.loadMyTemplates();
+      if (!isTemplateOptional(this.data.termsMode)) this.loadMyTemplates();
       if (!editing && !this.data.defaultAddress) this.loadMerchantAddress();
       /* F3 里已经选过玩法就预填。emptyForm() 刚把表单清空,所以放在它之后 ——
          这是「打开表单」这一刻的初值,不是覆盖用户在本表单里的选择:
@@ -617,10 +622,11 @@ Component({
         && (!String(form.optionalBenefit || '').trim() || !!String(form.benefitRules || '').trim())
         && !!String(form.merchantRules || '').trim()
       );
+      const templateOptional = isTemplateOptional(this.data.termsMode);
       const canSubmit = this.data.formMode === 'offer'
         ? termsSupplyValid && circleSupplyValid
         : !!String(form.name || '').trim() && !!String(form.address || '').trim()
-          && !!Number(form.templateId) && hasCoords(form);
+          && (templateOptional || !!Number(form.templateId)) && hasCoords(form);
       if (canSubmit !== this.data.canSubmit) this.setData({ canSubmit });
     },
 
@@ -628,12 +634,13 @@ Component({
       if (this.data.submitting) return;
       const form = this.data.form || {};
       if (this.data.formMode !== 'offer') {
+        const templateOptional = isTemplateOptional(this.data.termsMode);
         const name = String(form.name || '').trim();
         if (!name) {
           app.tips('请填写节点名称');
           return;
         }
-        if (!Number(form.templateId)) {
+        if (!templateOptional && !Number(form.templateId)) {
           app.tips('请选择玩法模板');
           return;
         }
@@ -647,12 +654,12 @@ Component({
         }
         this.triggerEvent('submit', {
           chapterId: Number(this.data.chapterId),
-          templateId: Number(form.templateId),
+          templateId: Number(form.templateId) || null,
           name,
           address: String(form.address || '').trim(),
           longitude: String(form.longitude),
           latitude: String(form.latitude),
-          xpValue: form.xpValue === '' ? null : Number(form.xpValue),
+          xpValue: templateOptional || form.xpValue === '' ? null : Number(form.xpValue),
           message: String(form.message || '').trim(),
         });
         return;

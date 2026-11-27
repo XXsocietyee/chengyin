@@ -1,6 +1,7 @@
 {
   "usingComponents": {
     "chapter-node-form": "/pages/topic/components/cy/chapter-node-form/index",
+    "cy-quick-join-sheet": "/pages/topic/components/cy/quick-join-sheet/index",
     "node-npc-form": "/pages/topic/components/cy/node-npc-form/index",
     "cy-btn": "/components/cy/btn/index",
     "cy-danger-confirm": "/components/cy/danger-confirm/index",
