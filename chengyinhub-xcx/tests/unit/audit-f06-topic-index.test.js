@@ -77,10 +77,18 @@ test('L06-010 场次时间:缺时分/ISO 不抛错,按中国时区显示', () =>
   const list = vm.processTopicDate.call(vm, [
     { startTime: '2026-12-01', endTime: '2026-12-01T20:30:00+08:00' },
     { startTime: '2026-12-02 09:05:00', endTime: '2026-12-02 11:00:00' },
+    { startTime: '2026-12-03 09:05:00', endTime: '2026-12-03' },
+    { startTime: '2026-12-04', endTime: '2026-12-05' },
   ]);
-  assert.equal(list[0].monthDayTime, '12-01 00:00');
+  assert.equal(list[0].monthDayTime, '12-01');
   assert.equal(list[0].endMonthDayTime, '12-01 20:30');
+  assert.equal(list[0].sessionTimeText, '12-01–20:30');
   assert.equal(list[1].sessionTimeText, '12-02 09:05–11:00');
+  assert.equal(list[2].endMonthDayTime, '12-03');
+  assert.equal(list[2].sessionTimeText, '12-03 09:05');
+  assert.equal(list[3].monthDayTime, '12-04');
+  assert.equal(list[3].endMonthDayTime, '12-05');
+  assert.equal(list[3].sessionTimeText, '12-04 ~ 12-05');
 });
 
 test('L06-006 触摸起点存实例,不 setData', () => {

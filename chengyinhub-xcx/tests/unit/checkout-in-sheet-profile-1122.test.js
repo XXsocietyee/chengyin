@@ -307,15 +307,26 @@ test('资料原本就齐:直接建单,how=had;拉起支付前记 pay_start,取�
   assert.deepEqual(cancel.payload.properties, { reason: 'user_cancel' });
 });
 
-test('支付失败记 pay_fail(reason=sdk_fail,不带原文)', () => {
+test('收银台已拉起后非取消失败回读原订单，不展示微信原文或请重试', () => {
   const h = loadPage();
   openWith(h, { realName: '张三', phone: PHONE });
+  h.vm.data.selfPlayCheckoutShow = true;
   h.vm._createSelfPlayOrder(77);
   h.requests.filter((r) => r.url === '/api/registration/create')[0].success({ code: '200', data: { registrationId: 1001, payableAmount: 100,
     payParams: { timeStamp: '1', nonceStr: 'n', package: 'prepay_id=x', signType: 'RSA', paySign: 's' } } });
   h.payments[0].fail({ errMsg: 'requestPayment:fail something' });
-  const fail = h.tracked.find((t) => t.name === 'pay_fail');
-  assert.deepEqual(fail.payload.properties, { reason: 'sdk_fail' });
+  const readback = h.requests.filter((r) => r.url === '/api/registration/info');
+  assert.equal(readback.length, 1);
+  assert.equal(readback[0].data.id, 1001);
+  readback[0].success({ code: '200', data: { paymentStatus: 3, registrationStatus: 1 } });
+  assert.equal(h.vm.data.checkoutError, '支付结果未确认，请到订单查看，勿重复支付');
+  assert.equal(h.vm._workflow.getState(), 'unknown');
+  const shown = JSON.stringify(h.toasts) + h.vm.data.checkoutError;
+  assert.equal(shown.includes('requestPayment'), false);
+  assert.equal(shown.includes('请重试'), false);
+  h.vm._createSelfPlayOrder(77);
+  assert.equal(h.payments.length, 1, '未确认不得再拉起支付');
+  assert.equal(h.requests.filter((r) => r.url === '/api/registration/create').length, 1);
 });
 
 test('服务端确认已付 ⇒ solo_ticket_purchase,eventKey 按订单号去重;无订单号不记', () => {

@@ -69,7 +69,8 @@ test('结算层开着时,下单/付款失败原文留在底栏(带重试),不再
   assert.deepEqual(calls.toasts, ['支付失败'])
   const js = read('pages/topic/index/index.js')
   assert.match(js, /onOrderFail[\s\S]{0,700}that\._showCheckoutFailure\(res && res\.msg \|\| '下单失败'\)/)
-  assert.match(js, /onPayFail[\s\S]{0,400}支付结果未确认，请到订单查看，勿重复支付/)
+  assert.match(js, /onPayFail[\s\S]{0,500}_payFailReason === 'sdk_fail'[\s\S]{0,180}'支付结果未确认，请到订单查看，勿重复支付'/)
+  assert.match(js, /onPayFail[\s\S]{0,700}res && res\.errMsg \|\| '支付失败'/)
   // 取消仍是轻提示:不是失败,不占底栏
   assert.match(js, /onPayCancel[\s\S]{0,200}toast\('已取消支付'\)/)
   // 底栏错误旁的「重试」就是原支付按钮的同一出口

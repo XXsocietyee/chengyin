@@ -330,6 +330,7 @@ test('PERK 无常备权益时提供可执行的创建入口', () => {
   assert.deepEqual(JSON.parse(requests[0].data), {});
   requests[0].success({ code: '200', data: [] });
   assert.deepEqual(state.component.data.perkTemplates, []);
+  assert.equal(state.component.data.perkTemplatesError, '');
 
   state.component.goCreatePerkTemplate();
   assert.equal(navigations[0].url, '/pages/merchant/decor/perks/index');
@@ -363,6 +364,27 @@ test('M-09:报名表里去创建玩法,发布回来新玩法直接选上;表单�
   stale.component._formVersion = 4;
   navigations[1].events.templateCreated({ id: 92, title: '别的' });
   assert.equal(stale.component.data.form.templateId, 0);
+});
+
+test('常备权益读失败不当成还没有，给重试', () => {
+  const state = makeComponent({});
+  state.component.data.perkTemplatesLoading = false;
+  state.component.loadMyPerkTemplates();
+  requests[0].success({ code: '500', msg: '权益列表读取失败' });
+  requests[0].complete();
+  assert.deepEqual(state.component.data.perkTemplates, []);
+  assert.equal(state.component.data.perkTemplatesError, '权益列表读取失败');
+  assert.equal(state.component.data.perkTemplatesLoading, false);
+  assert.equal(state.component._perkTemplatesStale, true);
+  assert.match(WXML, /perkTemplatesError && !perkTemplatesLoading/);
+
+  const net = makeComponent({});
+  net.component.data.perkTemplatesLoading = false;
+  net.component.loadMyPerkTemplates();
+  requests[1].fail();
+  requests[1].complete();
+  assert.equal(net.component.data.perkTemplatesError, '网络异常，常备权益未读取');
+  assert.equal(net.component.data.perkTemplatesLoading, false);
 });
 
 test('PERK 选择器过滤历史缺零售价或份数的无效模板', () => {

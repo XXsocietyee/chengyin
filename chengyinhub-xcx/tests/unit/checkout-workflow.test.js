@@ -5,7 +5,8 @@
 // 不变量:
 //  - 防重:在途(submitting/paying)再次 submit 直接忽略,createOrder 只调一次。
 //  - 创建订单失败 → 不拉起支付,回 idle(可重试)。
-//  - 支付取消/失败 → 回 idle(可重试);支付成功 → done 且 onPaySuccess 只触发一次。
+//  - 支付取消 → 回 idle(可重试)。收银台已打开后的非取消失败不回 idle、不请重试,回读原订单。
+//  - 支付成功 → done 且 onPaySuccess 只触发一次。
 //  - 页面销毁后(destroy)任何在途回调都不再触发(避免 setData after unload)。
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -173,35 +174,62 @@ test('支付取消 → onPayCancel、回 idle 可重试', () => {
   assert.equal(wf.submit({}, h), true, '取消后可重试');
 });
 
-test('支付失败(非取消)→ onPayFail、回 idle', () => {
-  const { wf, resolveOrder, resolvePay } = makeWf();
+test('收银台已打开后的非取消失败回读原订单，未确认则停在 unknown 且不请重试', () => {
+  const { wf, calls, resolveOrder, resolvePay, resolveVerify } = makeWf();
   const h = handlers();
   wf.submit({}, h);
-  resolveOrder({ ok: true, data: { payableAmount: 100 } });
-  resolvePay({ ok: false, cancelled: false, errMsg: 'fail' });
-  assert.equal(h.log[0][0], 'payFail');
-  assert.equal(wf.isBusy(), false);
-});
-
-test('微信支付失败不得把 requestPayment 原始诊断串透传给页面', () => {
-  const { wf, resolveOrder, resolvePay } = makeWf();
-  const h = handlers();
-  wf.submit({}, h);
-  resolveOrder({ ok: true, data: { payableAmount: 100 } });
+  resolveOrder({ ok: true, data: { payableAmount: 100, registrationId: 9 } });
   resolvePay({
     ok: false,
     cancelled: false,
     errMsg: 'requestPayment:fail system error trace_id=internal-123',
   });
-
+  assert.equal(wf.getState(), 'verifying');
+  assert.equal(calls.verify, 1, '必须回读原订单');
+  assert.equal(calls.pay, 1);
+  assert.equal(wf.submit({}, h), false, '回读期间不能再下一单');
+  resolveVerify({ ok: false, status: 'failed', errMsg: 'requestPayment:fail' });
+  assert.equal(wf.getState(), 'unknown');
+  assert.equal(wf.isBusy(), false);
+  assert.equal(wf.submit({}, h), false, '未确认不能再支付');
+  assert.equal(calls.order, 1);
+  assert.equal(calls.pay, 1);
   assert.deepEqual(h.log, [[
-    'payFail',
-    {
-      ok: false,
-      cancelled: false,
-      errMsg: '支付结果未确认，请到订单查看，勿重复支付',
-      paymentLaunched: true,
-    },
+    'unknown',
+    { ok: false, status: 'unknown', errMsg: '支付结果未确认，请到订单查看，勿重复支付' },
+  ]]);
+  assert.equal(JSON.stringify(h.log).includes('requestPayment'), false);
+  assert.equal(JSON.stringify(h.log).includes('请重试'), false);
+  assert.equal(wf.recheck(), true, '仍可核对同一张单');
+  assert.equal(calls.verify, 2);
+  assert.equal(calls.pay, 1);
+});
+
+test('收银台非取消失败回读确认已付则完成，不再拉起支付', () => {
+  const { wf, calls, resolveOrder, resolvePay, resolveVerify } = makeWf();
+  const h = handlers();
+  wf.submit({}, h);
+  resolveOrder({ ok: true, data: { payableAmount: 100, registrationId: 9 } });
+  resolvePay({ ok: false, cancelled: false, errMsg: 'requestPayment:fail' });
+  resolveVerify({ ok: true });
+  assert.equal(wf.getState(), 'done');
+  assert.deepEqual(h.log.map((row) => row[0]), ['paySuccess']);
+  assert.equal(calls.order, 1);
+  assert.equal(calls.pay, 1);
+});
+
+test('无法回读时，收银台非取消失败直接停在 unknown，文案不请重试', () => {
+  const { wf, calls, resolveOrder, resolvePay } = makeWf({ verifyPayment: undefined });
+  const h = handlers();
+  wf.submit({}, h);
+  resolveOrder({ ok: true, data: { payableAmount: 100 } });
+  resolvePay({ ok: false, cancelled: false, errMsg: 'requestPayment:fail' });
+  assert.equal(calls.verify, 0);
+  assert.equal(wf.getState(), 'unknown');
+  assert.equal(wf.submit({}, h), false);
+  assert.deepEqual(h.log, [[
+    'unknown',
+    { ok: false, status: 'unknown', errMsg: '支付结果未确认，请到订单查看，勿重复支付' },
   ]]);
 });
 

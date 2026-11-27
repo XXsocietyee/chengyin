@@ -175,8 +175,18 @@ Page({
       return;
     }
     this.setData({ cards: placed, entered: false, settled: false, sel: sel, flip: flip });
-    this._enterTimer = setTimeout(() => this.setData({ entered: true }), 60);
-    this._settleTimer = setTimeout(() => this.setData({ settled: true }), 1400);
+    clearTimeout(this._enterTimer);
+    clearTimeout(this._settleTimer);
+    this._enterTimer = setTimeout(() => {
+      this._enterTimer = null;
+      if (this._unloaded) return;
+      this.setData({ entered: true });
+    }, 60);
+    this._settleTimer = setTimeout(() => {
+      this._settleTimer = null;
+      if (this._unloaded) return;
+      this.setData({ settled: true });
+    }, 1400);
   },
 
   // 远端封面拉不动(不在包内的主题):换成既有失败态，不拿别的图冒充

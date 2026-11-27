@@ -97,6 +97,17 @@ test('开局前准备:勾完才能开始;服务端拒绝只写一句中性说明
   assert.match(ok.navs.at(-1), /^\/pages\/play\/index\?topicId=9/);
 });
 
+test('组队卡连点只打开一次本场招募', () => {
+  const h = topicPage(() => {});
+  h.page.data.is_join = 1;
+  h.page.data.info = { id: 9, name: '城南旧事', productType: 1 };
+  h.page.data.teams = { rows: [{ activityId: 31, when: '10月25日 19:30' }], need: 0 };
+  h.page.openTeamLobby();
+  h.page.openTeamLobby();
+  assert.equal(h.navs.length, 1);
+  assert.match(h.navs[0], /\/subpackageRoam\/my-teams\/index\?tab=open&ownerType=2&ownerId=31/);
+});
+
 test('可玩时段:服务端 openNow=false 时写「当前未开放」,开始游玩置灰;自定义时段原样显示', () => {
   const reqs = []; const h = topicPage(r => reqs.push(r));
   h.page._loadPrep(1);

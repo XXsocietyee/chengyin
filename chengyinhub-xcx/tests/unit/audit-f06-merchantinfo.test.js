@@ -8,7 +8,7 @@ const vm = require('node:vm')
 const ROOT = path.resolve(__dirname, '../..')
 const PAGE = 'pages/topic/merchantinfo/merchantinfo'
 
-function loadPage() {
+function loadPage(opts = {}) {
   const requests = []
   const tips = []
   const timers = []
@@ -19,6 +19,7 @@ function loadPage() {
     sendRequest: (options) => requests.push(options),
     getRequestErrorMessage: (res, fallback) => (res && res.msg) || fallback,
     tips: (msg) => tips.push(msg),
+    getUserID: () => opts.member || '',
   }
   const modalStub = { show: (opts) => opts.success({ confirm: true }) }
   const toastStub = Object.assign(() => {}, { success() {}, fail() {} })
@@ -126,6 +127,10 @@ test('L06-014 切换承接站只重读该站详情,不重读 project/home', () =
   assert.equal(t.requests.filter(r => r.url === '/api/project/home').length, 0)
 })
 
+function hostHome(clubs) {
+  return { code: '200', data: { role: 'host', topic: { id: 5, name: '夜游', productType: 1 }, host: { ownerType: 'merchant', clubs, recruit: {}, players: {} } } }
+}
+
 test('L06-021 候选先回、已邀约名单后到:刚邀约的俱乐部不再出现在候选里', () => {
   const t = loadPage()
   Object.assign(t.page.data, { role: 'host', clubSheet: { show: true, items: [] } })
@@ -135,6 +140,59 @@ test('L06-021 候选先回、已邀约名单后到:刚邀约的俱乐部不再�
   t.page.data.clubSheet.items = [{ clubId: 7 }]
   t.page._renderClubCandidates()
   assert.deepEqual(t.page.data.clubCandidates.rows.map(r => r.id), [8])
+})
+
+test('L06-021 邀约成功后的候选只按同一次 project/home 过滤;更旧的候选回包不丢掉新俱乐部;失败仍是错误', () => {
+  const t = loadPage({ member: '7' })
+  t.page._projectMemberId = '7'
+  Object.assign(t.page.data, { role: 'host', topicId: 5, clubSheet: { show: true, items: [{ clubId: 1, name: 'old' }] } })
+  t.page.loadClubCandidates()
+  const olderClubs = t.requests.find(r => r.url === '/api/merchant/clubs')
+  t.page.loadProjectHome()
+  t.page.loadClubCandidates()
+  const homes = () => t.requests.filter(r => r.url === '/api/project/home')
+  const clubs = () => t.requests.filter(r => r.url === '/api/merchant/clubs')
+  const ids = (page) => Array.from((page.data.clubCandidates.rows || []), (r) => r.id)
+  clubs()[1].success({ code: '200', data: [{ id: 7, name: 'A' }, { id: 8, name: 'B' }, { id: 9, name: 'New' }] })
+  assert.equal(t.page.data.clubCandidates.state, 'loading', '同一次主页还没回来时不能按旧名单放行')
+  assert.deepEqual(ids(t.page), [])
+  olderClubs.success({ code: '200', data: [{ id: 7, name: 'A' }, { id: 8, name: 'B' }] })
+  homes()[0].success(hostHome([{ clubId: 7, name: 'A', status: 0 }]))
+  homes()[0].complete()
+  assert.equal(t.page.data.clubCandidates.state, 'ready')
+  assert.deepEqual(ids(t.page), [8, 9])
+  assert.deepEqual(Array.from(t.page._clubSheetClubs, (c) => c.clubId), [7])
+
+  const late = loadPage({ member: '7' })
+  late.page._projectMemberId = '7'
+  Object.assign(late.page.data, { role: 'host', topicId: 5, clubSheet: { show: true, items: [] } })
+  late.page.loadClubCandidates()
+  const lateOlder = late.requests.find(r => r.url === '/api/merchant/clubs')
+  late.page.loadProjectHome()
+  late.page.loadClubCandidates()
+  const lateHomes = late.requests.filter(r => r.url === '/api/project/home')
+  const lateClubs = late.requests.filter(r => r.url === '/api/merchant/clubs')
+  lateClubs[1].fail({ errMsg: 'down' })
+  lateHomes[0].success(hostHome([{ clubId: 7, name: 'A', status: 0 }]))
+  lateHomes[0].complete()
+  assert.equal(late.page.data.clubCandidates.state, 'error')
+  lateOlder.success({ code: '200', data: [{ id: 9, name: 'New' }] })
+  assert.equal(late.page.data.clubCandidates.state, 'error')
+  assert.equal(late.page.data.clubCandidates.rows.length, 0)
+
+  const failedHome = loadPage({ member: '7' })
+  failedHome.page._projectMemberId = '7'
+  Object.assign(failedHome.page.data, { role: 'host', topicId: 5, clubSheet: { show: true, items: [{ clubId: 1 }] } })
+  failedHome.page.loadProjectHome()
+  failedHome.page.loadClubCandidates()
+  const failedClubs = failedHome.requests.filter(r => r.url === '/api/merchant/clubs')
+  failedClubs[0].success({ code: '200', data: [{ id: 7, name: 'A' }, { id: 9, name: 'New' }] })
+  const failedHomes = failedHome.requests.filter(r => r.url === '/api/project/home')
+  failedHomes[0].fail({ errMsg: 'down' })
+  failedHomes[0].complete()
+  assert.equal(failedHome.page.data.loadFailed, true)
+  assert.equal(failedHome.page.data.clubCandidates.state, 'error')
+  assert.equal(failedHome.page.data.clubCandidates.rows.length, 0)
 })
 
 test('L06-096 去模板详情连点只跳一次,跳转后回来会重读', () => {

@@ -1835,6 +1835,7 @@ button::after {
 
 /* A12 / A7 参与商家与组队 */
 .topic-shops { padding: 0 var(--cy-space-6) var(--cy-space-6); }
+.topic .ugc-report { display: block; margin-top: var(--cy-space-4); font-size: var(--cy-font-label); line-height: var(--cy-leading-normal); color: var(--cy-text-secondary); }
 .topic-teams { padding: var(--cy-space-6) var(--cy-space-6) 0; }
 .topic-teams__card { border-radius: var(--cy-radius-xl); background: var(--cy-color-play-surface-solid); border: 1rpx solid var(--cy-color-play-line); padding: 8rpx 28rpx; }
 .topic-teams__hd { display: flex; align-items: baseline; justify-content: space-between; padding: 20rpx 0 12rpx; }

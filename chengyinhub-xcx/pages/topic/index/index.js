@@ -6,7 +6,23 @@ const app = getApp();
 const { chinaParts } = require('../../../utils/datetime.js');
 const { refundRuleText } = require('../utils/refund-tiers.js'); // L06-010/L06-112:直接取真源,不在循环里 require 转出壳
 const pad2 = (n) => String(n).padStart(2, '0');
-const mdhm = (p) => pad2(p.month) + '-' + pad2(p.day) + ' ' + pad2(p.hours) + ':' + pad2(p.minutes);
+// 日期串里没有「时:分」就不补 00:00。数字时间戳和 Date 自带钟点,仍显示。
+const hasClockPart = (value) => typeof value !== 'string' || /(?:[ T])\d{1,2}:\d{1,2}/.test(value);
+const mdhm = (p, source) => {
+  const date = pad2(p.month) + '-' + pad2(p.day);
+  return hasClockPart(source) ? date + ' ' + pad2(p.hours) + ':' + pad2(p.minutes) : date;
+};
+// 详情载荷上的喜欢标记。0/false 也是答案,不能当成「没给」。这三个字段都没有,就不猜心。
+function topicLikeFlag(topic) {
+  if (!topic || typeof topic !== 'object') return null;
+  for (const key of ['isLike', 'isLiked', 'liked']) {
+    if (!Object.prototype.hasOwnProperty.call(topic, key)) continue;
+    const value = topic[key];
+    if (value === null || value === undefined || value === '') continue;
+    return value === true || Number(value) === 1;
+  }
+  return null;
+}
 const themeRecords = require('../../../utils/theme-records.js');
 
 function recordsRequest(url, method, data, header) {
@@ -132,6 +148,7 @@ Page({
     clubSheetItems: [],
     reportReasonShow: false,
     reportReasonItems: [],
+    canReportTopic: false,
     resultSheet: { show: false, kind: 'success', title: '', sub: '', meta: '', pill: '',
       why: '', duration: RESULT_SHEET_MS,
       consentName: '', consentChecked: false, consentState: 'idle', consentError: '' },
@@ -282,7 +299,7 @@ Page({
       this.getData();
     }
     this._hasShown = true;
-    setTimeout(() => this.calculateScreenHeights(), 100);
+    this._later(100, () => this.calculateScreenHeights());
   },
 
   /**
@@ -365,7 +382,7 @@ Page({
     // 如果还没有获取到第二屏位置，先计算再滚动
     if (this.data.screen2Top <= 0) {
       this.calculateScreenHeights();
-      setTimeout(scrollToTarget, 200);
+      this._later(200, scrollToTarget);
     } else {
       scrollToTarget();
     }
@@ -378,6 +395,7 @@ Page({
     const t = setTimeout(() => {
       const i = list.indexOf(t);
       if (i >= 0) list.splice(i, 1);
+      if (this._unloaded) return;
       fn();
     }, ms);
     list.push(t);
@@ -408,7 +426,7 @@ Page({
     // L06-008:开局准备只对已报名的人有用(wxml 只在 is_join==1 时出);NPC 只在故事标签出,进故事标签再拉
     this._loadPrep(String(this.data.is_join) === '1' ? data.id : 0);
     if (Number(data.productType) === 2) this._loadExplorePerks(data.id);
-    this._loadFav(data.id);
+    this._loadFav(data.id, data);
     this._charsData = data;
     this._charsLoaded = false;
     if (String(this.data.activeTab) === '1') this._loadCharsOnce();
@@ -593,23 +611,21 @@ Page({
     });
   },
 
-  // 收藏 = 既有的主题「喜欢」(我的-喜欢 同一个接口);进页读一次当前状态
+  // 收藏 = 既有的主题「喜欢」(我的-喜欢 同一个接口)。
+  // 详情上已有 isLike / isLiked / liked(含 0)就用它。没有时不去拉收藏列表:
+  // 列表不按主题 id 过滤,只看最新一条会把更早喜欢过的主题画成未喜欢。
+  // 这次详情发出之后用户点过的,晚到的标记让位。
   _loggedIn() { return typeof app.getUserID === 'function' && !!app.getUserID(); },
 
-  _loadFav(topicId) {
+  _loadFav(topicId, topic) {
     if (!topicId || !this._loggedIn()) return;
-    // L06-007:读回来之前用户点过收藏,以用户的点击为准,迟到的读结果不覆盖
-    const toggles = this._favToggles || 0;
-    app.sendRequest({ url: '/api/topic/like_list', method: 'POST', hideLoading: true, autoErrorToast: false,
-      data: { pageNum: 1, pageSize: 200 },
-      success: (res) => {
-        if (this._unloaded || (this._favToggles || 0) !== toggles || this._favBusy) return;
-        if (!res || String(res.code) !== '200' || !res.data) return;
-        const rows = Array.isArray(res.data.rows) ? res.data.rows : [];
-        this.setData({ faved: rows.some((t) => t && String(t.id) === String(topicId)) });
-      },
-      fail: () => {},
-    });
+    const readAt = this._favReadAt;
+    this._favReadAt = null;
+    const known = topicLikeFlag(topic);
+    if (known === null) return;
+    if (this._unloaded || this._favBusy) return;
+    if (readAt != null && (this._favToggles || 0) !== readAt) return;
+    this.setData({ faved: known });
   },
 
   // 2026-10-31 P-8:主题卡(封面 / 主题名 / 一站接一站的路线),右下主题码;微信好友走本页 onShareAppMessage
@@ -761,10 +777,15 @@ Page({
   openTeamLobby() {
     const info = this.data.info || {};
     if (Number(this.data.is_join) !== 1 || Number(info.productType) !== 1 || !info.id) return;
+    if (this._navigating) return;
+    this._navigating = true;
     const row = (this.data.teams.rows || []).find((r) => r && r.activityId) || null;
     const scope = [info.name, row && row.when ? row.when + ' 场' : ''].filter(Boolean).join(' · ');
-    wx.navigateTo({ url: '/subpackageRoam/my-teams/index?tab=open&ownerType=' + (row ? 2 : 1)
-      + '&ownerId=' + encodeURIComponent(row ? row.activityId : info.id) + '&scope=' + encodeURIComponent(scope) });
+    wx.navigateTo({
+      url: '/subpackageRoam/my-teams/index?tab=open&ownerType=' + (row ? 2 : 1)
+        + '&ownerId=' + encodeURIComponent(row ? row.activityId : info.id) + '&scope=' + encodeURIComponent(scope),
+      complete: () => { this._navigating = false; },
+    });
   },
 
   onMerchantOpen(e) {
@@ -938,11 +959,12 @@ Page({
     });
   },
   _verifySeatOrder(orderNo, attempt) {
+    if (this._unloaded) return;
     app.sendRequest({ url: '/api/marketing/product/orders/' + encodeURIComponent(orderNo), method: 'GET', hideLoading: true, autoErrorToast: false,
       success: (res) => {
         const row = res && String(res.code) === '200' && res.data && res.data.orderNo === orderNo ? res.data : null;
         if (row && row.statusLabel === 'PAID') { this._afterSeatOrder(row); return; }
-        if (attempt < 2) { setTimeout(() => this._verifySeatOrder(orderNo, attempt + 1), 1500); return; }
+        if (attempt < 2) { this._later(1500, () => this._verifySeatOrder(orderNo, attempt + 1)); return; }
         this._seatOrderFail('支付确认中，请到我的订单查看');
       },
       fail: () => this._seatOrderFail('支付确认中，请到我的订单查看'),
@@ -1246,6 +1268,55 @@ Page({
     wx.reLaunch({ url: '/pages/template/index' });
   },
   
+  // 评价成功后只更新评价区。列表接口与主题详情同一批可见评论,最多展示 5 条。
+  _refreshTopicComments(posted) {
+    const that = this;
+    if (that._unloaded || !that.data.id) return;
+    const prev = that.data.info || {};
+    const prevCount = Number(prev.commentCount);
+    const count = (Number.isFinite(prevCount) && prevCount >= 0 ? prevCount : 0) + 1;
+    const prevAvg = Number(prev.averageRating) || 0;
+    const rating = Number(posted && posted.rating) || 0;
+    const nextAvg = Math.round(((prevAvg * (count - 1) + rating) / count) * 10) / 10;
+    const rounded = Math.max(0, Math.min(5, Math.round(nextAvg)));
+    const ratingStars = [];
+    for (let i = 1; i <= rounded; i++) ratingStars.push({ star: i });
+    const existing = Array.isArray(prev.commentList) ? prev.commentList : [];
+    const commentList = [{
+      id: 'local-comment',
+      memberNickname: '',
+      createTime: '',
+      rating: rating,
+      contents: posted && posted.contents || '',
+    }].concat(existing).slice(0, 5);
+    that.setData({
+      info: Object.assign({}, prev, { commentCount: count, averageRating: nextAvg, commentList: commentList }),
+      ratingStars: ratingStars,
+    });
+    const seq = (that._commentSeq || 0) + 1;
+    that._commentSeq = seq;
+    const topicId = that.data.id;
+    app.sendRequest({
+      url: '/api/comment/list',
+      method: 'POST',
+      hideLoading: true,
+      data: { owner_type: 1, owner_id: topicId, pageNum: 1, pageSize: 5 },
+      success(res) {
+        if (that._unloaded || seq !== that._commentSeq || that.data.id !== topicId) return;
+        if (!res || String(res.code) !== '200') return;
+        const data = res.data && typeof res.data === 'object' ? res.data : res;
+        const rows = Array.isArray(data.rows) ? data.rows : (Array.isArray(res.rows) ? res.rows : null);
+        if (!rows) return;
+        const total = Number(data.total != null ? data.total : res.total);
+        const info = Object.assign({}, that.data.info || {}, {
+          commentList: rows,
+          commentCount: Number.isFinite(total) && total >= 0 ? total : count,
+        });
+        that.setData({ info: info });
+      },
+    });
+  },
+
   // 提交评价
   submitComment() {
     if (app.ensureLoginFor && !app.ensureLoginFor('post', () => this.submitComment(), { owner: this, target: () => [this.data.id] })) return; // 2026-10-24 游客写前登录
@@ -1283,9 +1354,10 @@ Page({
       success: function (res) {
         if (res.code == "200") {
           toast.success('评价成功');
+          const posted = { rating: answer + 1, contents: String(plnr || '').trim() };
           that.voteClose();
-          // 重新加载数据更新评价列表
-          that.getData();
+          // 只补评价列表和均分,不再整页重拉主题(会连带重跑封面、路线和一串侧向请求)
+          that._refreshTopicComments(posted);
         } else {
           app.tips(res.msg);
         }
@@ -1991,16 +2063,20 @@ Page({
         loading.hide();
         that._unknownPolling = false;
         that._selfPlaySubmitting = false;
-        that._showCheckoutFailure(res && res.paymentLaunched
+        // 收银台已拉起后的 SDK 失败不进这里(走 onPayUnknown)。若仍被叫到,也不展示请重试或微信原文。
+        var launched = !!(res && res.paymentLaunched) || that._payFailReason === 'sdk_fail';
+        that._showCheckoutFailure(launched
           ? '支付结果未确认，请到订单查看，勿重复支付'
           : (res && res.errMsg || '支付失败'));
         that._trackBuy('pay_fail', { reason: that._payFailReason || 'unknown' });
         // 付款失败不清幂等键,同一意图重试复用
       },
-      onPayUnknown: function () {
+      onPayUnknown: function (res) {
         loading.hide();
         that._selfPlaySubmitting = false;
-        if (!that._unknownPolling) that._showPaymentUnknown(); // 轮询/手动刷新仍不明时不重复弹窗
+        var launchedUnconfirmed = !!(res && res.errMsg === '支付结果未确认，请到订单查看，勿重复支付');
+        if (launchedUnconfirmed) that._showCheckoutFailure(res.errMsg);
+        if (!that._unknownPolling) that._showPaymentUnknown(launchedUnconfirmed ? res.errMsg : '');
       }
     });
 
@@ -2020,13 +2096,13 @@ Page({
    * E-B7:支付结果未知。只提供「刷新订单状态」(核对原订单,不建新单)并在后台轮询一小段时间;
    * 确认已付走 onPaySuccess → _onSelfPlayPaid;SDK 真回调迟到也照常处理(workflow 不再丢它)。
    */
-  _showPaymentUnknown() {
+  _showPaymentUnknown(content) {
     const that = this;
     if (that._unknownPolling) { toast('还在确认支付结果，请稍候'); return; }
     that._unknownPolling = true;
     modal.show({
       title: '支付结果待确认',
-      content: '暂不要重复支付。可以刷新订单状态，确认后会自动进入通行证。',
+      content: content || '暂不要重复支付。可以刷新订单状态，确认后会自动进入通行证。',
       confirmText: '刷新订单状态',
       cancelText: '稍后再说',
       success(res) {
@@ -2241,8 +2317,9 @@ Page({
   calculateScreenHeights() {
     const that = this;
 
-    // 延迟执行，确保页面渲染完成
-    setTimeout(() => {
+    // 延迟执行，确保页面渲染完成。定时器进 _later,卸载时清掉,避免卸页后还 setData
+    this._later(800, () => {
+      if (that._unloaded) return;
       const query = wx.createSelectorQuery();
 
       // 获取第一屏高度和第二屏位置
@@ -2250,6 +2327,7 @@ Page({
       query.select('#screen2').boundingClientRect();
 
       query.exec((res) => {
+        if (that._unloaded) return;
         if (res[0] && res[1]) {
           const screen1Height = res[0].height;
           const screen2Top = res[1].top + (that._scrollTop || 0); // 加上当前滚动位置
@@ -2268,7 +2346,7 @@ Page({
           });
         }
       });
-    }, 800);
+    });
   },
 
   /**
@@ -2347,6 +2425,7 @@ Page({
 
   getData: function () {
     const that = this;
+    const favReadAt = that._favToggles || 0;
     app.sendRequest({
       hideLoading: true,
       url: '/api/topic/info-to-user',
@@ -2436,8 +2515,11 @@ Page({
           });
 
           if (!that._viewTracked) { that._viewTracked = true; that._trackBuy('content_view'); } // 购买漏斗起点:详情首次读成功
-          that._applyMotionData(res.data); if (!that._statCounted) { that._statCounted = true; pageMotion.countIn(that, 'statK'); } /* 细节打磨 G4:数据条读数第一次到达时滚上来 */
-          setTimeout(() => that._measureHero(), 300);
+          that._favReadAt = favReadAt;
+          that._applyMotionData(res.data);
+          that._favReadAt = null;
+          if (!that._statCounted) { that._statCounted = true; pageMotion.countIn(that, 'statK'); } /* 细节打磨 G4:数据条读数第一次到达时滚上来 */
+          that._later(300, () => that._measureHero());
         } else {
           // j5 H1:服务端明确说「主题活动不存在」(审核中 / 已下架 / 未通过,对他人不可见)是终态:讲原因并给返回,不是加载失败留白。
           const refused = refusalOf(res);
@@ -2482,21 +2564,25 @@ Page({
     if (!isRecordList(list) || list.length === 0) return [];
     
     for (let i = 0; i < list.length; i++) {
-      // L06-010:按中国时区解析(utils/datetime),缺时分/ISO 格式都不抛错;解析不了就不出这一段文字
+      // L06-010:按中国时区解析(utils/datetime)。缺钟点不抛,日期照显示,缺的那一侧钟点留空;解析不了就不出这一段文字。
       const sp = list[i]['startTime'] ? chinaParts(list[i]['startTime']) : null;
-      if (sp) list[i]['monthDayTime'] = mdhm(sp);
+      if (sp) list[i]['monthDayTime'] = mdhm(sp, list[i]['startTime']);
       const ep = list[i]['endTime'] ? chinaParts(list[i]['endTime']) : null;
-      if (ep) list[i]['endMonthDayTime'] = mdhm(ep);
-      
+      if (ep) list[i]['endMonthDayTime'] = mdhm(ep, list[i]['endTime']);
 
-      // 探店日场次卡:同日场次压成「MM-DD HH:mm–HH:mm」,跨日保留两端全量
+      // 探店日场次卡:同日场次压成「MM-DD HH:mm–HH:mm」,跨日保留两端全量。缺钟点不补 00:00,也不留悬空的连接号。
       if (list[i]['monthDayTime'] && list[i]['endMonthDayTime']) {
         const sd = list[i]['monthDayTime'].slice(0, 5), ed = list[i]['endMonthDayTime'].slice(0, 5);
-        list[i]['sessionTimeText'] = sd === ed
-          ? (list[i]['monthDayTime'] + '–' + list[i]['endMonthDayTime'].slice(6))
-          : (list[i]['monthDayTime'] + ' ~ ' + list[i]['endMonthDayTime']);
+        if (sd !== ed) {
+          list[i]['sessionTimeText'] = list[i]['monthDayTime'] + ' ~ ' + list[i]['endMonthDayTime'];
+        } else {
+          const endClock = list[i]['endMonthDayTime'].slice(6);
+          list[i]['sessionTimeText'] = endClock
+            ? (list[i]['monthDayTime'] + '–' + endClock)
+            : list[i]['monthDayTime'];
+        }
       } else {
-        list[i]['sessionTimeText'] = list[i]['monthDayTime'] || '';
+        list[i]['sessionTimeText'] = list[i]['monthDayTime'] || list[i]['endMonthDayTime'] || '';
       }
       // 退改一律显示平台三档,不显示票上存的 refund_rule 原文(业主 2026-11-03)。
       list[i]['refundRuleText'] = refundRuleText(list[i]);
@@ -2595,7 +2681,7 @@ Page({
   // FOLLOWUP-A-1:举报主题,流程与动态详情 reportSquare 同一套(utils/content-report.js)
   reportTopic() {
     if (app.ensureLoginFor && !app.ensureLoginFor('report', () => this.reportTopic(), { owner: this, target: () => [this.data.id] })) return; // 2026-10-24 游客写前登录
-    if (!this._canReport) return;
+    if (!this.data.canReportTopic) return;
     contentReport.reportTopic(this, app, this.data.id);
   },
   reportComment(e) {

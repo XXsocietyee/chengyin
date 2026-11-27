@@ -180,16 +180,21 @@ Page({
   },
 
   onShow() {
+    const fromPicker = this._pickerOpen;
+    this._pickerOpen = false;
     this._hidden = false;
     merchantTheme.merchantPageShow();
     const reducedMotion = readReducedMotion();
     if (this.data.reducedMotion !== reducedMotion) this.setData({ reducedMotion });
+    if (fromPicker) return;
     if (this._resumePrivateRead || (this._privateReadOwner !== undefined && this._privateReadOwner !== memberId(app))) {
       this._resumePrivateRead = false;
       this.retryLoadRegistration();
     }
   },
   onHide() {
+    // 选地点 / 选图会先 hide 再 show。不当成离开页面,否则在途的报名和门店读取被作废,回来还整页重拉。
+    if (this._pickerOpen) return;
     this._hidden = true;
     this._resumePrivateRead = this._registrationLoading || this._shopLoading;
     this._registrationLoading = false;
@@ -467,6 +472,7 @@ Page({
 
   choosePoiForNode() {
     const that = this;
+    that._pickerOpen = true;
     pickLocation({
       guideOnDeny: false,
       latitude: that.data.latitude, longitude: that.data.longitude,
@@ -504,6 +510,7 @@ Page({
     const cur = that.data.picUrl ? that.data.picUrl.split(',').filter(Boolean) : [];
     const remain = 9 - cur.length;
     if (remain <= 0) { toast('最多9张'); return; }
+    that._pickerOpen = true;
     app.chooseImage((res) => {
       that.setData({ picUrl: cur.concat(res).slice(0, 9).join(','), 'errors.picUrl': '' }, () => that._refreshDirty());
     }, remain);

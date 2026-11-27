@@ -152,8 +152,6 @@
     "pages/square/detail/index.js::replyId::A2",
     "pages/talent/list/index.js::merchantCity::A2",
     "pages/template/index.js::capsuleBottom::A1",
-    "pages/templatedetail/templatedetail.js::difficultyLabel::A1",
-    "pages/templatedetail/templatedetail.js::difficultyLetter::A1",
     "pages/templatedetail/templatedetail.js::selectedOption::A1",
     "pages/topic/components/project-host/index.js::anyDrawerOpen::A1",
     "pages/topic/components/project-join/index.js::anyDrawerOpen::A1",

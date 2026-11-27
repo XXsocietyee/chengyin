@@ -20,6 +20,12 @@ const { MAX_UPLOAD_FILE_SIZE } = require('../../../../../utils/transport/upload-
 const PREVIEW_SCALE = 8;
 const EXPORT_SCALE = 12;
 const RESULT_HOLD_MS = 2000;
+const PREVIEW_FAIL = '试听失败，请稍后重试';
+
+function voiceCopyExt(filePath) {
+  const match = String(filePath || '').match(/\.(mp3|m4a|wav)$/i);
+  return match ? match[0].toLowerCase() : '.mp3';
+}
 
 Component({
   properties: {
@@ -141,6 +147,9 @@ Component({
     },
 
     _teardown() {
+      // 离开组件:停掉正在播的声音,并作废还没回来的下载/复制。
+      this._previewEpoch = (this._previewEpoch || 0) + 1;
+      this._abortVoiceDownload();
       clearTimeout(this._voiceTimer);
       // L06-118:时长轮询也要停;关表单时销毁音频上下文,下次试听再建
       clearTimeout(this._durationTimer);
@@ -397,6 +406,8 @@ Component({
                 voiceFile: { path: file.path, name: file.name, size: file.size, duration: Math.round(duration) },
                 voiceFileText: file.name + ' · ' + Math.round(duration) + '″ · ' + (file.size / 1048576).toFixed(1) + 'MB',
               });
+              // 选中后立刻复制。微信会清掉 chooseMessageFile 的临时文件,试听不能靠它。
+              this._keepVoiceCopy(file.path, current);
             } else if (++tries < 40) this._durationTimer = setTimeout(read, 100);
             else {
               this.setData({ voiceBusy: false });
@@ -585,9 +596,151 @@ Component({
       audio.obeyMuteSwitch = false;
       audio.onEnded(() => { if (!this._destroyed) this.setData({ voicePlaying: false }); });
       audio.onStop(() => { if (!this._destroyed) this.setData({ voicePlaying: false }); });
-      audio.onError(() => { if (!this._destroyed) this.setData({ voicePlaying: false, voiceError: '试听失败，请稍后重试' }); });
+      // 失败只留固定文案,不把播放器异常原文写到界面上。
+      audio.onError(() => { if (!this._destroyed) this.setData({ voicePlaying: false, voiceError: PREVIEW_FAIL }); });
       this._audio = audio;
       return audio;
+    },
+
+    _previewFail() {
+      if (this._destroyed) return;
+      this.setData({ voicePlaying: false, voiceError: PREVIEW_FAIL });
+    },
+
+    _stopPreviewAudio() {
+      if (this._audio && typeof this._audio.stop === 'function') {
+        try { this._audio.stop(); } catch (e) { /* 离开后的停止失败不再提示 */ }
+      }
+    },
+
+    _abortVoiceDownload() {
+      const task = this._voiceDownload;
+      this._voiceDownload = null;
+      if (task && typeof task.abort === 'function') {
+        try { task.abort(); } catch (e) { /* 取消下载失败不影响停播 */ }
+      }
+    },
+
+    _voiceFileExists(filePath) {
+      if (!filePath) return false;
+      try {
+        const fs = typeof wx.getFileSystemManager === 'function' ? wx.getFileSystemManager() : null;
+        if (!fs || typeof fs.accessSync !== 'function') return false;
+        fs.accessSync(filePath);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    },
+
+    // 复制到用户目录。saveFile 会挪走临时文件,上传还要用原路径,所以这里只复制。
+    _copyVoiceFile(tempPath, done, fail) {
+      const notifyFail = () => { if (typeof fail === 'function') fail(); };
+      let fs = null;
+      let root = '';
+      try {
+        fs = typeof wx.getFileSystemManager === 'function' ? wx.getFileSystemManager() : null;
+        root = (wx.env && wx.env.USER_DATA_PATH) || '';
+      } catch (e) {
+        return false;
+      }
+      if (!fs || typeof fs.copyFile !== 'function' || !root || !tempPath) return false;
+      const dest = root + '/nnf-voice-' + Date.now() + '-' + ((this._voiceCopySeq = (this._voiceCopySeq || 0) + 1)) + voiceCopyExt(tempPath);
+      try {
+        fs.copyFile({
+          srcPath: tempPath,
+          destPath: dest,
+          success: () => {
+            try { done(dest); } catch (e) { notifyFail(); }
+          },
+          fail: () => notifyFail(),
+        });
+      } catch (e) {
+        return false;
+      }
+      return true;
+    },
+
+    _keepVoiceCopy(tempPath, current) {
+      this._copyVoiceFile(tempPath, (dest) => {
+        if (typeof current === 'function' && !current()) return;
+        if (this._destroyed) return;
+        if (!this.data.voiceFile || this.data.voiceFile.path !== tempPath) return;
+        this.setData({ 'voiceFile.savedPath': dest });
+      });
+    },
+
+    _playExistingFile(filePath, still) {
+      if (!still() || !this._voiceFileExists(filePath)) {
+        if (still()) this._previewFail();
+        else this._stopPreviewAudio();
+        return;
+      }
+      const audio = this._audioContext();
+      try {
+        audio.src = filePath;
+        audio.play();
+      } catch (e) {
+        this._previewFail();
+        return;
+      }
+      if (!still()) { this._stopPreviewAudio(); return; }
+      if (this.data.voiceError === PREVIEW_FAIL) return;
+      this.setData({ voicePlaying: true, voiceError: '' });
+    },
+
+    _downloadVoiceFile(url, still) {
+      if (!still()) return;
+      if (typeof wx.downloadFile !== 'function') { this._previewFail(); return; }
+      try {
+        this._voiceDownload = wx.downloadFile({
+          url,
+          success: (res) => {
+            this._voiceDownload = null;
+            if (!still()) { this._stopPreviewAudio(); return; }
+            const filePath = res && Number(res.statusCode) === 200 ? res.tempFilePath : '';
+            if (!filePath || !this._voiceFileExists(filePath)) { this._previewFail(); return; }
+            this._playExistingFile(filePath, still);
+          },
+          fail: () => {
+            this._voiceDownload = null;
+            if (still()) this._previewFail();
+          },
+        }) || null;
+      } catch (e) {
+        this._previewFail();
+      }
+    },
+
+    _downloadAssetVoice(assetId, still) {
+      if (!still()) return;
+      try {
+        app.sendRequest({
+          url: '/api/media/asset/' + assetId + '/preview',
+          method: 'GET',
+          hideLoading: true,
+          silentError: true,
+          success: (res) => {
+            if (!still()) return;
+            const data = res && res.data;
+            const url = data && data.authorPreviewUrl;
+            if (typeof url !== 'string' || !/^https:\/\//i.test(url)) { this._previewFail(); return; }
+            this._downloadVoiceFile(url, still);
+          },
+          fail: () => { if (still()) this._previewFail(); },
+          successStatusAbnormal: () => { if (still()) this._previewFail(); },
+        });
+      } catch (e) {
+        this._previewFail();
+      }
+    },
+
+    _playDownloadedSample(sample, still) {
+      if (!still()) return;
+      if (/^https:\/\//i.test(sample)) { this._downloadVoiceFile(sample, still); return; }
+      const asset = /^media-asset:([1-9][0-9]*)$/.exec(sample);
+      if (asset) { this._downloadAssetVoice(asset[1], still); return; }
+      this._previewFail();
     },
 
     playVoice() {
@@ -598,13 +751,23 @@ Component({
         audio.stop();
         return;
       }
-      const src = (this.data.voiceFile && this.data.voiceFile.path) || this.data.voiceSample;
-      if (!src) return;
-      // L06-035:media-asset:N 是素材引用不是可播放地址(客户端解不了),不拿它去播,如实说明
-      if (/^media-asset:/.test(src)) { this.setData({ voiceError: '已保存的声音暂不支持在这里试听' }); return; }
-      audio.src = src;
-      audio.play();
-      this.setData({ voicePlaying: true });
+      // L06-035:不把 chooseMessageFile 的临时路径交给播放器,微信会删掉它,试听就断。
+      // 只播仍在的已保存副本,或下载后 access 仍在的文件。失败不展示异常原文。
+      this._previewEpoch = (this._previewEpoch || 0) + 1;
+      const epoch = this._previewEpoch;
+      const still = () => !this._destroyed && this._previewEpoch === epoch && original.current();
+      this._abortVoiceDownload();
+      const saved = this.data.voiceFile && this.data.voiceFile.savedPath;
+      if (saved && this._voiceFileExists(saved)) { this._playExistingFile(saved, still); return; }
+      const temp = this.data.voiceFile && this.data.voiceFile.path;
+      const sample = String(this.data.voiceSample || '');
+      if (temp && temp !== saved && this._copyVoiceFile(temp, (dest) => {
+        if (!still()) { this._stopPreviewAudio(); return; }
+        if (this.data.voiceFile && this.data.voiceFile.path === temp) this.setData({ 'voiceFile.savedPath': dest });
+        if (this._voiceFileExists(dest)) this._playExistingFile(dest, still);
+        else this._playDownloadedSample(sample, still);
+      }, () => { if (still()) this._playDownloadedSample(sample, still); })) return;
+      this._playDownloadedSample(sample, still);
     },
 
     // ===== 弹层与结果 =====
