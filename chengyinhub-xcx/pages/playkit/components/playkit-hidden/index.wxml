@@ -6,7 +6,7 @@
 
     <view class="hd__scene pe pe--zoom" bindtap="onTapScene"
           hover-class="hd__scene--press" hover-stay-time="60"
-          aria-role="button" aria-label="在图上点中藏起来的目标">
+          aria-role="button" aria-busy="{{submitting}}" aria-label="在图上点中藏起来的目标">
       <!-- 画框按底图原比例收在台面里(不裁),坐标都量这个框 —— 编辑页标点量的也是原图,
            两边才是同一把尺。以前横图塞进竖台面被裁掉一半多,标在两侧的点玩家根本看不见。 -->
       <view class="hd__frame" style="{{frame}}">

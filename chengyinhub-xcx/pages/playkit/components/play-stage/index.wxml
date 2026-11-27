@@ -6,7 +6,7 @@
      排在流里、天然把内容顶下去(见 .tlimit);我们为了让各屏自己刷底色做成了绝对定位,
      那就得手动让位 —— 2026-09-16 实证:限时条接通那天起,它正好压在题干上。 -->
 <view class="st st-tapsurface skin-{{skin || 'none'}} {{verdict ? 'st--verdict' : ''}} {{flash ? 'st--flash' : ''}}" wx:if="{{show}}" bindtap="onStageTap" hover-class="none" style="--pk-top:{{contentTop}}px;--pe-go:{{peGo}};--pe-on:{{peOn}}">
-  <view class="st__back" style="top:{{topPad + 12}}px" bindtap="onBack"
+  <view class="st__back" style="top:{{topPad + 12}}px" catchtap="onBack"
         aria-role="button" aria-label="退出这个玩法"
         hover-class="st__press" hover-stay-time="80"><cy-icon name="back" size="40" /></view>
   <!-- 玩法外壳(2026-11-21):整屏玩法的纸纹 / 暗角跟主题外观走(--lk-tex,look-tokens.wxss);
@@ -45,6 +45,7 @@
                      bind:tick="onCalibrateTick" bind:done="onCalibrated" />
   <!-- 答错一下淡红闪(nudge);2026-11-24 业主:不要整屏抖动,轻轻闪一下红可以 -->
   <view class="st__flash" aria-hidden="true"></view>
+  <view class="st__cue" wx:if="{{doneTap && !verdict}}" aria-hidden="true">轻点任意处继续</view>
   <cy-play-verdict show="{{verdict !== ''}}" kind="{{verdict}}" neutral="{{verdictNeutral}}"
                    timed-out="{{timedOut}}" text="{{verdictText}}" />
 </view>

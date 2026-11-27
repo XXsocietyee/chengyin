@@ -48,8 +48,8 @@
     </view>
   </view>
 
-  <view wx:if="{{phase === 'play' && !finished}}" class="g-btn {{ready ? '' : 'g-btn--disabled'}} pe pe--up" bindtap="onConfirm"
-        aria-role="button" aria-label="就是这一轨" aria-disabled="{{!ready}}" hover-class="g-btn--press" hover-stay-time="80">
+  <view wx:if="{{phase === 'play' && !finished}}" class="g-btn {{ready && !submitting ? '' : 'g-btn--disabled'}} pe pe--up" bindtap="onConfirm"
+        aria-role="button" aria-label="{{submitting ? '提交中' : '就是这一轨'}}" aria-disabled="{{!ready || submitting}}" hover-class="g-btn--press" hover-stay-time="80">
     就是这一轨
   </view>
 

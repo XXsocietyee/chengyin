@@ -47,7 +47,7 @@
 <!-- 取景层(现场感 S1):作者配了轮廓才进得来 —— 镜头里浮着一条轮廓，把实物套进去再按快门。
      ⚠️ 与 cy-play-stage 平级、不套在它里面:台面有 overflow:hidden 和抖动关键帧，
      原生 camera 的同层渲染压在带动画的祖先上最容易翻车(2026-09-22 记在契约里)。 -->
-<view class="pcv" wx:if="{{framing}}">
+<view class="pcv" wx:if="{{framing}}" style="--pcv-top:{{viewfinderTop}}px">
   <camera class="pcv__cam" device-position="back" flash="off" binderror="onFrameError"></camera>
   <!-- 轮廓加载失败只是不画框(下面 binderror 收掉)，绝不拦玩家拍这一张 -->
   <image wx:if="{{!outlineFailed}}" class="pcv__outline" src="{{frameUrl}}" mode="aspectFit"

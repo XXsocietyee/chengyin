@@ -45,6 +45,7 @@ Component({
     passed: { type: Boolean, value: false },
     lastPickId: { type: String, value: '' },
     answerId: { type: String, value: '' },
+    failureSeq: { type: Number, value: 0 },
   },
   data: {
     // 同 playkit-qa:派生数据换键名,别写回被监听的 items —— 那会自触发死循环
@@ -75,6 +76,10 @@ Component({
       this._begunSig = sig;
       const stage = this.selectComponent('#cy-play-stage');
       if (stage) stage.begin();
+    },
+    failureSeq: function (value) {
+      if (!value || this.data.revealed || !this.data.submitted) return;
+      this.setData({ submitted: false });
     },
   },
   methods: {

@@ -108,6 +108,7 @@ Component({
     shopAnswers: { type: Boolean, value: true },
     /* 第十一轮 g4:这一轮已经「不选，继续」过(服务端 predict.skipped)。不再邀请选,也不出「就选这个」 */
     skipped: { type: Boolean, value: false },
+    failureSeq: { type: Number, value: 0 },
   },
   data: {
     // L02-004
@@ -117,6 +118,13 @@ Component({
     revealKind: '', revealHead: '', revealText: '',
   },
   observers: {
+    failureSeq: function (value) {
+      if (!value || this.data.myOptionKey || this.data.skipped) return;
+      if (this.data.skipping) { this.setData({ skipping: false }); return; }
+      if (!this.data.committed) return;
+      this.setData({ committed: false });
+      if (this.data.show && !this.data.reducedMotion) this._spin();
+    },
     'show, settleStatus, settledOption, won, shopAnswers': function (show) {
       if (!show) return;
       // 字段写死成字面量:动态 setData 门禁核不出写了哪些顶层字段

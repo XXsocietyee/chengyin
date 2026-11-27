@@ -585,7 +585,7 @@ function pickPlayKit(view, now) {
       if (accusation.outcome) accusation.terminal = false;
       return accusation;
     }
-    if (name === 'hangman') return Object.assign(base, questo.hangmanKit(seg));
+    if (name === 'hangman') return Object.assign(base, questo.hangmanKit(seg), { failureSeq: 0 });
     if (name === 'qa') {
       const MODE = { TYPE: 'type', PICK: 'pick', SHOT: 'shot' };
       return Object.assign(base, {
@@ -668,6 +668,7 @@ function pickPlayKit(view, now) {
         finished: !!seg.finished,
         passed: !!seg.passed,
         answerId: seg.answerId || '', lastPickId: seg.lastPickId || '',
+        failureSeq: 0,
       });
     }
     if (name === 'album') return Object.assign(base, albumBeforeCard
@@ -709,6 +710,7 @@ function pickPlayKit(view, now) {
         shopAnswers: seg.shopAnswers !== false,
         // 第十一轮 g4:已「不选，继续」过,卡面不再邀请选
         skipped: seg.skipped === true,
+        failureSeq: 0,
       });
     }
     if (name === 'random') {
@@ -797,6 +799,7 @@ function pickPlayKit(view, now) {
       reveal: seg.submitted ? (seg.reveal || '') : '',
       // 第十二轮 k8 N2:没过的终局屏也给出你猜的数和真值(不带结果反馈时那一行本来就有)
       ...(base.terminal ? { terminalDetail: estimateTerminalDetail(seg) } : {}),
+      failureSeq: 0,
     });
   }
   /* ===== R3 排序 / 连线 / 分类 =====
@@ -815,6 +818,7 @@ function pickPlayKit(view, now) {
       lastCorrect: !!seg.lastCorrect,
       // 服务端记的上一次提交顺序:排对之后重进 / 静默回来,台面按它摆,不回到题面的打乱序(实走 A14 复核)
       lastOrder: Array.isArray(seg.lastOrder) ? seg.lastOrder : [],
+      failureSeq: 0,
     });
   }
   /* 以物换物:题面全是公开的(物品 / 开局背包 / 目标 / 交换卡);每张卡的 fb 服务端不下发,
@@ -868,6 +872,7 @@ function pickPlayKit(view, now) {
       lastCorrect: !!seg.lastCorrect,
       lastTrackId: seg.lastTrackId || '',
       lastFeedback: seg.lastFeedback || '',
+      failureSeq: 0,
     });
   }
   if (name === 'match') {
@@ -878,6 +883,7 @@ function pickPlayKit(view, now) {
       attempts: seg.attempts || 0,
       passed: !!seg.passed,
       lastCorrect: !!seg.lastCorrect,
+      failureSeq: 0,
     });
   }
   if (name === 'classify') {
@@ -904,6 +910,7 @@ function pickPlayKit(view, now) {
       // 能错几次。0 = 不限;用完之后服务端直接拒收,这里只负责把点数画出来
       maxTries: seg.maxTries || 0,
       used: Number(seg.missCount) || 0,  // L02-005
+      failureSeq: 0,
     });
   }
   if (name === 'coinFlip') {

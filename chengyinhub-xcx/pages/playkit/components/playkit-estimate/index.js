@@ -115,18 +115,25 @@ Component({
     guess: { type: Number, value: 0 },
     answer: { type: Number, value: 0 },
     reveal: { type: String, value: '' },
+    failureSeq: { type: Number, value: 0 },
   },
   data: {
     ticks: [],
     pickerValue: [0],
     curText: '0', prevText: '', nextText: '',
     locked: false,
+    submitting: false,
     result: null,
     retry: null,
     used: 0,
     hit: false,
   },
   observers: {
+    failureSeq: function (value) {
+      if (!value || this.data.locked) return;
+      this._pending = false;
+      if (this.data.submitting) this.setData({ submitting: false });
+    },
     'submitted, tier, guess, answer, reveal, unit, attempts': function (submitted, tier, guess, answer, reveal, unit, attempts) {
       const result = resultLine({ submitted, tier, guess, answer, reveal, unit });
       const retry = retryLine({ submitted, tier, attempts });
@@ -134,7 +141,7 @@ Component({
       const fresh = !!this._pending && Number(attempts) > (this._seenAttempts || 0);
       if (fresh) this._pending = false;
       this._seenAttempts = Number(attempts) > 0 ? Number(attempts) : 0;
-      this.setData({ retry, used: usedTries(attempts, tier), hit: !!result && tier === 'HIT' });
+      this.setData({ retry, used: usedTries(attempts, tier), hit: !!result && tier === 'HIT', submitting: false });
       // 新的一次没猜中:台面淡红闪一下(stage.nudge);新的一次猜中:台面的「通过」判定屏,整屏点一下继续
       const stage = fresh && tier && typeof this.selectComponent === 'function' ? this.selectComponent('#cy-play-stage') : null;
       if (stage && tier !== 'HIT' && stage.nudge) stage.nudge();
@@ -147,12 +154,12 @@ Component({
       if (result && this._ticks) { const g = nearestIndex(this._ticks, guess); this.setData({ pickerValue: [g] }); this._paint(g); }
     },
     'show, min, max': function (show, min, max) {
-      if (!show) { this._begunSig = null; return; }
+      if (!show) { this._begunSig = null; if (this.data.submitting) this.setData({ submitting: false }); return; }
       const ticks = buildTicks(min, max);
       const i = (this.data.result || this.data.retry) ? nearestIndex(ticks, this.data.guess) : initialIndex(ticks);
       this._ticks = ticks;
       this.setData({
-        ticks, pickerValue: [i], locked: !!this.data.result,
+        ticks, pickerValue: [i], locked: !!this.data.result, submitting: false,
       });
       this._paint(i);
       // L02-036
@@ -193,11 +200,12 @@ Component({
     },
 
     onSubmit() {
-      if (this.data.locked) return;
+      if (this.data.locked || this.data.submitting) return;
       const guess = (this._ticks || [])[this._index];
       if (guess == null) return;
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       this._pending = true;
+      this.setData({ submitting: true });
       this.triggerEvent('submit', { guess });
     },
 

@@ -247,7 +247,8 @@
 
 /* 证据表(qa.table):规则签在上,记录表在中,自己滚(窄屏横竖都在表里滚,不压底部按钮)。
    划掉 = 删除线 + 变淡;选中 = 右侧圆点实心;错 = 那一行与那条规则染危险红(status-danger);对 = 成功绿(status-success)。不加动画,只过渡颜色与透明度。 */
-.qa__tb { display: flex; flex-direction: column; gap: var(--cy-space-3); width: 100%; padding-bottom: 176rpx; box-sizing: border-box; } /* 底部「确认选择」按钮的位置留出来,表不压在按钮下面 */
+.qa__tb { display: flex; flex-direction: column; gap: var(--cy-space-3); width: 100%; box-sizing: border-box; }
+.qa__tb--inline .qa__grid { max-height: none; }
 .qa__rules { display: flex; flex-wrap: wrap; gap: var(--cy-space-2); }
 .qa__rule {
   display: flex; align-items: center; gap: var(--cy-space-1-5);
@@ -264,12 +265,12 @@
 .qa__rule.is-hot .qa__rule-k { color: var(--cy-color-status-danger); }
 
 .qa__grid { width: 100%; max-height: 58vh; }
-.qa__grid-in { display: flex; flex-direction: column; width: 100%; }
+.qa__grid-in { display: flex; flex-direction: column; min-width: 100%; width: max(100%, calc(var(--qa-cols, 3) * 160rpx + 88rpx)); }
 .qa__tr { display: flex; align-items: stretch; border-bottom: 1rpx solid var(--soft); }
 .qa__tr--h { border-top: 1rpx solid var(--soft); font-size: var(--cy-type-caption); font-weight: 600; color: var(--sub); }
 .qa__td {
-  flex: 1 1 0; min-width: 0; padding: var(--cy-space-2) var(--cy-space-1-5); box-sizing: border-box; /* 各列分屏宽、字换行:选择圆点那一列始终在屏内 */
-  word-break: break-all; line-height: 1.4;
+  flex: 1 1 0; min-width: 160rpx; padding: var(--cy-space-2) var(--cy-space-1-5); box-sizing: border-box; /* 窄屏每列保底 160rpx,4 列以上真横滚不竖排碎字 */
+  word-break: break-word; line-height: 1.4;
 }
 .qa__tr--h .qa__td { display: flex; align-items: center; }
 .qa__cells {
@@ -277,7 +278,8 @@
   font-size: var(--cy-type-body); color: var(--ink);
   transition: opacity .2s ease, color .18s ease;
 }
-.qa__pick-h, .qa__radio { flex: none; width: 88rpx; }
+.qa__pick-h, .qa__radio { flex: none; width: 88rpx; border-left: 1rpx solid var(--soft); box-sizing: border-box; }
+.qa__pick-h { display: flex; align-items: center; justify-content: center; }
 .qa__radio { min-height: 88rpx; display: flex; align-items: center; justify-content: center; transition: opacity .2s ease; }
 .qa__dot { width: 36rpx; height: 36rpx; border-radius: 50%; border: 3rpx solid var(--sub); box-sizing: border-box; }
 .qa__tr.is-struck .qa__cells { text-decoration: line-through; opacity: .38; }
@@ -289,8 +291,10 @@
 .qa__tr.is-right .qa__cells { color: var(--cy-color-status-success); font-weight: 700; }
 .qa__tr.is-right .qa__dot { border: 12rpx solid var(--cy-color-status-success); }
 .qa__tr.is-dim .qa__cells { opacity: .5; }
+.qa__tb-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--cy-space-2); }
+.qa__tb-cue { font-size: var(--cy-type-caption); color: var(--sub); opacity: .72; }
 .qa__restore {
-  align-self: flex-end; min-height: 88rpx; display: flex; align-items: center;
+  margin-left: auto; min-height: 88rpx; display: flex; align-items: center;
   font-size: var(--cy-type-label); color: var(--sub); text-decoration: underline;
 }
 .qa--reduced .qa__cells, .qa--reduced .qa__radio, .qa--reduced .qa__rule { transition: none; }

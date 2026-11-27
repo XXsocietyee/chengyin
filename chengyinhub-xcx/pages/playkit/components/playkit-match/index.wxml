@@ -41,8 +41,8 @@
     </view>
   </view>
   <!-- 2026-11-24 业主:除了答题确认不留按钮 —— 过了之后整屏点一下继续(台面 done-tap),不再出「继续」钮 -->
-  <view wx:if="{{verdict !== 'ok'}}" class="g-btn {{pairedCount >= total && total > 0 && verdict !== 'ok' ? '' : 'g-btn--disabled'}} pe pe--up" bindtap="onSubmit"
-        aria-role="button" aria-label="提交连好的线" hover-class="g-btn--press" hover-stay-time="80">
-    连好了
+  <view wx:if="{{verdict !== 'ok'}}" class="g-btn {{pairedCount >= total && total > 0 && verdict !== 'ok' && !submitting ? '' : 'g-btn--disabled'}} pe pe--up" bindtap="onSubmit"
+        aria-role="button" aria-label="{{submitting ? '提交中' : '提交连好的线'}}" aria-disabled="{{pairedCount < total || !(total > 0) || submitting}}" hover-class="g-btn--press" hover-stay-time="80">
+    {{submitting ? '提交中…' : '连好了'}}
   </view>
 </cy-play-stage>

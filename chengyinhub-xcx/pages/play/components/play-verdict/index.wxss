@@ -94,6 +94,16 @@
   font-family: var(--cy-story-font, 'CyStoryHand', -apple-system, "PingFang SC", "Noto Sans SC", sans-serif); /* ds-ok 字族名同 story-font.js */
 }
 .pv__remember { margin-top: var(--cy-space-3); font-size: var(--cy-type-caption); color: rgba(255, 255, 255, .72); letter-spacing: .04em; } /* ds-ok 整屏色块上的弱白字 */
+.pv__cue {
+  position: absolute; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + 64rpx);
+  text-align: center; font-size: var(--cy-type-caption); letter-spacing: 2rpx;
+  color: rgba(255, 255, 255, .72); /* ds-ok 整屏色块上的弱白提示 */
+  opacity: 0;
+  transition: opacity var(--cy-motion-read-fade, 160ms) var(--cy-ease) var(--cy-motion-read-transition, 320ms);
+}
+.pv--on .pv__cue { opacity: 1; }
+.pv--reduced .pv__cue { transition: none; opacity: 1; }
+.pv--closable .pv__cue { color: var(--pk-embed-sub, var(--cy-color-text-secondary)); }
 
 /* 减动效:不淡入、不闪,直接是结果那一屏。
    ⚠️ 用类兜底不用 @media (prefers-reduced-motion):小程序里那条媒体查询不生效,

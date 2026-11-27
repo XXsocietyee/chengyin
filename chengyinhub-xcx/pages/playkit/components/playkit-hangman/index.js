@@ -85,34 +85,52 @@ Component({
     wrongFeedback: { type: String, value: '' },
     howto: { type: String, value: '' },
     referenceUrl: { type: String, value: '' },   // CG-10-D-3:看不清时的资料图(内容配了才有)        // CG-01-P2-5:本站填格说明(服务端没给就用通用一句)
+    failureSeq: { type: Number, value: 0 },
   },
-  data: { groups: [], active: -1, pop: -1, typedText: '', focused: false, cursor: 0, blankCount: 0, verdict: '', canSubmit: false,
+  data: { groups: [], active: -1, pop: -1, typedText: '', focused: false, cursor: 0, blankCount: 0, overLimit: false, submitting: false, verdict: '', canSubmit: false,
     poolOn: false, poolRows: [], canClear: false, howtoOpen: false, DEFAULT_HOWTO: '一格填一个字或字母；拼音不写声调，ü 用 V 代替。' },
   observers: {
+    failureSeq: function (value) {
+      if (!value || this.data.solved) return;
+      this._pending = false;
+      if (this.data.poolOn) {
+        if (this.data.submitting) this.setData({ submitting: false });
+        this._paintPool(this.data.verdict, this.data.active, -1);
+        return;
+      }
+      const canSubmit = !this.data.overLimit && !!hangmanPayload(this.data.slots, this._typed, '');
+      this.setData({ submitting: false, canSubmit });
+    },
     'show, slots, solved, inputMode, pool': function (show, slots, solved, inputMode, pool) {
       // L02-037
       if (!show) {
         this._typed = null; this._pending = false; this._pool = null; this._poolSlots = null; this._clearPop();
-        if (this.data.typedText || this.data.verdict || this.data.active !== -1) this.setData({ typedText: '', verdict: '', active: -1 });
+        if (this.data.typedText || this.data.verdict || this.data.active !== -1 || this.data.overLimit || this.data.submitting) {
+          this.setData({ typedText: '', verdict: '', active: -1, overLimit: false, submitting: false });
+        }
         return;
       }
       if (inputMode === 'pool') { this._syncPool(slots, solved, pool); return; }
-      if (this._kbTitle !== this.data.title) { this._kbTitle = this.data.title; this._typed = null; if (this.data.typedText) this.setData({ typedText: '', verdict: '' }); }
+      if (this._kbTitle !== this.data.title) { this._kbTitle = this.data.title; this._typed = null; if (this.data.typedText || this.data.overLimit) this.setData({ typedText: '', verdict: '', overLimit: false }); }
       /* 刚交过、服务端回来仍未解开:提示一句,保留已填的格子让玩家直接改(F02;服务端不给逐格对错) */
       const wrong = this._pending && !solved;
       this._pending = false;
       if (this._typed == null) { this._typed = distribute(slots, initialText(slots)); }
       const cells = paintCells(slots, this._typed);
       const text = this.data.typedText || initialText(slots);
+      const limit = editable(slots).length;
+      const overLimit = limit > 0 && codePoints(text).filter((c) => c.trim()).length > limit;
       this.setData({
         poolOn: false,
         groups: groupCells(cells),
-        blankCount: editable(slots).length,
+        blankCount: limit,
+        overLimit,
+        submitting: false,
         typedText: text,
         verdict: wrong ? 'no' : (solved ? 'ok' : this.data.verdict),
         active: solved ? -1 : this.data.active,
         pop: -1,
-        canSubmit: !solved && !!hangmanPayload(slots, this._typed, ''),
+        canSubmit: !solved && !overLimit && !!hangmanPayload(slots, this._typed, ''),
       });
       if (solved) motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       else if (wrong) { motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'light' }); this._nudgeStage(); }
@@ -153,6 +171,8 @@ Component({
         groups: groupCells(v.cells),
         poolRows: v.rows,
         blankCount: letterPool.fillable(this.data.slots).length,
+        overLimit: false,
+        submitting: false,
         canSubmit: !this.data.solved && !!letterPool.hangmanPayload(this._pool || letterPool.empty(), this.data.slots),
         canClear: !this.data.solved && v.filled > 0,
         verdict,
@@ -212,6 +232,9 @@ Component({
     onInput(e) {
       const slots = this.data.slots;
       const value = String(e.detail.value || '');
+      const chars = codePoints(value).filter((c) => c.trim());
+      const limit = editable(slots).length;
+      const overLimit = limit > 0 && chars.length > limit;
       const typed = distribute(slots, value);
       const prev = this._typed || {};
       // 刚填上的那一格弹一下(只在多了字时;删字不弹)
@@ -223,19 +246,26 @@ Component({
       this.setData({
         groups: groupCells(cells), verdict: '',
         typedText: value,
+        overLimit,
         active: cellAt(slots, filled),
         pop: popped,
-        canSubmit: !!hangmanPayload(slots, typed, ''),
+        canSubmit: !this.data.submitting && !overLimit && !!hangmanPayload(slots, typed, ''),
       });
       this._clearPop();
       if (popped >= 0) this._popT = setTimeout(() => { this._popT = null; if (this.data.pop === popped) this.setData({ pop: -1 }); }, POP_MS);
     },
     onSubmit() {
-      if (this.data.solved) return;
+      if (this.data.solved || this.data.submitting) return;
+      if (!this.data.poolOn) {
+        const limit = editable(this.data.slots).length;
+        const count = codePoints(this.data.typedText).filter((c) => c.trim()).length;
+        if (this.data.overLimit || (limit > 0 && count > limit)) return;
+      }
       const payload = this.data.poolOn ? letterPool.hangmanPayload(this._pool || letterPool.empty(), this.data.slots)
         : hangmanPayload(this.data.slots, this._typed, '');
       if (!payload) return;
       this._pending = true;
+      this.setData({ submitting: true, canSubmit: false });
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       this.triggerEvent('submit', payload);
     },
