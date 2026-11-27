@@ -361,18 +361,86 @@
     }
   ],
   "preloadRule": {
-    "pages/member/index/index": { "network": "all", "packages": ["subpackageA"] },
-    "pages/index/index": { "network": "wifi", "packages": ["subpackageTopic"] },
-    "pages/topic/index/index": { "network": "wifi", "packages": ["subpackageMember", "subpackagePlaykit"] },
-    "pages/play/index": { "network": "all", "packages": ["subpackagePlaykit", "subpackageRoam"] },
-    "pages/play/poi-challenge/index": { "network": "all", "packages": ["subpackagePlaykit"] },
-    "subpackageMember/signup/index": { "network": "all", "packages": ["subpackageActivity"] },
-    "subpackageMember/market/membership/index": { "network": "all", "packages": ["subpackagePass"] },
-    "subpackageMember/market/passes/index": { "network": "all", "packages": ["subpackagePass"] },
-    "pages/roam/index": { "network": "all", "packages": ["subpackageRoam"] },
-    "pages/userinfo/userinfo": { "network": "wifi", "packages": ["subpackageMerchant"] },
-    "pages/publish/fabu/index": { "network": "all", "packages": ["subpackagePublishkit"] },
-    "pages/publish/temp/index": { "network": "all", "packages": ["subpackagePublishkit"] }
+    "pages/member/index/index": {
+      "network": "all",
+      "packages": [
+        "subpackageA"
+      ]
+    },
+    "pages/index/index": {
+      "network": "wifi",
+      "packages": [
+        "subpackageTopic"
+      ]
+    },
+    "pages/topic/index/index": {
+      "network": "wifi",
+      "packages": [
+        "subpackageMember",
+        "subpackagePlaykit"
+      ]
+    },
+    "pages/play/index": {
+      "network": "all",
+      "packages": [
+        "subpackagePlaykit",
+        "subpackageRoam"
+      ]
+    },
+    "pages/play/poi-challenge/index": {
+      "network": "all",
+      "packages": [
+        "subpackagePlaykit"
+      ]
+    },
+    "subpackageMember/signup/index": {
+      "network": "all",
+      "packages": [
+        "subpackageActivity"
+      ]
+    },
+    "subpackageMember/market/membership/index": {
+      "network": "all",
+      "packages": [
+        "subpackagePass"
+      ]
+    },
+    "subpackageMember/market/passes/index": {
+      "network": "all",
+      "packages": [
+        "subpackagePass"
+      ]
+    },
+    "pages/roam/index": {
+      "network": "all",
+      "packages": [
+        "subpackageRoam"
+      ]
+    },
+    "pages/userinfo/userinfo": {
+      "network": "wifi",
+      "packages": [
+        "subpackageMerchant"
+      ]
+    },
+    "pages/publish/fabu/index": {
+      "network": "all",
+      "packages": [
+        "subpackagePublishkit"
+      ]
+    },
+    "pages/publish/temp/index": {
+      "network": "all",
+      "packages": [
+        "subpackagePublishkit"
+      ]
+    },
+    "pages/publish/activity/index": {
+      "network": "all",
+      "packages": [
+        "subpackagePublishkit"
+      ]
+    }
   },
   "__usePrivacyCheck__": true,
   "requiredPrivateInfos": [

@@ -14,8 +14,8 @@
  * 不新造格式 —— 换格式要动后端契约,那是另一件事。
  */
 
-const cal = require('../../../utils/calendar.js')
-const tr = require('../../../utils/timerange.js')
+const cal = require('./calendar.js')
+const tr = require('./timerange.js')
 
 /**
  * calendar.parse 只认长相(\d{4}-\d{2}-\d{2}),不认日历:'2026-13-01'、'2026-02-30' 都能过。

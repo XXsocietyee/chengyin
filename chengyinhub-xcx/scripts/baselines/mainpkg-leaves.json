@@ -193,42 +193,42 @@
     },
     {
       "from": "components/cy/chips/index.js",
-      "to": "pages/publish/components/chips/index.js",
+      "to": "pages/publishkit/components/chips/index.js",
       "sourceBlob": "84218538b63e1d343f5a755e2646693214a4d3f0"
     },
     {
       "from": "components/cy/chips/index.json",
-      "to": "pages/publish/components/chips/index.json",
+      "to": "pages/publishkit/components/chips/index.json",
       "sourceBlob": "357cf73347c36da494a686986585bba21cf11e92"
     },
     {
       "from": "components/cy/chips/index.wxml",
-      "to": "pages/publish/components/chips/index.wxml",
+      "to": "pages/publishkit/components/chips/index.wxml",
       "sourceBlob": "68b12f41a2d35e7d527eb43f923952bf75166ebc"
     },
     {
       "from": "components/cy/chips/index.wxss",
-      "to": "pages/publish/components/chips/index.wxss",
+      "to": "pages/publishkit/components/chips/index.wxss",
       "sourceBlob": "16e80e39241d16b2e785337d20889039a363afcd"
     },
     {
       "from": "components/cy/choice-sheet/index.js",
-      "to": "pages/publish/components/choice-sheet/index.js",
+      "to": "pages/publishkit/components/choice-sheet/index.js",
       "sourceBlob": "47f1610a979f835e681816f2243e0523d4b19d9c"
     },
     {
       "from": "components/cy/choice-sheet/index.json",
-      "to": "pages/publish/components/choice-sheet/index.json",
+      "to": "pages/publishkit/components/choice-sheet/index.json",
       "sourceBlob": "de5ba4fb0bb33043e3282334f6eb1cac6877868a"
     },
     {
       "from": "components/cy/choice-sheet/index.wxml",
-      "to": "pages/publish/components/choice-sheet/index.wxml",
+      "to": "pages/publishkit/components/choice-sheet/index.wxml",
       "sourceBlob": "5b968e8845cfb100e8d51e1eb88c3817bb0a5fe8"
     },
     {
       "from": "components/cy/choice-sheet/index.wxss",
-      "to": "pages/publish/components/choice-sheet/index.wxss",
+      "to": "pages/publishkit/components/choice-sheet/index.wxss",
       "sourceBlob": "246bcfca307729f3bc9195ded3cbfcd17738399e"
     },
     {
@@ -613,22 +613,22 @@
     },
     {
       "from": "components/cy/sheet-nav/index.js",
-      "to": "pages/publish/components/sheet-nav/index.js",
+      "to": "pages/publishkit/components/sheet-nav/index.js",
       "sourceBlob": "98a592ebe0bef2c414a3c1db4d6316a580830ee9"
     },
     {
       "from": "components/cy/sheet-nav/index.json",
-      "to": "pages/publish/components/sheet-nav/index.json",
+      "to": "pages/publishkit/components/sheet-nav/index.json",
       "sourceBlob": "357cf73347c36da494a686986585bba21cf11e92"
     },
     {
       "from": "components/cy/sheet-nav/index.wxml",
-      "to": "pages/publish/components/sheet-nav/index.wxml",
+      "to": "pages/publishkit/components/sheet-nav/index.wxml",
       "sourceBlob": "b4bfc0d2f7c194d627cbab63fbcd3d8106938185"
     },
     {
       "from": "components/cy/sheet-nav/index.wxss",
-      "to": "pages/publish/components/sheet-nav/index.wxss",
+      "to": "pages/publishkit/components/sheet-nav/index.wxss",
       "sourceBlob": "41d574712019230e7bbc8424f3f9a7c2d41eaa2c"
     },
     {
@@ -653,22 +653,22 @@
     },
     {
       "from": "components/cy/swipe-row/index.js",
-      "to": "pages/publish/components/swipe-row/index.js",
+      "to": "pages/publishkit/components/swipe-row/index.js",
       "sourceBlob": "40287fdc46540f8058a0c25fb1b00ae7197ed3b2"
     },
     {
       "from": "components/cy/swipe-row/index.json",
-      "to": "pages/publish/components/swipe-row/index.json",
+      "to": "pages/publishkit/components/swipe-row/index.json",
       "sourceBlob": "a89ef4dbeefa01f5cd7971973aa4db6498d139f7"
     },
     {
       "from": "components/cy/swipe-row/index.wxml",
-      "to": "pages/publish/components/swipe-row/index.wxml",
+      "to": "pages/publishkit/components/swipe-row/index.wxml",
       "sourceBlob": "549eb19ef8320a62a3af065c195564aa7e99c74b"
     },
     {
       "from": "components/cy/swipe-row/index.wxss",
-      "to": "pages/publish/components/swipe-row/index.wxss",
+      "to": "pages/publishkit/components/swipe-row/index.wxss",
       "sourceBlob": "332b79023479f9a7c32ee6c10708004823fe2b5c"
     },
     {

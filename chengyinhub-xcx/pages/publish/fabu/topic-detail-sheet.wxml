@@ -234,6 +234,7 @@
     </view>
 
     <view class="node-card" id="fieldBingo" bindtap="openThemeBingo" aria-role="button" hover-class="cy-pressed" hover-stay-time="80"><view class="node-card__row"><view class="node-card__ico"><view class="rt-grid-glyph"><view wx:for="{{[1,2,3,4,5,6,7,8,9]}}" wx:key="*this"></view></view></view><view class="node-card__main"><text class="node-card__title">宾果九宫格</text></view><view class="node-pill">配置<cy-icon name="chevron-right" size="24" /></view></view></view>
+    <view class="node-card" wx:if="{{runtimeScenes.length}}" id="fieldRuntimeScenes" bindtap="openRuntimeScenes" aria-role="button" hover-class="cy-pressed" hover-stay-time="80"><view class="node-card__row"><view class="node-card__ico"><cy-icon name="settings" size="32" /></view><view class="node-card__main"><text class="node-card__title">场景与玩法调节</text></view><view class="node-pill"><text>{{runtimeScenes.length}} 个场景</text><cy-icon name="chevron-right" size="24" /></view></view></view>
     <!-- 举办方式。设计源码里这张卡是「需要商家参与 / 发布到创意广场」两个开关,
          但商家承接在本仓是【章节级】字段、且发布后才配得准(招商要等商家看得到主题),
          主题层没有这个开关 —— 不凭空造一个点了不生效的假开关,只留真有的那两项。 -->

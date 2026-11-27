@@ -13,7 +13,7 @@
 //   · 本文件             只做属性 → 数据的编排。
 // **格子结构只构建一次,点选只 setData 两个日期字符串** —— 六个月约 180 格,
 // 若每次点选都把整片 class 过桥一遍就是跨线程反模式。
-const cal = require('../../../../../utils/calendar.js')
+const cal = require('../../../utils/calendar.js')
 const reducedMotionBehavior = require('../../../../../behaviors/reduced-motion.js')
 
 const WEEK_MON = ['一', '二', '三', '四', '五', '六', '日']

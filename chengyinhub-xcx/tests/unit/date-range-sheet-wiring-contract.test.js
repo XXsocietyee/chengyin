@@ -20,7 +20,7 @@ const path = require('node:path')
 
 const ROOT = path.resolve(__dirname, '../..')
 const WXML = fs.readFileSync(path.join(ROOT, 'pages/topic/merchantapply/index.wxml'), 'utf8')
-const cal = require(path.join(ROOT, 'utils/calendar.js'))
+const cal = require(path.join(ROOT, 'pages/topic/utils/calendar.js'))
 
 function assertSheetWiring(source) {
   const m = source.match(/<cy-date-range-sheet[\s\S]*?\/>/)

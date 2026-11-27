@@ -8,8 +8,8 @@ const subscribe = require('../../../utils/subscribe.js'); // 订阅授权契约�
 const cyLoading = require('../../../utils/loading.js');
 const DRAFT_PERSIST_MS = 400; // L03-003:本机草稿落盘节流窗口
 const cyToast = require('../../../utils/toast.js');
-const familyTicket = require('../../../utils/family-ticket.js'); // F12 亲子票
-const priceInput = require('../../../utils/price-input.js');
+const familyTicket = require('../utils/family-ticket.js'); // F12 亲子票
+const priceInput = require('../utils/price-input.js');
 const TICKET_PAYLOAD_FIELDS = ['id', 'name', 'price', 'totalStock', 'mode', 'meetingPoint', 'meetingPointAddress',
   'meetingPointLongitude', 'meetingPointLatitude', 'gatherLng', 'gatherLat', 'teamSize', 'startTime', 'endTime',
   'saleStartTime', 'saleEndTime', 'description', 'refundSupported', 'syncWithTheme',
@@ -262,6 +262,7 @@ const structure = require('./theme-runtime-structure.js'); // structure
 const survivalEditor = require('./theme-runtime-survival.js'); /* survival */
 const lookEditor = require('./theme-look-editor.js'); /* 主题画面风格 */
 const zeroHpEditor = require('./theme-runtime-zero-hp.js'); // R5 HP 归零面板(L03-194:方法与 data 只在这里展开一次)
+const runtimeScenesEditor = require('./theme-runtime-scenes.js'); // 多场景玩法参数调节(末日寒冬等)
 const feVisitConfig = require('./theme-fe-visit.js'); // FE-STORY 7.10 地点到访方式
 const ownership = require('./theme-ownership.js');
 const d20Page = require('./theme-d20-page.js');
@@ -276,7 +277,7 @@ Page({
   ...runtimeEditor.methods, ...routeNames.methods,
   ...structure.methods, // structure
   ...survivalEditor.methods, // survival
-  ...zeroHpEditor.methods, /* R5 HP 归零 */ ...lookEditor.methods, /* 画面风格 */
+  ...zeroHpEditor.methods, /* R5 HP 归零 */ ...runtimeScenesEditor.methods, ...lookEditor.methods, /* 画面风格 */
   ...ownership.methods, ...feVisitConfig.methods, ...d20Page.methods, ...keysItems.methods, ...initialCarry.methods,
   _routeGraph: topicRouteGraph.emptyGraph(),
   _routeMappingSourceNodeId: '',
@@ -286,7 +287,7 @@ Page({
   _nodeBindingDraft: null,
   data: {
     creatorLoginRequired: false,
-    ...runtimeEditor.data, ...routeNames.data, ...zeroHpEditor.data, /* R5 HP 归零 */ ...themeMedia.data, /* 章节视频/音频 */
+    ...runtimeEditor.data, ...routeNames.data, ...zeroHpEditor.data, /* R5 HP 归零 */ ...runtimeScenesEditor.data, ...themeMedia.data, /* 章节视频/音频 */
     ...structure.data, // structure
     ...survivalEditor.data, /* survival */ ...lookEditor.data, /* 画面风格 */
     ...ownership.data, ...feVisitConfig.data, ...d20Page.data, ...keysItems.data, ...initialCarry.data,

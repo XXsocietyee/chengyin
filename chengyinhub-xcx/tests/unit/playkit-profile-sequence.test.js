@@ -113,7 +113,7 @@ test('登记问题读取、保存、预览统一必答，旧选填配置不能�
 });
 
 test('作者预览与正式登记同样拒绝缺题、空格、无效选项与超长答案', () => {
-  const { applyPreviewAction } = require('../../utils/game-preview-action.js');
+  const { applyPreviewAction } = require('../../pages/play/utils/game-preview-action.js');
   const kit = { type: 'profile', done: false, answers: {}, questions: [
     { key: 'name', label: '姓名', kind: 'text', maxLength: 2, required: false },
     { key: 'job', label: '职业', kind: 'pick', required: false,
@@ -153,7 +153,7 @@ test('咔哒:编辑页的平字段存成服务端 override,读回来还原;条�
 })
 
 test('咔哒:作者试玩按条件已满足演,答案改写成定好的那一项', () => {
-  const { applyPreviewAction } = require('../../utils/game-preview-action.js')
+  const { applyPreviewAction } = require('../../pages/play/utils/game-preview-action.js')
   const kit = { type: 'profile', done: false, answers: {}, questions: [{ key: 'job', kind: 'pick',
     options: [{ key: 'painter', label: '画师' }, { key: 'clerk', label: '会计' }], kaccha: { option: 'clerk', voice: '写的是{assigned}' } }] }
   const r = applyPreviewAction(kit, { action: 'submit', detail: { answers: { job: 'painter' } } })

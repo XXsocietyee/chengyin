@@ -12,7 +12,7 @@
  *      没有任何地方算过)。
  */
 
-const opts = require('./time-picker-options.js')
+const opts = require('../../../utils/time-picker-options.js')
 
 /** 'HH:mm' → 当天第几分钟;非法返回 -1(不是 0 —— 0 是合法的 00:00) */
 function toMinutes(hhmm) {

@@ -1684,8 +1684,8 @@
 <view class="woo" wx:if="{{medal.show}}">
   <view class="woo__title" style="padding-top:{{chrome.actionTop}}px">徽章</view>
   <view class="woo__hero">
-    <!-- 后端配了勋章图用后端的;没配用稿上的金奖杯(images/play/trophy.png,Figma 3964:17047 切图) -->
-    <image class="woo__img" src="{{medal.img || '/images/play/trophy.png'}}" mode="aspectFit" />
+    <!-- 后端配了勋章图用后端的;没配用稿上的金奖杯(pages/play/images/trophy.png,Figma 3964:17047 切图) -->
+    <image class="woo__img" src="{{medal.img || '/pages/play/images/trophy.png'}}" mode="aspectFit" />
     <text class="woo__name">{{medal.name}}</text>
   </view>
   <view class="woo__coupon" wx:if="{{medal.coupon}}" bindtap="goCouponWallet"

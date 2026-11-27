@@ -75,7 +75,7 @@ test('validate 不夹取:结束早于开始时把真实(负)跨度原样返回',
 })
 
 test('负控:把跨天跨度写成只比时刻,跨夜必然算成负数', () => {
-  const tr = require('../../utils/timerange.js')
+  const tr = require('../../pages/publishkit/utils/timerange.js')
   const broken = (a, b) => tr.toMinutes(b.slice(11, 16)) - tr.toMinutes(a.slice(11, 16))
   const A = '2026-09-01 22:00:00'
   const B = '2026-09-02 02:00:00'

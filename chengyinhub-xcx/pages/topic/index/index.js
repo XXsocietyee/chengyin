@@ -39,7 +39,7 @@ const ticketSource = require('../../../utils/ticket-source.js');
 const { buildTopicShare, resolveTopicCover } = require('../../../utils/topic-share.js');
 const { decodeDisplayText } = require('../../../utils/display-text.js');
 const contentReport = require('../utils/content-report.js');
-const reportSheet = require('../../../utils/community-report-sheet.js');
+const reportSheet = require('../utils/community-report-sheet.js');
 const mediaPreview = require('../../../utils/media-preview.js');
 const motion = require('../utils/topic-motion.js');
 const chapterCards = require('../utils/chapter-cards.js'); const departNotes = require('../utils/depart-notes.js'); const stationImage = require('../utils/station-image.js');

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 
-const DIR = path.join(__dirname, '../../pages/publish/components/swipe-row')
+const DIR = path.join(__dirname, '../../pages/publishkit/components/swipe-row')
 function loadWxs() {
   const mod = { exports: {} }
   // WXS 是 ES5 子集 + module.exports;同一 realm 里跑,断言才能直接比对象

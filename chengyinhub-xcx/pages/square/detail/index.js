@@ -1,4 +1,4 @@
-const reportSheet = require('../../../utils/community-report-sheet.js'); const { isMerchantView } = require('../../../utils/roleGuard.js'); const merchantTheme = require('../../../utils/merchant-theme.js'); // M-35:商家从「发现」点进帖文是浅色
+const reportSheet = require('../utils/community-report-sheet.js'); const { isMerchantView } = require('../../../utils/roleGuard.js'); const merchantTheme = require('../../../utils/merchant-theme.js'); // M-35:商家从「发现」点进帖文是浅色
 const modal = require('../../../utils/modal.js');
 const toast = require('../../../utils/toast.js');
 const { toTimestamp } = require('../../../utils/datetime');

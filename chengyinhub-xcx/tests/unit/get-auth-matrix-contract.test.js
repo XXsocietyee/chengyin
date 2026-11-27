@@ -128,7 +128,7 @@ const MATRIX = [
   // 2026-10-29 M-32:俱乐部计酬并进账户收益「本月收入明细」,同端点同权限档(商家 FINANCE_READ 派生店主)。
   ['subpackageA/components/earnings-overview/index.js', "url: '/api/club-direct-merchant/merchant'", 'required', 'merchant', 'owned-merchant-or-club-receivable'],
   // 2026-11-18 F11 自由探索参考结算:店铺按商家岗位 FINANCE_READ 派生店主只读本店;收款人按场次收款人规则只读本人场次。
-  ['components/cy/fe-reference-settlement/index.js', "url: kind === 'payer'", 'required', 'merchant/session-payee', 'owned-merchant-or-club-receivable'],
+  ['pages/club/components/cy/fe-reference-settlement/index.js', "url: kind === 'payer'", 'required', 'merchant/session-payee', 'owned-merchant-or-club-receivable'],
   // 2026-11-22 P1-10 参考结算 CSV 导出:与上一条列表同一控制器同一归属(店铺 FINANCE_READ 派生店主 / 场次收款人本人),复用同一条查询。
   ['pages/merchant/components/cy/fe-reference-range/index.js', "url: (kind === 'payer' ? '/api/fe/reference-settlement/payer' : '/api/fe/reference-settlement/merchant') + '/export'", 'required', 'merchant/session-payee', 'owned-merchant-or-club-receivable'],
   ['pages/club/components/cy/fe-reference-range/index.js', "url: (kind === 'payer' ? '/api/fe/reference-settlement/payer' : '/api/fe/reference-settlement/merchant') + '/export'", 'required', 'merchant/session-payee', 'owned-merchant-or-club-receivable'],

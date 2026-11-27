@@ -2,7 +2,7 @@
 // 第一层:规则难度三张卡 / 三个规则开关 / 属性(就地展开 + 预设药丸)/ 更多规则;
 // 下一层「更多规则」:进度钟、特质,都就地展开、就地添加。从这张半屏出发最多再开这一层。
 // 改动只记在本地副本里:「完成」把整份交回主题(save),「取消」丢掉。写回哪些字段见 fabu/theme-d20.js。
-const d20 = require('../../fabu/theme-d20.js');
+const d20 = require('../../utils/publish/theme-d20.js');
 const modal = require('../../../../utils/modal.js');
 
 const TAP_MS = 420; // 卡片回弹一次的时长,和 --cy-motion-sheet-in 对齐

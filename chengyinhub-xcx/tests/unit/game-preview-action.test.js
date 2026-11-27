@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { applyPreviewAction } = require('../../utils/game-preview-action.js');
+const { applyPreviewAction } = require('../../pages/play/utils/game-preview-action.js');
 
 test('本地建档与D20试玩保留当前配置，不修改原始kit', () => {
   const kit = { type: 'profile', questions: [{ key: 'name', kind: 'text', maxLength: 12, required: true }], answers: {}, done: false };
@@ -54,7 +54,7 @@ test('资料预览全题必答，非法选项/超长输入/配置必填头像均
 
 test('D20 作者预览标为试玩不计成绩（一句玩家话，无开发说明），加值来源为模板固定值；正式玩法不自造加值来源', () => {
   const fs = require('node:fs'); const path = require('node:path');
-  const { previewD20Result } = require('../../utils/game-preview-action.js');
+  const { previewD20Result } = require('../../pages/play/utils/game-preview-action.js');
   const result = previewD20Result({ rollMode: 'normal', modifier: 3, dc: 10, successText: '成', failText: '败' });
   assert.equal(result.sandbox, true);
   assert.equal(result.modifierSource, 'TEMPLATE_FIXED');

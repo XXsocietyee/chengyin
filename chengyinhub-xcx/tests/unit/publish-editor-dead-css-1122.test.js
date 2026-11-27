@@ -96,12 +96,22 @@ test('模板编辑页样式:同一选择器后写的那条不再覆盖前一条�
 // AUDIT-1122 L04-110:这 10 个组件都开了 addGlobalClass,全局 .cy-pressed(.92 + scale .97)本来就进得来;
 // 本地那份 .88 只会和全局那条打架,让发布页的按压反馈和全站不一样。删掉后统一走全局一条。
 test('发布页 10 个共享样式组件不再各写一份 .cy-pressed,按压反馈走全局', () => {
-  const names = ['chips', 'choice-sheet', 'list-group', 'list-row', 'segmented', 'sheet-nav', 'stepper', 'swipe-row', 'start-prep', 'd20-settings']
-  for (const n of names) {
-    const dir = 'pages/publish/components/' + n + '/index'
-    assert.match(read(dir + '.js'), /addGlobalClass:\s*true/, n + ' 必须仍收全局类')
-    assert.doesNotMatch(read(dir + '.wxss'), /\.cy-pressed\b/, n + ' 又写回了本地按压样式')
-    assert.match(read(dir + '.wxml'), /hover-class="[^"]*cy-pressed/, n + ' 按压类还在用')
+  const dirs = [
+    'pages/publishkit/components/chips/index',
+    'pages/publishkit/components/choice-sheet/index',
+    'pages/publish/components/list-group/index',
+    'pages/publish/components/list-row/index',
+    'pages/publish/components/segmented/index',
+    'pages/publishkit/components/sheet-nav/index',
+    'pages/publish/components/stepper/index',
+    'pages/publishkit/components/swipe-row/index',
+    'pages/publishkit/components/start-prep/index',
+    'pages/publishkit/components/d20-settings/index',
+  ]
+  for (const dir of dirs) {
+    assert.match(read(dir + '.js'), /addGlobalClass:\s*true/, dir + ' 必须仍收全局类')
+    assert.doesNotMatch(read(dir + '.wxss'), /\.cy-pressed\b/, dir + ' 又写回了本地按压样式')
+    assert.match(read(dir + '.wxml'), /hover-class="[^"]*cy-pressed/, dir + ' 按压类还在用')
   }
   assert.match(read('style/components.wxss'), /\.cy-pressed\s*\{ opacity: \.92; transform: scale\(\.97\);/)
 })

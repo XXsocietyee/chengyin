@@ -111,7 +111,7 @@ const loadPage = (rel, options = {}) => {
     if (request === '../../../utils/feed-play-card.js') return require(path.join(ROOT, 'utils/feed-play-card.js'))
     if (request === '../../../utils/response-shape.js') return require(path.join(ROOT, 'utils/response-shape.js'))
     if (request === '../utils/square-share.js') return require(path.join(ROOT, 'pages/square/utils/square-share.js'))
-    if (request === '../../../utils/community-report-sheet.js') return require(path.join(ROOT, 'utils/community-report-sheet.js')) // L06-184:分包转出壳已删
+    if (request === '../utils/community-report-sheet.js') return require(path.join(ROOT, 'pages/square/utils/community-report-sheet.js')) // L06-184:分包转出壳已删
     // 性能批4 分页路径追加助手:纯函数无副作用,用真模块不用桩(同上 response-shape 先例)
     if (request.endsWith('list-append.js')) return require(path.join(ROOT, 'utils/list-append.js'))
     // W8 评论写作用域核对账号(reader/sameReader):纯函数,用真模块不用桩

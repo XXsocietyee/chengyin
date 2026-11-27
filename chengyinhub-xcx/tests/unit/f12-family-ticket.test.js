@@ -6,7 +6,7 @@ const path = require('node:path')
 
 const ROOT = path.resolve(__dirname, '../..')
 const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8')
-const family = require('../../utils/family-ticket.js')
+const family = require('../../pages/activity/utils/family-ticket.js')
 
 test('票种:模板预填 1 大 1 小与 3–12 岁;只允许 1+0 / 1+1;亲子票年龄段必填', () => {
   const draft = family.familyTicketDraft()

@@ -1,4 +1,4 @@
-const moneyFormat = require('../../../utils/money-format.js')
+const moneyFormat = require('../../../../../utils/money-format.js')
 // F11 自由探索结算（参考）：服务端 /api/fe/reference-settlement/{merchant|payer} 的展示模型。
 // 合同(小程序与 iOS 共用)：{groups:[{activityId, activityTitle, payerName, openAmount, settledAmount,
 //   rows:[{id, chapterName, merchantName, supplierKind, basis, quantity, unitAmount, amount, status,

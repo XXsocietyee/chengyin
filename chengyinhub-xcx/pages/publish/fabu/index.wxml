@@ -2004,6 +2004,7 @@
     custom-style="width:0;height:0;background:transparent;pointer-events:none"
     bind:afterleave="onNativeBackGuard" />
 <include src="runtime-editor.wxml" />
+<include src="runtime-scenes-editor.wxml" />
 <include src="runtime-structure-editor.wxml" /> <!-- structure -->
 <include src="survival-editor.wxml" /> <!-- survival -->
 <include src="zero-hp-editor.wxml" /> <!-- R5 HP 归零 -->

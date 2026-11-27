@@ -1,0 +1,22 @@
+<cy-sheet show="{{runtimeSceneEditor.show}}" fixed="full" bind:close="closeRuntimeScenes" style="--cy-comp-sheet-max-h:calc(100vh - {{chrome.sheetTop + 18}}px);--cy-comp-sheet-role-glass:#f3f4f5">
+ <view class="rt-editor">
+  <view class="node-sheet__top"><view class="node-sheet__close" bindtap="closeRuntimeScenes" aria-role="button" aria-label="放弃场景修改" hover-class="cy-pressed">退出</view><view class="node-sheet__done" bindtap="saveRuntimeScenes" aria-role="button" aria-label="保存场景修改" hover-class="cy-pressed">完成</view></view>
+  <view class="rt-title"><text>场景与玩法调节</text></view>
+  <cy-inline-error wx:if="{{runtimeSceneEditor.error}}" title="{{runtimeSceneEditor.error}}" />
+  <view class="node-card"><view class="rt-field"><text>编辑场景</text><cy-dropdown topic-editor range="{{runtimeScenes}}" range-key="name" value="{{runtimeSceneEditor.index}}" bind:change="chooseRuntimeScene"><view class="rt-select" aria-role="button" aria-label="选择要编辑的场景">{{runtimeScenes[runtimeSceneEditor.index].name}}<cy-icon name="chevron-right" size="24" /></view></cy-dropdown></view></view>
+  <view class="node-card" wx:for="{{runtimeSceneRows}}" wx:key="questKey" wx:for-item="quest" wx:for-index="qi">
+   <view class="rt-card-head"><text>{{qi + 1}} · {{quest.name}}</text><view class="node-pill" data-node="{{quest.nodeId}}" bindtap="editRuntimeSceneGame" aria-role="button" aria-label="编辑{{quest.name}}的场景玩法" hover-class="cy-pressed">题目与难度<cy-icon name="chevron-right" size="24" /></view></view>
+   <view class="rt-two"><view class="rt-field"><text>保暖消耗</text><input type="number" value="{{quest.hpCost || 0}}" data-quest="{{qi}}" data-field="hpCost" bindinput="onRuntimeSceneNumber" aria-label="{{quest.name}}保暖消耗" /></view><view class="rt-field"><text>行动消耗</text><input type="number" value="{{quest.actionCost || 0}}" data-quest="{{qi}}" data-field="actionCost" bindinput="onRuntimeSceneNumber" aria-label="{{quest.name}}行动消耗" /></view></view>
+   <view wx:for="{{quest.choices}}" wx:key="choiceKey" wx:for-item="choice" wx:for-index="ci">
+    <text class="node-card__title">{{choice.label}}</text>
+    <view class="rt-field" wx:if="{{choice.hpDelta != null}}"><text>取暖增减值</text><input type="text" value="{{choice.hpDelta}}" data-quest="{{qi}}" data-choice="{{ci}}" data-field="hpDelta" bindinput="onRuntimeSceneNumber" aria-label="{{choice.label}}取暖增减值" /></view>
+    <view class="rt-field" wx:for="{{choice.grants}}" wx:key="itemId" wx:for-item="grant" wx:for-index="gi"><text>{{grant.name}}数量</text><input type="number" value="{{grant.quantity}}" data-quest="{{qi}}" data-choice="{{ci}}" data-grant="{{gi}}" data-field="quantity" bindinput="onRuntimeSceneNumber" aria-label="{{choice.label}}的{{grant.name}}数量" /></view>
+   </view>
+  </view>
+  <view class="node-card" wx:for="{{runtimeSceneRecoveries}}" wx:key="recoveryKey" wx:for-index="ri">
+   <text class="node-card__title">{{item.title || '救援'}}</text>
+   <view class="rt-field"><text>可用次数</text><input type="number" value="{{item.limit}}" data-recovery="{{ri}}" data-field="limit" bindinput="onRuntimeSceneNumber" aria-label="救援可用次数" /></view>
+   <view class="rt-field" wx:if="{{item.kind === 'RESCUE'}}"><text>恢复至保暖值</text><input type="number" value="{{item.hpFloor}}" data-recovery="{{ri}}" data-field="hpFloor" bindinput="onRuntimeSceneNumber" aria-label="救援恢复保暖值" /></view>
+  </view>
+ </view>
+</cy-sheet>

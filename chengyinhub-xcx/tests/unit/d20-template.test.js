@@ -29,7 +29,7 @@ test('D20 预览按当前配置给固定样例，玩家只显示服务端结果�
   const kit = preview.buildPreviewKit(draft);
   assert.equal(kit.mode, 'd20');
   assert.equal(kit.result, null, '进入预览先展示规则，不直接展示结果');
-  const sample = require('../../utils/game-preview-action.js').previewD20Result(kit);
+  const sample = require('../../pages/play/utils/game-preview-action.js').previewD20Result(kit);
   assert.deepEqual(sample.values, [12, 7]);
   assert.equal(sample.kept, 7);
   assert.equal(sample.total, 9);

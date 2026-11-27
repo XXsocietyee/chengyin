@@ -1,7 +1,7 @@
 // 开局前准备(文档二 L1,2026-10-28):主题详情的下一层。列表左滑删除、「编辑」拖动排序,
 // 最后一行直接输入添加,下面「建议」点一下就加入;满 6 项时添加行和建议都不出现。
 // 和原型一样即改即生效:每次改动发 change {items},主题详情那边写回 journeyRules。
-const d20 = require('../../fabu/theme-d20.js');
+const d20 = require('../../utils/publish/theme-d20.js');
 
 Component({
   options: { addGlobalClass: true },

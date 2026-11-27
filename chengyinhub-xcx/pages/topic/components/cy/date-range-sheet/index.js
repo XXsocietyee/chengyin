@@ -8,7 +8,7 @@
 //   ③ 快捷芯片 —— 本周末 / 未来 7 天 / 本月,覆盖大部分实际意图
 //
 // 组件不落库、不改调用方的业务态:确定时把 [start, end] 原样抛出去,取消什么也不抛。
-const cal = require('../../../../../utils/calendar.js')
+const cal = require('../../../utils/calendar.js')
 const reducedMotionBehavior = require('../../../../../behaviors/reduced-motion.js')
 
 const DEFAULT_QUICK = [

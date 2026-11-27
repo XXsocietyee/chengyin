@@ -119,7 +119,7 @@ test('glow 徽章减少动态时只渲染稳定帧，不启动持续 RAF', () =>
 
 test('负控：静态预览退回无关奖杯图时素材契约必须判红', () => {
   const source = fs.readFileSync(WXML_PATH, 'utf8')
-  const mutated = source.replace('src="{{fallbackSrc}}"', 'src="/images/play/trophy.png"')
+  const mutated = source.replace('src="{{fallbackSrc}}"', 'src="/pages/play/images/trophy.png"')
   assert.notEqual(mutated, source, '负控锚点失效：未找到 fallbackSrc')
   assert.throws(
     () => assert.match(mutated, /<image\b[^>]*src="\{\{fallbackSrc\}\}"/s),

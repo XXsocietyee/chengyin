@@ -13,7 +13,7 @@
 //
 // 选项与格式化复用既有的 utils/time-picker-options.js(2026-08-25 建的单一真源),
 // 本组件只额外用 utils/timerange.js 的分钟互转、跨天跨度与时长上下限判定。
-const tr = require('../../../../../utils/timerange.js')
+const tr = require('../../../utils/timerange.js')
 const reducedMotionBehavior = require('../../../../../behaviors/reduced-motion.js')
 
 // 拖动灵敏度:每 12px 位移走一格。step=15 分钟时,一屏宽(~360px)约等于 7.5 小时,

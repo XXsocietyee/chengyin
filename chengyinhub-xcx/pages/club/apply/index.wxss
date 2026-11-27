@@ -1,5 +1,5 @@
 @import '../style/club-apply-form.wxss';
-@import '../../../style/wizard-intro.wxss';
+@import '../styles/wizard-intro.wxss';
 
 page { background: var(--cy-bg-page); }
 .page { min-height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; }

@@ -37,7 +37,7 @@ function pageFixture(file, fixtureOptions = {}) {
       if (id.includes('coop-invite-request')) return require('../../pages/coop/utils/coop-invite-request.js');
       if (id.includes('response-shape')) return require('../../utils/response-shape.js');
       if (id.includes('datetime')) return require('../../utils/datetime.js');
-      if (id.includes('price-input')) return require('../../utils/price-input.js');
+      if (id.includes('price-input')) return require('../../pages/publish/utils/price-input.js');
       if (id.includes('money-format')) return require('../../utils/money-format.js');
       if (id.includes('subscribe')) return { request: () => Promise.resolve({ status: 'accepted' }) };
       if (emptyPorts.has(path.basename(id))) return { merchantPageShow() {}, merchantPageRestore() {} };

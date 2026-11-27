@@ -1,4 +1,4 @@
-const { applyPreviewAction } = require('../../../../utils/game-preview-action.js');
+const { applyPreviewAction } = require('../../utils/game-preview-action.js');
 const toast = require('../../../../utils/toast.js');
 const { id, integer } = require('../../utils/orient-score-view.js');
 const photoPending = require('../../utils/advanced-photo-pending.js');

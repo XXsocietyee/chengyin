@@ -7,7 +7,7 @@ const { memberId, failureStatus, retryLogin, recoverReadSession } = require('../
 const timeOptions = require('../../../utils/time-picker-options.js');
 const { pickLocation } = require('../../../utils/location/location-manager.js');
 const { chinaDayStart } = require('../../../utils/datetime.js');
-const calendar = require('../../../utils/calendar.js');
+const calendar = require('../utils/calendar.js');
 const merchantTheme = require('../../../utils/merchant-theme.js');
 const { readReducedMotion } = require('../../../utils/motion-preference.js');
 

@@ -168,7 +168,7 @@ test('R13 touchcancel丢弃已开始的录音，正常touchend仍发送', () => 
 });
 test('R14 搜索发送keyword，慢到的旧关键词结果与complete均不覆盖当前搜索', () => {
   const requests = [], app = { getPageSize: () => 10, getTotalPage: () => 1, sendRequest: value => requests.push(value) };
-  const p = host({ list: [], page_no: 1, ids: '', searchKeyword: '' }); const file = 'pages/publish/components/collaborator-picker/index.js';
+  const p = host({ list: [], page_no: 1, ids: '', searchKeyword: '' }); const file = 'pages/publishkit/components/collaborator-picker/index.js';
   p._getList = method(file, '_getList', { app, isRecordList: Array.isArray }); const search = method(file, 'onSearchInput', { setTimeout: fn => fn(), clearTimeout() {} });   // 去抖(L04-019)在此立即触发,只测迟到回包
   search.call(p, { detail: { value: 'A' } }); search.call(p, { detail: { value: 'B' } });
   assert.equal(requests[1].data.keyword, 'B'); requests[1].success({ code: 200, data: { rows: [{ id: 2, nickname: 'B' }], total: 1 } });

@@ -29,7 +29,7 @@ test('旧客户端载荷保持字节；已绑定规则不能退回旧副本或�
  const modified=JSON.parse(bound);modified.attributes[0].max=100;assert.throws(()=>contract.requestRules(JSON.stringify(modified),'',snapshot),/确认差异/);
  const linked=JSON.stringify({schemaVersion:1,statLinks:[{sourceKey:'counter.hp'}]});assert.throws(()=>contract.confirm(session(linked),[],[]),/未启用/);
 });
-function component(){let cfg;global.Component=c=>cfg=c;delete require.cache[require.resolve('../../pages/publish/components/attribute-binding-editor/index')];require('../../pages/publish/components/attribute-binding-editor/index');const events=[];const c={...cfg.methods,data:{...structuredClone(cfg.data),rules:raw,snapshot,topicId:'501',configVersion:'3',readOnly:false},setData(p){Object.assign(this.data,p)},triggerEvent(name,data){events.push({name,data})}};cfg.lifetimes.attached.call(c);return {c,events,cfg};}
+function component(){let cfg;global.Component=c=>cfg=c;delete require.cache[require.resolve('../../pages/publishkit/components/attribute-binding-editor/index')];require('../../pages/publishkit/components/attribute-binding-editor/index');const events=[];const c={...cfg.methods,data:{...structuredClone(cfg.data),rules:raw,snapshot,topicId:'501',configVersion:'3',readOnly:false},setData(p){Object.assign(this.data,p)},triggerEvent(name,data){events.push({name,data})}};cfg.lifetimes.attached.call(c);return {c,events,cfg};}
 test('真实Component逐项确认，刷新注册版本撤销旧确认，离开后不发事件',()=>{
  const {c,events,cfg}=component();c.select({detail:{value:['counter.hp']}});c.confirm();assert.match(c.data.error,/逐项确认/);assert.equal(events.length,0);
  c.accept({detail:{value:['counter.hp']}});c.confirm();assert.equal(events[0].data.registryVersion,'2');

@@ -7,6 +7,7 @@ const values = require('./theme-values.js');
 const zeroHp = require('./theme-runtime-zero-hp.js');
 const keysItems = require('./theme-keys-items.js');
 const survivalRules = require('./theme-runtime-survival.js'); // L03-198:无循环依赖,放顶层
+const runtimeScenes = require('./theme-runtime-scenes.js'); // 多场景玩法参数调节(末日寒冬等)
 // L03-231:互斥组只在编辑视图里用的稳定 key(不存进配置),删中间一组时输入/勾选不串行
 let groupSeq = 0;
 const groupId = () => 'g' + (++groupSeq);
@@ -57,6 +58,7 @@ function writePath(target, path, value) {
 }
 function validate(c, rules, policies, nodes, support) {
   const survivalIssue = survivalRules.validate(c, undefined, rules); if (survivalIssue) return survivalIssue; // survival
+  const sceneIssue = runtimeScenes.validate(c, rules); if (sceneIssue) return sceneIssue;
   for (const key of ['hpName', 'luckName', 'actionName']) if (String(c[key] || '').length > 20) return '数值名称不能超过 20 字';
   const zeroIssue = zeroHp.validate(c, rules, policies, nodes, support); if (zeroIssue) return zeroIssue;
   const itemIssue = itemsIssue(c, rules); if (itemIssue) return itemIssue;
@@ -102,19 +104,23 @@ const data = {
   runtimeChapterCostRows: [], runtimeChapterCostOptions: [],
   runtimeChapterRules: { index: 0, completionType: 'ALL', quantity: '', overflowSlot: '', groups: [], extraNodes: [], nodes: [], slots: [] },
   runtimeChapterRation: { enabled: false, actKey: '', rationKey: '', itemIndex: -1, itemLabel: '请选择', quantity: '1', fallback: '0', values: [], valueIndex: 0, items: [], reason: '' },
+  ...runtimeScenes.data,
 };
 const methods = {
+  ...runtimeScenes.methods,
   _runtimeConfig() { return config(this.data.formData.themeRuntimeConfig); },
   _saveRuntime(c) {
     const raw = this.data.formData.themeRuntimeConfig;
     if (raw) {
       const previous = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      runtimeScenes.syncCommon(previous, c);
       for (const [key, fallback] of Object.entries({ allowDiscard: true, grants: [], events: [] })) {
         if (!(key in previous) && JSON.stringify(c[key]) === JSON.stringify(fallback)) delete c[key];
       }
     }
     this._collectSetData(() => {
       this.setData({ 'formData.themeRuntimeConfig': JSON.stringify(c) });
+      if (this._refreshRuntimeScenes) this._refreshRuntimeScenes(c);
       if (this._syncKeysItems) this._syncKeysItems(c);
       if (this._refreshStructureSummary) this._refreshStructureSummary(); // structure
       if (this._refreshThemeOwnership) this._refreshThemeOwnership(c);
