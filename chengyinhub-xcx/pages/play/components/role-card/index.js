@@ -3,6 +3,7 @@
 const { roleCardView } = require('../../utils/role-card-view.js');
 
 Component({
+  options: { addGlobalClass: true },
   properties: {
     view: { type: Object, value: null },
     collapsible: { type: Boolean, value: false },

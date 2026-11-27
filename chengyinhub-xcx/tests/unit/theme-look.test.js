@@ -260,14 +260,16 @@ test('故事文字动效(2026-10-30 业主定稿原型 v3):每段滑进来播一
   host._look = Object.assign(look.normalizeLook(null), { legacy: true })
   assert.deepEqual(host._textFx({ kind: 'text', text: '老主题' }, 0), {}, '没配风格的老主题不加动效')
   const js = read('pages/play/index.js'), wxml = read('pages/play/index.wxml'), wxss = read('pages/play/index.wxss')
-  assert.match(js, /\}, item, (?:item\.url \? \{ url: secureOwnMedia\(item\.url\) \} : \{\}, )?this\._textFx\(item, i\)\)\),/)  // 并 #690:配图 / 语音先升 https,再叠文字动效
+  assert.match(js, /\}, item, (?:item\.url \? \{ url: secureOwnMedia\(item\.url\) \} : \{\}, )?this\._textFx\(item, i\)\)\)[,;]$|\}, item, (?:item\.url \? \{ url: secureOwnMedia\(item\.url\) \} : \{\}, )?this\._textFx\(item, i\)\)\)[,;]/m)  // 并 #690 + A1:配图 / 语音先升 https,再叠文字动效
   assert.match(js, /if \(chapterFull && ln\.fx === 'decode'\) that\._decodeLine\(i\);/)
   assert.match(wxml, /\{\{item\.fx \? 'tfx tfx--' \+ item\.fx : ''\}\}/)
   assert.match(wxml, /class="tfx__c \{\{c\.raw \? 'is-raw' : ''\}\}" style="--i:\{\{c\.i\}\};--r:\{\{c\.r\}\};--dx:\{\{c\.dx\}\}px;--dy:\{\{c\.dy\}\}px" aria-hidden="true"/)
   assert.match(wxml, /<text wx:if="\{\{item\.chars\}\}" class="tfx__sr">\{\{item\.text\}\}<\/text>/, '拆成单字后整句仍给读屏')
   for (const fx of ['type', 'ink', 'gather', 'drop', 'wind', 'signal']) assert.match(wxss, new RegExp('\\.tfx--' + fx + '\\.is-in \\.tfx__c\\{'), fx + ' 在 is-in 时显形')
   for (const fx of ['glow', 'wipe', 'fog', 'neon', 'scan']) assert.match(wxss, new RegExp('\\.chfull__para\\.tfx--' + fx + '\\.is-in\\{'), fx)
-  const tfxCss = wxss.slice(wxss.indexOf('/* ===== 故事文字动效'))
+  const tfxStart = wxss.indexOf('/* ===== 故事文字动效')
+  const tfxEnd = wxss.indexOf('/* §3.2', tfxStart)
+  const tfxCss = wxss.slice(tfxStart, tfxEnd > tfxStart ? tfxEnd : undefined)
   assert.ok(!/@keyframes|animation\s*:/.test(tfxCss), '只用过渡,不新增关键帧')
   assert.match(tfxCss, /\.play--reduced-motion \.tfx__c\{ transition:none; opacity:1;/)
 

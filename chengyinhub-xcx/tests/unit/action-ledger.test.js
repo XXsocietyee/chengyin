@@ -158,8 +158,8 @@ test('R30 切换章节只关闭视频，选择章节仍保留真实旁白的真�
   assert.equal(inferActionClass('onPickChapter',
     expandHandlerBody('onPickChapter', stopped, null, { modules: true }), helpers), 'external')
   for (const controls of [ledger.controls, readCurrentLedger().controls]) {
-    const tools = controls.find(item => item.id === 'pages/play/index.wxml:401:bindtap:openStackOrChaptersFromTools:73')   // 2026-11-26 A1+A2 合流:旁白重听喇叭按钮 +1 个 catchtap,序号 72 → 73(仅位移)
-    const pick = controls.find(item => item.id === 'pages/play/index.wxml:583:bindtap:onPickChapter:95')   // 2026-11-26 A1+A2 合流:户外浅底开关(+5行,+1控件) + 旁白重听(+1控件),578:93 → 583:95(仅位移)
+    const tools = controls.find(item => item.id === 'pages/play/index.wxml:404:bindtap:openStackOrChaptersFromTools:75')   // 2026-11-27 8路合流:A1+A2+B1+B2 游玩页控件位移,401:72 → 404:75(仅位移)
+    const pick = controls.find(item => item.id === 'pages/play/index.wxml:586:bindtap:onPickChapter:97')   // 2026-11-27 8路合流:A1+A2+B1+B2 游玩页控件位移,583:94 → 586:97(仅位移)
     assert.ok(tools)
     assert.equal(tools.actionClass, 'state')
     assert.deepEqual(tools.externalCapabilities, [])

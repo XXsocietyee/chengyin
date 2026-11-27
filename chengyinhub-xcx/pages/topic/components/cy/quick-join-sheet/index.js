@@ -30,6 +30,7 @@ function firstPhotoFromMerchant(data) {
 }
 
 Component({
+  options: { addGlobalClass: true },
   properties: {
     show: { type: Boolean, value: false },
     chapterId: { type: Number, value: 0 },

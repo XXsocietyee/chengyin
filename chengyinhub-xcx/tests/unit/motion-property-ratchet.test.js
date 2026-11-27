@@ -137,6 +137,10 @@ const KEYFRAMES_EXEMPT = new Map([
   ['tb-fade',
     '2026-10-22 业主口述的主题详情动效(docs/design/动效界面落地_20261022)。' +
     '徽章放大层 wx:if 挂载时的压暗淡入。挂载帧没有起点,transition 不触发。只改 opacity。'],
+  ['standStampPop',
+    '2026-11-27 B2 §4.2 柜台台卡自助核销确认屏 wx:if 挂载时一次性三段式绿章落印(同 rs-pop),只动 transform/opacity,.stand-redeem.is-reduced 下关闭。'],
+  ['standStampPulse',
+    '2026-11-27 B2 §4.2 柜台台卡自助核销确认屏防截图常驻外环脉冲(infinite,同 md-tw/npcRingSpin),transition 无法表达无限循环,.stand-redeem.is-reduced 下关闭。'],
   ['tb-pop',
     '2026-10-22 业主口述的主题详情动效(docs/design/动效界面落地_20261022)。' +
     '徽章放大层里大徽章弹出:缩小→过冲→回位三段,transition 只能 A→B。.tb-layer--reduced 下关闭。'],

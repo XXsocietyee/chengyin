@@ -154,7 +154,7 @@ test('负控：撤掉任一道细节门禁都会判红', () => {
 
   // 图例还在、但某个字段的可见标记没了 —— 旧写法这里是绿的
   assert.throws(() => applyRequiredFieldsAreAccessible(
-    SOURCE.applyWxml.replace('<text class="fl">店铺名称<text class="req" aria-hidden="true">*</text></text>',
+    SOURCE.applyWxml.replaceAll('<text class="fl">店铺名称<text class="req" aria-hidden="true">*</text></text>',
       '<text class="fl">店铺名称</text>')
   ), assert.AssertionError, '某个字段丢掉可见必填标记后没有判红')
 

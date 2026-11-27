@@ -76,9 +76,9 @@
 .mx__preview { width: 100%; margin-top: var(--cy-space-4); display: flex; flex-direction: column; gap: var(--cy-space-2); }
 .mx__pv-seg { display: flex; border: 1rpx solid var(--soft); border-radius: var(--cy-radius-md); overflow: hidden; align-self: flex-start; }
 .mx__pv-btn { min-width: 156rpx; min-height: 72rpx; padding: 0 var(--cy-space-3); display: flex; align-items: center; justify-content: center; font-size: var(--cy-type-label); font-weight: 600; color: var(--ink); transition: background .18s ease, color .18s ease; }
-.mx__pv-btn.is-on { background: var(--ink); color: var(--bg); font-weight: 800; }
+.mx__pv-btn.is-on { background: var(--ink); color: var(--lk-bg, #111114); font-weight: 800; }  /* ds-ok 反色胶囊字色 */
 .mx__pv-track { width: 100%; height: 4rpx; border-radius: var(--cy-radius-pill); background: var(--soft); overflow: hidden; }
-.mx__pv-fill { height: 100%; background: var(--accent); transition: width .2s linear; }
+.mx__pv-fill { height: 100%; background: var(--accent); }
 
 .mx--reduced .mx__row,
 .mx--reduced .mx__bar,

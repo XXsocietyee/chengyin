@@ -62,21 +62,15 @@ function ballHost() {
   return { def, ball, listeners, starts, stops, haptics, wx, started: () => started }
 }
 
-test('a1-v3-10-53 弹球:露出整屏时听摇一摇,真摇(同抛硬币阈值)= 开始 + 震动;静止和走路不触发', () => {
+test('a1-v3-10-53 弹球:露出整屏时不自动监听摇一摇误开局(A3-3b 防误触),隐藏后保持无监听', () => {
   const h = ballHost()
   h.def.observers.show.call(h.ball, true)
-  assert.equal(h.listeners.size, 1)
-  assert.equal(h.starts[0].interval, 'game')
-  const feed = [...h.listeners][0]
-  for (const rest of [{ x: 0, y: 0, z: 1 }, { x: 0.6, y: -0.4, z: 1.3 }]) feed(rest)
+  assert.equal(h.listeners.size, 0, 'A3-3b: 未点「开始」前禁止晃动误开局')
+  h.ball._onIdleShake()
   assert.equal(h.started(), 0)
-  feed({ x: 1.4, y: -0.8, z: 0.7 })
-  assert.equal(h.started(), 1)
-  assert.deepEqual(h.haptics, ['medium'])
-  // 隐藏 / 关掉整屏:监听撤掉,传感器关掉
+  assert.deepEqual(h.haptics, [])
   h.def.pageLifetimes.hide.call(h.ball)
   assert.equal(h.listeners.size, 0)
-  assert.ok(h.stops.length >= 1)
 })
 
 test('a1-v3-10-53 弹球:关不掉监听的环境不开传感器;跑动中摇一下只改速度(踢一脚)并震动', () => {

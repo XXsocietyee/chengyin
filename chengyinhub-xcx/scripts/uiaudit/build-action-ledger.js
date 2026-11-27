@@ -1098,6 +1098,15 @@ const ACTION_VARIANTS = new Map([
       ],
     }]]
   }),
+  ['pages/play/index.js:onConfirmTrialUnlock', [{
+    handler: 'onConfirmTrialUnlock',
+    requiredRequestsByBranch: {
+      'single-ticket-pay': [{ urlTemplate: '/api/registration/create', method: 'POST', kind: 'write' }, { urlTemplate: '/api/registration/pay', method: 'POST', kind: 'write' }],
+      'duo-ticket-pay': [{ urlTemplate: '/api/marketing/product/orders/{param}/pay', method: 'POST', kind: 'write' }],
+      'blocked-or-cancelled': [],
+    },
+    requiredBranches: ['single-ticket-pay', 'duo-ticket-pay', 'blocked-or-cancelled', 'error', 'timeout', 'duplicate-trigger', 'forbidden-owner'],
+  }]],
   ['pages/play/index.js:onRunToggleFromTools', [{
     handler: 'onRunToggleFromTools', writeApis: ['/api/play/run-session/save'],
     requiredRequests: [{ urlTemplate: '/api/play/run-session/save', method: 'POST', kind: 'write' }],

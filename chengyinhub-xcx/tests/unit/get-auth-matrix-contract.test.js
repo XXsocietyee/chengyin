@@ -75,6 +75,10 @@ const MATRIX = [
   ['pages/talent/list/index.js', "url: '/api/marketing/product/list'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
   // 2026-11-24 DEC-F12 A:主题页结算层买多人票,付款回跳按单号读本人一单(同 /orders/{orderNo},requireAppMemberId + 本人归属)。
   ['pages/topic/index/index.js', "url: '/api/marketing/product/orders/' + encodeURIComponent(orderNo), method: 'GET'", 'required', 'member', 'self-account'],
+  // 2026-11-27 Cloud B1:游玩页首站免费试玩剧内解锁读在售商品目录 + 付款回跳按单号读本人一单 + 自玩双人视角卡读 /api/play/encounter(均与已有端点同权限档)。
+  ['pages/play/index.js', "url: '/api/marketing/product/list', method: 'GET'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  ['pages/play/index.js', "url: '/api/marketing/product/orders/' + encodeURIComponent(orderNo),\n      method: 'GET'", 'required', 'member', 'self-account'],
+  ['pages/play/index.js', "url: '/api/play/encounter', method: 'GET'", 'required', 'member', 'current-session'],
   // 2026-11-24 DEC-F12 B:票夹读本人已领取的同伴席位(ApiRegistrationSeatInvitationController /mine,requireMember + invitee_member_id = 本人)。
   ['subpackageMember/signup/index.js', "url: '/api/play/seat-invitations/mine', method: 'GET'", 'required', 'member', 'self-account'],
   //   通行证列表 get() 服务 /list(listSellable,无会员维度)与 /orders、/gifts/bought、/gifts/received(均 requireAppMemberId 本人);
@@ -573,7 +577,8 @@ test('全部 GET 调用点都有 URL + method + auth/角色/scope 分类，新�
   // 2026-11-24 F09b L09-110:举报列表 / 详情两处原因字典读取收进 report-common/taxonomy.js 一处(同端点同权限档),152 → 151。
   // 2026-11-24 DEC-F12:主题页多人票付款回查本人一单 + 票夹读本人已领同伴席位(均已入 MATRIX),151 → 153。
   // 2026-11-27 N1-03:玩法详情页同包内直接读举报原因字典 GET /api/v1/community/capabilities(同端点同权限档,已入 MATRIX),153 → 154。
-  assert.equal(directCount, 154, '直接 GET 数量变化时必须逐条复核权限并更新矩阵');
+  // 2026-11-27 Cloud B1:游玩页剧内解锁读目录/本人订单 + 自玩双人读 encounter 共三处直接 GET(均已入 MATRIX),154 → 157。
+  assert.equal(directCount, 157, '直接 GET 数量变化时必须逐条复核权限并更新矩阵');
   // 2026-10-09 U04 只读主题请求增加6处，22 → 28。
   // 2026-10-19 Claude 小程序线移植到 master(用户批准冻结数值更新):漫游 BL-41 可参与官方活动 req 包装 GET +1(已入 MATRIX),28 → 29。
   // 2026-10-22 L21 BL-186:pages/play 本章结算 GET /api/play/journey/stage-end(与 /ending 同档),29 → 30。
@@ -875,7 +880,7 @@ function assertPreferenceGetContract(s) {
   for (const [port, paid] of [['requireToContinue', ''], ['require', 'false,']]) {
     assert.match(admission, new RegExp(`CurrentPlayRegistration\\.${port}\\(\\s*currentPlayActivityMapper,cmsRegistrationMapper,memberId,1L,tId,registrationId,new Date\\(\\),\\s*${paid}giftPlayEligibility,seatRecipientEligibility(?:,\\s*codeGrantPlayEligibility)?\\)`));
   }
-  assert.match(admission, /if \(pass == null\) \{ c\.error = new Failure\(402, "请先购买自玩通行证"\); return c; \}/);
+  assert.match(admission, /if \(pass == null\) \{[\s\S]*c\.error = new Failure\(402, (?:deniedMessage != null \? deniedMessage : )?"请先购买自玩通行证"\);[\s\S]*return c;\s*\}/);
   const registrationArgs = 'CmsActivityMapper activities,CmsRegistrationMapper registrations,\n            Long memberId,long ownerType,Long ownerId,Long requestedId,Date now';
   assert.match(javaMethod(s.registration, `public static CmsRegistration require(${registrationArgs})`),
     /return require\(activities,registrations,memberId,ownerType,ownerId,requestedId,now,false\);/);

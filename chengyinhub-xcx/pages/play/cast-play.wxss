@@ -9,7 +9,7 @@
 .chfull__vrow{ display:inline-flex; align-items:center; justify-content:center; gap:var(--cy-space-1); margin:var(--cy-space-2) 0 0; padding:8rpx 20rpx; min-height:48rpx; box-sizing:border-box; border-radius:var(--cy-radius-pill); background:rgba(var(--lk-ink-rgb, 255,255,255), .1); border:1rpx solid rgba(var(--lk-ink-rgb, 255,255,255), .18); font-size:22rpx; font-weight:500; line-height:1.4; letter-spacing:.06em; text-align:left; opacity:.86; font-family:-apple-system, "PingFang SC", sans-serif; } /* ds-ok 配音触发胶囊 */
 .chfull__vrow--narr{ opacity:.62; transition:opacity var(--cy-motion-fast, 150ms) var(--cy-ease-out, ease-out); }
 .chfull__vrow--narr.is-speaking{ opacity:1; font-weight:600; }
-.chfull__para.is-narrating{ padding-left:var(--cy-space-3); border-left:4rpx solid var(--look-a, var(--atmo-text, var(--cy-color-text-primary))); transition:border-color var(--cy-motion-fast, 150ms) var(--cy-ease-out, ease-out), padding-left var(--cy-motion-fast, 150ms) var(--cy-ease-out, ease-out); }
+.chfull__para.is-narrating{ padding-left:var(--cy-space-3); border-left:4rpx solid var(--look-a, var(--atmo-text, var(--cy-color-text-primary))); transition:border-color var(--cy-motion-fast, 150ms) var(--cy-ease-out, ease-out); }
 .play--reduced-motion .chfull__vrow--narr, .play--reduced-motion .chfull__para.is-narrating{ transition:none; }
 .chfull__remember{ display:block; margin-top:var(--cy-space-3); font-size:24rpx; line-height:1.5; text-align:left; opacity:.46; font-family:-apple-system, "PingFang SC", sans-serif; } /* ds-ok 契约 E3 12px 浅灰,左对齐 */
 
