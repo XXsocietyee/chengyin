@@ -9,7 +9,17 @@
 const app = getApp();
 const { recoverReadSession } = require('../../../../utils/session/login-reload.js');
 const { resolveMenuChrome } = require('../../../../utils/nav-safe-area.js'); const pageMotion = require('../../../../utils/page-motion.js');
-const ENAMEL = require('./enamel-pin.js'); const PIN_PX = 420; function pinIdOf(b) { return (b.glyph || 'DEFAULT') + (b.locked ? '_l' : ''); } // 2026-10-28 业主:珐琅徽章(enamel-pin.js)
+const ENAMEL = require('./enamel-pin.js'); const PIN_PX = 420; function pinIdOf(b) { return b && b.glyph ? (b.glyph + (b.locked ? '_l' : '')) : ''; } // 2026-10-28 业主:珐琅徽章(enamel-pin.js); 无专属徽记时不回退统一蓝色靶心，改用名字首字徽章
+function badgeInitial(name) {
+  const clean = String(name || '').replace(/^[\s·•\-—《「【(（]+/, '').trim();
+  return clean ? clean.charAt(0) : '徽';
+}
+function monogramTone(seed) {
+  const s = String(seed || '');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % 6;
+}
 const { chinaDateKey } = require('../../../../utils/datetime');
 const { readReducedMotion } = require('../../../../utils/motion-preference.js');
 const { isRecord, isRecordList } = require('../../../../utils/response-shape.js');
@@ -121,11 +131,15 @@ function itemToBadge(item) {
   // category 撞上 Object.prototype 键名(如 'toString' 会查出个函数)四种情况。
   const t = CATEGORY_TO_TRACK[item.category];
   const track = CAT_META[t] ? t : 0;
+  const name = item.badgeName || '勋章';
+  const glyph = glyphFor(item.badgeCode);
   return {
     code: item.badgeCode || '',        // 稳定 ID:玩法侧带着它跳进来做回读,不能在映射里丢掉
-    name: item.badgeName || '勋章', en: item.nameEn || '',
+    name, en: item.nameEn || '',
     iconUrl: '',                       // 勋章墙用统一单色徽记(程序化 glyph;正式素材经 glyph_url 替换)
-    glyph: glyphFor(item.badgeCode),
+    glyph,
+    monogram: glyph ? '' : badgeInitial(name),
+    monoTone: glyph ? 0 : monogramTone(item.badgeCode || name),
     rarity: track,                     // 类别占用配色轨道,不是稀有度(PRD §7.6)
     tierKey: CAT_META[track].key, tierZh: CAT_META[track].zh,
     locked: !item.unlocked,
@@ -145,12 +159,17 @@ function medalToBadge(item) {
   const achievement = item.kind === 'achievement';
   const time = displayDate(item.getTime);
   if (achievement) {
+    const name = item.medalName || '成就徽章';
+    const iconUrl = item.medalImg || '';
+    const glyph = glyphFor(item.badgeCode);
     return {
       code: item.badgeCode || '',      // 同上:成就徽章也要能被 code 找回
-      name: item.medalName || '成就徽章',
+      name,
       style: item.style || 'glow',
-      iconUrl: item.medalImg || '',
-      glyph: glyphFor(item.badgeCode),
+      iconUrl,
+      glyph,
+      monogram: (!iconUrl && !glyph) ? badgeInitial(name) : '',
+      monoTone: (!iconUrl && !glyph) ? monogramTone(item.badgeCode || name) : 0,
       rarity: 1, tierKey: 'ACHIEVEMENT', tierZh: '成就徽章',
       locked: false,
       time,
@@ -160,10 +179,14 @@ function medalToBadge(item) {
       cond: ''
     };
   }
+  const name = item.medalName || '城市纪念章';
+  const iconUrl = item.medalImg || '';
   return {
-    name: item.medalName || '城市纪念章',
+    name,
     style: item.style || 'glow',   // 模板勋章正是可选 enamel 的那类;漏了它「查看 3D」永不出现(review 抓出)
-    iconUrl: item.medalImg || '',
+    iconUrl,
+    monogram: iconUrl ? '' : badgeInitial(name),
+    monoTone: iconUrl ? 0 : monogramTone(name),
     rarity: 1, tierKey: 'CITY', tierZh: '城市纪念章',
     locked: false,
     time,
@@ -368,7 +391,7 @@ Page({
     this.setData({
       sheetOn: true,
       sheet: {
-        style: b.style || 'glow', iconUrl: b.iconUrl || '', rarity: b.rarity || 0, pinId: pinIdOf(b), glyph: b.glyph || 'DEFAULT', locked: !!b.locked,
+        style: b.style || 'glow', iconUrl: b.iconUrl || '', rarity: b.rarity || 0, pinId: pinIdOf(b), glyph: b.glyph || '', monogram: b.monogram || '', monoTone: b.monoTone || 0, locked: !!b.locked,
         name: b.name,
         rarZh: b.tierZh || meta.zh,
         rarColor: b.rarity === 4 ? 'var(--cy-color-status-danger)' : meta.css,
@@ -457,7 +480,7 @@ Page({
   _renderPins(list) {
     const tried = this._pinTried || (this._pinTried = {});
     const todo = [], track = {};
-    list.forEach(function (b) { const id = pinIdOf(b); track[id] = b.rarity; if (!b.iconUrl && !tried[id] && todo.indexOf(id) < 0) todo.push(id); });
+    list.forEach(function (b) { const id = pinIdOf(b); if (!id) return; track[id] = b.rarity; if (!b.iconUrl && !tried[id] && todo.indexOf(id) < 0) todo.push(id); });
     if (!todo.length || this._pinBusy) return;
     this._pinBusy = true;
     const that = this;

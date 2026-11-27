@@ -73,14 +73,14 @@
 
 .cy-error-title {
   font-size: var(--cy-font-body);
-  color: var(--cy-text-title);
+  color: var(--cy-color-text-primary);
   font-weight: 600;
 }
 
 .cy-error-sub {
   margin-top: var(--cy-space-1);
   font-size: var(--cy-font-caption);
-  color: var(--cy-text-secondary);
+  color: var(--cy-color-text-secondary);
   line-height: var(--cy-leading-normal);
 }
 
@@ -91,8 +91,8 @@
   line-height: var(--cy-btn-h);
   border-radius: var(--cy-radius-pill);
   border: none;
-  background: var(--cy-btn-solid-bg);
-  color: var(--cy-btn-solid-fg);
+  background: var(--cy-color-action-primary-bg);
+  color: var(--cy-color-action-primary-fg);
   font-size: var(--cy-font-label);
   font-weight: 600;
 }

@@ -873,6 +873,43 @@ class MarketingProductFulfillmentServiceImplTest {
         assertNull(rows.get(0).getRefundPolicyCode());
     }
 
+    @Test
+    void purePointsPassOnOpenEndedRouteFulfilsWithManualRefundVerdict() {
+        Fixture fixture = fixture();
+        fixture.order.setPayMode(MarketingProductOrder.PAY_MODE_POINTS);
+        fixture.order.setTotalCashAmount(null);
+        fixture.order.setTotalPointsAmount(1);
+        topicWithDates(fixture, null, null);
+        List<CmsRegistration> rows = fixture.captureInserts();
+
+        FulfillmentCommand cmd = command(plainLine(TOPIC_A, "29.90", "0.02"));
+        cmd.payment = PaymentFacts.points(1L);
+        FulfillmentOutcome outcome = fixture.service.grant(cmd);
+
+        assertEquals(1, rows.size());
+        assertEquals(1, outcome.registrationIds.size());
+        assertNull(rows.get(0).getRefundDeadline(), "纯积分通票覆盖开放式路线不造截止点");
+        assertNull(rows.get(0).getRefundPolicyCode());
+        assertEquals(Integer.valueOf(0), rows.get(0).getPaymentType());
+        assertEquals(Long.valueOf(1L), rows.get(0).getPointUsed());
+    }
+
+    @Test
+    void purePointsPassOnPartiallyDatedRouteIsStillRefused() {
+        Fixture fixture = fixture();
+        fixture.order.setPayMode(MarketingProductOrder.PAY_MODE_POINTS);
+        fixture.order.setTotalCashAmount(null);
+        fixture.order.setTotalPointsAmount(1);
+        topicWithDates(fixture, fixture.windowStartDate, null);
+
+        FulfillmentCommand cmd = command(plainLine(TOPIC_A, "29.90", "0.02"));
+        cmd.payment = PaymentFacts.points(1L);
+        IllegalStateException gap = assertThrows(IllegalStateException.class,
+                () -> fixture.service.grant(cmd));
+        assertTrue(gap.getMessage().contains(MarketingProductFulfillmentServiceImpl.REFUND_DECISION_POINT_MISSING));
+        verify(fixture.registrationMapper, never()).insertCmsRegistration(any());
+    }
+
     private void assertOpenEndedSeatGrant(int seats, String paid) {
         Fixture fixture = seatTicketFixture(seats, paid);
         CmsTopic open = topicWithDates(fixture, null, null);

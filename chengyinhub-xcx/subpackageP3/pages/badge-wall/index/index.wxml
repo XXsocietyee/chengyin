@@ -28,9 +28,12 @@
               aria-role="button" aria-label="{{item.name}}，{{item.locked ? '尚未点亮' : '已点亮'}}">
           <view class="bw-card bw-card--{{item.rarity || 0}} {{item.locked ? 'is-locked' : ''}} {{flyIdx === item._idx ? 'is-away' : ''}} {{focusIdx === item._idx ? 'is-focus' : ''}}">
           <view class="bw-medal {{item.locked ? 'is-locked' : ''}}" id="bw-medal-{{item._idx}}">
-            <!-- x-fix2 M-2:一张图到不了只让这一枚退回徽记/星标,不影响整面墙 -->
+            <!-- x-fix2 M-2:一张图到不了只让这一枚退回徽记/首字/星标,不影响整面墙 -->
             <image wx:if="{{item.iconUrl && !iconBroken[item._idx]}}" class="bw-medal__img" src="{{item.iconUrl}}" mode="aspectFit" binderror="onIconError" data-idx="{{item._idx}}" />
-            <image wx:elif="{{pins[item.pinId]}}" class="bw-medal__pin" src="{{pins[item.pinId]}}" mode="aspectFit" aria-hidden="true" />
+            <image wx:elif="{{item.pinId && pins[item.pinId]}}" class="bw-medal__pin" src="{{pins[item.pinId]}}" mode="aspectFit" aria-hidden="true" />
+            <view wx:elif="{{item.monogram}}" class="bw-medal__mono bw-medal__mono--{{item.monoTone}} {{item.locked ? 'is-locked' : ''}}" aria-hidden="true">
+              <text class="bw-medal__mono-char">{{item.monogram}}</text>
+            </view>
             <cy-icon wx:else name="star" size="64" />
           </view>
           </view>

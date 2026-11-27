@@ -4,7 +4,7 @@
 <view class="ae {{state === 'ready' && balance === '0.00' && theme !== 'merchant' ? 'ae--empty' : ''}}">
   <cy-skeleton wx:if="{{state === 'loading'}}" type="amount" count="{{1}}" />
   <view wx:elif="{{state === 'error' || state === 'login' || state === 'permission'}}" class="ae-fill cy-fade-in" aria-role="alert">
-    <cy-error load-failure="{{state === 'error'}}" fill="{{true}}" size="lg" title="{{state === 'login' ? '登录后查看账户收益' : state === 'permission' ? '当前身份不能查看收益' : '收益加载失败'}}" retry="{{state === 'login' ? '登录' : '重试'}}" bind:retry="refresh" />
+    <cy-error fill="{{true}}" size="lg" title="{{state === 'login' ? '登录后查看账户收益' : state === 'permission' ? '当前身份不能查看收益' : '收益加载失败'}}" retry="{{state === 'login' ? '登录' : '重试'}}" bind:retry="refresh" />
   </view>
   <block wx:else>
     <view class="ae-hero cy-fade-in">

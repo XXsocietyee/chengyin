@@ -199,7 +199,17 @@ Page({
   },
 
   retryLoad() { this.getList(); this.loadSummary(); },
-  onDenyCta() { require('../../utils/merchant-no-permission.js').followDenyCta(this, this.data.isMerchant === true, '/pages/merchant/index/index') },
+  onDenyCta() {
+    if (this.data.isMerchant === true) {
+      require('../../utils/merchant-no-permission.js').followDenyCta(this, true, '/pages/merchant/index/index');
+      return;
+    }
+    if (this._cyDenyNavigating) return;
+    this._cyDenyNavigating = true;
+    const done = () => { this._cyDenyNavigating = false; };
+    const walletUrl = '/subpackageMember/coupon-wallet/index';
+    wx.redirectTo({ url: walletUrl, fail: () => wx.navigateTo({ url: walletUrl, complete: done }), complete: done });
+  },
 
   // BL-77:只在商家口径下读统计;失败或没有券就不展示,不阻塞列表。
   loadSummary() {

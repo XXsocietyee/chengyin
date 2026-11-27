@@ -119,6 +119,33 @@ page { background: var(--cy-color-bg-page); }
 .bw-pin-canvas { position: fixed; left: -4000rpx; top: 0; width: 160px; height: 160px; pointer-events: none; }
 .bw-sh-pin { display: block; width: 280rpx; height: 280rpx; margin: 8rpx auto 28rpx; }
 .bw-medal__img { width: 100%; height: 100%; }
+/* UI-C1:缺图且无专属徽记的成就/路线通关徽章用首字珐琅圆章，不再复用同一蓝色靶心占位图 */
+.bw-medal__mono {
+  width: 84%;
+  height: 84%;
+  border-radius: 50%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 6rpx solid #D6A646; /* ds-ok: 金属珐琅外圈 */
+  box-shadow: 0 12rpx 22rpx rgba(0, 0, 0, .38), inset 0 0 0 4rpx rgba(255, 255, 255, .18); /* ds-ok: 徽章立体投影 */
+}
+.bw-medal__mono--0 { background: radial-gradient(circle at 32% 28%, #345AB8, #1A2F66); } /* ds-ok: 靛蓝釉 */
+.bw-medal__mono--1 { background: radial-gradient(circle at 32% 28%, #1E7E57, #0D422C); } /* ds-ok: 翡翠釉 */
+.bw-medal__mono--2 { background: radial-gradient(circle at 32% 28%, #9B313F, #52141E); } /* ds-ok: 绛红釉 */
+.bw-medal__mono--3 { background: radial-gradient(circle at 32% 28%, #9E6826, #52330D); } /* ds-ok: 琥珀釉 */
+.bw-medal__mono--4 { background: radial-gradient(circle at 32% 28%, #226F73, #0F3B3E); } /* ds-ok: 孔雀青釉 */
+.bw-medal__mono--5 { background: radial-gradient(circle at 32% 28%, #5A524C, #2A2522); } /* ds-ok: 黛褐釉 */
+.bw-medal__mono.is-locked { background: rgba(255, 255, 255, .05); border-color: rgba(255, 255, 255, .22); box-shadow: none; } /* ds-ok: 未解锁线稿态 */
+.bw-medal__mono-char {
+  font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+  font-size: 76rpx; /* ds-ok: 徽章首字大字 */
+  font-weight: 700;
+  color: #F7F2E6; /* ds-ok: 珐琅白金字 */
+  line-height: 1;
+}
+.bw-medal__mono.is-locked .bw-medal__mono-char { color: rgba(255, 255, 255, .36); } /* ds-ok: 未解锁首字 */
 .bw-cell__name { margin-top: var(--cy-space-3-5); max-width: 100%; color: var(--cy-color-text-primary); font-size: var(--cy-type-card-title); font-weight: 600; text-align: center; }
 .bw-cell__meta { margin-top: var(--cy-space-1); max-width: 100%; color: var(--cy-color-text-tertiary); font-size: var(--cy-type-caption); text-align: center; }
 .bw-empty-state { position: fixed; inset: calc(var(--sbh) + var(--nbh) + 220rpx) 0 0; display: flex !important; flex-direction: column; min-height: 0; }

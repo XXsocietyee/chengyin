@@ -13,7 +13,7 @@
     <cy-error load-failure fill="{{true}}" title="暂时无法确认身份" sub="{{accessError}}" bind:retry="retryAccessCheck" auto-back />
   </view>
   <view class="publish-access-state" wx:elif="{{accessState === 'denied'}}">
-    <cy-empty title="暂时不能发布活动" sub="{{deniedReason}}" cta="返回" bind:cta="onNavBack" />
+    <cy-empty fill size="lg" title="暂时不能发布活动" sub="{{deniedReason}}" cta="返回" bind:cta="onNavBack" />
   </view>
   <block wx:elif="{{accessState === 'ready'}}">
   <view class="publish-access-state" wx:if="{{activityLoadError}}">

@@ -27,6 +27,7 @@ const REASON_TEXT = {
   ORDER_NOT_PAYABLE: '订单当前不可支付',
   ORDER_STATE_CHANGED: '订单状态已变化，请刷新',
   REFUND_POLICY_NOT_DEFINED: '退款规则未配置，暂不可购买',
+  REFUND_WINDOW_MISSING: '该商品暂不可售',
   CURRENCY_UNSUPPORTED: '该商品币种暂不支持',
   PAY_MODE_UNAVAILABLE: '该支付方式不可用',
   QUOTE_EXPIRED: '报价已过期，请重新确认',

@@ -492,7 +492,16 @@ public class MarketingProductPurchaseServiceImpl implements IMarketingProductPur
                     order.getPaymentFactId() == null ? 0L : order.getPaymentFactId(),
                     cashFactHash, order.getTotalCashAmount(), null);
         }
-        FulfillmentOutcome outcome = fulfillment.grant(command);
+        FulfillmentOutcome outcome;
+        try {
+            outcome = fulfillment.grant(command);
+        } catch (IllegalStateException gap) {
+            String msg = gap.getMessage();
+            if (msg != null && msg.startsWith(MarketingProductFulfillmentServiceImpl.REFUND_DECISION_POINT_MISSING)) {
+                throw MarketingProductException.conflict("REFUND_WINDOW_MISSING", "该商品暂不可售");
+            }
+            throw gap;
+        }
         if (outcome != null) {
             boolean pending = outcome.pendingActivation;
             Long primaryId = outcome.registrationIds.isEmpty() ? null : outcome.registrationIds.get(0);
