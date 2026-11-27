@@ -198,7 +198,7 @@ public class EcommercePartnerPaymentAdapter {
             if (member == null || member.getWxOpenId() == null || member.getWxOpenId().isBlank())
                 throw new IllegalStateException("用户不存在");
             openid = member.getWxOpenId();
-            description = description(registration.getActivityTitle() + "-" + registration.getTicketName());
+            description = description(WechatPaymentSdkGateway.formatRegistrationDescription(registration));
             notifyUrl = gateway.paymentNotifyUrl();
         } catch (RuntimeException invalid) {
             throw PaymentPreorderException.definiteFailure("创建微信支付订单参数异常：" + invalid.getMessage(), invalid);

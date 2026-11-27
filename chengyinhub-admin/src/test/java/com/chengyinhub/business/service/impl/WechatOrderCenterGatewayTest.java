@@ -134,4 +134,19 @@ class WechatOrderCenterGatewayTest {
             verifyNoInteractions(intents);
         }
     }
+
+    @Test
+    void registrationDescriptionOmitsNullTicketName() {
+        com.chengyinhub.business.domain.CmsRegistration selfPlay = new com.chengyinhub.business.domain.CmsRegistration();
+        selfPlay.setActivityTitle("外滩回执");
+        selfPlay.setTicketName(null);
+        assertEquals("外滩回执", WechatPaymentSdkGateway.formatRegistrationDescription(selfPlay));
+
+        com.chengyinhub.business.domain.CmsRegistration ticketed = new com.chengyinhub.business.domain.CmsRegistration();
+        ticketed.setActivityTitle("外滩回执");
+        ticketed.setTicketName("早鸟票");
+        assertEquals("外滩回执-早鸟票", WechatPaymentSdkGateway.formatRegistrationDescription(ticketed));
+
+        assertEquals("城瘾活动报名", WechatPaymentSdkGateway.formatRegistrationDescription(new com.chengyinhub.business.domain.CmsRegistration()));
+    }
 }

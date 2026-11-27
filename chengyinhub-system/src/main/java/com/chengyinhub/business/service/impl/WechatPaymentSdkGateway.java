@@ -760,7 +760,7 @@ public class WechatPaymentSdkGateway implements WechatPaymentOperations {
         amount.setTotal(toWechatPaymentCents(registration.getWechatPaymentAmount()));
         amount.setCurrency("CNY");
 
-        String body = registration.getActivityTitle() + "-" + registration.getTicketName();
+        String body = formatRegistrationDescription(registration);
         if (body.length() > 128) {
             body = body.substring(0, 125) + "...";
         }
@@ -826,8 +826,8 @@ public class WechatPaymentSdkGateway implements WechatPaymentOperations {
         Payer payer = new Payer();
         payer.setOpenid(getMemberOpenid(registration.getMemberId()));
 
-        // 商品描述（注意长度限制）
-        String body = jsapiDescription(registration.getActivityTitle() + "-" + registration.getTicketName());
+        // 商品描述（注意长度限制，自玩票等无 ticketName 时不拼接 "-null"）
+        String body = jsapiDescription(formatRegistrationDescription(registration));
 
         request.setAmount(amount);
         request.setPayer(payer);
@@ -838,6 +838,15 @@ public class WechatPaymentSdkGateway implements WechatPaymentOperations {
         request.setNotifyUrl(requireNotifyUrl());
 
         return request;
+    }
+
+    static String formatRegistrationDescription(CmsRegistration registration) {
+        String title = registration == null || registration.getActivityTitle() == null ? "" : registration.getActivityTitle().trim();
+        String ticket = registration == null || registration.getTicketName() == null ? "" : registration.getTicketName().trim();
+        if (!title.isEmpty() && !ticket.isEmpty()) return title + "-" + ticket;
+        if (!title.isEmpty()) return title;
+        if (!ticket.isEmpty()) return ticket;
+        return "城瘾活动报名";
     }
 
     private static String jsapiDescription(String value) {
