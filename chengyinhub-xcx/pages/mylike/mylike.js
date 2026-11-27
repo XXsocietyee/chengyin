@@ -71,13 +71,15 @@ Page({
       this._hasShown = true;
       return;
     }
-    // 返回页面后刷新数据；首展交给 onLoad，避免同一页并发两次 page=1。
+    // 首展交给 onLoad，避免同一页并发两次 page=1。
+    // L10-045:再次进入仍重读第 1 页，换上刚取消或刚改的收藏；已上拉的后续页留在列表里，回包前不清空。
     // 在途列表期间返回:排队一次刷新,由当前请求 complete 出队(刷新归属本次返回,不记在列表 handler 名下)。
+    const refreshReturn = () => this.refreshData({ preserveLoaded: true });
     if (this.data.loading) {
-      this._favoriteShowRefresh = { owner: this._favoriteOwner, generation: this._favoriteGeneration, run: () => this.refreshData() };
+      this._favoriteShowRefresh = { owner: this._favoriteOwner, generation: this._favoriteGeneration, run: refreshReturn };
       return;
     }
-    this.refreshData();
+    refreshReturn();
   },
 
   onHide() { merchantTheme.merchantPageRestore(); },
@@ -94,6 +96,8 @@ Page({
     this._stopPullWithCurrent = false;
     this._favoriteShowRefresh = null;
     this._favoriteLoadedPages = Object.create(null);
+    this._favoritePageIds = Object.create(null);
+    this._favoriteReturnMerge = null;
     this._favoriteRemovals = { posts: Object.create(null), topics: Object.create(null), nodes: Object.create(null) };
     this._unlikePrompts = Object.create(null); this._nodeUnfavoriteRequests = Object.create(null);
     this.setData({ postList: [], ztList1: [], nodeList: [], loading: false, refreshing: false, errorMsg: '', loginRequired: false,
@@ -120,6 +124,37 @@ Page({
   _filterFavoriteRead(type, rows, version) {
     const removed = this._favoriteRemovals && this._favoriteRemovals[type];
     return removed ? rows.filter(row => !(removed[String(row.id)] > version)) : rows;
+  },
+
+  _rememberFavoritePage(tab, pageNum, rows) {
+    const book = this._favoritePageIds || (this._favoritePageIds = Object.create(null));
+    const pages = book[tab] || (book[tab] = []);
+    pages[pageNum - 1] = rows.map(row => String(row && row.id));
+    pages.length = pageNum;
+  },
+
+  _takeFavoriteReturnMerge(tab, pageNum) {
+    const pending = this._favoriteReturnMerge;
+    if (!pending || pending.tab !== tab || pageNum !== 1) return null;
+    this._favoriteReturnMerge = null;
+    return pending;
+  },
+
+  // 新的第 1 页换上头；旧第 1 页里没有的已加载行留下。从第 1 页消失的 id 不在新回包里，也不会从后续页捡回来。
+  _mergeFavoriteReturn(tab, newRows) {
+    const pages = (this._favoritePageIds && this._favoritePageIds[tab]) || [];
+    const list = tab === 'posts' ? this.data.postList : this.data.ztList1;
+    const head = Object.create(null);
+    (pages[0] || []).forEach(id => { head[id] = true; });
+    const fresh = Object.create(null);
+    newRows.forEach(row => { fresh[String(row.id)] = true; });
+    const tail = [];
+    list.forEach(row => {
+      const id = String(row && row.id);
+      if (!head[id] && !fresh[id]) tail.push(row);
+    });
+    if (pages.length) pages[0] = newRows.map(row => String(row && row.id));
+    return newRows.concat(tail);
   },
 
   syncViewTheme() {
@@ -179,6 +214,7 @@ Page({
     const previousPage = loadedPages.posts || Math.max(1, pageConfig.pageNum - 1);
     const hasOldContent = that.data.postList.length > 0;
     const finishLoadError = function (res, fallback, statusCode) {
+      that._favoriteReturnMerge = null;
       const message = app.getRequestErrorMessage(res, fallback);
       that.setData({ pageConfig: { pageNum: previousPage, pageSize: pageConfig.pageSize } });
       that.setData({ refreshing: false, errorMsg: hasOldContent ? '' : message,
@@ -202,9 +238,20 @@ Page({
             row.picList = row.pics ? String(row.pics).split(';').filter(Boolean) : [];
             return row;
           });
-          loadedPages.posts = pageConfig.pageNum;
-          const postList = pageConfig.pageNum === 1 ? rows : that.data.postList.concat(rows);
-          that.setData({ postList: postList, hasMorePosts: res.data.hasMore === true, errorMsg: '' });
+          const preserved = that._takeFavoriteReturnMerge('posts', pageConfig.pageNum);
+          if (preserved) {
+            loadedPages.posts = preserved.pageNum;
+            that.setData({
+              postList: that._mergeFavoriteReturn('posts', rows),
+              pageConfig: { pageNum: preserved.pageNum, pageSize: pageConfig.pageSize },
+              errorMsg: ''
+            });
+          } else {
+            loadedPages.posts = pageConfig.pageNum;
+            that._rememberFavoritePage('posts', pageConfig.pageNum, rows);
+            const postList = pageConfig.pageNum === 1 ? rows : that.data.postList.concat(rows);
+            that.setData({ postList: postList, hasMorePosts: res.data.hasMore === true, errorMsg: '' });
+          }
         } else finishLoadError(res, '收藏帖文加载失败');
       },
       fail: function (res, statusCode) {
@@ -243,6 +290,7 @@ Page({
     const previousPage = loadedPages.topics || Math.max(1, pageConfig.pageNum - 1);
     const hasOldContent = that.data.ztList1.length > 0;
     const finishLoadError = function (res, fallback, statusCode) {
+      that._favoriteReturnMerge = null;
       const message = app.getRequestErrorMessage(res, fallback);
       that.setData({ pageConfig: { pageNum: previousPage, pageSize: pageConfig.pageSize } });
       if (hasOldContent) {
@@ -275,17 +323,26 @@ Page({
           
           // 处理日期格式
           list = that.processListData(list);
-          loadedPages.topics = pageConfig.pageNum;
-          
-          // 如果是第一页，直接替换；否则追加
-          if (pageConfig.pageNum === 1) {
-            that.setData({ 
+          const preserved = that._takeFavoriteReturnMerge('topics', pageConfig.pageNum);
+          if (preserved) {
+            loadedPages.topics = preserved.pageNum;
+            that.setData({
+              ztList1: that._mergeFavoriteReturn('topics', list),
+              pageConfig: { pageNum: preserved.pageNum, pageSize: pageConfig.pageSize },
+              errorMsg: '',
+            });
+          } else if (pageConfig.pageNum === 1) {
+            loadedPages.topics = pageConfig.pageNum;
+            that._rememberFavoritePage('topics', pageConfig.pageNum, list);
+            that.setData({
               ztList1: list,
               hasMore1: res.data.rows.length >= pageConfig.pageSize,
               errorMsg: '',
             });
           } else {
-            that.setData({ 
+            loadedPages.topics = pageConfig.pageNum;
+            that._rememberFavoritePage('topics', pageConfig.pageNum, list);
+            that.setData({
               ztList1: [...that.data.ztList1, ...list],
               hasMore1: res.data.rows.length >= pageConfig.pageSize,
               errorMsg: '',
@@ -721,11 +778,18 @@ Page({
       if (stopPullAfterComplete) this._stopPullWithCurrent = true;
       return;
     }
+    const preserveLoaded = !stopPullAfterComplete && !!fromPullDown && fromPullDown.preserveLoaded === true;
+    const tab = this.data.activeFavoriteTab === 'posts' ? 'posts' : (this.data.activeFavoriteTab === 'nodes' ? 'nodes' : 'topics');
+    const loaded = this._favoriteLoadedPages && this._favoriteLoadedPages[tab];
+    // 下拉、登录重试、失败重试仍从第 1 页整表重读。返回刷新只重读第 1 页，并在回包时接上已加载的后续页。
+    this._favoriteReturnMerge = preserveLoaded && tab !== 'nodes' && loaded > 1
+      ? { tab: tab, pageNum: loaded }
+      : null;
     const pageConfig = {
       pageNum: 1,
       pageSize: 10
     };
-    
+
     this.setData({ pageConfig, errorMsg: '' });
 
     this.loadLikeData(stopPullAfterComplete);
