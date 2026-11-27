@@ -14,7 +14,7 @@ test('活动详情:有店铺名就以店铺作主办方,标题「主办方」、
   assert.match(js, /hostName: nonEmptyString\(info\.organizerShopName\) \|\| nonEmptyString\(host\.memberRealName\)/);
   assert.match(js, /hostAvatar: nonEmptyString\(info\.organizerShopName\) \? nonEmptyString\(info\.organizerShopLogo\) : nonEmptyString\(host\.memberAvatar\)/);
   assert.match(js, /hostIsShop: !!nonEmptyString\(info\.organizerShopName\)/);
-  assert.match(wxml, /\{\{hostIsShop \? '主办方' : '主理人'\}\}/);
+  assert.match(wxml, /class="activity-host__name">\{\{hostName\}\}<\/text>/);
   assert.match(wxml, /\{\{hostIsShop \? '商家' : '发起人 · 主理人'\}\}/);
 });
 

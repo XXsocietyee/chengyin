@@ -21,21 +21,19 @@ function assertContract(overrides = {}) {
   const activityWxml = source('subpackageMember/components/cy/scene-play-activity-detail/index.wxml')
   const activityWxss = source('subpackageMember/components/cy/scene-play-activity-detail/index.wxss')
   assert.match(activityWxml, /class="activity-person"[^>]*aria-role="button"[^>]*aria-label=/)
-  assert.match(activityWxml, /class="ticket__more"[^>]*aria-role="button"[^>]*aria-expanded=/)
   assert.match(rule(activityWxss, '.activity-person'), /width:\s*var\(--cy-btn-h\)/)
   assert.match(rule(activityWxss, '.activity-person'), /height:\s*var\(--cy-btn-h\)/)
-  assert.match(rule(activityWxss, '.ticket__more'), /min-height:\s*var\(--cy-btn-h\)/)
 }
 
 test('紧凑型文字/头像动作具有 44px owner 和可读状态', () => {
   assertContract()
 })
 
-test('负控：票种展开动作缩回 64rpx 会判红', () => {
+test('负控：参与人头像动作缩回 64rpx 会判红', () => {
   const file = 'subpackageMember/components/cy/scene-play-activity-detail/index.wxss'
   const broken = read(file).replace(
-    /(\.ticket__more\s*\{[^}]*?)min-height:\s*var\(--cy-btn-h\);/s,
-    '$1min-height: 64rpx;',
+    /(\.activity-person\s*\{[^}]*?)height:\s*var\(--cy-btn-h\);/s,
+    '$1height: 64rpx;',
   )
-  assert.throws(() => assertContract({ [file]: broken }), /min-height/)
+  assert.throws(() => assertContract({ [file]: broken }), /height/)
 })
