@@ -101,6 +101,7 @@ const { resolveOpenState } = require('./utils/play-open-state.js');
 const { pushScene, popScene, currentScene, exitDecision } = require('../../utils/scene-stack.js');
 const finishRouteRecommendation = require('./finish-route-recommendation.js');
 const finishResult = require('./utils/finish-result.js');
+const standRedeemUtil = require('./utils/stand-redeem.js');
 const { buildPlayRecap } = require('./recap.js'); const { buildFinishMedals, themeMedals } = require('./utils/finish-medals.js'); // 2026-10-22 完成页勋章堆
 const { summarizePuzzleScores } = require('./utils/play-puzzle-summary.js'); const chapterFlip = require('./utils/chapter-flip-data.js'); // 2026-10-28 章节翻转过场
 const { normalizeAtmosphere, atmosphereClass, PRESETS: CHAPTER_ATMOSPHERES } = require('../../utils/chapter-atmosphere.js');
@@ -628,7 +629,9 @@ Page({
     finishMedals: 0, finishMedalList: [], finishAchievements: [], finishDateLabel: '', medalScreen: { show: false, items: [], title: '', sub: '', stats: [], record: null }, finishSnap: '', finishSnapError: false, finishPhotos: [], canReplayJournal: false,
     branchPath: [],
     finishRouteRecommendation: null,
+    finishStation: null,
     finishResult: null,
+    standRedeem: { show: false, shopName: '', perkTitle: '', serialCode: '', serialLabel: '', playerName: '', clockText: '', dateText: '', replayed: false },
     voucher: { show: false },
     ticket: { show: false, url: '', code: '', loading: false, expiresAt: 0 },
     // B 通关轨迹回顾层(2D):只连已完成节点、按真实走法排序,渐进描线 + 成就气泡。
@@ -805,6 +808,7 @@ Page({
     if (this._teamPatchPending) { this._teamPatchPending = false; this._applyTeams(this._teams); }
     this._flushTrail(true);
     this._startZeroHpTimer();
+    if (this.data.standRedeem && this.data.standRedeem.show) this._startStandClock();
     if (this.data.chapterFull && !this.data.chapterGate.show) this.measureChapter();
     else if (this.data.chapStory.show) this._startStoryDust();
     if (this.data.chapterFull) audioSession.keepAwake('chapterFull', true);
@@ -1159,9 +1163,11 @@ Page({
     if (this._storyTimer) { clearTimeout(this._storyTimer); this._storyTimer = 0; }
     // 长按结束的进度定时只有 touchend 会清;卸载若正好压在按住那一拍上,不清就是卸载后还 setData。
     this._cancelRunHold();
+    this._stopStandClock();
   },
   // 游玩定位只在前台持有；回前台沿用本页同意，暂停或通关后不恢复。
   onHide() {
+    this._stopStandClock();
     this.finishChapterVideo();
     this._flushAnswerRight();
     this.setData({ arrivalGuard: null });
@@ -2684,15 +2690,111 @@ Page({
     if (this.data.storyExpired) return;   // 票过期的只读集章册:只读章节,不进玩法、不到店
     if (this._heroTimer) clearTimeout(this._heroTimer);
     this.setData({ hero: { show: false, open: false, node: null, style: '', bodyTop: 0, ry: 0, spun: false, turned: false, sx: 0, ss: '1', faded: false, collapsed: false, scrollTop: 0 } });
-    // F08 / FE-GAPS G1:没有玩法的店不进 startGame —— 直接到这家的权益与核销码(商家页「我已到店」→「出示核销码」)
-    if (node && Number(this.data.mode) === 2 && Number(node.merchantId) > 0 && !node.hasGame && !node.hasAdvanced) {
-      wx.navigateTo({ url: '/pages/play/merchant/index?nodeId=' + id + '&verify=1' });
+    // §4.2 1-Second perk-only redemption: 纯权益商家节点直接在当前页出示动态核销码,
+    // 不再跳转 pages/play/merchant/index 再 navigateBack,也跳过定位/拍照/逐店手机授权弹窗
+    if (this._isPerkOnlyNode(node)) {
+      this._openPerkOnlyEntryQr(node);
       return;
     }
     // 「开始互动 获得奖励!」直接进玩法面板,不再经商家页中转 ——
     // 中间那一页除了再点一次「开始」之外没有别的事可做(用户 2026-09-08 定)。
     if (node) { this.startGame(node); return; }
     wx.navigateTo({ url: '/pages/play/merchant/index?nodeId=' + id });   // 拿不到节点时的兜底
+  },
+  _isPerkOnlyNode(node) {
+    return !!node && Number(this.data.mode) === 2 && Number(node.merchantId) > 0 && !node.hasGame && !node.hasAdvanced;
+  },
+  _openPerkOnlyEntryQr(node) {
+    if (!node) return;
+    if (node.supplyState) { cyToast('门店调整中，暂不能出示核销码'); return; }
+    if (node.perk && node.perk.redeemBlockedText) { cyToast(node.perk.redeemBlockedText); return; }
+    if (node.done) { cyToast('该店权益已核销'); return; }
+    this.openEntryQr();
+  },
+  /** §4.2 柜台台卡自助核销：扫描门店台卡二维码 → 原子核销并展示实时秒表+动态绿章确认屏。 */
+  scanStandRedeem(e) {
+    if (!this._isPlayAccountCurrent() || this.data.isPreview || this.data.isMock) return;
+    if (this._standRedeemBusy) return;
+    const id = (e && e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.id != null)
+      ? e.currentTarget.dataset.id : (this.data.hero.node && this.data.hero.node.nodeId);
+    const node = id != null ? (this.data.nodes || []).find((n) => String(n.nodeId) === String(id)) : null;
+    if (node && node.supplyState) { cyToast('门店调整中，暂不能核销'); return; }
+    if (node && node.perk && node.perk.redeemBlockedText) { cyToast(node.perk.redeemBlockedText); return; }
+    if (node && node.done) { cyToast('该店权益已核销'); return; }
+    const sessionKey = this._sessionKey();
+    const that = this;
+    wx.scanCode({
+      onlyFromCamera: true,
+      scanType: ['qrCode'],
+      success(scan) {
+        if (!that._isPlayAccountCurrent() || sessionKey !== that._sessionKey()) return;
+        const code = String((scan && scan.result) || '').trim();
+        if (!code) { cyToast('没有识别到台卡二维码'); return; }
+        that._submitStandRedeem(node, code);
+      },
+      fail(err) {
+        if (isScanCancelled(err)) return;
+        cyToast('未能打开扫码，请对准门店台卡重试');
+      },
+    });
+  },
+  _submitStandRedeem(node, code) {
+    if (!this._isPlayAccountCurrent() || this._standRedeemBusy) return;
+    const sessionKey = this._sessionKey();
+    const that = this;
+    this._standRedeemBusy = true;
+    const payload = Object.assign({}, this._sessionParams(), { code });
+    if (node && node.nodeId != null) payload.nodeId = node.nodeId;
+    if (this.data.regId) payload.registrationId = this.data.regId;
+    req('/api/play/self-redeem', 'POST', payload).then((res) => {
+      that._standRedeemBusy = false;
+      if (!that._isPlayAccountCurrent() || sessionKey !== that._sessionKey()) return;
+      if ((res.code == 200 || res.code == '200') && res.data) {
+        const targetId = res.data.nodeId != null ? res.data.nodeId : (node && node.nodeId);
+        if (targetId != null) {
+          const nodes = (that.data.nodes || []).map((item) => (
+            String(item.nodeId) === String(targetId)
+              ? Object.assign({}, item, { done: true, arrived: true, doneAt: res.data.redeemedAt || Date.now() })
+              : item
+          ));
+          that.setData({ nodes, 'hero.show': false, 'hero.open': false }, () => that.rebuild());
+        }
+        that._openStandRedeemModal(res.data, node);
+      } else {
+        cyToast((res && res.msg) || '台卡核销失败，请重试');
+      }
+    }).catch(() => {
+      that._standRedeemBusy = false;
+      if (that._isPlayAccountCurrent()) cyToast('网络异常，请稍后重试');
+    });
+  },
+  _openStandRedeemModal(payload, fallbackNode) {
+    this._stopStandClock();
+    const view = standRedeemUtil.buildStandRedeemView(payload, fallbackNode, Date.now());
+    this.setData({ standRedeem: view }, () => this._startStandClock());
+  },
+  _startStandClock() {
+    this._stopStandClock();
+    const tick = () => {
+      if (this._playDisposed || !(this.data.standRedeem && this.data.standRedeem.show)) {
+        this._stopStandClock();
+        return;
+      }
+      const clock = standRedeemUtil.formatClockParts(Date.now());
+      this.setData({ 'standRedeem.clockText': clock.clockText, 'standRedeem.dateText': clock.dateText });
+    };
+    this._standClockTimer = setInterval(tick, 1000);
+  },
+  _stopStandClock() {
+    if (this._standClockTimer) {
+      clearInterval(this._standClockTimer);
+      this._standClockTimer = null;
+    }
+  },
+  closeStandRedeem() {
+    this._stopStandClock();
+    this.setData({ 'standRedeem.show': false });
+    if (this._isPlayAccountCurrent() && !this.data.isPreview && !this.data.isMock) this.loadData(false);
   },
   /** 物理返回 / iOS 侧滑被 page-container 守卫吃掉后落到这里:关的是 hero,不是 play 页。
    *  按钮关闭时 hero.show 已先置 false,守卫随之 leave 再进来一次 —— closeHero 的 guard 让它成为空操作。 */
@@ -3725,13 +3827,14 @@ Page({
     // 「满X可用」门槛已拍板删除展示(2026-09-17):线下到店券平台校验不了金额,只留券名。
     // 有效期展示只到日(全站统一 'YYYY.MM.DD');服务端判定仍用完整时间。
     const endDay = formatDayDots(c.endTime);
+    const station = (!node.coupon && (this.data.finishStation || reward.finishStation)) || null;
     this.setData({
       voucherView: {
         big: amt ? (amt + '元') : '优惠',
         small: c.name || '优惠券',
         expires: endDay ? ('截止日期：' + endDay) : '有效期见券包',
-        merchantName: node.name || '合作商家',
-        merchantAddress: node.address || '地址待补充',
+        merchantName: (station && station.shopName) || node.name || '合作商家',
+        merchantAddress: (station && station.shopAddress) || node.address || '地址待补充',
       },
     });
   },
@@ -4715,8 +4818,9 @@ Page({
       // subpackagePrefab。那条换轨让「用玩法模板 + 主题配置做出《预制人生》」永远无法验收 ——
       // 作者配得再对,一取这个名字就被顶掉,看到的仍是写死在 JS 里的那份。
       that._topicAudioUrl = d.topicAudioUrl || '';
+      const resolvedRegId = that.data.regId || (d.regId != null && Number(d.regId) > 0 ? String(d.regId) : '');
       that.setData({
-        loading: false, emptyTip: '', emptyKind: '', topicId: d.topicId || '', topicName, topicDesc: d.topicDesc || '', topicCover: d.topicCover || '', topicAiGenerated: d.topicAiGenerated === true,
+        loading: false, emptyTip: '', emptyKind: '', regId: resolvedRegId, topicId: d.topicId || '', topicName, topicDesc: d.topicDesc || '', topicCover: d.topicCover || '', topicAiGenerated: d.topicAiGenerated === true,
         narrationAvailable: hasVoice(d, nodes), musicAvailable: hasMusic(d),
         mode, playContact: playOverlays.contact(d.contact), packOpen: skipPack || that.data.packOpen, headIn: skipPack || that.data.headIn,
         modeLabel: mode == 2 ? '自由探索' : '城市定向',
@@ -5370,11 +5474,12 @@ Page({
   openPoiFromSheet() {
     this.setData({ 'sheet.show': false, packOpen: true });
   },
-  /** ③ 的门店核销码必须经过 merchant 页的单店授权写入+回读闸。 */
+  /** ③ 有玩法门店经 merchant 页单店授权闸；§4.2 纯权益门店直接本页 1 秒出码。 */
   openMerchantFromSheet() {
     const node = this.data.sheet && this.data.sheet.node;
     if (!node || node.nodeId == null) return;
     this.setData({ 'sheet.show': false }, () => {
+      if (this._isPerkOnlyNode(node)) { this._openPerkOnlyEntryQr(node); return; }
       wx.navigateTo({ url: '/pages/play/merchant/index?nodeId=' + node.nodeId });
     });
   },
@@ -9085,6 +9190,13 @@ Page({
     const finishChapterDone = finishChapterNodes.length > 0 && finishChapterNodes.every((n) => n.done);
     const finishResultLocal = { topicCompleted: !!this.data.topicCompleted, allDone: !!this.data.allDone, chapterDone: finishChapterDone };
     this._finishShownKey = this._finishKey();
+    const finishCoupon = this._themeReward && this._themeReward.finishCoupon;
+    const finishNodes = this.data.nodes || [];
+    const lastFinishNode = finishNodes.length ? finishNodes[finishNodes.length - 1] : null;
+    const initialFinishStation = finishCoupon
+      ? standRedeemUtil.buildFinishStationView(
+          finishCoupon, null, this._themeReward && this._themeReward.finishStation, lastFinishNode)
+      : null;
     this.setData({
       showFinish: true,
       finishResult: finishResult.resolveFinishResult(null, finishResultLocal, 'pending'),
@@ -9096,6 +9208,7 @@ Page({
       finishSnap: '', finishSnapError: false,
       finishPhotos: recap.photos,
       canReplayJournal: recap.canReplayJournal,
+      finishStation: initialFinishStation,
       // 站末分支图(契约 §3.3):只读本次会话已有的走向记录
       branchPath: this._buildBranchPath(),
       // 主视觉:本次拿到的徽章(有图用图,无图用名字首字);一枚都没有时不硬凑
@@ -9107,10 +9220,39 @@ Page({
       if (!(this.data.routeCard || {}).on || (this.data.newLifeOS || {}).show) this.paintRouteThumb();
       if (!this._openFinale(isShopDay)) this._openMedalScreen(); // g20:通关过场本身就是那一张通关卡,不再在它下面再垫一层勋章页;B:轨迹回顾层(渐进描线 + 成就气泡 + 用时/距离);v13 整个主题走完时盖上通关勋章页
     });
+    if (finishCoupon) this._syncFinishStationCoupon(finishCoupon, lastFinishNode, finishView);
     this.loadMilestone(); this.loadStageEnd(); // BL-186 本章结算与里程碑并列读,不挡完成页
     if (!this.data.allDone) { this.loadSessionStats(); this.loadHudCharacter(); } // 文档二 L5:章节结算的本局成绩名次与 RPG 小结
     this.loadFinishRouteRecommendation();
     this.loadFinishResult(finishResultLocal);
+  },
+  /** §4.2 19-route 终点完赛驿站：复用 ApiCouponController /api/coupon/myrecvlist 匹配本人完赛券记录。 */
+  _syncFinishStationCoupon(finishCoupon, fallbackNode, finishView) {
+    if (!finishCoupon || !finishCoupon.id || this.data.isPreview || this.data.isMock) return;
+    req('/api/coupon/myrecvlist', 'POST', {}).then((res) => {
+      if (!this._isFinishViewCurrent(finishView) || !this.data.showFinish) return;
+      if (!(res && (res.code == 200 || res.code == '200') && Array.isArray(res.data))) return;
+      const matched = standRedeemUtil.pickFinishCouponHistory(res.data, finishCoupon.id);
+      if (!matched) return;
+      const updated = standRedeemUtil.buildFinishStationView(
+        finishCoupon, matched, this._themeReward && this._themeReward.finishStation, fallbackNode);
+      if (updated) this.setData({ finishStation: updated });
+    }).catch(() => {});
+  },
+  /** §4.2 终点完赛驿站 1 秒出示核销码：优先直出 ApiCouponController 完赛券动态码，否则复用 _syncVoucherView + openVoucher。 */
+  openFinishStationRedeem() {
+    const station = this.data.finishStation;
+    if (!station) return;
+    if (station.redeemed) { cyToast('完赛权益已核销'); return; }
+    if (station.couponHistoryId) {
+      this.openScene('qr-coupon', {
+        couponHistoryId: String(station.couponHistoryId),
+        name: station.perkName || '完赛权益',
+      });
+      return;
+    }
+    this._voucherNode = null;
+    this.openVoucher();
   },
   // U08-01:结果词以服务端本局战报为准;迟到响应(换局/换账号/关面板)丢弃
   loadFinishResult(local) {

@@ -85,13 +85,13 @@ test('「我已到店」on a perk-only shop asks for the auto popup so the code 
   assert.deepEqual(opts, { autoPopup: true });
 });
 
-test('perk code card: before arrival it runs 我已到店, after arrival it opens the code, after redemption nothing', () => {
+test('perk code card: §4.2 opens the code directly without GPS prompt, after redemption nothing', () => {
   const before = load(PERK_SHOP);
   let arrived = 0;
   before.arriveHere = () => { arrived += 1; };
   before.perkCodeTap();
-  assert.equal(arrived, 1);
-  assert.deepEqual(before.calls, []);
+  assert.equal(arrived, 0, '§4.2 perk-only shop skips pre-redemption GPS prompt');
+  assert.deepEqual(before.calls, ['verify']);
   const at = load(Object.assign({}, PERK_SHOP, { arrived: true }));
   at.perkCodeTap();
   assert.deepEqual(at.calls, ['verify']);
@@ -110,10 +110,11 @@ test('wxml: perk card + 核销码 lead the page, no photo step and no photo entr
   assert.match(WXML, /wx:if="\{\{!perkOnly && node\.perk && node\.perk\.name\}\}"/, 'old perk section only for game shops (no duplicate)');
 });
 
-test('perk code card on a shop under supply adjustment never starts 我已到店 (P1-9: no arrive / code while 门店调整中)', () => {
+test('perk code card on a shop under supply adjustment never starts 我已到店 or opens code (P1-9)', () => {
   const page = load(Object.assign({}, PERK_SHOP, { supplyState: 'EXITED' }));
   let arrived = 0;
   page.arriveHere = () => { arrived += 1; };
   page.perkCodeTap();
   assert.equal(arrived, 0, 'supply-adjusting shop must not request location / write an arrival from the code card');
+  assert.deepEqual(page.calls, [], 'supply-adjusting shop must not open verification code');
 });

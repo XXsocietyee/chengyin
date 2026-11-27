@@ -27,7 +27,7 @@
     <view class="mp-sec" wx:if="{{perkOnly}}">
       <view class="mp-sec__h">本店权益</view>
       <view class="mp-perk" wx:if="{{node.perk && node.perk.name}}"><cy-icon name="gift" size="32" /><view class="mp-perk__c"><text class="mp-perk__t">{{node.perk.name}}</text><text class="mp-perk__s" wx:if="{{node.perk.redeemRule}}">{{node.perk.redeemRule}}</text></view></view>
-      <view class="mp-perk mp-perk--code {{node.done || node.supplyState || (node.perk && node.perk.redeemBlockedText) ? 'is-off' : ''}}" bindtap="perkCodeTap" aria-role="button" aria-label="{{node.done ? '已核销' : (node.arrived ? '出示核销码' : '我已到店，打开核销码')}}" aria-disabled="{{node.done}}" hover-class="{{node.done ? 'none' : 'cy-pressed'}}" hover-stay-time="80">
+      <view class="mp-perk mp-perk--code {{node.done || node.supplyState || (node.perk && node.perk.redeemBlockedText) ? 'is-off' : ''}}" bindtap="perkCodeTap" aria-role="button" aria-label="{{node.done ? '已核销' : '出示核销码'}}" aria-disabled="{{node.done}}" hover-class="{{node.done ? 'none' : 'cy-pressed'}}" hover-stay-time="80">
         <cy-icon name="qr" size="32" /><view class="mp-perk__c"><text class="mp-perk__t">核销码</text><text class="mp-perk__s" wx:if="{{node.done}}">已核销</text></view>
       </view>
     </view>
@@ -35,9 +35,9 @@
     <view class="mp-sec">
       <view class="mp-sec__h">现场记录</view>
       <view class="mp-proof">
-        <view class="mp-proof__row {{node.arrived ? 'is-done' : ''}}"><text>1</text><view><text class="mp-proof__t">我已到店</text></view></view>
+        <view class="mp-proof__row {{node.arrived ? 'is-done' : ''}}" wx:if="{{!perkOnly}}"><text>1</text><view><text class="mp-proof__t">我已到店</text></view></view>
         <view class="mp-proof__row {{node.selfReported ? 'is-done' : ''}}" wx:if="{{!perkOnly}}"><text>2</text><view><text class="mp-proof__t">拍摄现场凭证</text><text class="mp-proof__s" wx:if="{{node.arrived && node.photoDesc}}">{{node.photoDesc}}</text></view></view>
-        <view class="mp-proof__row {{node.done ? 'is-done' : ''}}"><text>{{perkOnly ? 2 : 3}}</text><view><text class="mp-proof__t">商家核销</text></view></view>
+        <view class="mp-proof__row {{node.done ? 'is-done' : ''}}"><text>{{perkOnly ? 1 : 3}}</text><view><text class="mp-proof__t">商家核销</text></view></view>
       </view>
       <view class="mp-note" wx:if="{{node.arrived && node.rule}}">{{node.rule}}</view>
     </view>
@@ -53,7 +53,7 @@
 
     <view class="mp-feedback" wx:if="{{feedback}}" aria-role="status" aria-live="polite">{{feedback}}</view>
 
-    <view class="mp-sec" wx:if="{{merchantConsent === 'AGREE'}}">
+    <view class="mp-sec" wx:if="{{!perkOnly && merchantConsent === 'AGREE'}}">
       <view class="mp-sec__h">当前门店授权</view>
       <view class="mp-consent"><text>仅 {{node.name || '当前门店'}} 可按现场事实查看必要信息</text><view bindtap="revokeMerchantConsent" aria-role="button" aria-label="撤回当前门店授权" aria-disabled="{{consentBusy}}" hover-class="{{consentBusy ? 'none' : 'cy-pressed'}}" hover-stay-time="80">{{consentBusy ? '撤回中…' : '撤回授权'}}</view></view>
     </view>
@@ -130,7 +130,7 @@
       </view>
       <view class="mp-cta">
       <view class="mp-cta__ghost" bindtap="openMap" aria-role="button" aria-label="导航去这里" hover-class="cy-pressed" hover-stay-time="80"><cy-icon name="pin" size="34" /><text>地址</text></view>
-      <view class="mp-cta__ghost" wx:if="{{receipt !== 'unknown' && !node.done && (!node.arrived || (!perkOnly && !node.selfReported))}}" bindtap="openMore" aria-role="button" aria-label="更多到店方式" hover-class="cy-pressed" hover-stay-time="80"><cy-icon name="more" size="34" /><text>更多</text></view>
+      <view class="mp-cta__ghost" wx:if="{{!perkOnly && receipt !== 'unknown' && !node.done && (!node.arrived || !node.selfReported)}}" bindtap="openMore" aria-role="button" aria-label="更多到店方式" hover-class="cy-pressed" hover-stay-time="80"><cy-icon name="more" size="34" /><text>更多</text></view>
       <!-- unknown 期间主按钮必须自己说清状态:它就在首屏,而降级提示条在折叠线以下。
            沿用 busy 的「记录中…/上传中…」会一直对用户说「还在传」——请求早就断了,
            回读若一直核对不上,那句话会永远停在那儿。(2026-08-25 截图实证) -->
@@ -138,7 +138,7 @@
         aria-role="button" aria-label="结果待确认，点这里再确认一次" hover-class="cy-pressed" hover-stay-time="80">结果待确认 · 点这里确认</view>
       <!-- P1-9:这家店的供给已退出或补位中 —— 不再给「我已到店 / 出示核销码」,只说明状态 -->
       <view wx:elif="{{node.supplyState && !node.done}}" class="mp-cta__main is-dead" aria-role="status">门店调整中</view>
-      <view wx:elif="{{!node.arrived}}" class="mp-cta__main {{busy ? 'is-disabled' : ''}}" bindtap="arriveHere" aria-role="button" aria-label="{{arriveRetry === 'scan' ? '扫码解锁' : (arriveRetry === 'locate' ? '重新定位' : '我已到店')}}" aria-disabled="{{busy}}" hover-class="cy-pressed" hover-stay-time="80">{{busy ? '记录中…' : (arriveRetry === 'scan' ? '扫码解锁' : (arriveRetry === 'locate' ? '重新定位' : '我已到店'))}}</view>
+      <view wx:elif="{{!perkOnly && !node.arrived}}" class="mp-cta__main {{busy ? 'is-disabled' : ''}}" bindtap="arriveHere" aria-role="button" aria-label="{{arriveRetry === 'scan' ? '扫码解锁' : (arriveRetry === 'locate' ? '重新定位' : '我已到店')}}" aria-disabled="{{busy}}" hover-class="cy-pressed" hover-stay-time="80">{{busy ? '记录中…' : (arriveRetry === 'scan' ? '扫码解锁' : (arriveRetry === 'locate' ? '重新定位' : '我已到店'))}}</view>
       <!-- 每日名额用完或没到开始日期:显示服务端给的那句话(与柜台核销被拒同一句),这时不出码 -->
       <view wx:elif="{{!node.done && node.perk && node.perk.redeemBlockedText}}" class="mp-cta__main is-dead" aria-role="status">{{node.perk.redeemBlockedText}}</view>
       <view wx:elif="{{!node.done}}" class="mp-cta__main {{consentBusy ? 'is-disabled' : ''}}" bindtap="openVerifyCode" aria-role="button" aria-label="出示核销码" aria-disabled="{{consentBusy}}" hover-class="cy-pressed" hover-stay-time="80">{{consentBusy ? '确认授权中…' : '出示核销码'}}</view>

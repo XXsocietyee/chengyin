@@ -344,14 +344,15 @@ test('FE-STORY:未到访的章打不开,锁卡主按钮是「我已到达 / 扫�
   assert.match(heroView(), /this\.data\.storyGate && node\.storyLocked === true \? feVisit\.tileView\(node/)
 })
 
-test('F08:没有玩法的店点「到店打卡」不进 startGame,直接去本店权益与核销码', () => {
+test('F08 / §4.2:没有玩法的纯权益店点按钮不进 startGame,直接本页 1 秒出示核销码', () => {
   const enter = between(js, '  heroEnter(e) {', '  onHeroNativeBack() {', 'heroEnter')
-  const noGame = enter.indexOf('!node.hasGame && !node.hasAdvanced')
+  const noGame = enter.indexOf('this._isPerkOnlyNode(node)')
   const start = enter.indexOf('this.startGame(node)')
   assert.ok(noGame > 0 && start > noGame, '无玩法分支必须先于 startGame')
-  assert.match(enter, /\/pages\/play\/merchant\/index\?nodeId=' \+ id \+ '&verify=1'/)
+  assert.match(enter, /this\._openPerkOnlyEntryQr\(node\)/)
+  assert.match(enter, /this\.openEntryQr\(\)/)
   const merchant = fs.readFileSync(path.join(ROOT, 'pages/play/merchant/index.js'), 'utf8')
-  assert.match(merchant, /String\(query && query\.verify\) === '1' && node\.arrived && !node\.done\) this\.openVerifyCode\(\)/)
+  assert.match(merchant, /String\(query && query\.verify\) === '1' && !node\.done && \(node\.arrived \|\| isPerkOnlyShop\(node\)\)\) this\.openVerifyCode\(\)/)
 })
 
 // FE-G10:随 FE-G1 / G3 / G7–G9 落地同步的自由探索详情契约

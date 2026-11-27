@@ -227,9 +227,19 @@ public class PlayNodeQueryApplication {
         if (read.playMode == PlayMode.FREE_COLLECT && read.progActId != null && read.progActId > 0) {
             CmsRegistration explore = playCompletionFacts.exploreRegistration(read.memberId, read.progActId);
             if (explore != null) {
+                if (read.regId == null) read.regId = ownedRedeemableRegId(explore, read.memberId);
                 for (RegistrationEntitlement entitlement : perkLedgerService.listEntitlements(explore.getId())) {
                     read.entitlementByChapter.put(entitlement.getChapterId(), entitlement);
                 }
+            }
+        }
+        if (read.regId == null && read.registered && playCompletionFacts != null) {
+            if (!read.selfPlay && read.progActId != null && read.progActId > 0) {
+                read.regId = ownedRedeemableRegId(
+                        playCompletionFacts.activityRegistration(read.memberId, read.progActId, null), read.memberId);
+            } else if (read.selfPlay && read.tId != null && read.tId > 0) {
+                read.regId = ownedRedeemableRegId(
+                        playCompletionFacts.validSelfPlayPass(read.memberId, read.tId), read.memberId);
             }
         }
         Calendar nowCal = Calendar.getInstance();
@@ -830,6 +840,8 @@ public class PlayNodeQueryApplication {
                 ? read.nodes.stream().filter(n -> Boolean.TRUE.equals(n.get("done"))).count()
                 : read.doneNodeIds.size());
         data.put("registered", read.registered); // 前端据此显示"请先报名/购票"空态(不阻断只读查看)
+        // §4.2:自动解析本人已付有效报名单 id,任意入口进入游玩页都能 1 秒出码,不再卡死「从票夹进入」
+        if (read.regId != null && read.regId > 0) data.put("regId", read.regId);
         // 旁观带队:未报名但确是本场领队。前端据此放行页面渲染,不据此发任何玩家权益。
         data.put("leadSpectator", read.leadSpectator);
         // M2 自玩会话:标记 + 通行证有效期(前端顶部"自由定向中·有效期至 M/D")
@@ -888,10 +900,15 @@ public class PlayNodeQueryApplication {
                     reward.put("finishMedalName", topicForReward.getFinishMedalName());
                     reward.put("finishMedalImg", topicForReward.getFinishMedalImg());
                 }
+                com.chengyinhub.business.domain.SmsCoupon finishCouponEntity =
+                        resolveCoupon(topicForReward.getCompleteRewardCouponId());
                 com.chengyinhub.business.domain.vo.PublicCouponSummaryVO finishCoupon =
-                        com.chengyinhub.business.domain.vo.PublicCouponSummaryVO.from(
-                                resolveCoupon(topicForReward.getCompleteRewardCouponId()));
-                if (finishCoupon != null) reward.put("finishCoupon", finishCoupon);
+                        com.chengyinhub.business.domain.vo.PublicCouponSummaryVO.from(finishCouponEntity);
+                if (finishCoupon != null) {
+                    reward.put("finishCoupon", finishCoupon);
+                    Map<String, Object> finishStation = resolveFinishStationShop(finishCouponEntity);
+                    if (finishStation != null) reward.put("finishStation", finishStation);
+                }
                 if (!reward.isEmpty()) data.put("reward", reward);
             }
         } catch (Exception ignore) {
@@ -1025,10 +1042,60 @@ public class PlayNodeQueryApplication {
         return value == null || value.isNull() ? null : JSON.convertValue(value, Object.class);
     }
 
+    /**
+     * §4.2:只回传「本人持有且已支付生效」的报名单主键,与 RegistrationTicketApplication.issueDynCode 同一归属与状态闸:
+     * 非本人(如受赠/席位受让人)、未支付/退款、或缺少主键时返回 null,绝不泄露他人单号。
+     */
+    static Long ownedRedeemableRegId(CmsRegistration reg, Long memberId) {
+        if (reg == null || reg.getId() == null || reg.getId() <= 0 || memberId == null || memberId <= 0) {
+            return null;
+        }
+        if (!memberId.equals(reg.getMemberId())) {
+            return null;
+        }
+        if (!Integer.valueOf(2).equals(reg.getRegistrationStatus())) {
+            return null;
+        }
+        if (!Integer.valueOf(2).equals(reg.getPaymentStatus())) {
+            return null;
+        }
+        return reg.getId();
+    }
+
+    /**
+     * §4.2 终点完赛驿站公开门店投影(复用 ApiCouponController.projectShopPlace 同口径):
+     * 只投影审核通过、账号启用、未删除的公开门店;查不到或出错返回 null,不影响 /nodes。
+     */
+    private Map<String, Object> resolveFinishStationShop(com.chengyinhub.business.domain.SmsCoupon coupon) {
+        if (coupon == null || mmsMerchantService == null) return null;
+        try {
+            com.chengyinhub.business.domain.MmsMerchant shop = null;
+            if (coupon.getMerchantId() != null) {
+                shop = mmsMerchantService.selectMmsMerchantById(coupon.getMerchantId());
+            } else if (coupon.getMemberId() != null) {
+                shop = mmsMerchantService.selectMmsMerchantByMemberId(coupon.getMemberId());
+            }
+            if (shop == null || !Long.valueOf(1L).equals(shop.getStatus())
+                    || !Long.valueOf(1L).equals(shop.getAccountStatus())
+                    || !Integer.valueOf(0).equals(shop.getDelFlag())) {
+                return null;
+            }
+            Map<String, Object> station = new LinkedHashMap<>();
+            if (StringUtils.isNotBlank(shop.getName())) station.put("shopName", shop.getName());
+            if (StringUtils.isNotBlank(shop.getAddress())) station.put("shopAddress", shop.getAddress());
+            if (shop.getLocationLat() != null) station.put("shopLat", shop.getLocationLat());
+            if (shop.getLocationLng() != null) station.put("shopLng", shop.getLocationLng());
+            return station.isEmpty() ? null : station;
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
     /** Request-owned projection values only: no service references or executable continuations. */
     static final class NodeProjection {
         com.fasterxml.jackson.databind.JsonNode contentSnapshot;
         final Map<Long,com.fasterxml.jackson.databind.JsonNode> presentedContents = new LinkedHashMap<>();
+        Long regId;
         final Long memberId;
         final boolean selfPlay;
         final Long tId;

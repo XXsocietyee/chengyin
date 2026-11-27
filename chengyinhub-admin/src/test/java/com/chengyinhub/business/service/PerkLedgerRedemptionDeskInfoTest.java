@@ -103,4 +103,15 @@ class PerkLedgerRedemptionDeskInfoTest {
         service.refundUnderReview(900L);
         verifyNoInteractions(offerMapper, memberMapper);
     }
+
+    @Test
+    void dailyRedemptionSerialReadsTodaysUsedCountForLiveOffer() {
+        offer.setId(501L);
+        Map<String, Object> row = new java.util.HashMap<>();
+        row.put("offerId", 501L);
+        row.put("usedToday", 12);
+        when(offerMapper.selectDailyUsedByOfferIds(any(), any())).thenReturn(Collections.singletonList(row));
+        assertEquals(12, service.dailyRedemptionSerial(31L, 41L));
+        assertEquals(null, service.dailyRedemptionSerial(31L, 99L));
+    }
 }

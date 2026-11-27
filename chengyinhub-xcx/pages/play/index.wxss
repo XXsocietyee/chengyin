@@ -2253,3 +2253,60 @@ page { background: var(--cy-color-bg-page); }
 .gp2__spacer{ height:200rpx; } /* ds-ok 原内联字面值:题卡滚动区底部留白 */
 .finsheet__card--route{ padding-top:var(--cy-space-2); }
 .chfull__kit{ --pk-es-reel-h:860rpx; --pk-es-q-display:none; } /* ds-ok 原内联字面值;单列一条,首条 .chfull__kit 须与发布页预览变量逐条一致 */
+
+/* §4.2 柜台台卡自助核销入口与确认屏 + 19-route 终点完赛驿站卡 */
+.fx-hero__stand { margin-top: var(--cy-space-2-5); display: flex; align-items: center; justify-content: center; gap: var(--cy-space-1-5);
+  height: 80rpx; border-radius: var(--cy-radius-pill); border: 1rpx solid var(--cy-color-border-strong);
+  background: var(--cy-color-bg-elevated); color: var(--cy-color-text-primary); font-size: var(--cy-type-body); font-weight: 500; }
+
+.finish-station { margin: var(--cy-space-3) var(--cy-space-4) 0; padding: var(--cy-space-4); border-radius: var(--cy-radius-lg);
+  background: var(--cy-color-bg-elevated); border: 1rpx solid var(--cy-color-status-success, #22C55E); display: flex; flex-direction: column; gap: var(--cy-space-2); }
+.finish-station.is-redeemed { opacity: .65; border-color: var(--cy-color-border-subtle); }
+.finish-station__top { display: flex; align-items: center; justify-content: space-between; gap: var(--cy-space-2); }
+.finish-station__eyebrow { font-size: var(--cy-type-caption); font-weight: 600; color: var(--cy-color-status-success, #22C55E); letter-spacing: 2rpx; }
+.finish-station__amt { font-size: var(--cy-type-section-title); font-weight: 700; color: var(--cy-color-play-accent); }
+.finish-station__perk { font-size: var(--cy-type-section-title); font-weight: 700; color: var(--cy-color-text-primary); line-height: 1.3; }
+.finish-station__shop { display: flex; align-items: center; gap: var(--cy-space-1); font-size: var(--cy-type-caption); color: var(--cy-color-text-secondary); }
+.finish-station__shop-n { font-weight: 600; color: var(--cy-color-text-primary); }
+.finish-station__shop-a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.finish-station__foot { margin-top: var(--cy-space-1); padding-top: var(--cy-space-2-5); border-top: 1rpx solid var(--cy-color-border-subtle);
+  display: flex; align-items: center; justify-content: space-between; gap: var(--cy-space-2); }
+.finish-station__exp { font-size: var(--cy-type-caption); color: var(--cy-color-text-tertiary); }
+.finish-station__cta { display: inline-flex; align-items: center; gap: var(--cy-space-1); padding: 10rpx 24rpx;
+  border-radius: var(--cy-radius-pill); background: var(--cy-color-status-success, #22C55E); color: var(--cy-color-play-ink);
+  font-size: var(--cy-type-caption); font-weight: 700; }
+
+.stand-redeem { position: fixed; inset: 0; z-index: 260; background: rgba(6, 12, 10, .88);
+  display: flex; align-items: center; justify-content: center; padding: var(--cy-space-5); box-sizing: border-box; }
+.stand-redeem__card { width: 100%; max-width: 640rpx; padding: var(--cy-space-6) var(--cy-space-5); border-radius: var(--cy-radius-xl, 32rpx);
+  background: var(--cy-color-bg-surface); border: 2rpx solid var(--cy-color-status-success, #22C55E);
+  display: flex; flex-direction: column; align-items: center; text-align: center; box-sizing: border-box; }
+.stand-redeem__stamp-wrap { position: relative; width: 196rpx; height: 196rpx; display: flex; align-items: center; justify-content: center; margin-bottom: var(--cy-space-4); }
+.stand-redeem__pulse { position: absolute; inset: 0; border-radius: 50%; border: 4rpx solid var(--cy-color-status-success, #22C55E);
+  opacity: .55; animation: standStampPulse 1.8s ease-out infinite; }
+.stand-redeem__stamp { position: relative; z-index: 1; width: 164rpx; height: 164rpx; border-radius: 50%;
+  background: var(--cy-color-status-success, #22C55E); color: var(--cy-color-play-ink);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4rpx;
+  box-shadow: 0 12rpx 32rpx rgba(0, 0, 0, .45); animation: standStampPop .42s cubic-bezier(.22, 1, .36, 1) both; }
+.stand-redeem__stamp-t { font-size: var(--cy-type-body); font-weight: 800; letter-spacing: 2rpx; }
+.stand-redeem.is-reduced .stand-redeem__pulse,
+.stand-redeem.is-reduced .stand-redeem__stamp { animation: none; }
+@keyframes standStampPop { 0% { transform: scale(.65) rotate(-10deg); opacity: 0; } 70% { transform: scale(1.06) rotate(2deg); opacity: 1; } 100% { transform: scale(1) rotate(0); opacity: 1; } }
+@keyframes standStampPulse { 0% { transform: scale(.92); opacity: .7; } 100% { transform: scale(1.32); opacity: 0; } }
+.stand-redeem__serial { display: inline-flex; align-items: center; gap: var(--cy-space-2); padding: 10rpx 26rpx;
+  border-radius: var(--cy-radius-pill); background: var(--cy-color-bg-elevated); border: 1rpx solid var(--cy-color-status-success, #22C55E);
+  margin-bottom: var(--cy-space-3); }
+.stand-redeem__serial-code { font-size: var(--cy-type-section-title); font-weight: 800; color: var(--cy-color-status-success, #22C55E); font-variant-numeric: tabular-nums; }
+.stand-redeem__serial-label { font-size: var(--cy-type-caption); font-weight: 600; color: var(--cy-color-text-primary); }
+.stand-redeem__perk { font-size: 44rpx; font-weight: 800; color: var(--cy-color-text-primary); line-height: 1.25; word-break: keep-all; overflow-wrap: break-word; }
+.stand-redeem__meta { margin-top: var(--cy-space-2); font-size: var(--cy-type-body); color: var(--cy-color-text-secondary); }
+.stand-redeem__shop { font-weight: 600; color: var(--cy-color-text-primary); }
+.stand-redeem__replay { margin-top: var(--cy-space-2-5); padding: 8rpx 20rpx; border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-bg-elevated); border: 1rpx solid #F97316; color: #F97316; font-size: var(--cy-type-caption); font-weight: 600; }
+.stand-redeem__clock-box { margin-top: var(--cy-space-4); padding: var(--cy-space-3) var(--cy-space-4); width: 100%; box-sizing: border-box;
+  border-radius: var(--cy-radius-lg); background: var(--cy-color-bg-elevated); display: flex; flex-direction: column; align-items: center; gap: 4rpx; }
+.stand-redeem__clock { font-size: 52rpx; font-weight: 800; letter-spacing: 4rpx; color: var(--cy-color-status-success, #22C55E); font-variant-numeric: tabular-nums; }
+.stand-redeem__date { font-size: var(--cy-type-caption); color: var(--cy-color-text-tertiary); font-variant-numeric: tabular-nums; }
+.stand-redeem__close { margin-top: var(--cy-space-5); width: 100%; height: 88rpx; border-radius: var(--cy-radius-pill);
+  background: var(--cy-color-play-accent); color: var(--cy-color-play-ink); display: flex; align-items: center; justify-content: center;
+  font-size: var(--cy-type-section-title); font-weight: 700; }
