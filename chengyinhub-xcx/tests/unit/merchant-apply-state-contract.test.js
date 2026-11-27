@@ -135,7 +135,7 @@ function loadPage(options = {}) {
       // 形变模块里用 wx.createSelectorQuery,实名 util 里用 getApp():
       // 普通 require 拿不到沙箱全局,放进同一个上下文编译 —— 被测到的是真实现不是桩
       if (request.endsWith('wizard-morph.js') || request.endsWith('publisher-identity.js')) {
-        const rel = request.endsWith('wizard-morph.js') ? 'utils/wizard-morph.js' : 'utils/publisher-identity.js'
+        const rel = request.endsWith('wizard-morph.js') ? 'pages/merchant/utils/wizard-morph.js' : 'utils/publisher-identity.js'
         const src = fs.readFileSync(path.join(ROOT, rel), 'utf8')
         const mod = { exports: {} }
         const context = Object.assign({}, sandbox, { module: mod, exports: mod.exports })

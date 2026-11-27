@@ -47,8 +47,8 @@ const CASES = [
     ],
     wxssRules: [
       /\.cy-motion-reduced\s+\.opt,\s*\.cy-motion-reduced\s+\.cap,\s*\.cy-motion-reduced\s+\.sw,\s*\.cy-motion-reduced\s+\.sw__knob,\s*\.cy-motion-reduced\s+\.prog__seg\s*\{[^}]*transition:\s*none\s*!important/s,
-      // 形变样式住在 style/wizard-intro.wxss(三页共用),页面这边只查确实引了它
-      /@import '\.\.\/\.\.\/\.\.\/style\/wizard-intro\.wxss';/,
+      // 形变样式住在 pages/club/styles/wizard-intro.wxss,页面这边只查确实引了它
+      /@import '\.\.\/styles\/wizard-intro\.wxss';/,
     ],
   },
   {
@@ -79,7 +79,7 @@ const CASES = [
       /class="morph" wx:if="\{\{morph\}\}"/,
       /scale\(\{\{morphRun \? morph\.sx : 1\}\}, \{\{morphRun \? morph\.sy : 1\}\}\)/,
     ],
-    wxssRules: [/@import '\.\.\/\.\.\/\.\.\/style\/wizard-intro\.wxss';/],
+    wxssRules: [/@import '\.\.\/styles\/wizard-intro\.wxss';/],
   },
   {
     id: 'merchant-topic-apply',
@@ -115,15 +115,15 @@ function findViolations(overrides = {}) {
   }
   // 形变的共用真源:只准动 transform / border-radius。
   // 动 width/left 会同时踩布局属性棘轮和掉帧,这条是把那个约束钉死的地方。
-  const morphCss = read('style/wizard-intro.wxss')
+  const morphCss = read('pages/club/styles/wizard-intro.wxss')
   if (!/\.morph\s*\{[^}]*transition:\s*transform\s+400ms\s+cubic-bezier\(\.65,\s*0,\s*\.35,\s*1\)/s.test(morphCss)) {
-    violations.push('style/wizard-intro.wxss:形变的 transition 不再是 transform 400ms 慢快慢')
+    violations.push('pages/club/styles/wizard-intro.wxss:形变的 transition 不再是 transform 400ms 慢快慢')
   }
   if (/\.morph\s*\{[^}]*transition:[^;}]*\b(width|height|left|top)\b/s.test(morphCss)) {
-    violations.push('style/wizard-intro.wxss:形变动了布局属性')
+    violations.push('pages/club/styles/wizard-intro.wxss:形变动了布局属性')
   }
   if (!/\.cy-motion-reduced\s+\.morph,/.test(morphCss)) {
-    violations.push('style/wizard-intro.wxss:形变没有减动效保底')
+    violations.push('pages/club/styles/wizard-intro.wxss:形变没有减动效保底')
   }
   const sharedPath = 'style/motion-entry.wxss'
   const sharedMotion = overrides[sharedPath] || read(sharedPath)

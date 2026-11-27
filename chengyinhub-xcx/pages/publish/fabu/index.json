@@ -1,9 +1,9 @@
 {
   "usingComponents": {
-    "location-todos": "/pages/publish/components/location-todos/index",
+    "location-todos": "/pages/publishkit/components/location-todos/index",
     "cy-list-group": "/pages/publish/components/list-group/index",
     "cy-list-row": "/pages/publish/components/list-row/index",
-    "cy-sheet-nav": "/pages/publish/components/sheet-nav/index",
+    "cy-sheet-nav": "/pages/publishkit/components/sheet-nav/index",
     "cy-privacy-gate": "/components/cy/privacy-gate/index",
     "cy-card": "/components/cy/card/index",
     "cy-date-sheet": "/components/cy/date-sheet/index",
@@ -28,10 +28,10 @@
     "cy-empty": "/components/cy/empty/index",
     "topic-state-keys": "/pages/publishkit/components/topic-state-keys/index",
     "story-rule-editor": "/pages/publish/components/story-rule-editor/index",
-    "attribute-binding-editor": "/pages/publish/components/attribute-binding-editor/index",
-    "cy-choice-sheet": "/pages/publish/components/choice-sheet/index",
-    "d20-settings": "/pages/publish/components/d20-settings/index",
-    "start-prep": "/pages/publish/components/start-prep/index",
+    "attribute-binding-editor": "/pages/publishkit/components/attribute-binding-editor/index",
+    "cy-choice-sheet": "/pages/publishkit/components/choice-sheet/index",
+    "d20-settings": "/pages/publishkit/components/d20-settings/index",
+    "start-prep": "/pages/publishkit/components/start-prep/index",
     "cy-stepper": "/pages/publish/components/stepper/index",
     "cy-look-preview": "/pages/publishkit/components/look-preview/index",
     "cy-option-sheet": "/components/cy/option-sheet/index"
@@ -39,7 +39,13 @@
   "componentPlaceholder": {
     "cy-reward-selector": "view",
     "topic-state-keys": "view",
-    "cy-look-preview": "view"
+    "cy-look-preview": "view",
+    "cy-choice-sheet": "view",
+    "location-todos": "view",
+    "attribute-binding-editor": "view",
+    "d20-settings": "view",
+    "start-prep": "view",
+    "cy-sheet-nav": "view"
   },
   "navigationStyle": "custom",
   "navigationBarTextStyle": "black",

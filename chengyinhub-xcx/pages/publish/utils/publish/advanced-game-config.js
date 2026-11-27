@@ -1824,7 +1824,11 @@ function validateNormalized(model, opts) {
     }
     if (qa.mode === 'PICK') {
       const options = Array.isArray(qa.options) ? qa.options : [];
-      if (options.length < 2 || options.length > 4) return '选项问答须为 2 至 4 个选项';
+      const hasEvidenceTable = !!(qa.table && typeof qa.table === 'object' && Array.isArray(qa.table.rows) && qa.table.rows.length > 0);
+      const maxOptions = hasEvidenceTable ? 12 : 4;
+      if (options.length < 2 || options.length > maxOptions) {
+        return hasEvidenceTable ? '带证据表的问答须为 2 至 12 个选项' : '选项问答须为 2 至 4 个选项';
+      }
       const ids = new Set();
       let correct = 0;
       for (const option of options) {

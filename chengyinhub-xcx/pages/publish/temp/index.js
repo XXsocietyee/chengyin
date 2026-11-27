@@ -26,7 +26,7 @@ const { safeUserMessage } = require('../../../utils/transport/safe-user-message.
 const { isRecordList } = require('../../../utils/response-shape.js');
 const advancedGameConfig = require('../utils/publish/advanced-game-config.js');
 const advancedGamePreview = require('../utils/publish/advanced-game-preview.js');
-const { applyPreviewAction } = require('../../../utils/game-preview-action.js');
+const { applyPreviewAction } = require('../utils/game-preview-action.js');
 const nodeGameCatalog = require('../utils/publish/node-game-catalog.js');
 const nodeOutcomeContract = require('../utils/publish/node-outcome-contract.js');
 const supportMatrix = require('../utils/publish/gameplay-support-matrix.js');
@@ -1393,6 +1393,8 @@ Page({
       this._boundDraftId = editingId;
     // 从发布页进来时,作者在「给这个玩法起个名字」里已经起过名,传的是 nodeName —— 不接的话要再起一遍
     const initialTitle = options.from === 'fabu' && options.nodeName ? safeDecode(options.nodeName) : '';
+    const isThemeSceneEditor = options.from === 'fabu' && options.scene === '1';
+    this._themeSceneEditor = isThemeSceneEditor;
 
     this.data.dirty = !!initialTitle;
     this.setData({
@@ -1404,14 +1406,26 @@ Page({
       isMyScope: options.scope === 'my' || options.templateScope === 'my',
       from: options.from || '',
       editorLoading: !!editingId,
-      loadError: editingId || options.id == null ? '' : '模板编号无效，请返回后重试',
-      loadErrorIsAccess: !editingId && options.id != null,
+      loadError: isThemeSceneEditor ? '' : (editingId || options.id == null ? '' : '模板编号无效，请返回后重试'),
+      loadErrorIsAccess: !isThemeSceneEditor && !editingId && options.id != null,
       // FE-04:纯预览态(调用方传 mode=preview 或 preview=1)——隐藏发布/草稿控件,temp 只做预览确认。
       // 现有编辑调用方不传该参 → previewMode=false,行为完全不变。
       previewMode: options.mode === 'preview' || options.preview === '1',
       // 主题开着角色时由主题编辑器带进来;没带 = 不出信任行,选项上已有的 trust 原样保留
       castMembers: options.from === 'fabu' ? storyCast.parseCastQuery(safeDecode(options.cast)) : []
     });
+
+    if (isThemeSceneEditor) {
+      const channel = typeof this.getOpenerEventChannel === 'function' ? this.getOpenerEventChannel() : null;
+      if (!channel || typeof channel.on !== 'function') {
+        this.setData({ loadError: '连接已断开，请返回并从主题场景重新打开', editorLoading: false });
+        return;
+      }
+      channel.on('sceneGame', (payload) => {
+        if (!this._unloaded && payload) this.fillFormWithTemplateData(payload);
+      });
+      return;
+    }
 
     if (options.from === 'citynode') that.loadCityNodeAccess();
 
@@ -3241,6 +3255,17 @@ Page({
     const formData = this.prepareFormData();
     if (this.data.from !== 'citynode') formData.scope = this.data.operationScope;
     if (!this.validateForm(formData, false)) return;
+    if (this._themeSceneEditor) {
+      const channel = typeof this.getOpenerEventChannel === 'function' ? this.getOpenerEventChannel() : null;
+      if (!channel || typeof channel.emit !== 'function') {
+        this.setData({ loadError: '连接已断开，请返回并从主题场景重新打开' });
+        return;
+      }
+      channel.emit('sceneGameChanged', formData.advancedConfigJson || '');
+      this.data.dirty = false;
+      this.exitPage();
+      return;
+    }
     if (this.data.from !== 'citynode' && this.data.from !== 'fabu' && this.data.isMyScope && this._templateId) formData.id = this._templateId;
     else delete formData.id;
     if (this._templateId && this._templateId != 0) {

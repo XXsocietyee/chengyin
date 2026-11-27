@@ -2244,17 +2244,47 @@ public class ApiTopicController extends BaseController {
     @Autowired(required = false)
     private com.chengyinhub.business.mapper.CmsTopicNodeMapper visitConfigNodeMapper;
 
-    /** FE-STORY 7.10:作者读本主题各地点的到访方式(GPS / 扫码 / 仅线上)与 GPS 半径。仅主题作者本人。 */
+    /** FE-STORY 7.10:作者(或具 PROJECT_MANAGE 的商家员工)读本主题各地点的到访方式(GPS / 扫码 / 仅线上)与 GPS 半径。 */
     @GetMapping("/free-explore/visit-config")
-    public AjaxResult freeExploreVisitConfig(@RequestParam("topicId") Long topicId) {
-        return visitConfigRules().list(optionalAppUserId(), topicId);
+    public AjaxResult freeExploreVisitConfig(@RequestParam("topicId") Long topicId,
+                                             @RequestParam(value = "operationScope", required = false) String operationScope) {
+        return visitConfigRules().list(resolveVisitConfigActorId(optionalAppUserId(), topicId, null, operationScope), topicId);
     }
 
-    /** FE-STORY 7.10:作者设置单个地点的到访方式与半径(300–500 米);只改这两列。 */
+    /** FE-STORY 7.10:作者(或具 PROJECT_MANAGE 的商家员工)设置单个地点的到访方式与半径(300–500 米);只改这两列。 */
     @PostMapping("/free-explore/visit-config")
     public AjaxResult updateFreeExploreVisitConfig(@RequestBody FreeExploreVisitConfigRequest request) {
         if (request == null) return error("参数有误");
-        return visitConfigRules().update(optionalAppUserId(), request.nodeId, request.visitCheck, request.visitRadius);
+        return visitConfigRules().update(
+                resolveVisitConfigActorId(optionalAppUserId(), null, request.nodeId, request.operationScope),
+                request.nodeId, request.visitCheck, request.visitRadius);
+    }
+
+    private Long resolveVisitConfigActorId(Long principalMemberId, Long topicId, Long nodeId, String operationScope) {
+        if (principalMemberId == null || principalMemberId <= 0L) return principalMemberId;
+        if (MerchantOperationScope.isMerchant(operationScope)) {
+            return resolveProjectOwnerMemberId(principalMemberId, operationScope);
+        }
+        Long targetTopicId = topicId;
+        if ((targetTopicId == null || targetTopicId <= 0L) && nodeId != null && nodeId > 0L) {
+            CmsTopicNode node = cmsTopicNodeService.selectCmsTopicNodeById(nodeId);
+            targetTopicId = node == null ? null : node.getTopicId();
+        }
+        if (targetTopicId == null || targetTopicId <= 0L) return principalMemberId;
+        CmsTopic topic = cmsTopicService.selectCmsTopicById(targetTopicId);
+        if (topic == null || topic.getMemberId() == null || topic.getMemberId().equals(principalMemberId)) {
+            return principalMemberId;
+        }
+        try {
+            MerchantAccessContext access = merchantAccessService.resolve(principalMemberId);
+            if (access != null && access.hasPermission(MerchantPermission.PROJECT_MANAGE)
+                    && topic.getMemberId().equals(access.getOwnerMemberId())) {
+                return access.getOwnerMemberId();
+            }
+        } catch (ServiceException ignored) {
+            // 非商家成员或商家不可用时回落本人身份，由 authorGate 返回 403
+        }
+        return principalMemberId;
     }
 
     private com.chengyinhub.business.service.support.FreeExploreVisitConfigRules visitConfigRules() {
@@ -2266,6 +2296,7 @@ public class ApiTopicController extends BaseController {
         public Long nodeId;
         public String visitCheck;
         public Integer visitRadius;
+        public String operationScope;
     }
 
     /** FE-G4:展示用,读不到(含未落迁移的库)只让卡片缺席,不影响主题详情。 */

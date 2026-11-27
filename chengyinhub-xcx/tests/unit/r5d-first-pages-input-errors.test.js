@@ -69,7 +69,7 @@ function loadApply() {
         if (request.endsWith(rel)) return require(path.join(ROOT, 'utils', rel))
       }
       if (request.endsWith('wizard-morph.js') || request.endsWith('publisher-identity.js')) {
-        const rel = request.endsWith('wizard-morph.js') ? 'utils/wizard-morph.js' : 'utils/publisher-identity.js'
+        const rel = request.endsWith('wizard-morph.js') ? 'pages/merchant/utils/wizard-morph.js' : 'utils/publisher-identity.js'
         const src = fs.readFileSync(path.join(ROOT, rel), 'utf8')
         const mod = { exports: {} }
         const context = Object.assign({}, sandbox, { module: mod, exports: mod.exports })

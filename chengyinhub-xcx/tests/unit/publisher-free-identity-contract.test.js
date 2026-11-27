@@ -202,7 +202,7 @@ test('自玩票上送不把未填写的价格悄悄改成0', () => {
   // f-money3:只在经典定向上送(自由探索带收费自玩票后端会拒),经典定向仍原样上送作者填的价。
   assert.match(read('pages/publish/fabu/index.js'), /selfPlayPrice: productType === 1 && this\.data\.formData\.selfPlay \? priceInput\.submitPrice\(this\.data\.formData\.selfPlayPrice\) : 0,/)
   // L03-193:submitPrice 只给合法金额补到两位小数,空值原样返回 —— 未填仍不会变成 0
-  assert.equal(require('../../utils/price-input.js').submitPrice(''), '')
+  assert.equal(require('../../pages/publish/utils/price-input.js').submitPrice(''), '')
 })
 
 test('场景主理人副本同样不采集实名，商家仍保留采集和失败阻断', () => {

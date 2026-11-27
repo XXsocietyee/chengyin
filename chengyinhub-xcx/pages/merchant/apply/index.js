@@ -12,7 +12,7 @@ const STEP_TITLES = ['基础信息', '经营信息', '资质信息', '预览确�
 const STEP_HEADLINES = ['先认识你的店', '告诉大家怎样找到你', '补齐审核需要的资料', '确认这份入驻信息'];
 // 时/分选项与 HH:mm 格式化的单一真源(补零口径全仓一致)
 const { readReducedMotion } = require('../../../utils/motion-preference.js');
-const wizardMorph = require('../../../utils/wizard-morph.js');
+const wizardMorph = require('../utils/wizard-morph.js');
 const publisherIdentity = require('../../../utils/publisher-identity.js'); const merchantIndustry = require('../utils/merchant-industry.js'); // M-16
 
 function displayText(value) {

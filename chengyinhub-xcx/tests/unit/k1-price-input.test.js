@@ -3,7 +3,7 @@ const { test } = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { typingPrice, isValidPrice } = require('../../utils/price-input.js')
+const { typingPrice, isValidPrice } = require('../../pages/publish/utils/price-input.js')
 
 test('逐字敲 39.99 每一步都保留小数点,最终是 39.99', () => {
   let shown = ''

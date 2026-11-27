@@ -12,7 +12,7 @@
 
 const assert = require('node:assert/strict')
 const test = require('node:test')
-const tr = require('../../utils/timerange.js')
+const tr = require('../../pages/publishkit/utils/timerange.js')
 const opts = require('../../utils/time-picker-options.js')
 
 test('toMinutes:非法一律 -1,不能退回 0 —— 0 是合法的 00:00', () => {

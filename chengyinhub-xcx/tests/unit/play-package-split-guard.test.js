@@ -65,18 +65,18 @@ test('体积:主包与每个分包 est ≤ 1950KB,主包 est 不增长', () => {
   assert.ok(est['pages/play'] < PLAY_EST_LIMIT, `pages/play est ${kb(est['pages/play'])} ≥ 1950KB`);
 });
 
-test('est 口径负控:往主包加 120KB 代码就会越过 1950KB', () => {
+test('est 口径负控:往主包加 160KB 代码就会越过 1950KB', () => {
   const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'est-main-'));
   try {
     const rel = 'utils/__est_probe__.js';
     fs.mkdirSync(path.join(dir, 'utils'), { recursive: true });
-    fs.writeFileSync(path.join(dir, rel), 'var a=' + JSON.stringify('x'.repeat(120 * KB)) + ';');
+    fs.writeFileSync(path.join(dir, rel), 'var a=' + JSON.stringify('x'.repeat(160 * KB)) + ';');
     const probe = graph.estimate({
-      files: new Map([[rel, { size: 120 * KB, owner: 'MAIN' }]]),
+      files: new Map([[rel, { size: 160 * KB, owner: 'MAIN' }]]),
       reach: new Map([[rel, new Set(['MAIN'])]]),
       packages: { MAIN: {} },
     }, dir);
-    assert.ok(probe.MAIN > 100 * KB);
+    assert.ok(probe.MAIN > 140 * KB);
     assert.ok(measure().est.MAIN + probe.MAIN > PACKAGE_EST_LIMIT);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

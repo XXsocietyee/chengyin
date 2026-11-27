@@ -1,4 +1,4 @@
-@import '../../../style/wizard-intro.wxss';
+@import '../styles/wizard-intro.wxss';
 @import '../../../style/merchant-light.wxss';
 
 page { background: var(--cy-color-bg-page); }

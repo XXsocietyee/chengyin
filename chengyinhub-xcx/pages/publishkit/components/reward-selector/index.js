@@ -4,7 +4,7 @@ const app = getApp();
 const couponForm = require('../../../../utils/coupon-form.js');
 // 起止时刻的拆装(跨天必须按「日期+时刻」一起算,见该文件注释)
 const datetimeRange = require('../../utils/datetime-range.js');
-const calendar = require('../../../../utils/calendar.js');
+const calendar = require('../../utils/calendar.js');
 
 const OCCASION_LABELS = {
   node: '完成节点后发放',

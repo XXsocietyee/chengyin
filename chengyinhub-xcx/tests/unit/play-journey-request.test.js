@@ -188,7 +188,7 @@ test('旧局迟到失败不解锁当前节点；pickPlayKit只认服务端starte
 });
 
 test('草稿试玩开始也向打字组件确认，但不写正式请求', () => {
-  const { applyPreviewAction } = require('../../utils/game-preview-action.js');
+  const { applyPreviewAction } = require('../../pages/play/utils/game-preview-action.js');
   const original = { type: 'typein', target: 'hi', seconds: 10, attempts: 0 };
   const result = applyPreviewAction(original, { action: 'start' }, 0, 1000);
   assert.equal(result.kit.startConfirmed, true);

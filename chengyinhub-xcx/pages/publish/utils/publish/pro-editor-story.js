@@ -128,16 +128,24 @@ function liftCapBlocks(chapter) {
   chapter.blocks.forEach(function (block) {
     if (!block || !isCapType(block.type)) { kept.push(block); return; }
     var text = String(block.content == null ? '' : block.content);
-    if (block.cap === 'open') chapter._capOpen = text;
-    else if (block.cap === 'end') chapter._capEnd = text;
+    var voice = typeof block.voice === 'string' && block.voice.trim() ? block.voice.trim() : '';
+    if (block.cap === 'open') {
+      chapter._capOpen = text;
+      if (voice) chapter._capOpenVoice = voice; else delete chapter._capOpenVoice;
+    } else if (block.cap === 'end') {
+      chapter._capEnd = text;
+      if (voice) chapter._capEndVoice = voice; else delete chapter._capEndVoice;
+    }
   });
   chapter.blocks = kept;
 }
-function capPayloadBlock(kind, text) {
+function capPayloadBlock(kind, text, voice) {
   var content = String(text == null ? '' : text);
   if (!content.trim()) return null;
   if (content.trim().length > CAP_MAX_LENGTH) throw new Error((kind === 'open' ? '开场白' : '结语') + '不能超过 ' + CAP_MAX_LENGTH + ' 字');
-  return { key: CAP_KEYS[kind], type: 'cap', cap: kind, content: content.trim() };
+  var out = { key: CAP_KEYS[kind], type: 'cap', cap: kind, content: content.trim() };
+  if (typeof voice === 'string' && voice.trim()) out.voice = voice.trim();
+  return out;
 }
 // 句子边界:拖到一段正文中间时,槽只落在句末(。!?;… 或换行之后),不会把一句话劈成两半。
 var SENTENCE_END = /[。!?！？;；…]+|\n/g;
@@ -535,8 +543,8 @@ function toPayloadChapter(source) {
     throw new Error('节点块引用已失效');
   });
   // 章节开始 / 结束卡:开场白还原成第一个块,结语还原成最后一个块(服务端按位置校验)
-  var openCap = capPayloadBlock('open', chapter._capOpen);
-  var endCap = capPayloadBlock('end', chapter._capEnd);
+  var openCap = capPayloadBlock('open', chapter._capOpen, chapter._capOpenVoice);
+  var endCap = capPayloadBlock('end', chapter._capEnd, chapter._capEndVoice);
   if (openCap) chapter.blocks.unshift(openCap);
   if (endCap) chapter.blocks.push(endCap);
   chapter.nodes = chapter.nodes.map(stripLocalFields);

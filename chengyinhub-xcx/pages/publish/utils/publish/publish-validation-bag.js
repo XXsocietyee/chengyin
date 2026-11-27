@@ -13,7 +13,7 @@ const { createErrorBag, nonEmpty } = require('./publish-validator.js');
 const { cityOrientationScheduleIssues, freeExplorationSaleScheduleIssues, freeExplorationValidityScheduleIssues } = require('./publish-ticket-schedule.js');
 const proEditorPolicy = require('./pro-editor-policy.js');
 const topicRouteGraph = require('./topic-route-graph.js');
-const priceInput = require('../../../../utils/price-input.js');
+const priceInput = require('../price-input.js');
 
 /**
  * @param {object} state 页面显式传入的数据切片

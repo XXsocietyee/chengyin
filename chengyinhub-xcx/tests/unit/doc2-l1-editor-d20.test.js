@@ -110,7 +110,7 @@ test('可玩时段与开局前准备(需后端,先放 journeyRules 根上)', () 
 });
 
 test('d20 半屏组件:预设药丸只列没加的,满 6 项不出现;完成交回整份规则,取消不交', () => {
-  const { cfg, vm, events } = loadComponent('pages/publish/components/d20-settings/index.js');
+  const { cfg, vm, events } = loadComponent('pages/publishkit/components/d20-settings/index.js');
   vm.data.rules = JSON.stringify({ checkEnabled: true });
   cfg.observers.show.call(vm, true);
   assert.equal(vm.data.attrChips.length, d20.ATTR_PRESETS.length);
@@ -136,7 +136,7 @@ test('d20 半屏组件:预设药丸只列没加的,满 6 项不出现;完成交�
 });
 
 test('开局前准备组件:最多 6 项、重复不加、建议点一下就加入', () => {
-  const { cfg, vm, events } = loadComponent('pages/publish/components/start-prep/index.js');
+  const { cfg, vm, events } = loadComponent('pages/publishkit/components/start-prep/index.js');
   vm.data.items = ['带水'];
   cfg.observers.items.call(vm, vm.data.items);
   assert.ok(!vm.data.suggestions.includes('带水'));
@@ -161,7 +161,7 @@ test('通用小件:步进器挡上下限、底部选择卡点一项即收(stay �
   stp.vm.onStep({ currentTarget: { dataset: { d: '-1' } } });
   assert.deepEqual(stp.events[0].detail, { value: 4 });
 
-  const chips = loadComponent('pages/publish/components/chips/index.js');
+  const chips = loadComponent('pages/publishkit/components/chips/index.js');
   chips.vm.data.taken = ['观察'];
   chips.vm.onAddTap();
   chips.vm.onInput({ detail: { value: '观察' } });
@@ -172,7 +172,7 @@ test('通用小件:步进器挡上下限、底部选择卡点一项即收(stay �
   chips.vm.onConfirm();
   assert.deepEqual(chips.events[0], { name: 'add', detail: { value: '洞察' } });
 
-  const cs = loadComponent('pages/publish/components/choice-sheet/index.js');
+  const cs = loadComponent('pages/publishkit/components/choice-sheet/index.js');
   cs.vm.data.options = d20.WINDOWS;
   const timers = [];
   const realSet = global.setTimeout;
@@ -196,14 +196,14 @@ test('主题详情:只留完成(L03-113 业主默认 A)、d20 开关在玩法规
   assert.match(wxml, /stacked="\{\{[^"]*d20Sheet\.show \|\| prepSheet\.show[^"]*\}\}"/);
   const pc = read('pages/publish/fabu/index.wxml');
   assert.doesNotMatch(pc, /探索值\(XP\)/);
-  for (const f of ['pages/publish/components/d20-settings/index.wxml', 'pages/publish/components/start-prep/index.wxml']) {
+  for (const f of ['pages/publishkit/components/d20-settings/index.wxml', 'pages/publishkit/components/start-prep/index.wxml']) {
     const visible = read(f).replace(/<!--[\s\S]*?-->/g, '').replace(/\{\{[^}]*\}\}/g, ' ').replace(/<[^>]+>/g, ' ');
     assert.doesNotMatch(visible.replace(/d20/g, ''), /[A-Za-z]{2,}/, f + ' 里不能出现英文');
   }
 });
 
 test('L04-064 d20 设置每次改动只 setData 一次,模型与派生芯片同批下发', () => {
-  const { cfg, vm } = loadComponent('pages/publish/components/d20-settings/index.js');
+  const { cfg, vm } = loadComponent('pages/publishkit/components/d20-settings/index.js');
   vm.data.rules = JSON.stringify({ checkEnabled: true });
   let sets = 0; const set = vm.setData; vm.setData = function (p) { sets += 1; return set.call(this, p); };
   cfg.observers.show.call(vm, true);

@@ -7,7 +7,7 @@
 
 const assert = require('node:assert/strict')
 const test = require('node:test')
-const cal = Object.assign({}, require('../../utils/calendar.js'), { dayType })
+const cal = Object.assign({}, require('../../pages/topic/utils/calendar.js'), { dayType })
 
 /**
  * L10-075/096:原 utils/calendar.js 的 dayType 只剩本测试在用,移到这里作为 WXS dayClass 的对照实现(规则不变)。

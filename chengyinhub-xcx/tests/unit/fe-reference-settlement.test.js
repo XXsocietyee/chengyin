@@ -2,10 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { referenceView, disputeNoteError, voucherError } = require('../../components/cy/fe-reference-settlement/view-model.js');
+const { referenceView, disputeNoteError, voucherError } = require('../../pages/club/components/cy/fe-reference-settlement/view-model.js');
 
 const ROOT = path.join(__dirname, '../..');
-const componentPath = '../../components/cy/fe-reference-settlement/index.js';
+const componentPath = '../../pages/club/components/cy/fe-reference-settlement/index.js';
 const modalPath = require.resolve('../../utils/modal.js');
 const toastPath = require.resolve('../../utils/toast.js');
 const row = (patch) => Object.assign({ id: 1, chapterName: '示例站点', merchantName: '示例店铺', supplierKind: 'MERCHANT',
@@ -98,7 +98,7 @@ test('店铺对本店一行提异议必须写原因；取消不发请求；收�
   assert.deepEqual(JSON.parse(requests[1].data), { id: 5, note: '没收到' });
   vm.onDispute({ currentTarget: { dataset: { id: 999 } } });
   assert.equal(requests.length, 2, '不是本店可异议的行不发请求');
-  const wxml = fs.readFileSync(path.join(ROOT, 'components/cy/fe-reference-settlement/index.wxml'), 'utf8');
+  const wxml = fs.readFileSync(path.join(ROOT, 'pages/club/components/cy/fe-reference-settlement/index.wxml'), 'utf8');
   assert.match(wxml, /自由探索结算（参考）/);
   assert.match(wxml, /kind === 'payer' && state === 'ready' && view && !view\.groups\.length/);
 });
@@ -129,9 +129,9 @@ test('P1-10 起止日期经属性传入:带范围重读;收款人侧筛空时卡
   vm.data.to = '';
   vm.load();
   assert.deepEqual(requests[2].data, { from: '2026-11-01' });
-  const js = fs.readFileSync(path.join(ROOT, 'components/cy/fe-reference-settlement/index.js'), 'utf8');
+  const js = fs.readFileSync(path.join(ROOT, 'pages/club/components/cy/fe-reference-settlement/index.js'), 'utf8');
   assert.match(js, /observers: \{ 'kind, from, to'\(\) \{ if \(this\._attached\) this\.load\(\); \} \}/);
-  const wxml = fs.readFileSync(path.join(ROOT, 'components/cy/fe-reference-settlement/index.wxml'), 'utf8');
+  const wxml = fs.readFileSync(path.join(ROOT, 'pages/club/components/cy/fe-reference-settlement/index.wxml'), 'utf8');
   assert.match(wxml, /!view\.groups\.length && !from && !to\)/);
   assert.match(wxml, /<slot \/>/);
 });

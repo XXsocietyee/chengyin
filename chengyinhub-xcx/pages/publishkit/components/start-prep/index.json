@@ -3,9 +3,13 @@
   "usingComponents": {
     "cy-sheet": "/components/cy/sheet/index",
     "cy-icon": "/components/cy/icon/index",
-    "cy-sheet-nav": "/pages/publish/components/sheet-nav/index",
+    "cy-sheet-nav": "/pages/publishkit/components/sheet-nav/index",
     "cy-list-group": "/pages/publish/components/list-group/index",
     "cy-list-row": "/pages/publish/components/list-row/index",
-    "cy-swipe-row": "/pages/publish/components/swipe-row/index"
+    "cy-swipe-row": "/pages/publishkit/components/swipe-row/index"
+  },
+  "componentPlaceholder": {
+    "cy-list-group": "view",
+    "cy-list-row": "view"
   }
 }

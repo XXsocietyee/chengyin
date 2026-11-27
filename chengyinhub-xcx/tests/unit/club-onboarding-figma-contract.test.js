@@ -35,7 +35,7 @@ test('说明文案用 text/secondary(#B7B7B7)，不是解析成 #919191 的同�
   assert.equal(darkAliasTarget('--cy-text-body'), '#C7C7C7', '--cy-text-body 必须仍解析到 text/secondary')
   assert.equal(darkAliasTarget('--cy-text-secondary'), '#A8A8A8', '--cy-text-secondary 仍是历史错位，别当 secondary 用')
 
-  const introCss = read('style/wizard-intro.wxss')
+  const introCss = read('pages/club/styles/wizard-intro.wxss')
   assert.match(introCss, /^\.intro__sub \{[^}]*color:\s*var\(--cy-color-text-secondary\)/ms,
     '开场屏副标题必须走 text/secondary(#B7B7B7),不是同名 alias')
 
@@ -45,7 +45,7 @@ test('说明文案用 text/secondary(#B7B7B7)，不是解析成 #919191 的同�
 })
 
 test('负控:开场屏副标题换回 --cy-text-secondary 必须判红', () => {
-  const css = read('style/wizard-intro.wxss')
+  const css = read('pages/club/styles/wizard-intro.wxss')
   const mutated = css.replace(
     /^(\.intro__sub \{[^}]*color:\s*)var\(--cy-color-text-secondary\)/ms, '$1var(--cy-text-secondary)')
   assert.notEqual(mutated, css, '变异未生效，负控本身是假的')

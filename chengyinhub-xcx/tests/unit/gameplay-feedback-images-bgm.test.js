@@ -156,7 +156,7 @@ test('试玩台里原来没法试玩的三屏(闭眼盲品 / 今日城市签 / D
   assert.equal(check.type, 'journeycheck');
   assert.equal(pv.judge({}, check, 'settle', {}), '', '没掷没结算不判');
   assert.equal(pv.judge({}, Object.assign({}, check, { receipt: { settled: true, success: true } }), 'settle', {}), 'win');
-  const { applyPreviewAction } = require('../../utils/game-preview-action.js');
+  const { applyPreviewAction } = require('../../pages/play/utils/game-preview-action.js');
   const sign = applyPreviewAction(preview.buildSampleKit('dailySign'), { action: 'accept', detail: { text: '来过' } }, 0);
   assert.equal(sign.kit.revealed && sign.kit.claimed, true); assert.equal(sign.kit.myText, '来过');
 });

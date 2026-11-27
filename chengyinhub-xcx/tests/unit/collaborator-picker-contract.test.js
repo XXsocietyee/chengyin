@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const COMPONENT = '../../pages/publish/components/collaborator-picker/index.js';
+const COMPONENT = '../../pages/publishkit/components/collaborator-picker/index.js';
 const ROOT = path.resolve(__dirname, '../..');
 const read = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
 
@@ -49,15 +49,15 @@ function assertHostWiring(wxml, label) {
 }
 
 test('模板把首屏三态与分页失败重试接到组件状态机', () => {
-  const config = JSON.parse(read('pages/publish/components/collaborator-picker/index.json'));
+  const config = JSON.parse(read('pages/publishkit/components/collaborator-picker/index.json'));
   for (const name of ['cy-skeleton', 'cy-error', 'cy-empty']) {
     assert.ok(config.usingComponents[name], `选择器必须注册 ${name}`);
   }
-  assertVisibleStateWiring(read('pages/publish/components/collaborator-picker/index.wxml'));
+  assertVisibleStateWiring(read('pages/publishkit/components/collaborator-picker/index.wxml'));
 });
 
 test('负控：摘掉分页错误的 retry 接线必须判红', () => {
-  const source = read('pages/publish/components/collaborator-picker/index.wxml');
+  const source = read('pages/publishkit/components/collaborator-picker/index.wxml');
   const mutated = source.replace(
     'title="更多合作者加载失败" sub="{{loadError}}" bind:retry="onRetry"',
     'title="更多合作者加载失败" sub="{{loadError}}"',
@@ -188,8 +188,8 @@ test('L04-019 连续输入只在停手 300ms 后发一次搜索', () => {
   global.setTimeout = (fn, ms) => { timers.push({ fn, ms, live: true }); return timers.length }
   global.clearTimeout = (id) => { if (timers[id - 1]) timers[id - 1].live = false }
   try {
-    delete require.cache[require.resolve('../../pages/publish/components/collaborator-picker/index.js')]
-    require('../../pages/publish/components/collaborator-picker/index.js')
+    delete require.cache[require.resolve('../../pages/publishkit/components/collaborator-picker/index.js')]
+    require('../../pages/publishkit/components/collaborator-picker/index.js')
     const c = Object.assign({}, def.methods, { data: Object.assign({}, def.data, { ids: '' }), properties: { ids: '' }, setData(p) { Object.assign(this.data, p) }, triggerEvent() {} })
     for (const v of ['张', '张三', '张三丰']) c.onSearchInput({ detail: { value: v } })
     assert.equal(requests.length, 0)

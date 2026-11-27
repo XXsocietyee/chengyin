@@ -17,7 +17,7 @@
 // 计算全在 utils/datetime-range.js(跨天跨度那条只能在那里算,见其注释),
 // 滚轮选项复用 utils/time-picker-options.js,不另造第二套。
 const dtr = require('../../../utils/datetime-range.js')
-const cal = require('../../../../../utils/calendar.js')
+const cal = require('../../../utils/calendar.js')
 const opts = require('../../../../../utils/time-picker-options.js')
 const reducedMotionBehavior = require('../../../../../behaviors/reduced-motion.js')
 

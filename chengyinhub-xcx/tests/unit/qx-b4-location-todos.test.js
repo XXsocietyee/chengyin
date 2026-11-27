@@ -55,7 +55,7 @@ test('r2-create:每个已保存节点的当前地址,供地点待办逐个「替
   assert.deepEqual(t.nodePlaces([{ nodes: [{ id: 9, name: '西湖', address: '杭州市西湖区' }, { id: 10, name: '纯线上' }, { id: 11, name: '断桥', latitude: '30.2', longitude: '120.1' }, { name: '未保存', address: 'x' }] }]),
     { 9: '杭州市西湖区', 11: '断桥' });
   const fs = require('node:fs');
-  const wxml = fs.readFileSync(path.join(__dirname, '../../pages/publish/components/location-todos/index.wxml'), 'utf8');
+  const wxml = fs.readFileSync(path.join(__dirname, '../../pages/publishkit/components/location-todos/index.wxml'), 'utf8');
   assert.match(wxml, /bindtap="replacePlace"/);
   assert.doesNotMatch(wxml, /view\.source|换一个节点/);
   assert.match(wxml, /bindtap="confirmPlace"/);
@@ -80,7 +80,7 @@ test('可绑定节点只取已保存且有地点的节点', () => {
 });
 
 test('绑定请求带槽位与当前修订号;玩家私有字段不出现在组件模板里', () => {
-  const dir = path.join(__dirname, '../../pages/publish/components/location-todos');
+  const dir = path.join(__dirname, '../../pages/publishkit/components/location-todos');
   const js = fs.readFileSync(path.join(dir, 'index.js'), 'utf8');
   const wxml = fs.readFileSync(path.join(dir, 'index.wxml'), 'utf8');
   assert.match(js, /\/api\/template\/topic-template\/binding-status/);
@@ -94,8 +94,8 @@ function mountTodos() {
   const requests = [];
   global.getApp = () => ({ sendRequest: (o) => requests.push(o) });
   global.Component = (d) => { def = d; };
-  delete require.cache[require.resolve('../../pages/publish/components/location-todos/index.js')];
-  require('../../pages/publish/components/location-todos/index.js');
+  delete require.cache[require.resolve('../../pages/publishkit/components/location-todos/index.js')];
+  require('../../pages/publishkit/components/location-todos/index.js');
   let sets = 0;
   const c = Object.assign({}, def.methods, {
     data: Object.assign({ topicId: '901', scope: '', chapters: [] }, JSON.parse(JSON.stringify(def.data))),

@@ -3181,6 +3181,9 @@ public class CmsTopicServiceImpl implements ICmsTopicService {
         patch.setImgUrl(dto.getImgUrl());
         patch.setImgArr(dto.getImgArr());
         patch.setCategoryIds(dto.getCategoryIds());
+        if (dto.getLook() != null) {
+            patch.setLookJson(com.chengyinhub.business.util.ThemeLook.normalize(dto.getLook()));
+        }
         patch.setUpdateBy(username);
         patch.setUpdateTime(new Date());
         mediaPublicationGuard.requireTopic(exist.getMemberId(), patch, true);

@@ -1,4 +1,4 @@
-@import '../../../style/wizard-intro.wxss';
+@import '../styles/wizard-intro.wxss';
 .cc-page {
   min-height: 100vh;
   display: flex;

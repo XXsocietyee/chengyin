@@ -64,7 +64,7 @@ function loadPage(mutate) {
     Page: (value) => { definition = value },
     require: (id) => {
       if (id.includes('roleGuard')) return roleGuard
-      if (id.includes('wizard-morph')) return compileInSandbox('utils/wizard-morph.js', sandbox)
+      if (id.includes('wizard-morph')) return compileInSandbox('pages/club/utils/wizard-morph.js', sandbox)
       if (id.includes('publisher-identity')) return compileInSandbox('utils/publisher-identity.js', sandbox)
       return require(path.resolve(path.dirname(path.join(ROOT, JS_PATH)), id))
     },
@@ -322,8 +322,8 @@ test('开场形变的起止几何按中心对中心算，不是按顶边', () =>
 })
 
 test('负控：位移按顶边算(漏掉中心修正)必须判红', () => {
-  // 中心修正现在住在 utils/wizard-morph.js 里,负控直接改那份源码
-  const src = fs.readFileSync(path.join(ROOT, 'utils/wizard-morph.js'), 'utf8')
+  // 中心修正现在住在 pages/club/utils/wizard-morph.js 里,负控直接改那份源码
+  const src = fs.readFileSync(path.join(ROOT, 'pages/club/utils/wizard-morph.js'), 'utf8')
   const broken = src.replace(
     'dy: (first.top + first.height / 2) - (cta.top + cta.height / 2),',
     'dy: first.top - cta.top,')
@@ -560,9 +560,9 @@ test('负控：完成态失去已生效状态必须判红', () => {
 // 2026-10-27 P-24(owner 真机 p98):形变保留,但白色段一开始就快速缩到第一段 ——
 // 不再先画满整条、到收尾才突然变短;翻 morphRun 要等一帧,不能和首帧合并。标题叠在形变条之上。
 test('P-24 形变条先快速缩到当前步长度，再随位移就位；标题不被形变条压住', () => {
-  const css = fs.readFileSync(path.join(ROOT, 'style/wizard-intro.wxss'), 'utf8')
+  const css = fs.readFileSync(path.join(ROOT, 'pages/club/styles/wizard-intro.wxss'), 'utf8')
   assert.match(css, /\.morph__fill\s*\{[^}]*transition:\s*transform\s+220ms\s+cubic-bezier\(\.2, \.8, \.2, 1\)/s)
-  const util = fs.readFileSync(path.join(ROOT, 'utils/wizard-morph.js'), 'utf8')
+  const util = fs.readFileSync(path.join(ROOT, 'pages/club/utils/wizard-morph.js'), 'utf8')
   assert.match(util, /setTimeout\(function \(\) \{\s*page\.setData\(\{ morphRun: true \}\);/)
   assert.doesNotMatch(util, /wx\.nextTick\(function \(\) \{ page\.setData\(\{ morphRun: true \}\); \}\)/)
   assert.match(WXSS, /\.step-head \{ position: relative; z-index: 21; \}/)

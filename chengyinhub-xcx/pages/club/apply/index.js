@@ -1,6 +1,6 @@
 const app = getApp();
 const toast = require('../../../utils/toast.js');
-const wizardMorph = require('../../../utils/wizard-morph.js');
+const wizardMorph = require('../utils/wizard-morph.js');
 const roleGuard = require('../../../utils/roleGuard.js');
 const { readReducedMotion } = require('../../../utils/motion-preference.js');
 const { memberId, retryLogin } = require('../../../utils/session/login-reload.js');

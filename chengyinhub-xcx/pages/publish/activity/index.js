@@ -1,4 +1,4 @@
-const priceInput = require('../../../utils/price-input.js')
+const priceInput = require('../utils/price-input.js')
 const modal = require('../../../utils/modal.js');
 const authorWrites = require('../../../utils/author-write-recovery.js');
 const mediaPreview = require('../../../utils/media-preview.js');

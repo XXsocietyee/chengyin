@@ -13,7 +13,7 @@
     "cy-empty": "/components/cy/empty/index",
     "cy-inline-error": "/components/cy/inline-error/index",
     "cy-category-sheet": "/components/cy/category-sheet/index",
-    "cy-collaborator-picker": "/pages/publish/components/collaborator-picker/index",
+    "cy-collaborator-picker": "/pages/publishkit/components/collaborator-picker/index",
     "cy-toast": "/components/cy/toast/index",
     "cy-loading-mask": "/components/cy/loading-mask/index",
     "cy-modal-host": "/components/cy/modal-host/index",
@@ -21,5 +21,8 @@
   },
   "navigationBarTitleText": "发布活动",
   "navigationStyle": "custom",
-  "navigationBarTextStyle": "black"
+  "navigationBarTextStyle": "black",
+  "componentPlaceholder": {
+    "cy-collaborator-picker": "view"
+  }
 }

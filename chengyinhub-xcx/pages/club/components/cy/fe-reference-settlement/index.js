@@ -1,8 +1,8 @@
 // F11 自由探索结算（参考）：店铺(kind=merchant)看本店各场参考金额并可提异议；
 // 场次收款人(kind=payer)看本人各场并「标记已结清」。钱不经平台，双方线下结款。
 const app = getApp();
-const modal = require('../../../utils/modal.js');
-const toast = require('../../../utils/toast.js');
+const modal = require('../../../../../utils/modal.js');
+const toast = require('../../../../../utils/toast.js');
 const { referenceView, disputeNoteError, voucherError } = require('./view-model.js');
 
 Component({

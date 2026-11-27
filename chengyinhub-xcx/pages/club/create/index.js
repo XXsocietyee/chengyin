@@ -4,7 +4,7 @@ const roleGuard = require('../../../utils/roleGuard.js');
 const tagLibrary = require('../../../utils/tag-library.js'); // G-8:活动倾向选项与图标只从标签库取
 const DIR_OPTIONS = tagLibrary.tagLabels('club', '活动倾向');
 const { readReducedMotion } = require('../../../utils/motion-preference.js');
-const wizardMorph = require('../../../utils/wizard-morph.js');
+const wizardMorph = require('../utils/wizard-morph.js');
 const { bizFailureMessage } = require('../../../utils/response-shape.js');
 const { memberId, retryLogin } = require('../../../utils/session/login-reload.js');
 

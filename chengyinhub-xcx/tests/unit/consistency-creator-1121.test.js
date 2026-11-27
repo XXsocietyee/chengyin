@@ -75,7 +75,7 @@ test('置灰按钮会说明原因:开售发布 / 新建优惠券', () => {
 })
 
 test('注册属性绑定:原生 <button> 换成 cy-btn,文案去掉内部用语', () => {
-  const dir = 'pages/publish/components/attribute-binding-editor/'
+  const dir = 'pages/publishkit/components/attribute-binding-editor/'
   const wxml = read(dir + 'index.wxml')
   assert.doesNotMatch(wxml, /<button\b/)
   assert.match(wxml, /<cy-btn class="binding__act" wx:if="\{\{ready && !readOnly\}\}" variant="primary" bindtap="confirm">确认启用<\/cy-btn>/)
