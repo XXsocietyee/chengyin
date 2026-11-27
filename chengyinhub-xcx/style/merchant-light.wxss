@@ -57,6 +57,7 @@ page {
   --cy-comp-nav-border:         transparent;
   /* 表面规范(ADA):镜像 tokens.wxss .theme-light —— 浅端卡走投影,不要顶缘高光,
      且描边与投影二选一(投影已在,描边同步关掉;详见真源块注释) */
+  --cy-comp-card-bg:            var(--cy-color-bg-elevated);
   --cy-comp-card-highlight:     transparent;
   --cy-comp-card-shadow-day:    0 2rpx 8rpx rgba(15,23,43,.48);
   --cy-comp-card-border:        transparent;

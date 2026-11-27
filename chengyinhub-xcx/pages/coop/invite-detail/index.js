@@ -26,6 +26,16 @@ const { partnerMemberId, shapeCredit } = require('./credit-view.js');
 const markCoopListDirty = () => { app.globalData.coopListDirty = true; };
 // L07-010:接受合作后回到商家工作台,项目列表立刻整链重读(pages/merchant/index onShow 消费)
 const markMerchantWorkbenchStale = () => { app.globalData.merchantWorkbenchStale = true; };
+// #965:弱网下发出 /api/coop/handle 后立刻点返回,coop/list.onShow 可能在服务端落库前已消费 coopListDirty 并读到旧态;
+// 回包落定且详情页已退栈时,若 coop/list 正是当前栈顶活跃页,主动触发强制重读,避免列表滞留旧状态。
+function refreshLiveCoopList(expectedIdentity) {
+  if (expectedIdentity && expectedIdentity !== identityKey()) return;
+  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : [];
+  const top = pages && pages.length ? pages[pages.length - 1] : null;
+  if (!top || top.route !== 'pages/coop/list/index' || top._unloaded || top._hidden || typeof top.load !== 'function') return;
+  if (app && app.globalData) app.globalData.coopListDirty = false;
+  top.load(true);
+}
 
 // 状态 → 顶部大字的语气。已接受是唯一的正向终态,其余终态一律中性,
 // 不用红色 —— 「已拒绝」是一个事实,不是错误。
@@ -405,7 +415,7 @@ Page({
       success(res) {
         markCoopListDirty();
         if (status === 1 && String(res && res.code) === '200') markMerchantWorkbenchStale();
-        if (!that._isCurrent(ctx)) return;
+        if (!that._isCurrent(ctx)) { refreshLiveCoopList(ctx.identity); return; }
         that.setData({ submitting: false });
         // L07-064:业务失败也可能是状态已变(对方先处理/重复提交) ⇒ 提示后重读真实状态
         if (String(res && res.code) !== '200') { toast((res && res.msg) || '没能提交，请重试'); that.load(); return; }
@@ -417,7 +427,7 @@ Page({
         markCoopListDirty();
         // 结果待确认:可能已接受,回工作台按已变化处理
         if (status === 1) markMerchantWorkbenchStale();
-        if (!that._isCurrent(ctx)) return;
+        if (!that._isCurrent(ctx)) { refreshLiveCoopList(ctx.identity); return; }
         that.setData({ submitting: false });
         // L07-064:断网时请求可能已提交 ⇒ 说「结果待确认」并重读真实状态
         toast('网络异常，结果待确认');

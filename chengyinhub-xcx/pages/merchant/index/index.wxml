@@ -16,7 +16,7 @@
     <cy-empty kind="no-permission" fill size="lg" title="当前身份不能查看经营台" cta="申请入驻" bind:cta="goApplicationProgress" />
   </view>
   <scroll-view wx:else class="rv-scroll" scroll-y enhanced show-scrollbar="{{false}}"
-               style="{{pmPage === 1 ? '--pm-w:1;' : (pmPage === 2 ? '--pm-w-d:.32s;--pm-w-s:1;' : '')}}height: 100vh; padding-top: {{statusBarHeight + navBarHeight}}px;"
+               style="{{pmPage === 1 ? '--pm-w:1;' : (pmPage === 2 ? '--pm-w-d:.32s;--pm-w-s:1;' : '')}}padding-top: {{statusBarHeight + navBarHeight}}px;"
                refresher-enabled
                refresher-triggered="{{refreshing}}"
                bindrefresherrefresh="onRefresh">
