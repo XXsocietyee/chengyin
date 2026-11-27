@@ -1,5 +1,7 @@
-const { test, beforeEach } = require('node:test')
+const { test, beforeEach, mock } = require('node:test')
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
 
 const COMPONENT = '../../pages/deregister/components/scene-settings-deregister/index.js'
 const FLOW = '../../pages/deregister/deregister-flow.js'
@@ -226,22 +228,126 @@ test('撤销申请响应在组件离开后不改状态，也不触发资格回�
   assert.equal(requests.length, requestCount)
 })
 
-test('L10-043:验证码发送成功后 60 秒内重发不再发请求;L10-042:返回页面时已发送标记随手机号一起复位', () => {
+test('L10-043:验证码发送成功后 60 秒内重发不再发请求;返回页面保留尾号和已发送标记', () => {
+  const wxml = fs.readFileSync(path.join(__dirname, '../../pages/deregister/components/scene-settings-deregister/index.wxml'), 'utf8')
+  assert.match(wxml, /smsSending \|\| smsResendLocked \? 'is-disabled'/)
+  assert.match(wxml, /aria-disabled="\{\{smsSending \|\| smsResendLocked\}\}"/)
+  assert.match(wxml, /hover-class="\{\{smsSending \|\| smsResendLocked \? 'none' : 'cy-pressed'\}\}"/)
   const page = makePage()
   page.sendSms()
   requests.find(r => r.url === '/api/user/info').success({ code: 200, data: { phone: '13800138000' } })
   requests.find(r => r.url === '/api/sms/send').success({ code: 200 })
   assert.equal(page.data.smsSent, true)
+  assert.equal(page.data.smsResendLocked, true, '重新发送在冷却结束前保持禁用')
   const before = requests.length
+  const infoCount = requests.filter(r => r.url === '/api/user/info').length
+  const smsCount = requests.filter(r => r.url === '/api/sms/send').length
+  page.sendSms()
   page.sendSms()
   assert.equal(requests.length, before, '60 秒内不重发')
+  assert.equal(requests.filter(r => r.url === '/api/user/info').length, infoCount)
+  assert.equal(requests.filter(r => r.url === '/api/sms/send').length, smsCount)
+  assert.equal(page.data.smsResendLocked, true)
   page._smsSentAt = Date.now() - 61000
   page.sendSms()
-  assert.equal(requests.length, before + 1, '冷却结束可重发')
+  page.sendSms()
+  assert.equal(requests.length, before + 1, '冷却结束点一次只发一次')
+  assert.equal(requests.at(-1).url, '/api/user/info')
+  requests.at(-1).success({ code: 200, data: { phone: '13800138000' } })
+  requests.filter(r => r.url === '/api/sms/send').at(-1).success({ code: 200 })
+  assert.equal(page.data.smsResendLocked, true)
+  assert.equal(page.data.smsSent, true)
+  page.data.smscode = '654321'
+  page.data.confirmed = true
   componentConfig.pageLifetimes.hide.call(page)
   componentConfig.pageLifetimes.show.call(page)
-  assert.equal(page.data.smsSent, false)
-  assert.equal(page.data.phoneMasked, '')
+  assert.equal(page.data.smsSent, true)
+  assert.equal(page.data.smsResendLocked, true, '离开再回来，冷却没结束就仍然不能重发')
+  assert.equal(page.data.phoneMasked, '8000')
+  assert.equal(page.data.smscode, '654321')
+  assert.equal(page.data.confirmed, true)
+  assert.equal(page.data.status, 'ELIGIBLE')
+  const afterReturn = requests.length
+  page.sendSms()
+  assert.equal(requests.length, afterReturn, '回来后的冷却点击仍然不发请求')
+
+  mock.timers.enable({ apis: ['setTimeout', 'Date'] })
+  try {
+    const cooled = makePage()
+    const mark = requests.length
+    cooled.sendSms()
+    requests.at(-1).success({ code: 200, data: { phone: '13800138000' } })
+    requests.at(-1).success({ code: 200 })
+    assert.equal(cooled.data.smsResendLocked, true)
+    mock.timers.tick(59999)
+    cooled.sendSms()
+    assert.equal(requests.length, mark + 2, '差 1 毫秒仍不读手机号、不发短信')
+    assert.equal(cooled.data.smsResendLocked, true)
+    mock.timers.tick(1)
+    assert.equal(cooled.data.smsResendLocked, false, '冷却结束才放开重新发送')
+    assert.equal(cooled.data.smsSent, true)
+    cooled.sendSms()
+    cooled.sendSms()
+    assert.equal(requests.length, mark + 3, '放开后点一次只读一次手机号')
+    assert.equal(requests.at(-1).url, '/api/user/info')
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test('L10-042:可注销时隐藏页面不取消在途短信，也不清掉验证码和确认', () => {
+  const page = makePage()
+  page._statusMemberId = '7'
+  page.data.smscode = '654321'
+  page.data.confirmed = true
+  page.sendSms()
+  const info = requests.find(request => request.url === '/api/user/info')
+  componentConfig.pageLifetimes.hide.call(page)
+  assert.equal(page.data.smsSending, true)
+  assert.equal(page.data.smscode, '654321')
+  assert.equal(page.data.confirmed, true)
+  info.success({ code: 200, data: { phone: '13800138000' } })
+  const sms = requests.find(request => request.url === '/api/sms/send')
+  assert.ok(sms)
+  componentConfig.pageLifetimes.show.call(page)
+  assert.equal(page.data.smsSending, true)
+  assert.equal(page.data.smscode, '654321')
+  assert.equal(page.data.confirmed, true)
+  sms.success({ code: 200 })
+  assert.equal(page.data.smsSent, true)
+  assert.equal(page.data.phoneMasked, '8000')
+  assert.equal(page.data.smscode, '654321')
+  assert.equal(page.data.confirmed, true)
+  requests.filter(request => request.url === '/api/user/deregister/status').at(-1).success({ code: 200, data: { status: 'NORMAL' } })
+  requests.filter(request => request.url === '/api/user/deregister/precheck').at(-1).success({
+    code: 200, data: { status: 'ELIGIBLE', blockers: [], verificationMethod: 'SMS' },
+  })
+  assert.equal(page.data.status, 'ELIGIBLE')
+  assert.equal(page.data.smsSent, true)
+  assert.equal(page.data.smscode, '654321')
+  assert.equal(page.data.confirmed, true)
+
+  requests = []
+  const midSend = makePage()
+  midSend._statusMemberId = '7'
+  Object.assign(midSend.data, { smscode: '111111', confirmed: true })
+  midSend.sendSms()
+  requests.find(request => request.url === '/api/user/info').success({ code: 200, data: { phone: '13800138000' } })
+  const inflight = requests.find(request => request.url === '/api/sms/send')
+  componentConfig.pageLifetimes.hide.call(midSend)
+  inflight.success({ code: 200 })
+  assert.equal(midSend.data.smsSent, true)
+  assert.equal(midSend.data.phoneMasked, '8000')
+  assert.equal(midSend.data.smscode, '111111')
+  assert.equal(midSend.data.confirmed, true)
+
+  requests = []
+  const unloaded = makePage()
+  unloaded.sendSms()
+  componentConfig.pageLifetimes.hide.call(unloaded)
+  componentConfig.lifetimes.detached.call(unloaded)
+  requests.at(-1).success({ code: 200, data: { phone: '13800138000' } })
+  assert.equal(requests.filter(request => request.url === '/api/sms/send').length, 0)
 })
 
 test('L10-201:同一次填写重试复用同一个申请编号,重新加载状态才换新编号', async () => {

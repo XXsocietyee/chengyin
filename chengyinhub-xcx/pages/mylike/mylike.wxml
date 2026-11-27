@@ -15,6 +15,7 @@
   <view class="favorite-recommend-note" wx:if="{{ztList1.length}}" bindtap="showRecommendNote" aria-role="button" aria-label="查看推荐说明" hover-class="cy-pressed" hover-stay-time="80">推荐说明</view>
 
   <view class="tablist favorite-list">
+    <cy-inline-error wx:if="{{refreshError}}" kind="data" title="{{refreshError}}" action="重试" bind:action="refreshData" />
     <block wx:if="{{activeFavoriteTab === 'posts'}}">
       <cy-empty fill class="cy-fill-state" size="lg" wx:if="{{errorMsg && loginRequired && postList.length === 0}}" kind="no-permission" title="登录后查看收藏" cta="登录" bind:cta="loginFavorites" />
       <cy-error load-failure fill class="cy-fill-state" size="lg" wx:elif="{{errorMsg && postList.length === 0}}" icon="empty-state" title="收藏加载失败" sub="{{errorMsg}}" bind:retry="refreshData" auto-back />

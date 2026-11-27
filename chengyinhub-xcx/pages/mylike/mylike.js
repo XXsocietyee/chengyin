@@ -5,7 +5,14 @@ const community = require('../../utils/community-post-api.js').createClient(app,
 const { isRecordList } = require('../../utils/response-shape.js');
 const policy = require('../../utils/identity/identity-policy.js');
 const { isLoginRequired, retryLogin } = require('../../utils/session/login-reload.js');
+function userText(res, fallback) {
+  return app && typeof app.getRequestErrorMessage === 'function'
+    ? app.getRequestErrorMessage(res, fallback)
+    : fallback;
+}
 const merchantTheme = require('../../utils/merchant-theme.js');
+// L10-045:同一账号刚读到的收藏,大约一分钟内返回不打回第一页。
+const FAVORITE_FRESH_MS = 60 * 1000;
 
 Page({
   /**
@@ -28,6 +35,7 @@ Page({
     loading: false,
     refreshing: false,
     errorMsg: '',
+    refreshError: '', // 已有收藏时刷新失败的重试文案;空列表仍走 errorMsg
     loginRequired: false,   // PR10 F-W1-12:读失败是未登录(无会话 / 401)⇒ 登录引导,不与加载失败一起留白
     hasMore1: true,
     hasMorePosts: true,
@@ -71,10 +79,12 @@ Page({
       this._hasShown = true;
       return;
     }
-    // 首展交给 onLoad，避免同一页并发两次 page=1。
-    // L10-045:再次进入仍重读第 1 页，换上刚取消或刚改的收藏；已上拉的后续页留在列表里，回包前不清空。
-    // 在途列表期间返回:排队一次刷新,由当前请求 complete 出队(刷新归属本次返回,不记在列表 handler 名下)。
-    const refreshReturn = () => this.refreshData({ preserveLoaded: true });
+    // L10-045:同一账号的列表还新鲜时,返回不把页码打回 1,也不换掉已加载的行。
+    // 下拉刷新和换号仍重读。过了窗口,或这次还没成功读到,才刷新第一页。
+    // 回包前不摘掉已有卡片。刷新失败则留下这些卡片,并给出重试。
+    // 还没读成功、且列表仍在途:排队一次刷新,由当前请求 complete 出队。
+    if (this._favoriteListFresh()) return;
+    const refreshReturn = () => this.refreshData();
     if (this.data.loading) {
       this._favoriteShowRefresh = { owner: this._favoriteOwner, generation: this._favoriteGeneration, run: refreshReturn };
       return;
@@ -96,17 +106,24 @@ Page({
     this._stopPullWithCurrent = false;
     this._favoriteShowRefresh = null;
     this._favoriteLoadedPages = Object.create(null);
-    this._favoritePageIds = Object.create(null);
-    this._favoriteReturnMerge = null;
+    this._favoriteFresh = Object.create(null);
     this._favoriteRemovals = { posts: Object.create(null), topics: Object.create(null), nodes: Object.create(null) };
     this._unlikePrompts = Object.create(null); this._nodeUnfavoriteRequests = Object.create(null);
-    this.setData({ postList: [], ztList1: [], nodeList: [], loading: false, refreshing: false, errorMsg: '', loginRequired: false,
+    this.setData({ postList: [], ztList1: [], nodeList: [], loading: false, refreshing: false, errorMsg: '', refreshError: '', loginRequired: false,
       hasMore1: true, hasMorePosts: true, pageConfig: { pageNum: 1, pageSize: 10 } });
     return true;
   },
   _isFavoriteResponseCurrent(owner, generation) {
     return !this._favoritesDisposed && owner === this._favoriteMember()
       && generation === this._favoriteGeneration;
+  },
+  _markFavoriteFresh(tab) {
+    const fresh = this._favoriteFresh || (this._favoriteFresh = Object.create(null));
+    fresh[tab] = { at: Date.now(), owner: this._favoriteMember() };
+  },
+  _favoriteListFresh() {
+    const mark = this._favoriteFresh && this._favoriteFresh[this.data.activeFavoriteTab];
+    return !!mark && mark.owner === this._favoriteMember() && (Date.now() - mark.at) < FAVORITE_FRESH_MS;
   },
 
   _flushFavoriteShowRefresh() {
@@ -182,7 +199,7 @@ Page({
     const tab = that.data.activeFavoriteTab;
     const currentList = tab === 'posts' ? that.data.postList : tab === 'nodes' ? that.data.nodeList : that.data.ztList1;
     const refreshing = that.data.pageConfig.pageNum === 1 && currentList.length > 0;
-    that.setData({ loading: true, refreshing: refreshing, errorMsg: '', loginRequired: false });
+    that.setData({ loading: true, refreshing: refreshing, errorMsg: '', refreshError: '', loginRequired: false });
     
     if (tab === 'posts') that.getPostFavoriteList(stopPullAfterComplete);
     else if (tab === 'nodes') that.getNodeFavoriteList(stopPullAfterComplete);
@@ -224,7 +241,8 @@ Page({
       const message = app.getRequestErrorMessage(res, fallback);
       that.setData({ pageConfig: { pageNum: previousPage, pageSize: pageConfig.pageSize } });
       that.setData({ refreshing: false, errorMsg: hasOldContent ? '' : message,
-        loginRequired: !hasOldContent && isLoginRequired(app, res, statusCode) });
+        loginRequired: !hasOldContent && isLoginRequired(app, res, statusCode),
+        refreshError: hasOldContent && pageConfig.pageNum === 1 ? message : '' });
     };
     community.request({
       hideLoading: true,
@@ -244,20 +262,10 @@ Page({
             row.picList = row.pics ? String(row.pics).split(';').filter(Boolean) : [];
             return row;
           });
-          const preserved = that._takeFavoriteReturnMerge('posts', pageConfig.pageNum);
-          if (preserved) {
-            loadedPages.posts = preserved.pageNum;
-            that.setData({
-              postList: that._mergeFavoriteReturn('posts', rows),
-              pageConfig: { pageNum: preserved.pageNum, pageSize: pageConfig.pageSize },
-              errorMsg: ''
-            });
-          } else {
-            loadedPages.posts = pageConfig.pageNum;
-            that._rememberFavoritePage('posts', pageConfig.pageNum, rows);
-            const postList = pageConfig.pageNum === 1 ? rows : that.data.postList.concat(rows);
-            that.setData({ postList: postList, hasMorePosts: res.data.hasMore === true, errorMsg: '' });
-          }
+          loadedPages.posts = pageConfig.pageNum;
+          const postList = pageConfig.pageNum === 1 ? rows : that.data.postList.concat(rows);
+          that._markFavoriteFresh('posts');
+          that.setData({ postList: postList, hasMorePosts: res.data.hasMore === true, errorMsg: '', refreshError: '' });
         } else finishLoadError(res, '收藏帖文加载失败');
       },
       fail: function (res, statusCode) {
@@ -303,12 +311,14 @@ Page({
         that.setData({
           refreshing: false,
           errorMsg: '',
+          refreshError: pageConfig.pageNum === 1 ? message : '',
         });
       } else {
         that.setData({
           refreshing: false,
           errorMsg: message,
           loginRequired: isLoginRequired(app, res, statusCode),
+          refreshError: '',
         });
       }
     };
@@ -329,21 +339,16 @@ Page({
           
           // 处理日期格式
           list = that.processListData(list);
-          const preserved = that._takeFavoriteReturnMerge('topics', pageConfig.pageNum);
-          if (preserved) {
-            loadedPages.topics = preserved.pageNum;
-            that.setData({
-              ztList1: that._mergeFavoriteReturn('topics', list),
-              pageConfig: { pageNum: preserved.pageNum, pageSize: pageConfig.pageSize },
-              errorMsg: '',
-            });
-          } else if (pageConfig.pageNum === 1) {
-            loadedPages.topics = pageConfig.pageNum;
-            that._rememberFavoritePage('topics', pageConfig.pageNum, list);
-            that.setData({
+          loadedPages.topics = pageConfig.pageNum;
+          that._markFavoriteFresh('topics');
+          
+          // 如果是第一页，直接替换；否则追加
+          if (pageConfig.pageNum === 1) {
+            that.setData({ 
               ztList1: list,
               hasMore1: res.data.rows.length >= pageConfig.pageSize,
               errorMsg: '',
+              refreshError: '',
             });
           } else {
             loadedPages.topics = pageConfig.pageNum;
@@ -352,6 +357,7 @@ Page({
               ztList1: [...that.data.ztList1, ...list],
               hasMore1: res.data.rows.length >= pageConfig.pageSize,
               errorMsg: '',
+              refreshError: '',
             });
           }
         } else {
@@ -391,8 +397,8 @@ Page({
     const hasOldContent = that.data.nodeList.length > 0;
     const finishLoadError = function (res, fallback, statusCode) {
       const message = app.getRequestErrorMessage(res, fallback);
-      if (hasOldContent) that.setData({ refreshing: false, errorMsg: '' });
-      else that.setData({ refreshing: false, errorMsg: message, loginRequired: isLoginRequired(app, res, statusCode) });
+      if (hasOldContent) that.setData({ refreshing: false, errorMsg: '', refreshError: message });
+      else that.setData({ refreshing: false, errorMsg: message, loginRequired: isLoginRequired(app, res, statusCode), refreshError: '' });
     };
     app.sendRequest({
       hideLoading: true,
@@ -403,7 +409,8 @@ Page({
         if (!isCurrent()) return;
         if (res && res.code == '200' && isRecordList(res.data)) {
           const rows = res.data.map(function (row) { return Object.assign({}, row, { id: row.poiId }); });
-          that.setData({ nodeList: that._filterFavoriteRead('nodes', rows, removalVersion), errorMsg: '' });
+          that._markFavoriteFresh('nodes');
+          that.setData({ nodeList: that._filterFavoriteRead('nodes', rows, removalVersion), errorMsg: '', refreshError: '' });
         } else {
           finishLoadError(res, '收藏加载失败');
         }
@@ -472,7 +479,7 @@ Page({
               // 回包说仍在收藏(并发下被 toggle 回来):不摘卡,重读列表对齐
               request.unknown = true;
             } else {
-              toast((res && res.msg) || '操作失败');
+              toast(userText(res, '操作失败'));
             }
           },
           fail: function () {
@@ -625,7 +632,7 @@ Page({
                 const ztList1 = that.data.ztList1.filter(topic => String(topic.id) !== requestKey);
                 that.setData({ ztList1 });
               } else {
-                toast(res.msg || '操作失败');
+                toast(userText(res, '操作失败'));
               }
             },
             fail: function (res) {
@@ -692,7 +699,7 @@ Page({
       success: (res) => {
         if (!isCurrent()) return;
         if (!res || res.code != '200') {
-          toast((res && res.msg) || '操作失败');
+          toast(userText(res, '操作失败'));
           return;
         }
         this._recordFavoriteRemoval('posts', requestKey);

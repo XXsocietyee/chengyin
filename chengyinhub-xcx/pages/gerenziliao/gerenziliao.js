@@ -10,6 +10,7 @@ function heroBgKey() {
 const { isRecordList } = require('../../utils/response-shape.js');
 const { isValidMobile } = require('../../utils/form-state.js');
 const nicknameCheck = require('./nickname-check.js');
+const { safeUserMessage } = require('../../utils/transport/safe-user-message.js');
 const profileReview = require('../../utils/profile-review.js');
 const identitySync = require('../../utils/identity-sync.js');
 const { avatarSrc } = identitySync;
@@ -32,6 +33,12 @@ function boundPhoneFromResponse(res) {
     if (isValidMobile(phone)) return phone;
   }
   return '';
+}
+
+// 成功体的 msg 经常是「操作成功」,失败体则可能是 Java 异常原文。两种都不直接给用户。
+function profileFailureText(res, fallback) {
+  if (res && (res.code == 200 || res.code == '200')) return fallback;
+  return typeof safeUserMessage === 'function' ? safeUserMessage(res, fallback) : fallback;
 }
 
 function maskPhone(raw) {
@@ -559,8 +566,8 @@ Page({
     }
   },
 
+  // L10-191:保存栏只读 canSave。有昵称才能保存;头像还在上传时先关掉,结束或失败后再按昵称放开。
   refreshSaveState: function () {
-    // L10-191:头像上传没返回前保存键保持禁用;返回后仍只看姓名是否可存。
     const canSave = !!(this.data.userInfo.name || '').trim() && !this.data.avatarUploading;
     if (canSave !== this.data.canSave) this.setData({ canSave });
   },
@@ -645,7 +652,7 @@ Page({
             refreshing: false,
             loadError: hadLoaded ? '' : '资料暂时不可用',   // 有旧资料时静默降级,wxml 只在 !loaded 渲染
             loadErrorKind: 'data',
-            loadErrorSub: hadLoaded ? '' : ((res && res.msg) || '请稍后重新加载')
+            loadErrorSub: hadLoaded ? '' : profileFailureText(res, '请稍后重新加载')
           });
         }
       },
@@ -750,7 +757,7 @@ Page({
           that.resetNicknameCheck();
           that.setData({
             saving: false,
-            saveError: res.msg || (taken ? '昵称已被占用，请换一个' : '昵称不符合规则'),
+            saveError: profileFailureText(res, taken ? '昵称已被占用，请换一个' : '昵称不符合规则'),
             popDavid4: true,
             tempName: userInfo.name,
             nicknameState: taken ? 'taken' : 'invalid',
@@ -762,7 +769,7 @@ Page({
         } else {
           that.setData({
             saving: false,
-            saveError: res.msg || '资料暂时没有保存，请重试'
+            saveError: profileFailureText(res, '资料暂时没有保存，请重试')
           });
         }
         });
@@ -814,15 +821,18 @@ Page({
       onUploadStart(filePaths) {
         if (!that.currentProfileContext(context) || !filePaths || !filePaths[0]) return;
         previousSrc = that.data.avatarSrc;
-        that.setData({ avatarSrc: filePaths[0], avatarReviewText: '', avatarUploading: true }, () => that.refreshSaveState());
+        // 与上传标记同一次 setData:保存栏在这一帧就禁用,不等下一次刷新。
+        that.setData({ avatarSrc: filePaths[0], avatarReviewText: '', avatarUploading: true, canSave: false });
       },
       // 上传失败退回原头像;返回 false 让 chooseImage 照常弹失败提示。
-      // 上传标记只在这一次返回里清掉,不能在请求发出去之前就放开保存。
+      // 结束或失败都清掉在途标记,保存再跟着昵称(canSave)。
       onUploadDone(r) {
-        if (!that.currentProfileContext(context)) return false;
-        const patch = { avatarUploading: false };
-        if (!r.ok && previousSrc !== null) patch.avatarSrc = previousSrc;
-        that.setData(patch, () => that.refreshSaveState());
+        if (that.currentProfileContext(context)) {
+          const patch = { avatarUploading: false };
+          if (!r.ok && previousSrc !== null) patch.avatarSrc = previousSrc;
+          that.setData(patch);
+          that.refreshSaveState();
+        }
         return false;
       }
     });
@@ -861,7 +871,7 @@ Page({
         if (res.code == '200') {
           const phone = boundPhoneFromResponse(res);
           if (!phone) {
-            toast(res.msg || '获取手机号失败');
+            toast(profileFailureText(res, '获取手机号失败'));
             return;
           }
           that.setData({
@@ -869,7 +879,7 @@ Page({
             phoneMasked: maskPhone(phone)
           });
         } else {
-          toast(res.msg || '获取手机号失败');
+          toast(profileFailureText(res, '获取手机号失败'));
         }
         });
       },

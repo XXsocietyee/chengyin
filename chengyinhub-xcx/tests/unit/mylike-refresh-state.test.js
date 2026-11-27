@@ -12,6 +12,7 @@ beforeEach(() => {
   global.getApp = () => ({
     globalData: {},
     canUseCommunity: () => true, // Current-account server-open fixture (favorites posts tab is gated since F-L5C-06).
+    getUserID: () => sandbox.member || '',
     getRequestErrorMessage: (_res, fallback) => fallback,
     sendRequest(options) {
       sandbox.requests.push(options);
@@ -48,87 +49,130 @@ test('帖文收藏刷新 502 保留旧卡片与操作，并在 complete 后停�
   assert.deepEqual(vm.data.postList, previous);
   assert.equal(vm.data.refreshing, false);
   assert.equal(vm.data.errorMsg, '');
+  assert.equal(vm.data.refreshError, '服务暂不可用，请稍后重试');
   assert.equal(sandbox.pullStops, 0);
 
   sandbox.requests[1].complete();
 
   assert.equal(vm.data.loading, false);
+  assert.deepEqual(vm.data.postList, previous);
+  assert.equal(vm.data.refreshError, '服务暂不可用，请稍后重试');
   assert.equal(sandbox.pullStops, 1);
   const view = fs.readFileSync(VIEW_PATH, 'utf8');
   assert.doesNotMatch(view, /<cy-inline-error[^>]*staleError/);
+  assert.match(view, /<cy-inline-error wx:if="\{\{refreshError\}\}" kind="data" title="\{\{refreshError\}\}" action="重试" bind:action="refreshData"/);
   assert.match(view, /bind:detail="goPost"/);
   assert.match(view, /bind:more="onPostMore"/);
   assert.match(view, /bind:select="onPostMoreSelect"/);
 });
 
-test('L10-045: 已加载第 2 页后再返回，列表仍含第 2 页，第 1 页消失的条目不留在屏上', () => {
+test('L10-045: 同一账号的收藏还新鲜时返回不重置第一页，过期、下拉和换号才重读', () => {
   const vm = loadPage();
+  sandbox.member = '11';
   vm.onLoad({});
-  vm.onShow();
-  sandbox.requests[0].success({
-    code: '200',
-    data: { rows: [{ id: 1, name: '甲' }, { id: 2, name: '乙' }], hasMore: true },
-  });
+  sandbox.requests[0].success({ code: '200', data: { rows: [{ id: 11, pics: '' }], hasMore: true } });
   sandbox.requests[0].complete();
+  vm.onShow();
+  assert.equal(sandbox.requests.length, 1);
 
   vm.onReachBottom();
-  sandbox.requests[1].success({
-    code: '200',
-    data: { rows: [{ id: 3, name: '丙' }], hasMore: false },
-  });
+  assert.equal(sandbox.requests[1].data.pageNum, 2);
+  sandbox.requests[1].success({ code: '200', data: { rows: [{ id: 12, pics: '' }], hasMore: false } });
   sandbox.requests[1].complete();
-  assert.deepEqual(vm.data.postList.map(item => item.id), [1, 2, 3]);
+  assert.deepEqual(vm.data.postList.map(row => row.id), [11, 12]);
+  assert.equal(vm.data.pageConfig.pageNum, 2);
 
   vm.onShow();
-  assert.deepEqual(vm.data.postList.map(item => item.id), [1, 2, 3], '回包前不得把已加载列表清成空');
+  assert.equal(sandbox.requests.length, 2);
+  assert.equal(vm.data.pageConfig.pageNum, 2);
+  assert.deepEqual(vm.data.postList.map(row => row.id), [11, 12]);
+
+  vm.onPullDownRefresh();
   assert.equal(sandbox.requests.length, 3);
   assert.equal(sandbox.requests[2].data.pageNum, 1);
-
-  sandbox.requests[2].success({
-    code: '200',
-    data: { rows: [{ id: 1, name: '甲改' }], hasMore: true },
-  });
+  assert.equal(sandbox.requests[2].data.favorite_only, 1);
+  assert.deepEqual(vm.data.postList.map(row => row.id), [11, 12]);
+  sandbox.requests[2].fail({});
+  assert.deepEqual(vm.data.postList.map(row => row.id), [11, 12]);
+  assert.equal(vm.data.refreshError, '收藏帖文加载失败');
   sandbox.requests[2].complete();
+  assert.equal(vm.data.loading, false);
+  assert.deepEqual(vm.data.postList.map(row => row.id), [11, 12]);
 
-  assert.deepEqual(vm.data.postList.map(item => item.id), [1, 3]);
-  assert.equal(vm.data.postList[0].name, '甲改');
-  assert.equal(vm.data.postList.some(item => item.id === 2), false);
-  assert.equal(vm.data.pageConfig.pageNum, 2, '下一页仍从已加载页之后继续');
+  vm.refreshData();
+  assert.equal(sandbox.requests.length, 4);
+  assert.equal(sandbox.requests[3].data.pageNum, 1);
+  assert.equal(vm.data.refreshError, '');
+  assert.deepEqual(vm.data.postList.map(row => row.id), [11, 12]);
+  sandbox.requests[3].success({ code: '200', data: { rows: [{ id: 13, pics: '' }], hasMore: false } });
+  sandbox.requests[3].complete();
+  assert.deepEqual(vm.data.postList.map(row => row.id), [13]);
+  assert.equal(vm.data.refreshError, '');
+
+  vm._favoriteFresh.posts.at = Date.now() - 60001;
+  vm.onShow();
+  assert.equal(sandbox.requests.length, 5);
+  assert.equal(sandbox.requests[4].data.pageNum, 1);
+  assert.deepEqual(vm.data.postList.map(row => row.id), [13]);
+  sandbox.requests[4].fail({});
+  assert.deepEqual(vm.data.postList.map(row => row.id), [13]);
+  assert.equal(vm.data.refreshError, '收藏帖文加载失败');
+  sandbox.requests[4].complete();
+
+  sandbox.member = '22';
+  vm.onShow();
+  assert.deepEqual(vm.data.postList, []);
+  assert.equal(sandbox.requests.length, 6);
+  assert.equal(sandbox.requests[5].data.pageNum, 1);
 });
 
-test('切到别的页签再切回帖文，已上拉的第 2 页还在，第 1 页消失的条目不留在屏上', () => {
-  const vm = loadPage();
-  vm.onLoad({});
-  vm.onShow();
-  sandbox.requests[0].success({
-    code: '200',
-    data: { rows: [{ id: 1, name: '甲' }, { id: 2, name: '乙' }], hasMore: true },
-  });
-  sandbox.requests[0].complete();
-  vm.onReachBottom();
-  sandbox.requests[1].success({
-    code: '200',
-    data: { rows: [{ id: 3, name: '丙' }], hasMore: false },
-  });
-  sandbox.requests[1].complete();
+test('主题和据点刷新失败时留着已有卡片并给出重试', () => {
+  const topics = loadPage();
+  topics.setData({ activeFavoriteTab: 'topics', ztList1: [{ id: 3, name: '原主题' }] });
+  topics._hasShown = true;
+  topics.onShow();
+  assert.equal(sandbox.requests.at(-1).data.pageNum, 1);
+  assert.equal(topics.data.ztList1[0].id, 3);
+  sandbox.requests.at(-1).fail({});
+  assert.equal(topics.data.ztList1[0].id, 3);
+  assert.equal(topics.data.refreshError, '喜欢列表加载失败');
 
-  vm.onFavoriteTabChange({ detail: { key: 'topics' } });
-  assert.deepEqual(vm.data.postList.map(item => item.id), [1, 2, 3], '切走时不得先清掉帖文后面页');
-  sandbox.requests[2].success({ code: '200', data: { rows: [{ id: 9, name: '主题' }] } });
-  sandbox.requests[2].complete();
+  sandbox.requests.length = 0;
+  const nodes = loadPage();
+  nodes.setData({ activeFavoriteTab: 'nodes', nodeList: [{ id: 9, name: '原据点' }] });
+  nodes._hasShown = true;
+  nodes.onShow();
+  assert.equal(sandbox.requests.at(-1).url, '/api/city/nodes/favorites');
+  assert.equal(nodes.data.nodeList[0].id, 9);
+  sandbox.requests.at(-1).successStatusAbnormal({ statusCode: 502 });
+  assert.equal(nodes.data.nodeList[0].id, 9);
+  assert.equal(nodes.data.refreshError, '服务暂不可用，请稍后重试');
+  assert.equal(nodes.data.errorMsg, '');
+});
 
-  vm.onFavoriteTabChange({ detail: { key: 'posts' } });
-  assert.deepEqual(vm.data.postList.map(item => item.id), [1, 2, 3], '回包前不得把已加载列表换成空的第 1 页');
-  assert.equal(sandbox.requests[3].data.pageNum, 1);
-  sandbox.requests[3].success({
-    code: '200',
-    data: { rows: [{ id: 1, name: '甲改' }], hasMore: true },
-  });
-  sandbox.requests[3].complete();
+test('L10-045: 主题和据点新鲜时返回不重读', () => {
+  const topics = loadPage();
+  topics.setData({ activeFavoriteTab: 'topics' });
+  topics._hasShown = true;
+  topics.loadLikeData();
+  sandbox.requests.at(-1).success({ code: '200', data: { rows: [{ id: 3, name: '原主题' }] } });
+  sandbox.requests.at(-1).complete();
+  const topicRequests = sandbox.requests.length;
+  topics.onShow();
+  assert.equal(sandbox.requests.length, topicRequests);
+  assert.equal(topics.data.pageConfig.pageNum, 1);
+  assert.equal(topics.data.ztList1[0].id, 3);
 
-  assert.deepEqual(vm.data.postList.map(item => item.id), [1, 3]);
-  assert.equal(vm.data.postList[0].name, '甲改');
-  assert.equal(vm.data.pageConfig.pageNum, 2);
+  sandbox.requests.length = 0;
+  const nodes = loadPage();
+  nodes.setData({ activeFavoriteTab: 'nodes' });
+  nodes._hasShown = true;
+  nodes.loadLikeData();
+  sandbox.requests.at(-1).success({ code: '200', data: [{ poiId: 9, name: '原据点' }] });
+  sandbox.requests.at(-1).complete();
+  nodes.onShow();
+  assert.equal(sandbox.requests.length, 1);
+  assert.equal(nodes.data.nodeList[0].id, 9);
 });
 
 function loadPage() {
