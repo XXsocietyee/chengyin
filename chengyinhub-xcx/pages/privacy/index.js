@@ -32,6 +32,7 @@ Page({
     mediaAccessDenied: false,
     mediaPreviewUrl: '',
     mediaPreviewType: '',
+    presenceError: '',
 
     serviceAgreed: false, // 进入弹窗:一行勾选同意两份文件后才能点「同意并继续」
     showServiceSheet: false,
@@ -66,10 +67,27 @@ Page({
     this._homeCityConsentEpoch = (this._homeCityConsentEpoch || 0) + 1;
     this.setData({ homeCityBusy: false, homeCityError: '' });
     this._mediaHidden = false;
-    // L10-044:媒体面板默认收起;只有展开着才在返回时重读,收起时等用户点开再读。
-    if (!this.data.pendingAuthorization && this.data.mediaOpen) this.loadOwnMedia();
+    if (this._presenceFlight != null && this._presenceFlight !== (this._presenceEpoch || 0)) {
+      this._presenceFlight = null;
+      this.setData({ submitting: false });
+    }
+    // L10-044:收起时不读。换了账号才丢掉上一份;同一趟离开再回来留着已读的行,不在 onShow 重拉。
+    const held = this._mediaRowsScope;
+    const now = this.mediaScope();
+    if (held && (held.owner !== now.owner || held.token !== now.token)) {
+      this.clearMediaState();
+      this._mediaHidden = false;
+    }
+    if (!this.data.pendingAuthorization && this.data.mediaOpen && !this._mediaVisitLoaded) this.loadOwnMedia();
   },
-  onHide() { this.invalidateRoamRevoke(); this.clearMediaState(); },
+  onHide() { this.invalidateRoamRevoke(); this.retainMediaAcrossHide(); this.releasePresenceRequest(); },
+  // 离开或新一次关闭都作废在途回包。转圈在离开时解开，不留给迟到的成功/失败回调。
+  releasePresenceRequest() {
+    this._presenceEpoch = (this._presenceEpoch || 0) + 1;
+    if (this._presenceFlight == null) return;
+    this._presenceFlight = null;
+    this.setData({ submitting: false });
+  },
 
   invalidateRoamRevoke() {
     this._roamRevokeHidden = true;
@@ -79,11 +97,27 @@ Page({
   clearMediaState() {
     this._mediaHidden = true;
     this._mediaEpoch = (this._mediaEpoch || 0) + 1;
+    this._mediaVisitLoaded = false;
     if (this._mediaDownload && this._mediaDownload.abort) this._mediaDownload.abort();
     this._mediaDownload = null;
     this._mediaRowsScope = null;
     this._mediaBeforeId = '';
     this.setData({ mediaRows: [], mediaLoading: false, mediaHasMore: false, mediaBusyId: '', mediaError: '', mediaPreviewUrl: '', mediaPreviewType: '' });
+  },
+  // 同一趟里离开页面:作废在途回包和本人预览链接,已读列表留下次回来接着看。
+  retainMediaAcrossHide() {
+    this._mediaHidden = true;
+    this._mediaEpoch = (this._mediaEpoch || 0) + 1;
+    if (this._mediaDownload && this._mediaDownload.abort) this._mediaDownload.abort();
+    this._mediaDownload = null;
+    if (this._mediaRowsScope) {
+      this._mediaRowsScope = {
+        epoch: this._mediaEpoch,
+        owner: this._mediaRowsScope.owner,
+        token: this._mediaRowsScope.token
+      };
+    }
+    this.setData({ mediaLoading: false, mediaBusyId: '', mediaPreviewUrl: '', mediaPreviewType: '' });
   },
   mediaScope() {
     return { epoch: this._mediaEpoch || 0, owner: String(app.getUserID ? app.getUserID() || '' : ''),
@@ -129,10 +163,12 @@ Page({
     this._mediaEpoch = (this._mediaEpoch || 0) + 1;
     scope.epoch = this._mediaEpoch;
     if (!Number(scope.owner) || !scope.token) {
+      this._mediaVisitLoaded = false;
       this._mediaBeforeId = '';
       this.setData({ mediaRows: [], mediaLoading: false, mediaHasMore: false, mediaAuthRequired: true, mediaAccessDenied: false });
       return;
     }
+    this._mediaVisitLoaded = false;
     this._mediaBeforeId = '';
     this.setData({ mediaRows: [], mediaLoading: true, mediaHasMore: false, mediaError: '', mediaAuthRequired: false, mediaAccessDenied: false,
       mediaPreviewUrl: '', mediaPreviewType: '' });
@@ -156,6 +192,7 @@ Page({
       this.setData({ mediaLoading: false, mediaError: '媒体列表加载失败，请重试' }); return;
     }
     this._mediaRowsScope = scope;
+    this._mediaVisitLoaded = true;
     const labels = { HOLD: '待审核', APPROVED: '已通过', REJECTED: '未通过', UNAVAILABLE: '审核暂不可用' };
     const types = { IMAGE: '图片', AUDIO: '音频', MODEL3D: '3D 模型' };
     const mapped = rows.map(row => ({ assetId: String(row.assetId), reviewState: row.reviewState,
@@ -244,8 +281,8 @@ Page({
   closeMediaPreview() { this.setData({ mediaPreviewUrl: '', mediaPreviewType: '' }); }, toggleMediaPanel() {
     const open = !this.data.mediaOpen;
     this.setData({ mediaOpen: open });
-    // L10-044:首次展开才读
-    if (open && !this.data.pendingAuthorization && !this.data.mediaLoading) this.loadOwnMedia();
+    // L10-044:第一次展开才读;这一趟已经读过就留着
+    if (open && !this.data.pendingAuthorization && !this._mediaVisitLoaded && !this.data.mediaLoading) this.loadOwnMedia();
   },
   copyApprovedMedia(event) {
     const row = this.ownMediaFromEvent(event);
@@ -270,6 +307,7 @@ Page({
   onUnload() {
     this.invalidateRoamRevoke();
     this.clearMediaState();
+    this.releasePresenceRequest();
     if (!app.hasPendingPrivacyAuthorization()) return;
     // 用户用系统返回离开了授权闸 = 没有作出同意。按「不同意」结算,让调用方拿到确定结果,
     // 而不是永远等下去。不同意不是猜测,是这个动作唯一安全的解释。
@@ -337,7 +375,7 @@ Page({
     if (this._mediaHidden || this.data.pendingAuthorization || this.data.homeCityBusy || this.data.submitting) return;
     const scope = this.mediaScope();
     if (!(Number(scope.owner) > 0) || !scope.token || scope.token === 'dev-token') {
-      toast('请先登录再设置首页定位'); return;
+      this.setData({ homeCityError: '请先登录再设置首页定位' }); return;
     }
     const epoch = this._homeCityConsentEpoch || 0;
     const current = () => {
@@ -386,12 +424,19 @@ Page({
   },
 
   disablePresenceSharing() {
-    if (this.data.submitting) return;
-    this.setData({ submitting: true });
+    if (this._mediaHidden || this.data.submitting) return;
+    const epoch = this._presenceEpoch = (this._presenceEpoch || 0) + 1;
+    this._presenceFlight = epoch;
+    const live = () => !this._mediaHidden && epoch === (this._presenceEpoch || 0);
+    this.setData({ submitting: true, presenceError: '' });
     presencePrivacy.setSharing(app, null, false)
-      .then(() => toast('已关闭附近的人位置分享'))
-      .catch(error => toast(error.message))
-      .finally(() => this.setData({ submitting: false }));
+      .then(() => { if (live()) toast('已关闭附近的人位置分享'); })
+      .catch(() => { if (live()) this.setData({ presenceError: '附近的人位置分享未能关闭，请重试' }); })
+      .finally(() => {
+        if (!live()) return;
+        this._presenceFlight = null;
+        this.setData({ submitting: false });
+      });
   },
 
   // PC-168:只读本机按用途的持有状态(bg-tracker),不改撤回核心(#439)。

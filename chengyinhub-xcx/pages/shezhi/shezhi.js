@@ -9,6 +9,10 @@ const { getScene } = require('../../utils/scene-registry.js');
 const { pushScene, popScene, currentScene, exitDecision } = require('../../utils/scene-stack.js');
 const { clearStorageForLogout } = require('../../utils/roam-player-memory.js');
 function identitySync() { return require('../../utils/identity-sync.js'); }
+function settingsIdentity() {
+  const gd = app.globalData || {};
+  return [app.getUserID(), gd.role || '', gd.user_type || '', gd.authorization || ''].join('|');
+}
 Page({
 
   data: {
@@ -54,8 +58,13 @@ Page({
     this._hidden = false;
     this.setData({ hasAccount: Number(app.getUserID && app.getUserID()) > 0 });
     this.syncViewStateAndTheme();
+    const refreshProfile = this._refreshProfileOnShow === true;
+    this._refreshProfileOnShow = false;
     if (this._skipInitialShow) this._skipInitialShow = false;
-    else { this.syncCommunityEntry(); this.getUserData(); }
+    else this.syncCommunityEntry();
+    // L10-041:同一账号的资料已经载入,再次显示不再打 /api/user/info。
+    // 改完资料、换了账号,或上次没载入成功,才重读。
+    if (refreshProfile || this._settingsProfileFailed || this._settingsReadOwner !== settingsIdentity()) this.getUserData();
   },
 
   // 与 IM 列表 _syncCommunityEntry、收藏页 syncCommunityTab 同一判据:app.canUseCommunity(false),开关稍后到达再补一次
@@ -67,14 +76,40 @@ Page({
       this.setData({
         invoiceOn: !!(app.globalData && app.globalData.features && app.globalData.features.userInvoice === true) });
     };
-    // L10-040:开关已为当前账号加载过就直接读,不在每次 onShow 重拉(重拉会先把社区开关清零)。
-    const loaded = app._communityFeatureOwner === String((app.getUserID && app.getUserID()) || '');
-    const pending = !loaded && typeof app.loadFeatureFlags === 'function' ? app.loadFeatureFlags() : null;
+    // L10-040:同一趟里读过的开关直接用。loadFeatureFlags 一调用就清掉归属,回包前再进 onShow 会再 POST。
+    // 换账号(含登录态)或上次没读到,下一次再拉。
+    const owner = String(memberId || '');
+    const tracksAuth = typeof app.getAuthorization === 'function';
+    const authorization = tracksAuth ? String(app.getAuthorization() || '') : '';
+    const key = tracksAuth ? owner + '|' + authorization : owner;
+    const fresh = app._communityFeatureOwner === owner
+      && (!tracksAuth || app._communityFeatureAuthorization === authorization);
+    if (this._featureFlagsKey !== key) {
+      this._featureFlagsKey = key;
+      this._featureFlagsPending = null;
+      this._featureFlagsReady = false;
+    }
+    if (fresh) this._featureFlagsReady = true;
+    if (this._featureFlagsReady || this._featureFlagsPending) {
+      sync();
+      return;
+    }
+    const pending = typeof app.loadFeatureFlags === 'function' ? app.loadFeatureFlags() : null;
+    if (pending && typeof pending.then === 'function') {
+      this._featureFlagsPending = pending;
+      const settle = () => {
+        if (this._featureFlagsPending !== pending || this._featureFlagsKey !== key) return;
+        this._featureFlagsPending = null;
+        this._featureFlagsReady = app._communityFeatureOwner === owner
+          && (!tracksAuth || app._communityFeatureAuthorization === authorization);
+        sync();
+      };
+      pending.then(settle, settle);
+    }
     sync();
-    if (pending && typeof pending.then === 'function') pending.then(sync);
   },
 
-  onHide() { this._hidden = true; this._userInfoEpoch = (this._userInfoEpoch || 0) + 1; merchantTheme.merchantPageRestore(); },
+  onHide() { this._hidden = true; merchantTheme.merchantPageRestore(); },
   onUnload() { this._unloaded = true; this._userInfoEpoch = (this._userInfoEpoch || 0) + 1; merchantTheme.merchantPageRestore(); },
 
   syncViewStateAndTheme() {
@@ -114,32 +149,36 @@ Page({
     const that = this;
     this.closeScene();
     // 按状态分流:不是主理人→申请;已是主理人无俱乐部→创建;已有俱乐部(含满2个)→管理台。
+    // 锁留到跳转结束。请求一完成就放开的话,转场前再点会再打一次 /api/club/my 并再开一页。
     loading.show('加载中');
+    let navigating = false;
+    const release = () => { that._clubTargetLoading = false; };
+    const stillHere = () => !that._unloaded && !that._hidden;
     app.sendRequest({
       url: '/api/club/my', method: 'POST', hideLoading: true, silentError: true,
       success(res) {
         loading.hide();
-        that._clubTargetLoading = false;
+        if (!stillHere()) { release(); return; }
         if (!res || res.code != '200' || !res.data || res.data.owned == null) {
+          release();
           toast(app.getRequestErrorMessage(res, '俱乐部信息加载失败'));
           return;
         }
         let owned = res.data.owned;
         if (owned && !Array.isArray(owned)) owned = [owned];
-        if (owned.length >= 1) {
-          wx.navigateTo({ url: '/pages/club/detail/index?owner=1&tab=manage' });
-        } else if (roleGuard.isClubLeader()) {
-          wx.navigateTo({ url: '/pages/club/create/index' });
-        } else {
-          wx.navigateTo({ url: '/pages/club/apply/index' });
-        }
+        const url = owned.length >= 1
+          ? '/pages/club/detail/index?owner=1&tab=manage'
+          : (roleGuard.isClubLeader() ? '/pages/club/create/index' : '/pages/club/apply/index');
+        navigating = true;
+        wx.navigateTo({ url, complete: release });
       },
       fail(res) {
-        that._clubTargetLoading = false;
         loading.hide();
+        release();
+        if (!stillHere()) return;
         toast(app.getRequestErrorMessage(res, '网络异常，俱乐部信息加载失败'));
       },
-      complete() { that._clubTargetLoading = false; }
+      complete() { if (!navigating) release(); }
     });
   },
   pickMerchant() {
@@ -154,6 +193,7 @@ Page({
   // (头像=Logo、昵称=店铺名称、签名=slogan、作品=门店相册,gerenziliao 对商户全是重复字段)。
   goUserInfo() {
     if (this.data.settingsAuthRequired || this.data.settingsAccessDenied) { this.onLoginSettings(); return; }
+    this._refreshProfileOnShow = true;
     if (this.data.isMerchantView) {
       wx.navigateTo({ url: '/pages/merchant/decor/index' });
       return;
@@ -376,18 +416,18 @@ Page({
   getUserData() {
     const that = this;
     const epoch = this._userInfoEpoch = (this._userInfoEpoch || 0) + 1;
-    const identity = () => {
-      const gd = app.globalData || {};
-      return [app.getUserID(), gd.role || '', gd.user_type || '', gd.authorization || ''].join('|');
-    };
+    const identity = () => settingsIdentity();
     const requestedIdentity = identity();
     if (!(Number(app.getUserID()) > 0)) {
       this.setData({ userInfo: {}, settingsAuthRequired: true, settingsAccessDenied: false });
       this._settingsReadOwner = requestedIdentity;
+      this._settingsProfileFailed = false;
       return;
     }
     if (this._settingsReadOwner && this._settingsReadOwner !== requestedIdentity) this.setData({ userInfo: {} });
     this._settingsReadOwner = requestedIdentity;
+    this._settingsProfileFailed = false;
+    const profileStillCurrent = () => epoch === that._userInfoEpoch && !that._unloaded && requestedIdentity === identity();
     const handleAuth = (res, statusCode) => {
       if (epoch !== that._userInfoEpoch || that._unloaded) return true;
       if (requestedIdentity !== identity() || res && res.reason === 'sessionChanged') {
@@ -399,6 +439,7 @@ Page({
       const code = Number(statusCode || res && (res.statusCode || res.code));
       if (code !== 401 && code !== 403) return false;
       that.setData({ userInfo: {}, settingsAuthRequired: code === 401, settingsAccessDenied: code === 403 });
+      that._settingsProfileFailed = true;
       return true;
     };
     app.sendRequest({
@@ -417,11 +458,13 @@ Page({
           // L10-041:页面不渲染手机号,原始号码与脱敏号都不进视图层。
           const data = Object.assign({}, res.data);
           delete data.phone;
+          delete data.phoneMasked;
+          that._settingsProfileFailed = false;
           that.setData({ userInfo: data, settingsAuthRequired: false, settingsAccessDenied: false });
-        }
+        } else if (profileStillCurrent()) that._settingsProfileFailed = true;
       },
-      fail(res, code) { handleAuth(res, code); },
-      successStatusAbnormal(res, code) { handleAuth(res, code); }
+      fail(res, code) { if (!handleAuth(res, code) && profileStillCurrent()) that._settingsProfileFailed = true; },
+      successStatusAbnormal(res, code) { if (!handleAuth(res, code) && profileStillCurrent()) that._settingsProfileFailed = true; }
     });
   },
 });

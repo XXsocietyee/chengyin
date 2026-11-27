@@ -12,7 +12,7 @@ function load(candidate = source) {
     setUserRole(role) { writes.push(role); this.globalData.role = role; storage.role = role; },
     sendRequest(o) { requests.push(o); } };
   vm.runInNewContext(candidate, { getApp: () => app, Page: p => { def = p; }, wx: {
-    getStorageSync: k => storage[k], reLaunch() {},
+    getStorageSync: k => storage[k], reLaunch() {}, navigateTo() {},
   }, require(id) {
     if (id.includes('im-send-recovery')) return require('../../utils/im-send-recovery.js');
     if (id.includes('identity-policy')) return require('../../utils/identity/identity-policy.js');
@@ -25,14 +25,13 @@ function load(candidate = source) {
   return { page, app, requests, writes, storage };
 }
 const reply = (req, role = 'merchant', name = 'current') => req.success({ code: 200, data: { role, name } });
-for (const change of ['logout', 'different-user', 'same-user-new-session', 'role-change', 'hide', 'unload']) {
+for (const change of ['logout', 'different-user', 'same-user-new-session', 'role-change', 'unload']) {
   test('设置旧资料响应不得回写：' + change, () => {
     const h = load(); h.page.getUserData(); const req = h.requests[0];
     if (change === 'logout') { h.page.onDangerConfirm({ detail: { key: 'account.logout' } }); h.requests[1].success({ code: 200 }); }
     if (change === 'different-user') h.app.globalData.user_id = 6;
     if (change === 'same-user-new-session') h.app.globalData.authorization = 'session-b';
     if (change === 'role-change') h.app.globalData.role = 'player';
-    if (change === 'hide') h.page.onHide();
     if (change === 'unload') h.page.onUnload();
     const before = JSON.stringify(h.page.data); reply(req);
     assert.deepEqual(h.writes, []);
@@ -52,13 +51,27 @@ test('设置重返页面接受正常当前请求，畸形响应不写角色', ()
   assert.deepEqual(h.writes, ['club']); h.page.getUserData(); h.requests[1].success({ code: 200, data: [] });
   assert.deepEqual(h.writes, ['club']);
 });
-test('设置正常load/show不重复请求，隐藏重开请求有效，失败退出不丢当前资料请求', () => {
+test('设置正常load/show不重复请求，离开再回不重读，失败退出不丢当前资料', () => {
   const h = load(); h.page.onLoad(); h.page.onShow(); assert.equal(h.requests.length, 1);
-  h.page.onHide(); h.page.onShow(); assert.equal(h.requests.length, 2);
-  reply(h.requests[0], 'merchant', 'hidden'); assert.deepEqual(h.writes, []);
-  h.page.onDangerConfirm({ detail: { key: 'account.logout' } }); h.requests[2].fail();
-  reply(h.requests[1], 'club', 'visible'); assert.deepEqual(h.writes, ['club']);
+  h.page.onHide(); h.page.onShow(); assert.equal(h.requests.length, 1);
+  h.page.onDangerConfirm({ detail: { key: 'account.logout' } }); h.requests[1].fail();
+  reply(h.requests[0], 'club', 'visible'); assert.deepEqual(h.writes, ['club']);
   assert.equal(h.page.data.userInfo.name, 'visible');
+});
+test('L10-041:普通返回不重读资料,改完资料或换账号才重读', () => {
+  const h = load(); h.page.onLoad(); h.page.onShow();
+  h.requests[0].success({ code: 200, data: { role: 'club', name: 'old', phone: '13800138000', phoneMasked: '138****8000' } });
+  assert.equal(h.page.data.userInfo.name, 'old');
+  assert.equal(h.page.data.userInfo.phone, undefined);
+  assert.equal(h.page.data.userInfo.phoneMasked, undefined);
+  h.page.onHide(); h.page.onShow();
+  assert.equal(h.requests.length, 1);
+  h.page.goUserInfo(); h.page.onHide(); h.page.onShow();
+  assert.equal(h.requests.length, 2);
+  h.app.globalData.user_id = 6;
+  h.page.onShow();
+  assert.equal(h.requests.length, 3);
+  assert.equal(Object.keys(h.page.data.userInfo).length, 0);
 });
 
 test('负控：移除回包身份/序号守卫会恢复旧身份污染', () => {
@@ -102,9 +115,37 @@ test('设置登录初始化异常解除锁，仍可再次主动登录', async ()
   h.app.firstLogin=()=>{h.app.globalData.user_id=7;return Promise.resolve({ok:true});};h.page.onLoginSettings();
   await new Promise(r=>setImmediate(r));assert.equal(h.requests.length,1);
 });
+test('L10-041:资料没载入成功时,同一账号再次显示仍重读,原始手机号不进视图', () => {
+  for (const fail of [
+    (req) => req.fail({ statusCode: 500 }),
+    (req) => req.successStatusAbnormal({ code: 401 }, 401),
+    (req) => req.success({ code: 500, data: { name: 'nope', phone: '13800138000' } }),
+  ]) {
+    const h = load();
+    h.page.onLoad();
+    h.page.onShow();
+    fail(h.requests[0]);
+    assert.equal(h.page.data.userInfo.phone, undefined);
+    h.page.onHide();
+    h.page.onShow();
+    assert.equal(h.requests.filter(r => r.url === '/api/user/info').length, 2);
+  }
+  const h = load();
+  h.page.onLoad();
+  h.page.onShow();
+  h.requests[0].success({ code: 200, data: { role: 'club', name: 'ok', phone: '13800138000', phoneMasked: '138****8000' } });
+  assert.equal(h.page.data.userInfo.phone, undefined);
+  assert.equal(h.page.data.userInfo.phoneMasked, undefined);
+  h.page.onHide();
+  h.page.onShow();
+  assert.equal(h.requests.filter(r => r.url === '/api/user/info').length, 1);
+  h.app.globalData.user_id = 9;
+  h.page.onShow();
+  assert.equal(h.requests.filter(r => r.url === '/api/user/info').length, 2);
+});
 test('L10-041:设置页资料不带原始或脱敏手机号进视图层', () => {
   const h = load(); h.page.getUserData();
-  h.requests[0].success({ code: 200, data: { role: 'club', name: 'current', phone: '13800138000' } });
+  h.requests[0].success({ code: 200, data: { role: 'club', name: 'current', phone: '13800138000', phoneMasked: '138****8000' } });
   assert.equal(h.page.data.userInfo.name, 'current');
   assert.equal(h.page.data.userInfo.phone, undefined);
   assert.equal(h.page.data.userInfo.phoneMasked, undefined);

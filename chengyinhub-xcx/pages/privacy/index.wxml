@@ -33,7 +33,10 @@
           </view>
         </view>
         <view class="privacy-row">
-          <text class="privacy-row__title">附近的人位置分享</text>
+          <view class="privacy-row__main">
+            <text class="privacy-row__title">附近的人位置分享</text>
+            <cy-inline-error wx:if="{{presenceError}}" kind="field" title="{{presenceError}}" />
+          </view>
           <cy-btn variant="secondary" size="sm" loading="{{submitting}}" disabled="{{submitting}}" aria-disabled="{{submitting}}" bindtap="disablePresenceSharing">关闭</cy-btn>
         </view>
         <view class="privacy-row">

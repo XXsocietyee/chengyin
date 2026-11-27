@@ -133,6 +133,20 @@ test('明确的业务拒绝如实提示,不进入未知态', async () => {
   } finally { t.restore(); }
 });
 
+test('没写申诉理由时错误留在输入框下，接着输入就清掉', async () => {
+  const t = mount({ responses: [(o) => o.success(active)] });
+  try {
+    await t.vm.load();
+    t.vm.startAppeal({ currentTarget: { dataset: { id: 4 } } });
+    t.vm.submitAppeal();
+    assert.equal(t.calls.length, 1);
+    assert.equal(t.vm.data.editingId, 4);
+    assert.equal(t.vm.data.notice, '请写下申诉理由');
+    t.vm.onReasonInput({ detail: { value: '误判' } });
+    assert.equal(t.vm.data.notice, '');
+  } finally { t.restore(); }
+});
+
 test('换号后的旧回包不写进当前页面;未登录不发请求', async () => {
   const t = mount({ uid: '0', responses: [] });
   try {
@@ -157,5 +171,8 @@ test('设置页有入口并挂载组件;文案不把 ACTIVE 说成最终结论',
   assert.equal(json.usingComponents['cy-post-governance'], '/' + DIR + '/index');
   const comp = fs.readFileSync(path.join(ROOT, DIR, 'index.wxml'), 'utf8');
   assert.doesNotMatch(comp, /最终处置|已定案|永久有效/);
+  const form = comp.slice(comp.indexOf('class="pg-form"'), comp.indexOf('pg-form-actions'));
+  assert.match(form, /<cy-inline-error wx:if="\{\{notice\}\}" kind="field" title="\{\{notice\}\}" \/>/);
+  assert.doesNotMatch(comp, /<text class="pg-notice"/);
   assert.doesNotMatch(fs.readFileSync(path.join(ROOT, DIR, 'index.js'), 'utf8'), /evidenceAssetIds/);
 });

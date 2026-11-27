@@ -61,6 +61,76 @@ test('帖文收藏刷新 502 保留旧卡片与操作，并在 complete 后停�
   assert.match(view, /bind:select="onPostMoreSelect"/);
 });
 
+test('L10-045: 已加载第 2 页后再返回，列表仍含第 2 页，第 1 页消失的条目不留在屏上', () => {
+  const vm = loadPage();
+  vm.onLoad({});
+  vm.onShow();
+  sandbox.requests[0].success({
+    code: '200',
+    data: { rows: [{ id: 1, name: '甲' }, { id: 2, name: '乙' }], hasMore: true },
+  });
+  sandbox.requests[0].complete();
+
+  vm.onReachBottom();
+  sandbox.requests[1].success({
+    code: '200',
+    data: { rows: [{ id: 3, name: '丙' }], hasMore: false },
+  });
+  sandbox.requests[1].complete();
+  assert.deepEqual(vm.data.postList.map(item => item.id), [1, 2, 3]);
+
+  vm.onShow();
+  assert.deepEqual(vm.data.postList.map(item => item.id), [1, 2, 3], '回包前不得把已加载列表清成空');
+  assert.equal(sandbox.requests.length, 3);
+  assert.equal(sandbox.requests[2].data.pageNum, 1);
+
+  sandbox.requests[2].success({
+    code: '200',
+    data: { rows: [{ id: 1, name: '甲改' }], hasMore: true },
+  });
+  sandbox.requests[2].complete();
+
+  assert.deepEqual(vm.data.postList.map(item => item.id), [1, 3]);
+  assert.equal(vm.data.postList[0].name, '甲改');
+  assert.equal(vm.data.postList.some(item => item.id === 2), false);
+  assert.equal(vm.data.pageConfig.pageNum, 2, '下一页仍从已加载页之后继续');
+});
+
+test('切到别的页签再切回帖文，已上拉的第 2 页还在，第 1 页消失的条目不留在屏上', () => {
+  const vm = loadPage();
+  vm.onLoad({});
+  vm.onShow();
+  sandbox.requests[0].success({
+    code: '200',
+    data: { rows: [{ id: 1, name: '甲' }, { id: 2, name: '乙' }], hasMore: true },
+  });
+  sandbox.requests[0].complete();
+  vm.onReachBottom();
+  sandbox.requests[1].success({
+    code: '200',
+    data: { rows: [{ id: 3, name: '丙' }], hasMore: false },
+  });
+  sandbox.requests[1].complete();
+
+  vm.onFavoriteTabChange({ detail: { key: 'topics' } });
+  assert.deepEqual(vm.data.postList.map(item => item.id), [1, 2, 3], '切走时不得先清掉帖文后面页');
+  sandbox.requests[2].success({ code: '200', data: { rows: [{ id: 9, name: '主题' }] } });
+  sandbox.requests[2].complete();
+
+  vm.onFavoriteTabChange({ detail: { key: 'posts' } });
+  assert.deepEqual(vm.data.postList.map(item => item.id), [1, 2, 3], '回包前不得把已加载列表换成空的第 1 页');
+  assert.equal(sandbox.requests[3].data.pageNum, 1);
+  sandbox.requests[3].success({
+    code: '200',
+    data: { rows: [{ id: 1, name: '甲改' }], hasMore: true },
+  });
+  sandbox.requests[3].complete();
+
+  assert.deepEqual(vm.data.postList.map(item => item.id), [1, 3]);
+  assert.equal(vm.data.postList[0].name, '甲改');
+  assert.equal(vm.data.pageConfig.pageNum, 2);
+});
+
 function loadPage() {
   delete require.cache[require.resolve(PAGE_PATH)];
   require('../helpers/community-page-seam.js').loadPage(PAGE_PATH);

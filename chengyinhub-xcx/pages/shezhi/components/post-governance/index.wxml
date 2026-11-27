@@ -18,6 +18,7 @@
         <view wx:if="{{editingId !== item.id}}" class="pg-action" data-id="{{item.id}}" bindtap="startAppeal" aria-role="button" aria-label="对这条处置提交申诉" hover-class="cy-pressed" hover-stay-time="80">提交申诉</view>
         <view wx:else class="pg-form">
           <textarea class="pg-input" value="{{reason}}" maxlength="{{reasonMax}}" placeholder="写下申诉理由（仅文字）" disabled="{{submitting}}" bindinput="onReasonInput" />
+          <cy-inline-error wx:if="{{notice}}" kind="field" title="{{notice}}" />
           <text class="pg-count">{{reason.length}}/{{reasonMax}}</text>
           <view class="pg-form-actions">
             <view class="pg-action pg-action--plain" bindtap="cancelAppeal" aria-role="button" aria-label="取消申诉" hover-class="cy-pressed" hover-stay-time="80">取消</view>
@@ -28,6 +29,5 @@
     </view>
     <view class="pg-more" wx:if="{{nextCursor}}" bindtap="loadMore" aria-role="button" aria-label="加载更多处置记录" hover-class="cy-pressed" hover-stay-time="80">{{loadingMore ? '加载中…' : '加载更多'}}</view>
   </view>
-  <text class="pg-notice" wx:if="{{notice}}" aria-role="alert">{{notice}}</text>
   <cy-inline-error class="pg-notice" wx:if="{{error && state === 'ready'}}" kind="data" title="更多处置记录暂未取回" sub="{{error}}" />
 </view>

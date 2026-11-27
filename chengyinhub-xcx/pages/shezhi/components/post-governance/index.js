@@ -92,7 +92,9 @@ Component({
       this.setData({ editingId: id, reason: '', notice: '' });
     },
     cancelAppeal() { if (!this.data.submitting) this.setData({ editingId: null, reason: '' }); },
-    onReasonInput(e) { this.setData({ reason: String((e.detail && e.detail.value) || '').slice(0, REASON_MAX) }); },
+    onReasonInput(e) {
+      this.setData({ reason: String((e.detail && e.detail.value) || '').slice(0, REASON_MAX), notice: '' });
+    },
 
     submitAppeal() {
       const enforcementId = this.data.editingId;

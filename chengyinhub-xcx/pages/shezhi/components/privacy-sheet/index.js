@@ -18,7 +18,7 @@ Component({
     theme: { type: String, value: 'player' },
   },
   data: {
-    submitting: false, submitError: '',
+    submitting: false, submitError: '', presenceError: '',
   },
   lifetimes: {
     attached() { this._privacyHidden = false; this.setData({ submitting: false }); },
@@ -32,6 +32,7 @@ Component({
     invalidatePrivacyAction() {
       this._privacyHidden = true;
       this._privacyActionEpoch = (this._privacyActionEpoch || 0) + 1;
+      if (this.data.submitting) this.setData({ submitting: false });
     },
     privacyActionCurrent() {
       const captured = reader(app);
@@ -63,11 +64,11 @@ Component({
 
     disablePresenceSharing() {
       if (this.data.submitting) return;
-      this.setData({ submitting: true });
+      this.setData({ submitting: true, presenceError: '' });
       const current = this.privacyActionCurrent();
       Promise.resolve().then(() => current() ? presencePrivacy.setSharing(app, null, false) : Promise.reject(new Error('账号已变化')))
         .then(() => { if (current()) toast('已关闭附近的人位置分享'); })
-        .catch(error => { if (current()) toast(error.message); })
+        .catch(() => { if (current()) this.setData({ presenceError: '附近的人位置分享未能关闭，请重试' }); })
         .finally(() => { if (current()) this.setData({ submitting: false }); });
     },
 
@@ -101,7 +102,7 @@ Component({
         const message = this._roamStopFailed ? '系统停止定位未确认，请再次点击撤回按钮重试'
           : !recorded ? '本机漫游已停，记录待确认' : '';
         this.setData({ submitError: message });
-        toast(message || '已撤回漫游定位同意');
+        if (!message) toast('已撤回漫游定位同意');
       }).finally(() => {
         if (current()) this.setData({ submitting: false });
       });
