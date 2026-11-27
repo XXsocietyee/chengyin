@@ -75,10 +75,12 @@ function checkAudioRegistration(source) {
   }
 }
 
-test('精度阈值 80m:>80 不足,=80/缺失/非法放行', () => {
+test('精度阈值:自动到达 80m,户外提示 120m(>120 不足,=120/缺失/非法放行)', () => {
   assert.equal(A.MAX_ACCURACY_M, 80);
-  assert.equal(A.isLowAccuracy(80.1), true);
-  assert.equal(A.isLowAccuracy(80), false);
+  assert.equal(A.HINT_ACCURACY_M, 120);
+  assert.equal(A.isLowAccuracy(120.1), true);
+  assert.equal(A.isLowAccuracy(120), false);
+  assert.equal(A.isLowAccuracy(80.1), false);
   for (const v of [undefined, null, '', NaN, -1, '90']) assert.equal(A.isLowAccuracy(v), false);
   assert.equal(A.accuracyOf({ accuracy: 12 }), 12);
   assert.equal(A.accuracyOf({}), undefined);

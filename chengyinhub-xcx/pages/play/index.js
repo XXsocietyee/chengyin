@@ -527,7 +527,7 @@ Page({
     chapter: { idxLabel: '第一章', name: '', description: '', cover: '', mileage: '', timeText: '', atmospherePreset: 'DEFAULT', atmosphereClass: 'atmosphere--default' },
     previewEnding: { show: false, list: [], idx: 0 },
     bootStage: '',   // 开局「开机」动画的阶段(on/line/open/fade),空 = 不显示   // W-15 试玩末尾的结局卡(只在预览出现)
-    chapterCards: [], /* 横滑章节卡(buildChapterCards) */ lookClass: themeLook.lookClass(null), lookTransition: themeLook.resolveTransition(null), /* 主题画面风格(/api/play/nodes 的 look) */
+    chapterCards: [], /* 横滑章节卡(buildChapterCards) */ outdoorMode: playLook.readOutdoorMode(), lookClass: playLook.outdoorLookClass(themeLook.lookClass(null), playLook.readOutdoorMode()), lookTransition: themeLook.resolveTransition(null), /* 主题画面风格(/api/play/nodes 的 look) */
     // mode2(自由探索)首屏:卡包 → 六宫格。动画标志位只驱动 WXSS class,不参与业务判定。
     // 四拍:② 蓄力(摇+压暗) → ③ 横撕(封口条扯走+爆炸) → ④ 发牌(逐张飞出) → 空袋下沉。
     // 奖励掉落卡:带服务端稳定 ID(badgeCode),可跳到徽章墙回读,不是一闪而过的 toast
@@ -571,7 +571,7 @@ Page({
     tileH: 0,                     // 瓦片行高:按剩余高度等分,4 家竖版大卡 / 6 家近方卡
     nodes: [], total: 0, merchantCount: 0, merchantDoneCount: 0, perkOnlyTopic: false, doneCount: 0, allDone: false, topicCompleted: false,
     remainingGameCount: 0, canContinueGames: false,
-    fmNodes: [], fmPolyline: [], fmTrail: [], fmTeamPins: [], teamRail: [], teamFollowKey: '', teamConsent: { show: false, share: false }, routeCard: { on: false, ready: false }, routeMap: { points: [], lines: [], subkey: '', layerStyle: 1, tone: '', palette: '' }, fmPlayer: null, fmCenter: { lat: 31.2304, lng: 121.4737 },
+    fmNodes: [], fmPolyline: [], fmTrail: [], fmTeamPins: [], teamRail: [], teamFollowKey: '', teamConsent: { show: false, share: false }, routeCard: { on: false, ready: false }, routeCardLayout: 'ticket', routeCardLayouts: routeCard.LAYOUTS, routeMap: { points: [], lines: [], subkey: '', layerStyle: 1, tone: '', palette: '' }, fmPlayer: null, fmCenter: { lat: 31.2304, lng: 121.4737 },
     fmSubkey: MAP_DARK.subkey, fmLayerStyle: MAP_DARK.layerStyle, /* 2026-11-14 owner:左上雷达与另两张图一样跟主题外观 */ fmTone: '', fmPalette: '', fmStyleReady: !mapStyleConfigured(), // S9 暗色底图预留,见上方 MAP_DARK 注释
 
     nextNode: null,
@@ -624,7 +624,7 @@ Page({
     // M2 夜间提示(自玩 22:00–06:00):后端回执带 nightWarning 时在完成结果时刻出一句
     nightHint: false,
     // 通关
-    showFinish: false, celebrationEvent: '', finishScore: 0, finishPuzzleScore: 0, finishPuzzleCount: 0, finishPuzzleBest: 0,
+    showFinish: false, posterSaved: false, celebrationEvent: '', finishScore: 0, finishPuzzleScore: 0, finishPuzzleCount: 0, finishPuzzleBest: 0,
     finishMedals: 0, finishMedalList: [], finishAchievements: [], finishDateLabel: '', medalScreen: { show: false, items: [], title: '', sub: '', stats: [], record: null }, finishSnap: '', finishSnapError: false, finishPhotos: [], canReplayJournal: false,
     branchPath: [],
     finishRouteRecommendation: null,
@@ -6105,7 +6105,8 @@ Page({
     const navHere = this.data.nav.active && node && this.data.nav.targetNodeId === node.nodeId;
     // 第十二轮 k2:玩法已解开的站直接收尾,不再开导航让玩家走回去(业主 2026-11-05)
     const solved = node && this._advancedReadyNodeId === node.nodeId;
-    if (this.data.mode === 2 && node && !node.done && node.lat && node.lng && !navHere && !solved) { this.startNav(node); return; }
+    const isNear = node && this.data.nearNodeId != null && String(this.data.nearNodeId) === String(node.nodeId);
+    if ((this.data.mode === 1 || this.data.mode === 2) && node && !node.done && node.lat && node.lng && !navHere && !solved && !isNear) { this.startNav(node); return; }
     this.onArriveTap();
   },
   // 进入陪伴态:记录目标 + 路程基准(totalM=当前直线距离),隐藏 peek/卡堆。
@@ -6138,9 +6139,10 @@ Page({
     const node = this._nodeById(this.data.nav.targetNodeId);
     if (!node || !node.lat || !node.lng) return;
     const remainM = this.haversine(loc.latitude, loc.longitude, node.lat, node.lng);
+    let totalM = this.data.nav.totalM || 1;
+    if (totalM <= 1 && remainM > 1) { totalM = remainM; this.setData({ 'nav.totalM': totalM }); }
     // L01-024:取整后的米数没变就不刷(原来每个 GPS 回调都 setData 两次)
     if (Math.round(remainM) !== this.data.nav.remainM) this.setData({ 'nav.remainM': Math.round(remainM) }, () => this._syncNavMeta());
-    const totalM = this.data.nav.totalM || 1;
     const ratio = 1 - remainM / totalM;
     // hit90 优先判、互斥 else if:稀疏 GPS 一跳跨过 50%/90% 两个阈值时只触发一次气泡,
     // 避免两次 companionLine 请求共用一个 _navBubbleTimer、后一次悄悄覆盖前一次。正常步行仍分两个 tick 各触发一次。
@@ -6220,6 +6222,9 @@ Page({
   sheetNav() {
     const n = this.data.sheet && this.data.sheet.node;
     if (!n || !n.lat || !n.lng) return;
+    if ((this.data.mode === 1 || this.data.mode === 2) && !n.done && !(this.data.nav && this.data.nav.active && this.data.nav.targetNodeId === n.nodeId)) {
+      this.startNav(n);
+    }
     wx.openLocation({
       latitude: parseFloat(n.lat), longitude: parseFloat(n.lng),
       name: n.name || '目的地', address: n.address || '', scale: 18
@@ -9576,12 +9581,30 @@ Page({
      单人、队伍、自由探索都一样。路线先在卡上画一遍,再出数字和主题码。不要求分享,也不奖励分享。 */
   _routeCardModel(city) {
     const ordered = this._reviewOrderedNodes();
+    const d = this.data || {};
+    const castRow = d.cast && d.cast.ending && Array.isArray(d.cast.ending.rows) && d.cast.ending.rows[0];
+    const handPara = (d.chapterParas || []).find((p) => p && p.kind === 'text' && p.hand && p.text);
+    const quote = (castRow && castRow.line) || (d.ending && d.ending.opener) || (handPara && handPara.text) || '';
+    const quoteAuthor = (castRow && castRow.name) || '';
+    const photos = (d.finishPhotos || []).map((p) => {
+      const raw = typeof p === 'string' ? p : (p && (p.url || p.photo || p.src));
+      return raw && app.getImgUrl ? app.getImgUrl(raw) : (raw || '');
+    }).filter(Boolean).slice(0, 3);
+    const leadTotal = d.lead && d.lead.exists ? Number(d.lead.total) || 0 : 0;
+    const duoStamp = leadTotal >= 2 ? { label: leadTotal === 2 ? '双人同行' : leadTotal + '人同行', sub: leadTotal + ' 人成行' } : null;
     return routeCard.cardModel({
+      layout: d.routeCardLayout || 'ticket',
       track: this._trail ? this._trail.points() : [],
       stops: ordered.map((n) => ({ lat: n.lat, lng: n.lng })),
-      fallbackKm: this.data.reviewDistance,
-      name: this.data.topicName || (this.data.info && this.data.info.name) || '',
-      time: this.data.reviewElapsed, doneCount: this.data.doneCount, city: city || '',
+      fallbackKm: d.reviewDistance,
+      name: d.topicName || (d.info && d.info.name) || '',
+      time: d.reviewElapsed, doneCount: d.doneCount, city: city || '',
+      date: d.finishDateLabel || '',
+      ending: (d.gameModule && d.gameModule.story && d.gameModule.story.ending) || null,
+      medal: (d.finishMedalList && d.finishMedalList[0]) || null,
+      quote, quoteAuthor, photos, duoStamp,
+      branchPath: d.branchPath || [],
+      score: d.finishPuzzleCount ? d.finishPuzzleScore : '',
     });
   },
   _routeCardExtras(model) {
@@ -9607,6 +9630,7 @@ Page({
     const current = () => this._isFinishArtworkCurrent(artwork);
     const model = this._routeCardModel('');
     this._routeCardFile = '';
+    this._routeCardCache = null;
     const points = routeCardMap.includePoints(model.route);
     if (points.length < 2) { this.setData({ routeCard: { on: false, ready: false } }); return; }
     const st = routeCardMap.styleFor(this._look);
@@ -9632,9 +9656,16 @@ Page({
         wx.createSelectorQuery().select('#routecv').fields({ node: true }).exec((res) => {
           if (!current()) return;
           if (!res || !res[0] || !res[0].node) { fail(); return; }
-          const cv = res[0].node, dpr = 2;
+          const cv = res[0].node, dpr = 1;
           cv.width = routeCard.W * dpr; cv.height = routeCard.H * dpr;
           const g = cv.getContext('2d'); g.scale(dpr, dpr);
+          const loadImg = (url, ms) => (!url ? Promise.resolve(null) : new Promise((resolve) => {
+            const im = cv.createImage();
+            const t = setTimeout(() => resolve(null), ms);
+            im.onload = () => { clearTimeout(t); resolve(im); };
+            im.onerror = () => { clearTimeout(t); resolve(null); };
+            im.src = url;
+          }));
           const base = cv.createImage();
           base.onerror = fail;
           base.onload = () => {
@@ -9644,13 +9675,17 @@ Page({
               if (!current()) return;
               // L01-119:路线与里程沿用开头那一份(重算会再读一遍整条轨迹,首尾模糊点也会变),只补上城市
               const full = Object.assign({}, model, { city: routeCard.cardModel({ city }).city });
-              const draw = (img) => { if (!current()) return; routeCard.drawCard(g, full, 1, img, base); this.setData({ 'routeCard.ready': true }); };
-              if (!codeUrl) { draw(null); return; }
-              const img = cv.createImage();
-              const timer = setTimeout(() => draw(null), 5000);
-              img.onload = () => { clearTimeout(timer); draw(img); };
-              img.onerror = () => { clearTimeout(timer); draw(null); };
-              img.src = codeUrl;
+              const photoUrls = Array.isArray(full.photos) ? full.photos.slice(0, 3) : [];
+              const draw = (img, photos) => {
+                if (!current()) return;
+                const layout = (this.data && this.data.routeCardLayout) || full.layout || 'ticket';
+                this._routeCardCache = { g, full, codeImg: img, base, photos: photos || [] };
+                routeCard.drawCard(g, full, 1, img, base, { layout, photos: photos || [] });
+                this.setData({ 'routeCard.ready': true });
+              };
+              const qrTask = loadImg(codeUrl, 5000);
+              const photoTasks = photoUrls.length ? Promise.all(photoUrls.map((u) => loadImg(u, 3500))) : Promise.resolve([]);
+              Promise.all([qrTask, photoTasks]).then(([img, photos]) => draw(img, (photos || []).filter(Boolean)));
             });
           };
           base.src = snapPath;
@@ -9668,6 +9703,16 @@ Page({
       if (!cv) { cb(''); return; }
       wx.canvasToTempFilePath({ canvas: cv, fileType: 'jpg', quality: 0.92, success: (r) => cb(r.tempFilePath), fail: () => cb('') });
     });
+  },
+  switchRouteCardLayout(e) {
+    const raw = e && e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.layout;
+    const layout = routeCard.normalizeLayout(raw);
+    if (layout === this.data.routeCardLayout) return;
+    this.setData({ routeCardLayout: layout });
+    const cache = this._routeCardCache;
+    if (cache && cache.g && cache.full) {
+      routeCard.drawCard(cache.g, cache.full, 1, cache.codeImg, cache.base, { layout, photos: cache.photos });
+    }
   },
   shareRouteCard() {
     const artwork = this._captureFinishArtwork('_routeShare');
@@ -9772,7 +9817,11 @@ Page({
   _saveToAlbum(path, current) {
     wx.saveImageToPhotosAlbum({
       filePath: path,
-      success: () => { if (current()) this.diegetic('已保存到相册'); },
+      success: () => {
+        if (!current()) return;
+        if (typeof this.setData === 'function') this.setData({ posterSaved: true });
+        this.diegetic('已保存到相册');
+      },
       fail: (e) => {
         if (!current()) return;
         const kind = albumSave.saveFailKind(e);
@@ -9788,6 +9837,13 @@ Page({
         });
       },
     });
+  },
+  copyXhsCopy() {
+    const model = (this._routeCardCache && this._routeCardCache.full) || this._routeCardModel('');
+    const copy = routeCard.buildXiaohongshuCopy(model);
+    if (typeof wx !== 'undefined' && typeof wx.setClipboardData === 'function') {
+      wx.setClipboardData({ data: copy, success: () => this.diegetic('已复制不剧透小红书文案') });
+    }
   },
   _syncCommunityEntry() {
     const owner = app.getUserID && app.getUserID();
@@ -10019,7 +10075,13 @@ Page({
     this.setData({ finale: Object.assign({ show: true }, flip) });
     return true;
   },
-  closeFinale() { this.setData({ 'finale.show': false }); },
+  closeFinale() {
+    this.setData({ 'finale.show': false }, () => {
+      if (this.data.allDone && Number(this.data.mode) !== 2 && !this.data.isPreview && !this.data.isMock) {
+        this._openMedalScreen();
+      }
+    });
+  },
   saveFinale() { this.setData({ 'finale.show': false }, () => this.saveFinishCard()); },
   // qx-b3 P7:战报读同一局(runId=本局路线会话),战报页只读,不补完局不发奖。
   // r2-finish 章节完成卡的「用时」:本局跑表到此刻;读不到就不出这一行(不写 0)。

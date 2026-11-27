@@ -5,6 +5,8 @@ const mapStyle = require('../../../utils/map-style.js');
 const storyResume = require('./story-resume.js');
 const readingMotion = require('./reading-motion.js');
 const lookColors = require('./look-colors.js');
+const cyToast = require('../../../utils/toast.js');
+const OUTDOOR_STORAGE_KEY = 'cy_play_outdoor_light';
 const TYPED_MAX = 400;
 /** 同一批显形逐条错开(秒,写进 --d):阅读面 read-stagger 档。 */
 const READ_STAGGER_S = readingMotion.READ_STAGGER_MS / 1000;
@@ -12,6 +14,22 @@ const READ_STAGGER_S = readingMotion.READ_STAGGER_MS / 1000;
 const READ_TAP_SCROLL_MS = 150;
 /** 段落显形还在进行的窗口:最近一次显形开始后这么久内的点击只落定文字(见 skipReveal / onStoryTap)。 */
 const REVEAL_BUSY_MS = 900;
+
+function readOutdoorMode() {
+  try { return typeof wx !== 'undefined' && typeof wx.getStorageSync === 'function' && wx.getStorageSync(OUTDOOR_STORAGE_KEY) === '1'; } catch (e) { return false; }
+}
+function writeOutdoorMode(on) {
+  const next = !!on;
+  try { if (typeof wx !== 'undefined' && typeof wx.setStorageSync === 'function') wx.setStorageSync(OUTDOOR_STORAGE_KEY, next ? '1' : '0'); } catch (e) {}
+  return next;
+}
+/** 户外浅底高对比:把任意 look-palette--* 切到 look-palette--white,关掉时还原主题原色。 */
+function outdoorLookClass(baseClass, outdoor) {
+  const raw = String(baseClass || '').trim();
+  if (!outdoor) return raw;
+  const cleaned = raw.replace(/\blook-palette--[a-z0-9_-]+\b/gi, '').replace(/\s+/g, ' ').trim();
+  return cleaned ? cleaned + ' look-palette--white' : 'look-palette--white';
+}
 
 /** CG-ALL-23:一段正文的「打字身份」= 章 id + 段序 + 文字摘要。文字改了就是另一段,会重新逐字打一遍。 */
 function typedKey(chapterId, i, text) {
@@ -34,9 +52,18 @@ function methods() {
       const look = Object.assign(themeLook.normalizeLook(raw), raw ? {} : { legacy: true });
       this._look = look;
       this._lookKey = JSON.stringify(look);
+      const outdoor = !!(this.data && this.data.outdoorMode);
       // lookOn:选过风格的主题,故事流才铺章节 / 主题配色的底(老主题保持纯黑故事背景)
-      this.setData({ lookClass: themeLook.lookClass(look), lookTransition: themeLook.resolveTransition(look), lookOn: !look.legacy });
+      this.setData({ lookClass: outdoorLookClass(themeLook.lookClass(look), outdoor), lookTransition: themeLook.resolveTransition(look), lookOn: !look.legacy || outdoor });
       this._applyMapLook(look);
+    },
+    /** 户外浅底高对比一键切换:切 look-palette--white 并关闭扫描线 / 模糊,状态栏切黑字。 */
+    toggleOutdoorMode() {
+      const outdoorMode = writeOutdoorMode(!(this.data && this.data.outdoorMode));
+      const base = themeLook.lookClass(this._look || null);
+      this.setData({ outdoorMode, lookClass: outdoorLookClass(base, outdoorMode), lookOn: !!(this._look && !this._look.legacy) || outdoorMode });
+      if (typeof this._syncStatusBar === 'function') this._syncStatusBar();
+      cyToast(outdoorMode ? '已开启户外浅底高对比' : '已恢复主题原色');
     },
     /** 第九轮 m4 第 2 项:底图按外观选(纸本 paper、夜城 2077、其余 black)。layer-style 不能运行时改:
      *  第一次外观落定才放地图出来;同一页里外观真变了,先撤地图、下一拍按新样式重建,不在旧图上改属性。 */
@@ -165,7 +192,7 @@ function methods() {
         stats: !!(d.startState || {}).show, boot: !!d.bootStage, album: !!(d.album || {}).show,
         gate: !!d.chapterFull && !!gate.show && !this._storyLeaving, held: !!gate.held,
         story: !!this._storyOn, chapterFull: !!d.chapterFull,
-      });
+      }) || !!d.outdoorMode;
       if (light === !!this._barLight || typeof wx === 'undefined' || typeof wx.setNavigationBarColor !== 'function') return;
       this._barLight = light;
       wx.setNavigationBarColor({ frontColor: light ? '#000000' : '#ffffff', backgroundColor: light ? '#ffffff' : '#000000' }); /* ds-ok 微信 API 只收这两个字面色 */
@@ -190,4 +217,4 @@ function readLiteDevice() {
   } catch (e) { return false; }
 }
 
-module.exports = { methods, typedKey, READ_STAGGER_S, readLiteDevice, CHAR_FX_HEAD, CHAR_FX_MAX_LEN };
+module.exports = { methods, typedKey, READ_STAGGER_S, readLiteDevice, CHAR_FX_HEAD, CHAR_FX_MAX_LEN, OUTDOOR_STORAGE_KEY, readOutdoorMode, writeOutdoorMode, outdoorLookClass };

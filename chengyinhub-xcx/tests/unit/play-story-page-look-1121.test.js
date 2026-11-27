@@ -46,7 +46,7 @@ test('正文书页式:左对齐、段距 token、左页边给说话人名字', (
   assert.ok(!/360rpx/.test(rule(css, '.chfull .st-line')), '不再一屏一段')
   const cast = strip(read('pages/play/cast-play.wxss'))
   assert.match(rule(cast, '.chfull__who'), /left:calc\(var\(--cy-space-3\) - var\(--cy-space-8\)\);/)
-  assert.match(rule(cast, '.chfull__who'), /font-size:20rpx; font-weight:400;[^}]*opacity:\.46;/)
+  assert.match(rule(cast, '.chfull__who'), /font-size:24rpx; font-weight:500;[^}]*opacity:\.82;/)
   for (const sel of ['.chfull__choice-q', '.chfull__remember', '.chfull__vrow']) {
     assert.ok(!/text-align:center/.test(rule(cast, sel)), sel + ' 跟正文同一条左边线')
   }

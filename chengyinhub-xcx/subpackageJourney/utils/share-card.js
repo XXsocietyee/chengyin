@@ -87,4 +87,13 @@ function draw(ctx, w, h, card, t, logo) {
   ctx.fillStyle = '#FFFFFF'; ctx.font = '800 ' + Math.round(w * 0.05) + 'px sans-serif'; ctx.fillText('城瘾', cx, h - w * 0.06); /* ds-ok 分享图画面色,导出图片不随主题 */
 }
 
-module.exports = { cardLines, draw, SIZES, LOGO: '/images/cy_logo_mark.png' };
+function buildXhsCopy(report, topicName) {
+  const c = cardLines(report, topicName);
+  const title = c.title || '城市漫游剧本';
+  const line1 = '刚走完「' + title + '」，把整座城市走成了一场电影！';
+  const line2 = c.meta ? '本场战绩：' + c.meta : '边走边解锁线索，沉浸感拉满';
+  const line3 = '全程不剧透，线索和反转留给你们自己去现场拆！';
+  return [line1, line2, line3, '', '#城瘾 #城市定向 #城市漫步 #周末去哪儿'].join('\n');
+}
+
+module.exports = { cardLines, draw, buildXhsCopy, SIZES, LOGO: '/images/cy_logo_mark.png' };
