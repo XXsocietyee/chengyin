@@ -37,9 +37,18 @@
         </view>
 
         <text class="pdm-q">{{item.question}}</text>
-        <view class="pdm-bets">{{item.betText}}</view>
+        <view class="pdm-bets" wx:if="{{item.betText}}">{{item.betText}}</view>
 
-        <block wx:if="{{openId === item.rid}}">
+        <block wx:if="{{item.settleUnconfirmed}}">
+          <view class="pdm-pick-hint">结算结果未确认，请勿再次公布</view>
+          <view class="pdm-foot" bindtap="onRecheckSettle"
+                aria-role="button" aria-label="核对结算结果" hover-class="cy-pressed" hover-stay-time="80">
+            <text>不能当作新的结算再提交</text>
+            <view class="pdm-link"><text>核对结果</text><cy-icon name="arrow-right" size="22" /></view>
+          </view>
+        </block>
+
+        <block wx:elif="{{openId === item.rid}}">
           <view class="pdm-pick-hint">选出正确答案</view>
           <view class="pdm-opt {{pickedKey === opt.key ? 'is-on' : ''}}"
                 wx:for="{{item.options}}" wx:for-item="opt" wx:key="key"
@@ -67,9 +76,10 @@
 
   <!-- 结算发券且只能结一次,所以要二次确认,并且把后果写清楚;按钮横排(2026-09-18 用户定) -->
   <cy-modal class="theme-merchant" show="{{confirm.show}}"
-            title="公布答案「{{confirm.label}}」？"
+            title="{{confirm.unconfirmed ? '结算结果未确认' : '公布答案「' + confirm.label + '」？'}}"
             content="{{confirm.content}}"
-            confirm-text="公布并结算" cancel-text="再想想"
+            confirm-text="{{confirm.unconfirmed ? '核对结果' : '公布并结算'}}"
+            cancel-text="{{confirm.unconfirmed ? '关闭' : '再想想'}}"
             loading="{{submitting}}"
-            bind:confirm="onConfirmSettle" bind:cancel="onCancelConfirm" />
+            bind:confirm="onConfirmModal" bind:cancel="onCancelConfirm" />
 </view>

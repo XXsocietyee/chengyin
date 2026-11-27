@@ -21,6 +21,10 @@ function mount() {
   return { page, requests, restore() { Object.assign(global, prev); } };
 }
 const pageOf = (bucket, items, hasMore) => ({ code: 200, data: { bucket, pageNum: 1, pageSize: 20, total: items.length + (hasMore ? 1 : 0), hasMore: !!hasMore, items } });
+const pageAt = (bucket, pageNum, items, hasMore) => {
+  const through = (pageNum - 1) * 20 + items.length;
+  return { code: 200, data: { bucket, pageNum, pageSize: 20, total: through + (hasMore ? 1 : 0), hasMore: !!hasMore, items } };
+};
 const row = (id, bucket) => ({ refundId: id, bucket, processing: 'WAITING_PLATFORM_REVIEW', merchantOpinion: 'PENDING', canRespond: true, refunded: false, createTime: '2026-11-20 10:00:00' });
 
 test('late response of the previous bucket is dropped', () => {
@@ -48,6 +52,38 @@ test('returning from detail without a response does not reload; after a response
     h.page.onShow();
     assert.equal(h.requests.length, 2);
     assert.equal(h.page.data.pageState, 'ready', '静默刷新不打回骨架');
+  } finally { h.restore(); }
+});
+
+test('静默刷新重读已加载的后面页，中途失败不把列表收成第一页', () => {
+  const h = mount();
+  try {
+    const bucket = h.page.data.bucket;
+    h.page.loadList(true);
+    h.requests[0].success(pageAt(bucket, 1, [row(5, bucket)], true));
+    h.page.loadMore();
+    h.requests[1].success(pageAt(bucket, 2, [row(6, bucket)], false));
+    assert.equal(h.page.data.itemCount, 2);
+    assert.equal(h.page.data.pageNum, 2);
+
+    h.page._refreshAfterDetail = true;
+    h.page.onShow();
+    assert.match(h.requests[2].url, /pageNum=1/);
+    h.requests[2].success(pageAt(bucket, 1, [row(5, bucket)], true));
+    assert.match(h.requests[3].url, /pageNum=2/);
+    h.requests[3].fail();
+    assert.equal(h.page.data.itemCount, 2, '第二页失败时已加载的行还在');
+    assert.equal(h.page.data.pageState, 'ready');
+    assert.equal(h.page._items[1].refundId, 6);
+
+    h.page._refreshAfterDetail = true;
+    h.page.onShow();
+    h.requests[4].success(pageAt(bucket, 1, [row(7, bucket)], true));
+    h.requests[5].success(pageAt(bucket, 2, [row(8, bucket)], false));
+    assert.equal(h.page.data.itemCount, 2);
+    assert.equal(h.page.data.pageNum, 2);
+    assert.equal(h.page._items[0].refundId, 7);
+    assert.equal(h.page._items[1].refundId, 8);
   } finally { h.restore(); }
 });
 

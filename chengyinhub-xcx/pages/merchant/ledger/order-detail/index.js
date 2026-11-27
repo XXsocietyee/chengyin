@@ -5,6 +5,7 @@ const detailLoad = require('../../utils/finance-detail-load.js');
 const { isTransportFailure, isMissingRecordResponse, hasValue } = detailLoad;
 const stopPullDownRefresh = () => detailLoad.stopPullDownRefresh(wx);
 const settleLoad = (page, epoch) => detailLoad.settleLoad(page, epoch, wx);
+const { staffErrorText } = require('../../utils/staff-error.js');
 
 const RECORD_TYPES = ['redemption', 'activity_ticket', 'session_fee'];
 
@@ -123,7 +124,7 @@ Page({
           errorKind: network ? 'network' : 'data',
           errorText: network
             ? '网络异常，请检查连接后重试'
-            : ((error && (error.msg || error.message)) || '核销详情加载失败'),
+            : staffErrorText(error, '核销详情加载失败'),
         });
       },
     });

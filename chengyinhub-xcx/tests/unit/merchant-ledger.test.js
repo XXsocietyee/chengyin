@@ -423,3 +423,128 @@ test('财务核销列表合并合法REFUND与MANUAL_CASE，未知类型不生成
   ctx.goRedemptionDetail({ currentTarget: { dataset: { item: row } } });
   assert.deepEqual(navs, ['/pages/merchant/aftercare/detail/index?recordType=MANUAL_CASE&manualCaseId=5']);
 });
+
+function mountRefundRows() {
+  let page;
+  let memberId = '7';
+  const painted = [];
+  const urls = [];
+  require('node:vm').runInNewContext(read('pages/merchant/ledger/index.js'), {
+    Page(value) { page = value; },
+    getApp: () => ({ globalData: {}, getUserID: () => memberId }),
+    require: id => id.includes('view-model') ? { shapeAftercareListPage: data => data }
+      : (id.includes('merchant-scope') ? require('../../pages/merchant/utils/merchant-scope.js') : {}),
+    wx: {},
+  });
+  page._scopeMemberId = '7';
+  page._redemptionEpoch = 1;
+  page.refundRow = item => item;
+  page._applyRedemptionView = () => {
+    painted.push((page._refundRows || []).map(row => (
+      row.recordType === 'MANUAL_CASE' ? 'M' + row.manualCaseId : row.refundId)));
+  };
+  page.useReplies = (reply) => {
+    page.request = (url, body, done) => {
+      urls.push(url);
+      const bucket = url.match(/bucket=([^&]+)/)[1];
+      const pageNum = Number(url.match(/pageNum=(\d+)/)[1]);
+      done(reply(bucket, pageNum));
+    };
+  };
+  return {
+    page, painted, urls,
+    setMember(id) { memberId = String(id); page._scopeMemberId = String(id); },
+  };
+}
+
+function refundBody(pageNum, items, extra) {
+  return { code: 200, data: Object.assign({ pageNum, pageSize: 20, items }, extra) };
+}
+
+function refundItems(start, count) {
+  return Array.from({ length: count }, (_, index) => ({ recordType: 'REFUND', refundId: start + index }));
+}
+
+// L07-034:第一页之后的售后退款也要并进同一份核销列表;核销翻页不在这里。
+test('售后退款按原售后列表翻页,短页或没有更多就停,并入同一份列表', () => {
+  const more = mountRefundRows();
+  more.page.useReplies((bucket, pageNum) => {
+    if (bucket !== 'PENDING') return refundBody(pageNum, [], { hasMore: false, total: 0 });
+    if (pageNum === 1) return refundBody(pageNum, refundItems(1, 20), { hasMore: true, total: 22 });
+    return refundBody(pageNum, refundItems(21, 1).concat([{ recordType: 'MANUAL_CASE', manualCaseId: 8 }]), { hasMore: false, total: 22 });
+  });
+  more.page._loadRefundRows('7', 1, true);
+  assert.deepEqual([...more.painted[0]], refundItems(1, 21).map(item => item.refundId).concat('M8'));
+  assert.deepEqual(more.urls.filter(url => url.includes('bucket=PENDING')), [
+    '/api/merchant/aftercare/list?bucket=PENDING&pageNum=1&pageSize=20',
+    '/api/merchant/aftercare/list?bucket=PENDING&pageNum=2&pageSize=20',
+  ]);
+  assert.equal(more.urls.some(url => url.includes('pageNum=3')), false);
+  for (const bucket of ['PROCESSING', 'COMPLETED']) {
+    assert.equal(more.urls.filter(url => url.includes('bucket=' + bucket)).length, 1);
+  }
+
+  const exact = mountRefundRows();
+  exact.page.useReplies((bucket, pageNum) => refundBody(pageNum,
+    bucket === 'COMPLETED' ? refundItems(1, 20) : [],
+    { hasMore: false, total: bucket === 'COMPLETED' ? 20 : 0 }));
+  exact.page._loadRefundRows('7', 1, true);
+  assert.equal(exact.urls.filter(url => url.includes('bucket=COMPLETED')).length, 1);
+  assert.deepEqual([...exact.painted[0]], refundItems(1, 20).map(item => item.refundId));
+});
+
+test('重复的售后页或页数上限会停,坏 total 不能一直翻', () => {
+  const echoed = mountRefundRows();
+  const first = refundItems(1, 20);
+  echoed.page.useReplies((bucket, pageNum) => {
+    if (bucket !== 'PENDING') return refundBody(pageNum, [], { hasMore: false, total: 0 });
+    return refundBody(1, first, { hasMore: true, total: 999999 });
+  });
+  echoed.page._loadRefundRows('7', 1, true);
+  const echoedPending = echoed.urls.filter(url => url.includes('bucket=PENDING'));
+  assert.deepEqual(echoedPending, [
+    '/api/merchant/aftercare/list?bucket=PENDING&pageNum=1&pageSize=20',
+    '/api/merchant/aftercare/list?bucket=PENDING&pageNum=2&pageSize=20',
+  ]);
+  assert.deepEqual([...echoed.painted[0]], first.map(item => item.refundId));
+
+  const sameRows = mountRefundRows();
+  sameRows.page.useReplies((bucket, pageNum) => {
+    if (bucket !== 'PENDING') return refundBody(pageNum, [], { hasMore: false, total: 0 });
+    return refundBody(pageNum, refundItems(1, 20), { hasMore: true, total: 999999 });
+  });
+  sameRows.page._loadRefundRows('7', 1, true);
+  assert.equal(sameRows.urls.filter(url => url.includes('bucket=PENDING')).length, 2);
+  assert.equal(sameRows.painted[0].length, 20);
+
+  const cap = Number(read('pages/merchant/ledger/index.js').match(/const REFUND_PAGE_CAP = (\d+)/)[1]);
+  assert.ok(cap >= 2 && cap <= 12);
+  const capped = mountRefundRows();
+  capped.page.useReplies((bucket, pageNum) => {
+    if (bucket !== 'PROCESSING') return refundBody(pageNum, [], { hasMore: false, total: 0 });
+    return refundBody(pageNum, refundItems((pageNum - 1) * 20 + 1, 20), { hasMore: true, total: 999999 });
+  });
+  capped.page._loadRefundRows('7', 1, true);
+  const processing = capped.urls.filter(url => url.includes('bucket=PROCESSING'));
+  assert.equal(processing.length, cap);
+  assert.equal(processing.some(url => url.includes('pageNum=' + (cap + 1))), false);
+  assert.equal(new Set(processing).size, processing.length);
+  assert.equal(capped.painted[0].length, cap * 20);
+});
+
+test('晚到的售后页不写进别的账号或更旧的刷新', () => {
+  function late(mutate) {
+    const host = mountRefundRows();
+    host.page.useReplies((bucket, pageNum) => {
+      if (bucket !== 'PENDING') return refundBody(pageNum, [], { hasMore: false, total: 0 });
+      if (pageNum === 1) return refundBody(pageNum, refundItems(1, 20), { hasMore: true, total: 21 });
+      mutate(host);
+      return refundBody(pageNum, refundItems(21, 1), { hasMore: false, total: 21 });
+    });
+    host.page._loadRefundRows('7', 1, true);
+    assert.equal(host.painted.length, 0);
+    assert.ok(!(host.page._refundRows || []).some(row => row.refundId === 21));
+  }
+  late(host => { host.page._redemptionEpoch = 2; });
+  late(host => { host.setMember('8'); });
+});

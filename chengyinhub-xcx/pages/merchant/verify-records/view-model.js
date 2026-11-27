@@ -111,6 +111,20 @@ function todayView(data) {
   return { total, topics };
 }
 
+function knownTotal(value) {
+  if (value == null || value === '') return null;
+  const total = Number(value);
+  return Number.isFinite(total) && total >= 0 ? total : null;
+}
+
+/** 总数未知时满页继续翻，不把缺字段当成 0 提前停。明确读满或短页则停。 */
+function pageContinues(pageLength, collectedLength, total, pageSize) {
+  if (pageLength !== pageSize) return false;
+  const known = knownTotal(total);
+  if (known == null) return true;
+  return collectedLength < known;
+}
+
 module.exports = {
   STATUS_TABS,
   shapeRecord,
@@ -118,4 +132,5 @@ module.exports = {
   countByStatus,
   groupRecords,
   todayView,
+  pageContinues,
 };

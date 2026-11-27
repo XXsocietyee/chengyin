@@ -84,6 +84,7 @@ Page({
     hostProjectTotal: 0,
     hostLoading: true,
     hostError: false,
+    projectTotalKnown: false,
     gameEntryLoading: true,
     displayName: '商家',
     businessStatus: 1, // 1营业中 0已打烊
@@ -403,9 +404,33 @@ Page({
     });
   },
 
-  // 项目卡的三块数据(承接列表 / 主办列表 / 待办 / 动态)是四个独立请求,
-  // 谁先回来都得能重算一次,所以统一收在这里,由各 load* 成功后调用。
+  // 项目卡的来源是多路独立请求。各 load* 写完实例字段后调用这里。
+  // L07-011:同一轮更新里多路一起回来只重建一次,卡片用这一轮里最新的项目;
+  // 下一轮真有变化再重建。直接改写过卡片的路径要作废还没落地的这一次。
   refreshProjectCards() {
+    this._projectCardsDirty = true;
+    if (this._projectCardsRefreshQueued) return;
+    this._projectCardsRefreshQueued = true;
+    const generation = this._projectCardsRefreshGen || 0;
+    const flush = () => {
+      if (generation !== (this._projectCardsRefreshGen || 0)) return;
+      this._projectCardsRefreshQueued = false;
+      if (this._unloaded || !this._projectCardsDirty) return;
+      this._projectCardsDirty = false;
+      this._rebuildProjectCards();
+    };
+    if (typeof wx !== 'undefined' && typeof wx.nextTick === 'function') wx.nextTick(flush);
+    else flush();
+  },
+
+  _forgetProjectCardsSnapshot() {
+    this._projectCardsSignature = '';
+    this._projectCardsRefreshGen = (this._projectCardsRefreshGen || 0) + 1;
+    this._projectCardsRefreshQueued = false;
+    this._projectCardsDirty = false;
+  },
+
+  _rebuildProjectCards() {
     // 2026-09-16 用户裁决:「项目已结束就不显示了」。判据直接用卡片自己的状态签
     // (与 buildProjectCards 内同一条 statusLabelOf),不另按日期算一套。
     // 结束的项目仍在「全部」完整列表页里可查,工作台只是不再占位。
@@ -437,7 +462,7 @@ Page({
   refreshGameStationSummaries(projectCards) {
     const decorated = attachMerchantGameEntries(projectCards, this._merchantGameEntries);
     const next = attachVisitTexts(decorated, this._upcomingRuns);
-    // L07-011:七路加载各自回来都会重建卡片;内容没变就不再整表 setData,
+    // L07-011:这一轮重建出的卡片和上次下发的一样,就不再整表 setData;
     // 入场动画只在卡片从无到有时播一次(原先列表为空期间每次都重播)
     const signature = JSON.stringify(next);
     if (signature === this._projectCardsSignature) return;
@@ -462,7 +487,13 @@ Page({
   },
 
   loadMerchantGameEntries() {
-    if (!this._gameSessionClient) return;
+    const memberId = this._accessMemberId || this._fullLoadMember || '';
+    if (!this._gameSessionClient) {
+      // 没有入口客户端就没有可发的请求;别让「加载中」把已读完的工作台永远挡在整链重读外面
+      this._entriesLoadedMember = memberId;
+      if (this.data.gameEntryLoading) this.setData({ gameEntryLoading: false });
+      return;
+    }
     const generation = this._gameSummaryGeneration || 0;
     if (this._merchantGameEntryTask && typeof this._merchantGameEntryTask.abort === 'function') {
       this._merchantGameEntryTask.abort();
@@ -475,6 +506,7 @@ Page({
       this._merchantGameEntryTask = null;
       if (result && result.status === 'ready') {
         this._merchantGameEntries = result.data;
+        this._entriesLoadedMember = memberId;
         this.setData({ gameEntryLoading: false });
       } else {
         this._merchantGameEntries = [];
@@ -495,8 +527,8 @@ Page({
     }
     this._merchantGameEntryTask = null;
     if (renderCards && this.data.projectCards.length) {
-      // L07-011:卡片被直接改写,下次重建必须重新下发
-      this._projectCardsSignature = '';
+      // L07-011:卡片被直接改写,作废同一轮里还没落地的重建,下次必须重新下发
+      this._forgetProjectCardsSnapshot();
       this.setData({
         projectCards: attachMerchantGameEntries(this.data.projectCards, []),
         gameEntryLoading: true,
@@ -667,18 +699,35 @@ Page({
       this.resetJoinState();
       this._projectList = [];
       this._hostProjectList = [];
-      // L07-011:卡片被直接改写,下次重建必须重新下发
-      this._projectCardsSignature = '';
+      // L07-011:卡片被直接改写,作废同一轮里还没落地的重建,下次必须重新下发
+      this._forgetProjectCardsSnapshot();
       this.setData({
         joinTotal: 0, joinLoading: false, joinError: false,
         hostProjectTotal: 0, hostLoading: false, hostError: false,
+        projectTotalKnown: false,
         projectCards: [],
       });
     }
   },
 
+  // L07-013:离开时作废已经发出的登录重试。回来后的 onShow 自己再进,旧结果不再写页。
+  _loginStillCurrent(epoch) {
+    return epoch === (this._loginEpoch || 0) && !this._hidden && !this._unloaded;
+  },
+
+  _noteLoginLeave() {
+    this._loginEpoch = (this._loginEpoch || 0) + 1;
+    this._initialSessionWait = false;
+  },
+
   // 重新加载:清掉页内错误再走一遍 onShow 的身份+数据链路。
-  onConsoleLogin() { retryLogin(this, app, this.enterConsole); },
+  onConsoleLogin() {
+    const epoch = this._loginEpoch || 0;
+    retryLogin(this, app, function () {
+      if (!this._loginStillCurrent(epoch)) return;
+      this.enterConsole();
+    });
+  },
 
   reloadConsole() {
     this.setData({ consoleError: '' });
@@ -701,6 +750,8 @@ Page({
   clearMerchantScopedData() {
     // L07-010:换主体后第一次回到页面必须走整条读取链
     this._lastFullLoadAt = 0;
+    this._merchantInfoMember = '';
+    this._entriesLoadedMember = '';
     if (this._verificationWorkflow) {
       this._verificationWorkflow.destroy();
       this._verificationWorkflow = null;
@@ -717,8 +768,8 @@ Page({
     if (this._revHoldTimer) { clearTimeout(this._revHoldTimer); this._revHoldTimer = null; }
     if (this._revenueCountStop) this._revenueCountStop();
     this._revenueCountStop = null;
-    // L07-011:卡片被直接改写,下次重建必须重新下发
-    this._projectCardsSignature = '';
+    // L07-011:卡片被直接改写,作废同一轮里还没落地的重建,下次必须重新下发
+    this._forgetProjectCardsSnapshot();
     this.setData({
       displayName: '商家',
       businessStatus: 1,
@@ -732,6 +783,7 @@ Page({
       hostProjectTotal: 0,
       hostLoading: true,
       hostError: false,
+      projectTotalKnown: false,
       todo: emptyTodo(),
       todoLoading: true,
       projectCards: [],
@@ -755,9 +807,14 @@ Page({
   },
 
   refreshJoinRequestState() {
+    const joinLoading = !!(this._legacyJoinLoading || this._chapterJoinLoading);
+    const joinError = !!(this._legacyJoinError || this._chapterJoinError);
+    const hostKnown = this.data.hostProjectTotal != null && !this.data.hostLoading && !this.data.hostError;
     this.setData({
-      joinLoading: !!(this._legacyJoinLoading || this._chapterJoinLoading),
-      joinError: !!(this._legacyJoinError || this._chapterJoinError),
+      joinLoading: joinLoading,
+      joinError: joinError,
+      projectTotalKnown: !!(this.data.merchantAccess && this.data.merchantAccess.canManageProjects
+        && hostKnown && !joinLoading && !joinError),
     });
   },
 
@@ -786,6 +843,13 @@ Page({
     merchantTheme.merchantPageShow(); this._navigating = false; this._hidden = false;
     // L07-002:系统相机让本页 onHide/onShow 一次。扫码往返不算离开:保留核销 epoch,不重跑整条读取链
     if (this._hiddenForScan) { this._hiddenForScan = false; return; }
+    // 选章/选点/系统选择器把页面藏起来再回来:同一主体不重读整条数据集,换了登录人仍走身份链
+    if (this._pickerReturn) {
+      this._pickerReturn = false;
+      this._systemPickerOpen = false;
+      const memberId = String(app.getUserID() || '');
+      if (memberId && memberId === this._pickerMember) return;
+    }
     if (this.data && this.data.msgOpen) this.setData({ msgOpen: false });
     // 回到页面不剥掉已确认的游戏入口卡(否则项目列先缩后涨);换主体时 clearMerchantScopedData 才清。
     this.resetGameStationSummaries();
@@ -795,13 +859,18 @@ Page({
     if (!(options && options.preserveVerification === true)) {
       this._verificationEpoch = (this._verificationEpoch || 0) + 1;
     }
-    // L07-010:同一账号 60s 内回到工作台只重读易变的三块(待办/看板/消息);
-    // 下拉刷新(preserveVerification)、换账号换主体、超过 60s 仍走整条读取链
+    // L07-010:同一会员、身份/资料/用户/入口都已在手上时,回来不再重打这四样。
+    // 换会员或下拉刷新才整链重读。接受合作/发布活动只补项目列表(业主 2026-11-24)。
     const memberId = String(app.getUserID() || '');
-    // 接受合作邀约 / 发布活动后回来:项目列表立刻整链重读(业主 2026-11-24)
+    // 接受合作邀约 / 发布活动后回来:项目列表立刻重读
     // 标记写在 app.globalData.merchantWorkbenchStale(写方:coop/invite-detail、topic/merchantinfo、publish/activity)
     const stale = !!(app.globalData && app.globalData.merchantWorkbenchStale === true);
     if (stale) app.globalData.merchantWorkbenchStale = false;
+    const pullRefresh = !!(options && options.preserveVerification === true);
+    if (!pullRefresh && this._staticHomeReady(memberId)) {
+      this._resumeLoadedHome(stale);
+      return;
+    }
     this._lightReload = !stale && !(options && options.preserveVerification === true)
       && this._fullLoadMember === memberId && Date.now() - (this._lastFullLoadAt || 0) < 60000
       // 上一轮项目列表还在途或失败:下面 enterConsole 推进 epoch 会丢掉在途回包,只能整链重读
@@ -812,7 +881,36 @@ Page({
     this.enterConsole();
   },
 
+  // 同一会员且这四样已经回来:access/me、店铺资料、用户资料、本站入口。项目还在转或失败不算。
+  _staticHomeReady(memberId) {
+    if (!memberId || this._fullLoadMember !== memberId || this._accessMemberId !== memberId) return false;
+    const access = this.data && this.data.merchantAccess;
+    if (!access || !access.active || this.data.consoleError || this.data.consoleLogin || this.data.consoleDenied) return false;
+    if (access.canWriteProfile && this._merchantInfoMember !== memberId) return false;
+    if (this._userInfoMember !== memberId) return false;
+    if (this._gameSessionClient) {
+      if (this.data.gameEntryLoading || this._entriesLoadedMember !== memberId) return false;
+    } else if (this.data.gameEntryLoading) return false;
+    if (access.canManageProjects && (this.data.joinLoading || this.data.hostLoading || this.data.joinError || this.data.hostError)) return false;
+    return true;
+  },
+
+  // 已加载的工作台回来:待办/看板/消息照旧刷新;合作或发布后的标记只补项目列表。
+  _resumeLoadedHome(stale) {
+    const dataEpoch = (this._dataEpoch || 0) + 1;
+    this._dataEpoch = dataEpoch;
+    this._dataMemberId = String(app.getUserID() || '');
+    const access = this.data.merchantAccess;
+    if (stale && access && access.canManageProjects) {
+      this.loadJoinList(dataEpoch);
+      this.loadChapterProjectList(dataEpoch);
+      this.loadHostProjects(dataEpoch);
+    }
+    this.loadVolatileConsole(access, dataEpoch);
+  },
+
   enterConsole(authRetryUsed) {
+    if (this._hidden || this._unloaded) return;
     const version = (this._consoleVersion || 0) + 1;
     this._consoleVersion = version;
     const identityMemberId = String(app.getUserID() || '');
@@ -826,7 +924,11 @@ Page({
       // owner 2026-10-24(app.js:142-144):游客不在打开页面时静默建号(j6 F1)。落「登录后查看」,
       // 点「登录」才走 retryLogin;冷启动还在恢复缓存会话时,恢复完自动重进。
       this.setData({ consoleError: '', consoleStatus: null, merchantAccess: inactiveAccess(), consoleLogin: true, consoleDenied: false });
-      waitForInitialSession(this, app, this.enterConsole);
+      const epoch = this._loginEpoch || 0;
+      waitForInitialSession(this, app, function () {
+        if (!this._loginStillCurrent(epoch)) return;
+        this.enterConsole();
+      });
       return;
     }
     if (this.data.consoleLogin) this.setData({ consoleLogin: false });
@@ -847,6 +949,7 @@ Page({
   // 会话失效:静默重登一次(同一轮 onShow 内只重试一次,防死循环),成功即重走身份链路;
   // 已经重试过或重登失败,就落页内错误态,而不是整屏「去登录」。
   recoverConsoleSession(version, authRetryUsed) {
+    if (this._hidden || this._unloaded || version !== this._consoleVersion) return;
     // 会话没了:旧商家的金额/项目/入口不能继续留在屏上(与旧整屏闸同一条数据纪律)。
     if (this._merchantScopeKey) this.clearMerchantScopedData();
     this._merchantScopeKey = '';
@@ -859,9 +962,10 @@ Page({
       this.setData({ consoleError: '登录已失效，请重新登录' });
       return;
     }
+    const epoch = this._loginEpoch || 0;
     clearInvalidSession();
     ensureSession(app, true).then((ok) => {
-      if (version !== this._consoleVersion) return;
+      if (!this._loginStillCurrent(epoch) || version !== this._consoleVersion) return;
       if (!ok) {
         this.setData({ consoleError: '登录失败，请重试' });
         return;
@@ -992,6 +1096,7 @@ Page({
       success(res) {
         if (!that.isCurrentDataEpoch(dataEpoch)) return;
         if (res.code === '200' || res.code === 200) {
+          that._merchantInfoMember = String(app.getUserID() || '');
           that.setData({ merchantInfo: res.data });
           that.refreshProfileHeader(res.data, that._userInfo);
         }
@@ -1226,7 +1331,7 @@ Page({
       success(res) {
         if (!that.isCurrentDataEpoch(dataEpoch)) return;
         if (!(res && (res.code === '200' || res.code === 200) && res.data && isRecordList(res.data.rows))) {
-          that.setData({ hostLoading: false, hostError: true });
+          that.setData({ hostLoading: false, hostError: true, projectTotalKnown: false });
           that.refreshProjectCards();
           return;
         }
@@ -1242,17 +1347,20 @@ Page({
         // 列表只请求一页 10 条,拿这一页数会把 30 个项目说成 10 个。判据在后端与卡片
         // 状态签同源(isEndedProject:档期未知不算结束),前端不再自己数。
         const activeTotal = finiteCount(res.data.activeTotal);
+        const hostKnown = activeTotal !== null;
         that._hostProjectList = rows;
         that.setData({
-          hostProjectTotal: activeTotal === null ? 0 : activeTotal,
+          hostProjectTotal: activeTotal,
           hostLoading: false,
           hostError: false,
+          projectTotalKnown: hostKnown && !that.data.joinLoading && !that.data.joinError
+            && !!(that.data.merchantAccess && that.data.merchantAccess.canManageProjects),
         });
         that.refreshProjectCards();
       },
       fail() {
         if (!that.isCurrentDataEpoch(dataEpoch)) return;
-        that.setData({ hostLoading: false, hostError: true });
+        that.setData({ hostLoading: false, hostError: true, projectTotalKnown: false });
         that.refreshProjectCards();
       },
     });
@@ -1315,7 +1423,7 @@ Page({
   },
 
   // 走查 v2 R02(业主 10-30):叠层展开后每条 × = 标为已读,底下「清空」= 全部标为已读。
-  // 会话走站内消息同一个 /api/im/read(失败照常 toast 一次);邀请和经营动态没有已读接口,记在本机(按账号)。
+  // 会话走站内消息同一个 /api/im/read(一次一个 conversation_id);邀请和经营动态没有已读接口,记在本机(按账号)。
   inboxReadStore() { return 'merchant_inbox_read_' + String((app.getUserID && app.getUserID()) || ''); },
 
   inboxReadMap() {
@@ -1326,19 +1434,27 @@ Page({
   markInboxRead(items) {
     const map = this.inboxReadMap();
     const at = Date.now();
-    const unread = [];
-    items.forEach((item) => {
+    const list = items || [];
+    list.forEach((item) => {
+      if (!item) return;
       map[inboxReadKey(item)] = at;
-      if (item.kind === 'conversation' && item.unread) unread.push(item.conversationId);
     });
-    // L07-016:一键已读逐条串行发,首个失败即停,最多一条报错提示(原先最多 50 条并发、各自 toast)
-    const next = (i) => {
-      if (i >= unread.length) return;
-      app.sendRequest({ url: '/api/im/read', method: 'POST', hideLoading: true,
-        data: { conversation_id: unread[i] },
-        success: (res) => { if (res && String(res.code) === '200') next(i + 1); } });
-    };
-    next(0);
+    // L07-016:/api/im/read 只收一个 conversation_id。本机仍记下全部,请求只发当前这一屏
+    // (最多叠层上的几条),成功后不再顺着预览里最多 50 条未读往下打。
+    const visibleKeys = {};
+    (this.data.inboxItems || []).forEach((item) => {
+      if (item && item.key) visibleKeys[item.key] = true;
+    });
+    const seen = {};
+    list.forEach((item) => {
+      if (!item || item.kind !== 'conversation' || !item.unread || item.conversationId == null) return;
+      if (!visibleKeys[item.key] || seen[item.conversationId]) return;
+      seen[item.conversationId] = true;
+      app.sendRequest({
+        url: '/api/im/read', method: 'POST', hideLoading: true, silentError: true,
+        data: { conversation_id: item.conversationId },
+      });
+    });
     const keys = Object.keys(map).sort((a, b) => map[b] - map[a]).slice(0, 300);
     const kept = {};
     keys.forEach((k) => { kept[k] = map[k]; });
@@ -1765,13 +1881,23 @@ Page({
   },
 
   onHide() {
+    this._hidden = true;
     if (this._scanOpen) {
       this._hiddenForScan = true;
       merchantTheme.merchantPageRestore();
       return;
     }
-    this._hidden = true;
+    this._noteLoginLeave();
+    const sceneId = this.data && this.data.sceneCurrent && this.data.sceneCurrent.id;
+    if (this._systemPickerOpen
+        || sceneId === 'merchant-chapter-picker'
+        || sceneId === 'merchant-station-picker'
+        || (this.data.manualChoice && this.data.manualChoice.show)) {
+      this._pickerReturn = true;
+      this._pickerMember = String(app.getUserID() || '');
+    }
     this._businessActionEpoch = (this._businessActionEpoch || 0) + 1;
+    this.stopRevenueCount();
     if (this._refreshEndTimer) {
       clearTimeout(this._refreshEndTimer);
       this._refreshEndTimer = null;
@@ -1783,6 +1909,8 @@ Page({
 
   onUnload() {
     this._unloaded = true;
+    this._projectCardsRefreshGen = (this._projectCardsRefreshGen || 0) + 1;
+    this._noteLoginLeave();
     if (this._offIdentitySync) { this._offIdentitySync(); this._offIdentitySync = null; }
     if (this._revHoldTimer) { clearTimeout(this._revHoldTimer); this._revHoldTimer = null; }
     if (this._revenueCountStop) this._revenueCountStop();

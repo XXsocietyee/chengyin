@@ -545,7 +545,11 @@ Page({
       this._seenSquareDirtyVersion = dirtyVer;
     }
   },
-  onHide() { merchantTheme.merchantPageRestore(); },
+  onHide() {
+    clearTimeout(this._feedSlowTimer);
+    this._feedSlowTimer = null;
+    merchantTheme.merchantPageRestore();
+  },
   onUnload() {
     this._destroyed = true;
     this._requestEpoch += 1;

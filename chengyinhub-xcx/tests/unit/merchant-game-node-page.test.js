@@ -676,3 +676,24 @@ test('离开页面停签到倒计时、回来续上;核验编号缺失给专门�
   assert.equal(page.submitVerification(), false)
   assert.match(JSON.stringify(toastCalls.at(-1)), /核验编号/)
 })
+
+test('签到码还在请求时离开，回包不得再 setData 开倒计时', async () => {
+  const { page, requests } = createPage()
+  try {
+    page.onLoad({ activityId: '71' })
+    requests[0].success({ code: 200, data: activeView() })
+    await flush()
+    assert.equal(page.showLiveCheckin(), true)
+    const checkin = requests.at(-1)
+    assert.equal(checkin.url, '/api/merchant/chapter-node/live-checkin-code')
+    page.onHide()
+    checkin.success({ code: 200, data: { code: 'ABC', qrcodeUrl: 'https://example/q', ttlMs: 60000 } })
+    assert.ok(!page._checkinTimer)
+    assert.equal(page.data.checkinQrState, 'loading')
+    assert.equal(page.data.checkinCountdown, 0)
+    page.onShow()
+    assert.equal(requests.filter((item) => item.url === '/api/merchant/chapter-node/live-checkin-code').length, 2)
+  } finally {
+    if (page._checkinTimer) clearInterval(page._checkinTimer)
+  }
+})

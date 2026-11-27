@@ -203,17 +203,20 @@ test('R02 展开后一路 × 到最后一条也能标掉;只有一条消息时 �
   assert.match(wxml, /class="rv-msg-x" wx:if="\{\{msgOpen \|\| inboxItems\.length === 1\}\}"/)
 })
 
-// L07-016:清空多条未读会话逐条串行发 /api/im/read,失败即停(不再并发、不刷屏报错)
-test('清空多条未读会话串行发已读,失败即停', () => {
+// L07-016:/api/im/read 一次只收一个会话。清空把本机已读记全,请求只发当前这一屏,不再顺着最多 50 条往下打。
+test('清空只给当前这一屏的未读会话发已读', () => {
   const page = loadPage()
-  page._inboxUnread = [21, 22, 23].map((id) => ({ kind: 'conversation', unread: true, conversationId: id, key: 'conv-' + id }))
+  const all = Array.from({ length: 50 }, (_, i) => ({
+    kind: 'conversation', unread: true, conversationId: 21 + i, key: 'conv-' + (21 + i),
+  }))
+  page._inboxUnread = all
+  page.data.inboxItems = all.slice(0, 3)
   page.clearInbox()
   const reads = () => requests.filter((r) => r.url === '/api/im/read')
-  assert.equal(reads().length, 1)
-  reads()[0].success({ code: 200 })
-  assert.deepEqual(reads().map((r) => r.data.conversation_id), [21, 22])
-  reads()[1].success({ code: 500, msg: '失败' })
-  assert.equal(reads().length, 2)
+  assert.deepEqual(reads().map((r) => r.data), [
+    { conversation_id: 21 }, { conversation_id: 22 }, { conversation_id: 23 },
+  ])
+  assert.equal(reads().length, 3, '这一屏发完即停，不再继续请求剩下的 47 条')
 })
 
 // L07-074:经营动态的已读键不再包含正文;升级前存的长键仍算已读

@@ -245,7 +245,13 @@ Page({
     // 从相册/裁剪页回来:上传回调还没落地,这次不刷新(刷新会挡住随后的保存),只把返回守卫重新挂上
     const backFromPicker = this._imagePicking && this._pickingHidden;
     if (backFromPicker) this._endPicking();
-    if (!backFromPicker && !this.data.chipSheet.show && !this.data.hoursOpen) {
+    let systemPickerReturn = false;
+    if (this._pickerReturn) {
+      this._pickerReturn = false;
+      const memberId = String(app.getUserID() || '');
+      systemPickerReturn = !!(memberId && memberId === this._pickerMember);
+    }
+    if (!backFromPicker && !systemPickerReturn && !this.data.chipSheet.show && !this.data.hoursOpen) {
       if (this._loadedOnce && this.canReadProfileView() && !this.data.fieldSheet.show && !this.data.imageEditor) this.load();
     }
     const coopView = this.data.view === 'coop';
@@ -264,6 +270,10 @@ Page({
   },
   onHide() {
     if (this._imagePicking) this._pickingHidden = true;
+    else if (this._systemPickerOpen) {
+      this._systemPickerOpen = false;
+      this._pickerReturn = true;
+    }
     merchantTheme.merchantPageRestore && merchantTheme.merchantPageRestore();
   },
   onUnload() {
@@ -275,6 +285,14 @@ Page({
     if (this._loadWatchdog) {
       clearTimeout(this._loadWatchdog);
       this._loadWatchdog = null;
+    }
+    if (this._categoryLoadingTimer) {
+      clearTimeout(this._categoryLoadingTimer);
+      this._categoryLoadingTimer = null;
+    }
+    if (this._backGuardTimer) {
+      clearTimeout(this._backGuardTimer);
+      this._backGuardTimer = null;
     }
     if (this._commerceWorkflow) {
       this._commerceWorkflow.destroy();
@@ -854,7 +872,11 @@ Page({
     const n = this.data;
     if (n.imageEditor || (n.fieldSheet && n.fieldSheet.show) || n.discardVisible || (n.chipSheet && n.chipSheet.show)) {
       this.setData({backGuardOff: true});
-      setTimeout(() => { if (!this._destroyed) this.setData({backGuardOff: false}); }, 50);
+      if (this._backGuardTimer) clearTimeout(this._backGuardTimer);
+      this._backGuardTimer = setTimeout(() => {
+        this._backGuardTimer = null;
+        if (!this._destroyed) this.setData({backGuardOff: false});
+      }, 50);
     }
   },
   discardField() {
@@ -1218,12 +1240,16 @@ Page({
     if (this.data.saving || this.data.refreshing) return;
     const that = this;
     const lat = Number((this.data.m || {}).locationLat), lng = Number((this.data.m || {}).locationLng);
+    this._systemPickerOpen = true;
+    this._pickerMember = String(app.getUserID() || '');
     wx.chooseLocation(Object.assign(lat && lng ? { latitude: lat, longitude: lng } : {}, {
       success(r) {
+        if (String(app.getUserID() || '') !== that._pickerMember) return;
         if (that.data.saving || that.data.refreshing) return;
         that.saveDecor({locationLat:r.latitude, locationLng:r.longitude, address:r.address || r.name || ''});
       },
-      fail(err) { handleLocationPickFailure(err); }
+      fail(err) { handleLocationPickFailure(err); },
+      complete() { that._systemPickerOpen = false; },
     }));
   },
 

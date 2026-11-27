@@ -410,6 +410,37 @@ test('导出状态轮询失败退避并在 onHide 停表', () => {
   } finally { global.setTimeout = st; global.clearTimeout = ct }
 })
 
+// L07-025:进行中的导出不能每 1.5s 一直查下去
+test('导出一直进行中时 20 次后停下，并说明可以再查', () => {
+  const page = loadPage()
+  page._scopeGuard = () => () => true
+  page.data.exportTask = { id: 5, status: 'RUNNING' }
+  page.data.exportState = 'RUNNING'
+  const delays = []
+  const st = global.setTimeout, ct = global.clearTimeout
+  global.setTimeout = (fn, ms) => { delays.push(ms); return delays.length }
+  global.clearTimeout = () => {}
+  const running = { code: 200, data: { id: 5, status: 'RUNNING', rowCount: null, errorMessage: null } }
+  try {
+    for (let i = 0; i < 20; i += 1) {
+      page._pollExport()
+      requests.filter((r) => /exports\/5\/status/.test(r.url)).at(-1).success(running)
+    }
+    assert.equal(requests.filter((r) => /exports\/5\/status/.test(r.url)).length, 20)
+    assert.deepEqual(delays, Array(19).fill(1500))
+    assert.equal(page.data.exportState, 'RUNNING')
+    assert.equal(page.data.exportError, '导出仍在进行，可稍后再次查询')
+    page._pollExport()
+    assert.equal(requests.filter((r) => /exports\/5\/status/.test(r.url)).length, 20, '到次数后不再查询')
+    page.onHide()
+    page._scheduleExportPoll()
+    assert.equal(delays.length, 19, '离开页面不再排下一次')
+    page._hidden = false
+    page.retryExportStatus()
+    assert.equal(requests.filter((r) => /exports\/5\/status/.test(r.url)).length, 21, '再次查询可以重新开始')
+  } finally { global.setTimeout = st; global.clearTimeout = ct }
+})
+
 // L07-112 / L07-113 / L07-115
 test('套用分群清掉关键词;起止日期倒了自动对调;导出令牌不进页面数据', () => {
   const page = loadPage()

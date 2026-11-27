@@ -38,7 +38,9 @@ function buildActiveSubscriptions(rows, tiers, now) {
     const end = formatDay(r.endDate);
     let usage = '';
     if (r.maxUsage !== null && r.maxUsage !== undefined && r.maxUsage !== '') {
-      usage = '已用 ' + (Number(r.usedCount) || 0) + '/' + r.maxUsage + ' 次';
+      const usedRaw = r.usedCount;
+      const usedKnown = usedRaw !== null && usedRaw !== undefined && usedRaw !== '' && Number.isFinite(Number(usedRaw));
+      if (usedKnown) usage = '已用 ' + Number(usedRaw) + '/' + r.maxUsage + ' 次';
     }
     return {
       key: r.id != null ? String(r.id) : 'sub-' + i,

@@ -137,15 +137,29 @@ Page({
 
   onShow() {
     this._hidden = false;
-    merchantTheme.merchantPageShow();
+    if (this.data.mode === 'public') merchantTheme.merchantPageRestore(); // PG-029:公开态保持玩家深色
+    else merchantTheme.merchantPageShow();
+    let sameMemberPicker = false;
+    if (this._pickerReturn) {
+      this._pickerReturn = false;
+      const memberId = String(app.getUserID() || '');
+      sameMemberPicker = !!(memberId && memberId === this._pickerMember);
+    }
     this.syncReplyRecovery();
     if (this._replyRecovery) this._replyRecovery.resume();
+    if (sameMemberPicker) return;
     if (this._resumeReviewRead || (this._reviewOwner !== undefined && this._reviewOwner !== String(app.getUserID() || ''))) {
       this._resumeReviewRead = false;
       this.retry();
     }
   },
   onHide() {
+    if (this._systemPickerOpen) {
+      this._systemPickerOpen = false;
+      this._pickerReturn = true;
+      merchantTheme.merchantPageRestore();
+      return;
+    }
     this._hidden = true;
     if (this._replyRecovery) this._replyRecovery.suspend();
     this._resumeReviewRead = this.data.pageState === 'loading' || this.data.loadingMore;
@@ -362,7 +376,12 @@ Page({
   chooseImages() {
     const images = this.data.images || [];
     if (images.length >= 9) return;
+    this._systemPickerOpen = true;
+    this._pickerMember = String(app.getUserID() || '');
+    const pickerMember = this._pickerMember;
     app.chooseImage((urls) => {
+      this._systemPickerOpen = false;
+      if (pickerMember && String(app.getUserID() || '') !== pickerMember) return;
       const next = images.concat(Array.isArray(urls) ? urls : []).slice(0, 9);
       this.setData({ images: next, submitError: '' });
       this.refreshCreateState();
@@ -384,7 +403,9 @@ Page({
     const imageIndex = Number(event.currentTarget.dataset.imageIndex);
     const review = this.data.filteredItems[reviewIndex];
     if (!review || !review.imageUrls[imageIndex]) return;
-    mediaPreview.open(review.imageUrls, review.imageUrls[imageIndex]);
+    this._systemPickerOpen = true;
+    this._pickerMember = String(app.getUserID() || '');
+    if (!mediaPreview.open(review.imageUrls, review.imageUrls[imageIndex])) this._systemPickerOpen = false;
   },
 
   refreshCreateState() {

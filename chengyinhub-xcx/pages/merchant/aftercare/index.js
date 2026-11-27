@@ -47,7 +47,7 @@ Page({
     merchantTheme.merchantPageShow();
     if (this._refreshAfterDetail) {
       this._refreshAfterDetail = false;
-      this.loadList(true, true); // L07-050:静默刷新,不打回骨架、不丢滚动
+      this.loadList(true, true); // L07-050:静默刷新,不打回骨架;已翻到的后面页一并重读,不收成第一页
     }
   },
   onHide() { merchantTheme.merchantPageRestore(); },
@@ -99,49 +99,60 @@ Page({
   },
 
   loadMore() {
-    if (!this.data.hasMore || this.data.loadingMore) return;
+    if (!this.data.hasMore || this.data.loadingMore || this._refreshingPages) return;
     this.loadList(false);
   },
 
   loadList(reset, silent) {
     if (!this._merchantAccess || !this._merchantAccess.canReadAftercare) return;
     const bucket = this.data.bucket;
-    const pageNum = reset ? 1 : this.data.pageNum + 1;
+    const loadedThrough = Math.max(1, Number(this.data.pageNum) || 1);
+    const pageNum = reset ? 1 : loadedThrough + 1;
     // L07-049:只认最后一次列表请求(快速切分段或切分段时还在翻页)
     const seq = this._listSeq = (this._listSeq || 0) + 1;
     const keepRows = reset && silent && this.data.pageState === 'ready';
+    // 静默重读要把已经翻到的页都再取一遍;中途失败留着屏上的行,不能先换成第一页
+    this._refreshingPages = keepRows && loadedThrough > 1;
     if (reset && !keepRows) this.setData({ pageState: 'loading', errorMessage: '', loadingMore: false, listShell: true }); // 2026-11-02 X-5:进入列表后分段常驻
     else if (!reset) this.setData({ loadingMore: true });
-    app.sendRequest({
-      hideLoading: true,
-      silentError: true,
-      url: `/api/merchant/aftercare/list?bucket=${bucket}&pageNum=${pageNum}&pageSize=${this.data.pageSize}`,
-      method: 'POST',
-      success: (res) => {
-        if (seq !== this._listSeq) return;
-        if (!successObject(res)) {
-          this.handleListFailure(reset, errorText(res, '售后列表加载失败'));
-          return;
-        }
-        const shaped = shapeAftercareListPage(res.data, bucket);
-        if (!shaped || shaped.pageNum !== pageNum) {
-          this.handleListFailure(reset, '售后列表加载失败，请重试');
-          return;
-        }
-        const items = reset ? shaped.items : (this._items || []).concat(shaped.items);
-        this._items = items;
-        this.setData({
-          itemCount: items.length,
-          groups: groupAftercareItems(filterAftercareItems(items, this.data.keyword), new Date()),
-          pageNum: shaped.pageNum,
-          hasMore: shaped.hasMore,
-          pageState: items.length ? 'ready' : 'empty',
-          errorMessage: '',
-          loadingMore: false,
-        });
-      },
-      fail: () => { if (seq === this._listSeq) this.handleListFailure(reset, '网络异常，请重试'); },
-    });
+    const readPage = (currentPage, accumulated, lastPage) => {
+      app.sendRequest({
+        hideLoading: true,
+        silentError: true,
+        url: `/api/merchant/aftercare/list?bucket=${bucket}&pageNum=${currentPage}&pageSize=${this.data.pageSize}`,
+        method: 'POST',
+        success: (res) => {
+          if (seq !== this._listSeq) return;
+          if (!successObject(res)) {
+            this.handleListFailure(reset, errorText(res, '售后列表加载失败'), keepRows);
+            return;
+          }
+          const shaped = shapeAftercareListPage(res.data, bucket);
+          if (!shaped || shaped.pageNum !== currentPage) {
+            this.handleListFailure(reset, '售后列表加载失败，请重试', keepRows);
+            return;
+          }
+          const items = reset && currentPage === 1 ? shaped.items : accumulated.concat(shaped.items);
+          if (keepRows && shaped.hasMore && currentPage < lastPage) {
+            readPage(currentPage + 1, items, lastPage);
+            return;
+          }
+          this._refreshingPages = false;
+          this._items = items;
+          this.setData({
+            itemCount: items.length,
+            groups: groupAftercareItems(filterAftercareItems(items, this.data.keyword), new Date()),
+            pageNum: shaped.pageNum,
+            hasMore: shaped.hasMore,
+            pageState: items.length ? 'ready' : 'empty',
+            errorMessage: '',
+            loadingMore: false,
+          });
+        },
+        fail: () => { if (seq === this._listSeq) this.handleListFailure(reset, '网络异常，请重试', keepRows); },
+      });
+    };
+    readPage(pageNum, reset ? [] : (this._items || []), keepRows ? loadedThrough : pageNum);
   },
 
   onSearchInput(event) {
@@ -156,7 +167,13 @@ Page({
     this.onSearchInput({ detail: { value: '' } });
   },
 
-  handleListFailure(reset, message) {
+  handleListFailure(reset, message, keepRows) {
+    this._refreshingPages = false;
+    if (keepRows) {
+      this.setData({ loadingMore: false });
+      toast(message);
+      return;
+    }
     if (reset) this.setData({ pageState: 'error', errorMessage: message, loadingMore: false });
     else {
       this.setData({ loadingMore: false });

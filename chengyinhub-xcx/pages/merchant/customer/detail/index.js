@@ -87,7 +87,7 @@ Page({
   },
 
   /* silent=true:弹窗里加/删标签、写完备注后的重载。不许把 pageState 打回 loading ——
-   * 弹窗还开着,背后会闪一层骨架屏;失败时也不能整页翻错误态把弹窗架空,改用 toast。 */
+   * 弹窗还开着,背后会闪一层骨架屏。断网时不提示、不改屏上已有的客户行,下次打开再读。 */
   loadDetail(silent) {
     if (!this._merchantAccess.canReadCrm) return;
     // L07-005:silent 只在写成功后发生 ⇒ 告诉名单页回去时要重读(否则名单在 60s 内不重读)
@@ -127,8 +127,8 @@ Page({
         });
       },
       fail: () => {
-        // L07-022:弹窗里写完后的静默刷新失败只提示,不把整页翻成错误态
-        if (silent) { toast.error('客户详情刷新失败'); return; }
+        // L07-022:写完后的静默刷新断网不提示,屏上的行留着;下次打开再读
+        if (silent) return;
         this.setData({ pageState: 'error', errorMessage: '网络异常，请重试' });
       },
     });
