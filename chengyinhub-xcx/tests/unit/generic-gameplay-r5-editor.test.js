@@ -573,23 +573,54 @@ test('L04-014 检定区「添加属性」有未保存修改时先问，不直接
 
 test('L04-008 已存模板换主玩法 / 调幸运加分 / 放宽 后返回会提示放弃；入口预选不算修改', () => {
   const load = () => { const p = page(); p.fillFormWithTemplateData({ title: '旧题', validationMethod: 5, advancedConfigJson: JSON.stringify(base()) }); p._templateId = 6; p.data.dirty = false; return p; };
-  let p = load(); p.pickGame(event({ key: 'pricePair', r5: true })); assert.equal(p.data.gameKey, 'pricePair'); assert.equal(p.data.dirty, true);
+  const watch = (p) => { const keys = []; const set = p.setData; p.setData = function (patch, done) { keys.push(...Object.keys(patch)); return set.call(this, patch, done); }; return keys; };
+  let p = load(); const picked = watch(p); p.data.submitError = '上次没保存';
+  p.pickGame(event({ key: 'pricePair', r5: true })); assert.equal(p.data.gameKey, 'pricePair'); assert.equal(p.data.dirty, true); assert.equal(p.data.submitError, '');
+  assert.equal(picked.includes('advanced'), false, picked.join(','));
   p = load(); p._writeMods([]); assert.equal(p.data.dirty, true);
   p = load(); p._writeRelax(-1); assert.equal(p.data.dirty, true);
   p = load(); p.pickGame(event({ key: 'pricePair', pristine: true })); assert.equal(p.data.dirty, false);
   p = load(); p._templateId = 0; p.pickGame(event({ key: 'pricePair', r5: true })); assert.equal(p.data.dirty, false, '新建时选玩法不算修改');
+  p = load(); const presentKeys = watch(p); p.data.submitError = '上次没保存'; p.data.gameSection = 'qa';
+  p.onPickPresent({ detail: { value: 1 } });
+  assert.equal(p.data.presentChoice, 'fullscreen'); assert.equal(p.data.advanced.present, 'fullscreen');
+  assert.equal(p.data.dirty, true); assert.equal(p.data.submitError, '');
+  assert.equal(presentKeys.includes('advanced'), false, presentKeys.join(','));
+  p = load(); const spotKeys = watch(p); p.data.submitError = '上次没保存'; p.data.dirty = false; p.data.hotspotArming = 0;
+  p.data.advanced.hiddenObject.hotspots = [{ id: 'h1', label: '猫', x: 0, y: 0 }];
+  wx.createSelectorQuery = () => { const api = { in() { return api; }, select() { return api; }, boundingClientRect(cb) { api.cb = cb; return api; }, exec() { api.cb({ left: 0, top: 0, width: 100, height: 100 }); } }; return api; };
+  p.placeHotspot({ touches: [{ x: 25, y: 40 }] });
+  assert.equal(p.data.advanced.hiddenObject.hotspots[0].x, 0.25); assert.equal(p.data.advanced.hiddenObject.hotspots[0].y, 0.4);
+  assert.equal(p.data.dirty, true); assert.equal(p.data.submitError, ''); assert.equal(p.data.hotspotArming, -1);
+  assert.equal(spotKeys.includes('advanced'), false, spotKeys.join(','));
 });
 
 test('L04-009 / L04-010 题干空着时加线索点完成：面板干净关上、线索存下，题干的错留给保存时报', () => {
   const p = page(); const cfgBase = base(); cfgBase.qa.title = '';
   p.data.advanced = cfg.parse(cfgBase).value; p.data.gameKey = 'qaPick'; p.data.gameSection = 'qa'; p._refreshR5Editor();
+  p.data.advancedConfigError = '问答题干不能为空';
   p.openR5ToolSheet(event({ key: 'clue' }));
   p.data.toolDraft = { rows: [{ name: '门后纸条', public: false }], publicOnce: false };
   assert.equal(p.saveR5ToolSheet(), true);
   assert.equal(p.data.toolSheetOpen, false); assert.equal(p.data.toolSheetKey, '', '不应出现空的附加规则面板');
   assert.equal(p.data.r5PanelError, '');
+  assert.equal(p.data.advancedConfigError, '问答题干不能为空', '站点上原来的错留在原处');
   assert.ok(tools.selected(p.data.advanced).clue, '线索已存下');
   assert.match(cfg.validate(p.data.advanced), /题干/, '整份配置的错仍在,保存 / 发布会报');
+});
+
+test('L04-009 限时自己不合法时，前面已有的配置错不挡、也不冒充成这张单的错', () => {
+  const p = page(); const raw = base(); delete raw.outcomeRules.fail;
+  p.data.advanced = cfg.parse(raw).value; p.data.gameKey = 'qaPick'; p.data.gameSection = 'qa'; p._refreshR5Editor();
+  p.data.advancedConfigError = '问答题干不能为空';
+  p.openR5ToolSheet(event({ key: 'timer' }));
+  p._setFormState({ 'advanced.timer.durationSeconds': 0 });
+  const station = p.data.supportError;
+  assert.equal(p.saveR5ToolSheet(), false);
+  assert.match(p.data.r5PanelError, /计时时长/);
+  assert.equal(p.data.toolSheetKey, 'timer');
+  assert.equal(p.data.advancedConfigError, '问答题干不能为空');
+  assert.equal(p.data.supportError, station);
 });
 
 test('L04-010 面板自己改出来的错仍然挡住完成', () => {
@@ -609,11 +640,80 @@ test('L04-012 逐字输入成功反馈：只按路径写这一行，r5Editor 只
   assert.equal(p.data.advanced.outcomeRules.pass.reply, '答对了');
   assert.deepEqual(p.data.advanced.outcomeRules.fail, {});
   assert.equal(refreshes, 1);
-  assert.ok(patches.some(keys => keys.includes('advanced.outcomeRules.pass')));
-  assert.ok(!patches.some(keys => keys.includes('advanced')));
+  assert.ok(patches.some(keys => keys.includes('advanced.outcomeRules.pass.reply')));
+  assert.ok(!patches.some(keys => keys.includes('advanced') || keys.includes('advanced.outcomeRules.pass')));
   delete p.data.advanced.outcomeRules;
   p.inputOutcomeReply(event({ path: 'outcomeRules.fail' }, '再想想'));
   assert.equal(p.data.advanced.outcomeRules.fail.reply, '再想想'); assert.equal(p.data.advanced.outcomeRules.version, 1);
+});
+
+test('L04-011 模板字段逐字输入不重建整份 r5Editor；视图用到的配置变了才刷新', () => {
+  const r5Keys = [];
+  const watch = (p) => {
+    r5Keys.length = 0;
+    const set = p.setData;
+    p.setData = function (patch, done) {
+      Object.keys(patch).forEach(key => { if (key === 'r5Editor' || key.startsWith('r5Editor')) r5Keys.push(key); });
+      return set.call(this, patch, done);
+    };
+  };
+  const primed = (advanced) => {
+    const p = page();
+    p.data.advanced = cfg.parse(advanced).value;
+    p._refreshR5Editor();
+    p.data.r5Editor.gameSummary = 'STALE';
+    watch(p);
+    return p;
+  };
+  const title = primed(base());
+  title.onAdvancedField(event({ section: 'qa', field: 'title' }, '新题干'));
+  assert.equal(title.data.advanced.qa.title, '新题干');
+  assert.equal(title.data.r5Editor.gameSummary, 'STALE', '题干逐字输入不重建玩法视图');
+  assert.deepEqual(r5Keys, []);
+
+  const options = primed(base());
+  options.data.optionItems = [{ text: 'A', isCorrect: true }, { text: 'B', isCorrect: false }];
+  options.onOptionTextChange(event({ index: 0 }, '甲'));
+  assert.equal(options.data.optionItems[0].text, '甲');
+  assert.equal(options.data.r5Editor.gameSummary, 'STALE');
+  assert.deepEqual(r5Keys, []);
+
+  const labels = primed(base());
+  labels.data.gameKey = 'qaPick';
+  labels.data.gameSection = 'qa';
+  labels.updateAdvancedRow(event({ path: 'qa.options', index: 0, field: 'label' }, '甲选项'));
+  assert.equal(labels.data.advanced.qa.options[0].label, '甲选项');
+  assert.equal(labels.data.r5Editor.optionAfterRows[0].label, '选「甲选项」之后');
+  assert.equal(r5Keys.includes('r5Editor'), false);
+  assert.equal(r5Keys.includes('r5Editor.gameGroups'), false);
+  assert.ok(r5Keys.includes('r5Editor.optionAfterRows'));
+
+  const dice = primed({ schemaVersion: 1, diceRoll: { enabled: true, mode: 'd6', diceCount: 1, faces: ['A', 'B', 'C', 'D', 'E', 'F'] }, outcomeRules: { version: 1, pass: {}, fail: {} } });
+  dice.onDiceFace(event({ index: 0 }, '去钟楼'));
+  assert.equal(dice.data.advanced.diceRoll.faces[0], '去钟楼', '打开的骰面输入仍是刚打的字');
+  assert.equal(dice.data.r5Editor.gameSummary, 'STALE');
+  assert.equal(r5Keys.includes('r5Editor'), false);
+
+  const scan = primed(Object.assign(base(), { scan: { enabled: true, kind: 'TEXT', reply: '' } }));
+  scan.data.formData.validationMethod = 4;
+  scan._r5Deps = '';
+  scan._refreshR5Editor();
+  scan.data.r5Editor.gameSummary = 'STALE';
+  r5Keys.length = 0;
+  scan.onAdvancedField(event({ section: 'scan', field: 'reply' }, '欢迎'));
+  assert.equal(scan.data.advanced.scan.reply, '欢迎', '扫完回复面板仍显示当前输入');
+  assert.equal(scan.data.r5Editor.scanSummary, '欢迎');
+  assert.equal(r5Keys.includes('r5Editor'), false);
+  assert.equal(r5Keys.includes('r5Editor.gameGroups'), false);
+  assert.ok(r5Keys.includes('r5Editor.scanSummary'));
+
+  const typed = primed({ schemaVersion: 1, typeIn: { enabled: true, text: 'abc', seconds: 10 } });
+  typed.onAdvancedField(event({ section: 'typeIn', field: 'seconds', numeric: '1' }, '19'));
+  assert.equal(typed.data.advanced.typeIn.seconds, 19);
+  assert.equal(typed.data.r5Editor.legacyRows.find(row => row.path === 'typeIn.seconds').displayValue, '19');
+  assert.equal(r5Keys.includes('r5Editor'), false);
+  assert.equal(r5Keys.includes('r5Editor.gameGroups'), false);
+  assert.ok(r5Keys.includes('r5Editor.legacyRows'));
 });
 
 test('L04-030 采用路径(直接 fillFormWithTemplateData)也带上类别芯片', () => {
@@ -641,13 +741,13 @@ test('L04-043/052 卸载时收掉罗盘监听与退场定时器，不再写表�
 test('L04-036 / L04-039 拍照问答记成相机图标；随机条目同一毫秒连点 id 不撞', () => {
   const p = page(); p.data.advanced = cfg.parse({ schemaVersion: 1, qa: { enabled: true, mode: 'SHOT', title: '拍一张' } }).value;
   assert.equal(p._gameIcon(p.data.advanced), 'camera');
-  const now = Date.now; Date.now = () => 1700000000000;
+  const now = Date.now; const rnd = Math.random; Date.now = () => 1700000000000; Math.random = () => 0;
   try {
     p.data.advanced = cfg.parse({ schemaVersion: 1, random: { enabled: true, items: [] } }).value;
     p.addRandomItem(); p.addRandomItem();
     const ids = (p.data.advanced.random.items || []).map(item => item.id);
     assert.equal(ids.length, 2); assert.notEqual(ids[0], ids[1]);
-  } finally { Date.now = now; }
+  } finally { Date.now = now; Math.random = rnd; }
 });
 
 test('L04-040 存盘的 validationMethod:扫码 4、拍照默认 2 / 保留定位 5、旧空题回 0、其余原样', () => {
@@ -674,6 +774,49 @@ test('L04-042 工具草稿改动走 _editToolDraft:越界不改、改了清错�
   p.addClueRow();
   assert.notEqual(p.data.toolDraft, before); assert.equal(p.data.toolDraft.rows.length, 2); assert.equal(before.rows.length, 1);
   assert.equal(p.data.toolError, null);
+});
+
+test('L04-042 费用、线索、投票逐字输入只写该字段，不整份回传 toolDraft', () => {
+  const p = page();
+  const keys = [];
+  const set = p.setData;
+  p.setData = function (patch, done) { keys.push(...Object.keys(patch)); return set.call(this, patch, done); };
+  const arm = () => { keys.length = 0; p.data.toolError = { error: '旧错误' }; return p.data.toolDraft; };
+  p.data.toolDraft = { mode: 'FIXED', groups: [{ label: '', rows: [{ kind: 'VALUE', key: '', label: '', amount: '' }] }] };
+  const cost = arm();
+  p.updateCostRow(event({ group: 0, row: 0, field: 'amount' }, '3'));
+  assert.equal(p.data.toolDraft, cost, '数量逐字不换整份草稿');
+  assert.equal(p.data.toolDraft.groups[0].rows[0].amount, '3');
+  assert.equal(p.data.toolError, null);
+  assert.deepEqual(keys, ['toolDraft.groups[0].rows[0].amount', 'toolError']);
+  const afterMiss = keys.length;
+  p.updateCostRow(event({ group: 3, row: 0, field: 'amount' }, '9'));
+  assert.equal(keys.length, afterMiss, '越界费用行不写');
+  assert.equal(p.data.toolDraft.groups[0].rows[0].amount, '3');
+
+  p.data.toolDraft = { rows: [{ name: '', public: false }], publicOnce: false };
+  const clue = arm();
+  p.updateClueRow(event({ index: 0, field: 'name' }, '门后'));
+  assert.equal(p.data.toolDraft, clue);
+  assert.equal(p.data.toolDraft.rows[0].name, '门后');
+  assert.equal(keys.includes('toolDraft'), false);
+
+  p.data.toolDraft = { plans: [{ title: '', summary: '', materialCost: [], clueNames: [''] }], itemSlots: [] };
+  const vote = arm();
+  p.updateVotePlan(event({ plan: 0, field: 'title' }, '继续'));
+  p.updatePlanClue(event({ plan: 0, index: 0 }, '信'));
+  assert.equal(p.data.toolDraft, vote);
+  assert.equal(p.data.toolDraft.plans[0].title, '继续');
+  assert.equal(p.data.toolDraft.plans[0].clueNames[0], '信');
+  assert.equal(keys.includes('toolDraft'), false);
+
+  p.data.toolDraft = { slots: [{ key: 'item_1', kind: 'ITEM', label: '旧名' }] };
+  const slot = arm();
+  p.updateSlotLabel(event({ slot: 0 }, '门票'));
+  assert.equal(p.data.toolDraft, slot);
+  assert.equal(p.data.toolDraft.slots[0].label, '门票');
+  assert.equal(p.data.toolDraft.itemSlots[1].label, '门票');
+  assert.equal(keys.includes('toolDraft'), false);
 });
 
 test('L04-051 检定派生态没变就不 setData;放宽选项变了照常刷新', () => {

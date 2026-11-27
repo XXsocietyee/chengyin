@@ -10,6 +10,7 @@
  * 界面不露这些键名。就地校验只挡服务端必拒的形状,其余仍以服务端保存/发布校验为准。
  */
 
+const { advancedFieldPatch } = require('./form-patch.js');
 const answerText = require('../utils/answer-text.js');
 
 const HINT_TYPES = [
@@ -244,9 +245,13 @@ const methods = {
     if (Object.keys(patch).length) this.setData(patch);
   },
   _qzAdvanced(mutate) {
-    const next = clone(this.data.advanced);
+    const before = this.data.advanced;
+    const next = clone(before);
     if (mutate(next) === false) return;
-    this._setFormState({ advanced: next, advancedConfigError: '' });
+    const patch = advancedFieldPatch(before, next);
+    if (!patch) return;
+    patch.advancedConfigError = '';
+    this._setFormState(patch);
   },
   /* ---- UG-01 逐字猜词 ---- */
   qzHangmanAnswer(e) {

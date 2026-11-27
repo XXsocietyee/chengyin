@@ -823,7 +823,7 @@
       <block wx:if="{{checkView.skillState === 'off'}}">
         <view class="cg-ios-row is-static"><text class="cg-ios-t is-l">技能</text><input class="cg-ios-in" value="{{checkView.skillText}}" maxlength="200" data-section="check" data-field="skill" bindinput="onAdvancedField" aria-label="技能" /></view>
       </block>
-      <view wx:elif="{{checkView.skillState === 'error'}}" class="cg-ios-row" bindtap="retryCheckCtx" aria-role="button" aria-label="加上属性，重新读取" hover-class="cy-pressed" hover-stay-time="80"><view class="cg-ios-m"><text class="cg-ios-t">加上属性</text></view><text class="cg-ios-v">{{checkView.skillValue}}</text></view>
+      <view wx:elif="{{checkView.skillState === 'error'}}" class="cg-ios-row is-static"><view class="cg-ios-m"><text class="cg-ios-t">加上属性</text></view><text class="cg-ios-v">{{checkView.skillValue}}</text></view>
       <block wx:else>
         <view class="cg-ios-row" data-open="skill" bindtap="toggleCheckRow" aria-role="button" aria-label="加上属性" aria-expanded="{{checkOpen === 'skill'}}" hover-class="cy-pressed" hover-stay-time="80"><view class="cg-ios-m"><text class="cg-ios-t">加上属性</text></view><text class="cg-ios-v">{{checkView.skillValue}}</text><view class="cg-ios-fold {{checkOpen === 'skill' ? 'is-open' : ''}}"><cy-icon name="chevron-right" size="28" /></view></view>
         <block wx:if="{{checkOpen === 'skill'}}">
@@ -833,7 +833,7 @@
       </block>
       <view class="cg-ios-row is-static"><text class="cg-ios-t is-l">难度</text><view class="cg-ios-seg"><view wx:for="{{checkTiers}}" wx:key="key" class="{{advanced.check.tier === item.key ? 'is-on' : ''}}" data-index="{{index}}" bindtap="pickCheckTierSeg" aria-role="button" aria-label="{{item.label}}" aria-selected="{{advanced.check.tier === item.key}}" hover-class="cy-pressed" hover-stay-time="80">{{item.label}}</view></view></view>
     </view>
-    <view wx:if="{{checkView.skillState === 'error'}}" class="cg-ios-ft is-err">没有读取成功，请再试一次。</view>
+    <view wx:if="{{checkView.skillState === 'error'}}" class="cg-ios-ft is-err">没有读取成功。</view>
 
     <view class="cg-ios-hd">情境加值</view>
     <view class="cg-ios-grp">

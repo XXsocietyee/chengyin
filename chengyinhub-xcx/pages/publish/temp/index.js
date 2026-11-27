@@ -32,6 +32,7 @@ const nodeOutcomeContract = require('../utils/publish/node-outcome-contract.js')
 const supportMatrix = require('../utils/publish/gameplay-support-matrix.js');
 const templateTools = require('../utils/publish/template-tools.js');
 const r5Editor = require('./r5-editor.js'); const questoAuthor = require('./questo-author.js'); const barterMixerAuthor = require('./barter-mixer-author.js'); const checkSection = require('./check-section.js'); const afterSection = require('./after-section.js');
+const { advancedFieldPatch } = require('./form-patch.js');
 const publishIssueTarget = require('../utils/publish/publish-issue-target.js');
 const templateAuthorFields = require('../utils/publish/template-author-fields.js');
 const merchantAccessPolicy = require('../../../utils/merchant-access-policy.js');
@@ -137,8 +138,10 @@ const PLAY_METHOD_SECTIONS = { 8: 'estimate', 9: 'pricePair', 10: 'hiddenObject'
 const PLAY_METHOD_LABELS = { 8: '猜数字', 9: '猜图', 10: '找东西' };
 
 /** 行 id 生成:同毫秒连点两次不能撞 —— 撞了服务端会判「id 不能重复」 */
+let rowSerial = 0;
 function rowId(prefix) {
-  return `${prefix}_${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
+  rowSerial += 1;
+  return `${prefix}_${Date.now().toString(36)}_${rowSerial.toString(36)}`;
 }
 
 const ADVANCED_ROW_TEMPLATES = {
@@ -167,6 +170,21 @@ const HINT_METHODS = [1, 3, 5];
 /* 单选一律是 cy-dropdown(2026-09-22 用户定):bind:change 的 detail.value 是下标,存的是那一项的 key */
 function pickedItem(list, e) {
   return list[Number(e.detail.value)];
+}
+
+// 只回写变了的段。根上被删掉的键就地去掉，不把整份 advanced 送进 setData。
+function advancedWritePatch(before, next) {
+  const patch = advancedFieldPatch(before, next);
+  if (!patch || !Object.prototype.hasOwnProperty.call(patch, 'advanced')) return patch || {};
+  const out = {};
+  const prior = before || {};
+  Object.keys(next || {}).forEach((key) => {
+    if (JSON.stringify(prior[key]) !== JSON.stringify(next[key])) out['advanced.' + key] = next[key];
+  });
+  Object.keys(prior).forEach((key) => {
+    if (!Object.prototype.hasOwnProperty.call(next, key)) delete prior[key];
+  });
+  return out;
 }
 
 // 据点玩法语义(cms_member_template.interaction_type),正交于 validationMethod。
@@ -555,8 +573,9 @@ Page({
     this._templateLoadToken = (this._templateLoadToken || 0) + 1;
     this._albumEditRevision = (this._albumEditRevision || 0) + 1;
     this.destroyPreviewAudio();
-    // L04-043 / L04-052:罗盘采样、浮层退场动画的定时器别在已卸载的页面上再 setData
+    // L04-043 / L04-052:罗盘采样、滚动、返回拦截、退场动画的定时器别在已卸载的页面上再 setData
     if (this._compassDone) this._compassDone(true);
+    this._clearPageTimers();
     if (this._cgOutTimer) { clearTimeout(this._cgOutTimer); this._cgOutTimer = null; }
   },
 
@@ -1013,8 +1032,12 @@ Page({
           missing: !legacy && !!row.var && !slot };
       });
     });
-    this.setData({ effectValueSlots: templateTools.slotChoices(slots, 'VALUE'), effectRows: rows,
-      effectErrors: templateTools.effectSlotErrors(advanced) });
+    const effectValueSlots = templateTools.slotChoices(slots, 'VALUE');
+    const effectErrors = templateTools.effectSlotErrors(advanced);
+    if (JSON.stringify(effectValueSlots) === JSON.stringify(this.data.effectValueSlots)
+      && JSON.stringify(rows) === JSON.stringify(this.data.effectRows)
+      && JSON.stringify(effectErrors) === JSON.stringify(this.data.effectErrors)) return;
+    this.setData({ effectValueSlots, effectRows: rows, effectErrors });
   },
   openEffectResource: function (e, declareNew) {
     const reason = supportMatrix.effectSlotPolicy(this._supportMatrix, this.data.advanced);
@@ -1167,12 +1190,9 @@ Page({
       () => this._refreshCheckView(a));
   },
   _writeMods: function (mods) {
-    const adv = JSON.parse(JSON.stringify(this.data.advanced));
-    adv.check = adv.check || {};
-    adv.check.mods = mods;
-    this.data.dirty = true;   // L04-008
-    this.setData({ advanced: adv, advancedConfigError: '', submitError: '' });
-    this._syncCheckDerived(adv);
+    // 只回写修正列表(L04-008):幸运 / 血量阶梯不整份回传 advanced
+    if (!this.data.advanced.check) this._setFormState({ 'advanced.check': { mods: mods }, advancedConfigError: '' });
+    else this._setFormState({ 'advanced.check.mods': mods, advancedConfigError: '' });
   },
   // 开 = 默认第一档;具体哪档在下面的下拉里换
   toggleLuck: function (e) {
@@ -1184,12 +1204,9 @@ Page({
   // 放宽只有一个触发条件(血量低),多配几条也只有第一条生效 —— 所以是单选,不是列表。
   _writeRelax: function (index) {
     const c = advancedGameConfig.relaxChoices(this.data.advanced)[index];
-    const adv = JSON.parse(JSON.stringify(this.data.advanced));
-    const rest = (adv.variants || []).filter((v) => !advancedGameConfig.isEditorVariant(v));
-    adv.variants = c ? rest.concat({ when: Object.assign({}, c.when), relax: Object.assign({}, c.relax) }) : rest;
-    this.data.dirty = true;   // L04-008
-    this.setData({ advanced: adv, advancedConfigError: '', submitError: '' });
-    this._syncCheckDerived(adv);
+    const rest = JSON.parse(JSON.stringify((this.data.advanced.variants || []).filter((v) => !advancedGameConfig.isEditorVariant(v))));
+    const variants = c ? rest.concat({ when: Object.assign({}, c.when), relax: Object.assign({}, c.relax) }) : rest;
+    this._setFormState({ 'advanced.variants': variants, advancedConfigError: '' });
   },
   toggleRelax: function (e) {
     this._writeRelax(e.detail.value ? 0 : -1);
@@ -1499,6 +1516,58 @@ Page({
   },
 
   // ===== 基本信息字段 =====
+  // L04-001:这次写入动了哪一段,就只刷新那一段的派生视图。标题、说明、规则步骤不再跑玩法矩阵。
+  _affectedRefreshers: function (keys) {
+    const hit = (prefix) => keys.some((key) => key === prefix || key.indexOf(prefix + '.') === 0 || key.indexOf(prefix + '[') === 0);
+    const wholeAdvanced = keys.indexOf('advanced') >= 0;
+    const wholeForm = keys.indexOf('formData') >= 0;
+    const sectionRoot = keys.some((key) => /^advanced\.[A-Za-z0-9_]+$/.test(key));
+    const enabledOrMode = keys.some((key) => /\.enabled$/.test(key) || /\.mode$/.test(key));
+    const want = { effects: false, support: false, outcome: false, check: false, qa: false, questo: false, segments: false, clue: false, preview: true };
+    want.effects = wholeAdvanced || hit('advanced.interactionRules') || keys.some((key) => key.indexOf('.effects') >= 0)
+      || ['outcomeRules', 'check', 'pricePair', 'hiddenObject', 'sort', 'match', 'classify', 'qa', 'profile', 'branch'].some((name) => keys.indexOf('advanced.' + name) >= 0)
+      || keys.indexOf('advanced.qa.options') >= 0 || keys.indexOf('advanced.profile.questions') >= 0;
+    want.support = wholeAdvanced || wholeForm || sectionRoot || enabledOrMode
+      || hit('gameKey') || hit('gameSection') || hit('gameCurrent') || hit('formData.validationMethod')
+      || hit('advanced.scan') || hit('advanced.outcomeRules') || hit('advanced.interactionRules') || hit('advanced.interactionTools')
+      || hit('advanced.branch') || hit('advanced.diceRoll') || hit('advanced.coinFlip') || hit('advanced.timer')
+      || hit('advanced.timeWindow') || hit('advanced.leaderboard') || hit('advanced.multiplayer')
+      || hit('optionItems') || hit('advanced.qa.options') || hit('advanced.blindTaste.options')
+      || hit('advanced.predict.options') || hit('advanced.pricePair.items') || hit('advanced.random.items');
+    want.outcome = wholeAdvanced || wholeForm || hit('formData.validationMethod') || hit('formData.preferenceJson')
+      || hit('advanced.branch') || hit('advanced.diceRoll');
+    const checkFields = {
+      timer: ['durationSeconds'], typeIn: ['seconds', 'tries'], sort: ['maxAttempts'], pricePair: ['maxTries'],
+      qa: ['maxTries'], hiddenObject: ['maxTries'], stopwatch: ['tries', 'toleranceMs'],
+      ballShake: ['timed', 'seconds', 'goal'], quietHold: ['seconds'], shout: ['seconds'],
+      countdown: ['seconds'], compass: ['holdSeconds', 'tolerance'], reaction: ['goalMs'], estimate: ['tolerance'],
+    };
+    want.check = wholeAdvanced || hit('advanced.variants') || hit('advanced.check')
+      || Object.keys(checkFields).some((name) => keys.indexOf('advanced.' + name) >= 0 || keys.indexOf('advanced.' + name + '.enabled') >= 0
+        || checkFields[name].some((field) => hit('advanced.' + name + '.' + field)));
+    want.qa = wholeAdvanced || wholeForm || hit('advanced.qa') || hit('formData.originalTemplateId');
+    want.questo = wholeAdvanced || hit('advanced.hangman') || hit('advanced.qa') || hit('advanced.accusation')
+      || hit('advanced.hintLadder') || hit('advanced.answerPolicy') || hit('advanced.hintFreeUsesPerRun');
+    want.segments = wholeAdvanced || hit('gameKey') || hit('gameSection')
+      || ['qa', 'sort', 'match', 'classify'].some((name) => keys.indexOf('advanced.' + name) >= 0 || keys.indexOf('advanced.' + name + '.enabled') >= 0);
+    want.clue = hit('storyBeats');
+    return want;
+  },
+  _armPageTimer: function (name, fn, ms) {
+    if (this[name]) clearTimeout(this[name]);
+    this[name] = setTimeout(() => {
+      this[name] = null;
+      if (this._disposed || this._unloaded) return;
+      fn.call(this);
+    }, ms);
+  },
+  _clearPageTimers: function () {
+    ['_scrollTimer', '_backGuardTimer', '_exitTimer'].forEach((name) => {
+      if (!this[name]) return;
+      clearTimeout(this[name]);
+      this[name] = null;
+    });
+  },
   _setFormState: function (patch, callback, options) {
     const previousRefs = Object.keys(patch).some(key => key === 'advanced' || key.startsWith('advanced.'))
       ? templateTools.reservedRefs(this.data.advanced) : null;
@@ -1515,21 +1584,35 @@ Page({
       next.submitError = '';
     }
     this.setData(next, () => {
+      const want = this._affectedRefreshers(Object.keys(next));
       if (!(options && options.pristine) && previousRefs && this.data.advanced.interactionRules?.resourceSlots) {
         const advanced = JSON.parse(JSON.stringify(this.data.advanced));
         const previous = JSON.stringify(advanced.interactionRules);
         templateTools.cleanSlots(advanced, previousRefs);
-        if (JSON.stringify(advanced.interactionRules) !== previous) this.setData({ 'advanced.interactionRules': advanced.interactionRules || {} });
+        if (JSON.stringify(advanced.interactionRules) !== previous) {
+          this.setData({ 'advanced.interactionRules': advanced.interactionRules || {} });
+          want.effects = true;
+          want.support = true;
+        }
       }
-      this._refreshEffectResources();
-      this._refreshSupportMatrix();
-      this._refreshOutcomeContract();
-      this._syncCheckDerived();   // 开关玩法段 / 改次数都会改变「能放宽什么」
-      this._syncQaAnswerError(); this._syncQuesto();
-      this._syncSegments();
-      this._syncClueContent();
-      this.refreshPreviewState();
-      if (callback) callback.call(this);
+      if (want.effects) this._refreshEffectResources();
+      if (want.support) this._refreshSupportMatrix();
+      // 支持矩阵没跑时，高级配置仍可能改到玩法视图(旧限时秒数等)。签名没变的字段在 _refreshR5Editor 里直接跳过。
+      else if (this._refreshR5Editor && Object.keys(next).some((key) => key === 'advanced' || key.indexOf('advanced.') === 0)) this._refreshR5Editor();
+      if (want.outcome) this._refreshOutcomeContract();
+      if (want.check) this._syncCheckDerived();
+      if (want.qa) this._syncQaAnswerError();
+      if (want.questo && this._syncQuesto) this._syncQuesto();
+      if (want.segments) this._syncSegments();
+      if (want.clue) this._syncClueContent();
+      // 结果合同这一轮已经算过，或这次字段跟它无关：预览里不要再抽一遍
+      this._outcomeSkip = true;
+      try {
+        if (want.preview) this.refreshPreviewState();
+        if (callback) callback.call(this);
+      } finally {
+        this._outcomeSkip = false;
+      }
     });
   },
   /* 线索内容在「剧情」里：标签与线索同名的段落。这里只回显对应段号，供线索工具行显示是否已配内容。 */
@@ -1573,12 +1656,18 @@ Page({
     if (error !== (this.data.qaAnswerError || '')) this.setData({ qaAnswerError: error });
   },
   _refreshOutcomeContract: function () {
+    if (this._outcomeSkip) {
+      return { items: this.data.outcomePreview || [], errors: this.data.outcomeContractErrors || [] };
+    }
     const outcome = nodeOutcomeContract.extract({
       validationMethod: this.data.formData.validationMethod,
       preferenceJson: this.data.formData.preferenceJson,
       advancedConfigJson: this.data.advanced
     });
-    this.setData({ outcomePreview: outcome.items, outcomeContractErrors: outcome.errors });
+    if (JSON.stringify(outcome.items) !== JSON.stringify(this.data.outcomePreview)
+      || JSON.stringify(outcome.errors) !== JSON.stringify(this.data.outcomeContractErrors)) {
+      this.setData({ outcomePreview: outcome.items, outcomeContractErrors: outcome.errors });
+    }
     return outcome;
   },
   onTitleChange: function (e) {
@@ -2147,7 +2236,7 @@ Page({
     if (key === 'story' && this.data.storyBeats.length === 0) {
       patch.storyBeats = [{ id: 1, text: '', tag: '', imgs: [] }];
     }
-    this._setFormState(patch); const anchor = key === 'finish' ? 'sec-join' : (key === 'reward' && this.data.gameKey !== 'album' ? 'sec-reward' : ''); if (anchor) { this.setData({ scrollIntoView: '' }); setTimeout(() => { this.setData({ scrollIntoView: anchor }); }, 30); } // CP-13:新模块接在长表单末尾,关掉面板后滚过去,看得见加在哪
+    this._setFormState(patch); const anchor = key === 'finish' ? 'sec-join' : (key === 'reward' && this.data.gameKey !== 'album' ? 'sec-reward' : ''); if (anchor) { this.setData({ scrollIntoView: '' }); this._armPageTimer('_scrollTimer', () => { this.setData({ scrollIntoView: anchor }); }, 30); } // CP-13:新模块接在长表单末尾,关掉面板后滚过去,看得见加在哪
   },
 
   removeModule: function (e) {
@@ -2240,7 +2329,7 @@ Page({
     if (editorLayout.ADVANCED_GROUP_ERRORS.indexOf(key) >= 0 && !this.data.advancedOpen) this.setData({ advancedOpen: true });
     // 先清空再设置,确保同 id 重复触发也能滚动
     this.setData({ scrollIntoView: '' });
-    setTimeout(() => { this.setData({ scrollIntoView: target }); }, 30);
+    this._armPageTimer('_scrollTimer', () => { this.setData({ scrollIntoView: target }); }, 30);
   },
 
   // ===== 玩法类别 =====
@@ -2360,17 +2449,11 @@ Page({
     const advanced = advancedGameConfig.applyPresent(this.data.advanced, this.data.gameSection, value);
     if (!advanced) return;
     const present = this._presentPatch(advanced, this.data.gameSection);
-    this.data.dirty = true;   // L04-008
-    /* 字段逐个写真源(不用展开/拼对象):U4 门禁要能静态核对 setData 顶层字段,
-       拼出来的键它核不了,只能进动态债务 —— 这里本来就只有三个固定字段。 */
-    this.setData({
-      advanced: advanced,
+    // L04-008:走 _setFormState，标脏并清掉上次提交错误；只写变了的 present，不回传整份 advanced
+    this._setFormState(Object.assign({
       advancedConfigError: '',
-      submitError: '',
       presentChoice: present.presentChoice,
-      /* 2026-10-30 所有玩法都能内嵌:撤掉 presentInlineLocked(不再置灰) */
-      /* 同上撤掉 presentLockReason */
-    }, () => { this.refreshPreviewState(); });
+    }, advancedWritePatch(this.data.advanced, advanced)));
     this._syncCheckDerived(advanced);
   },
 
@@ -2416,8 +2499,8 @@ Page({
       const next = spots.map((spot, i) => (i === index
         ? Object.assign({}, spot, { x: Number(x.toFixed(4)), y: Number(y.toFixed(4)) })
         : spot));
-      this.data.dirty = true;   // L04-008
-      this.setData({ 'advanced.hiddenObject.hotspots': next, hotspotArming: -1, submitError: '' });
+      // L04-008:只写热点列表，标脏并清掉上次提交错误
+      this._setFormState({ 'advanced.hiddenObject.hotspots': next, hotspotArming: -1 });
     }).exec();
   },
 
@@ -2488,42 +2571,63 @@ Page({
       content: tool.sub + (this._toolSelected[tool.key] ? '\n当前配置：' + this._toolSummaries[tool.key] : ''),
       showCancel: false });
   },
-  // 工具面板的草稿改动一律走这里(L04-042):深拷一份、改、整份回写并清错误;mutate 返回 false 表示不改
+  // 增减行、换类型仍整份换草稿(L04-042):结构变了,路径写不全。mutate 返回 false 表示不改。
   _editToolDraft: function (mutate) {
     const draft = JSON.parse(JSON.stringify(this.data.toolDraft));
     if (mutate(draft) === false) return;
     this.setData({ toolDraft: draft, toolError: null });
   },
+  // 逐字只写这一格(L04-042):费用数量、线索名、投票标题不再深拷并回传整份 toolDraft。
+  _patchToolDraft: function (path, value) {
+    if (!path) return;
+    this.setData({ [path]: value, toolError: null });
+  },
   updateToolField: function (e) {
     const field = e.currentTarget.dataset.field;
     const value = e.detail && e.detail.value;
-    this._editToolDraft((draft) => {
-      if (field === 'mode') {
+    if (field === 'mode') {
+      this._editToolDraft((draft) => {
         draft.mode = value ? 'OPTIONS' : 'FIXED';
         if (value && draft.groups.length < 2) draft.groups.push({ label: '', rows: [{ kind: this.data.toolKey === 'reward' ? 'ITEM' : 'VALUE', key: '', label: '', amount: '' }] });
-      } else if (['decidesEnding', 'publicOnce', 'requireArrival'].includes(field)) draft[field] = !!value;
-      else if (field === 'scope' || field === 'votePolicy') {
-        const options = field === 'scope' ? this.data.toolScopes : this.data.votePolicies;
-        draft[field] = (options[Number(value)] || options[0]).key;
-      } else draft[field] = value;
-    });
+      });
+      return;
+    }
+    if (!/^[A-Za-z][A-Za-z0-9]*$/.test(String(field || ''))) return;
+    let next = value;
+    if (['decidesEnding', 'publicOnce', 'requireArrival'].includes(field)) next = !!value;
+    else if (field === 'scope' || field === 'votePolicy') {
+      const options = field === 'scope' ? this.data.toolScopes : this.data.votePolicies;
+      const picked = options && (options[Number(value)] || options[0]);
+      if (!picked) return;
+      next = picked.key;
+    }
+    this._patchToolDraft('toolDraft.' + field, next);
   },
   updateCostRow: function (e) {
     const d = e.currentTarget.dataset;
-    this._editToolDraft((draft) => {
-      const group = draft.groups[Number(d.group)];
-      if (!group) return false;
-      if (d.field === 'label' && d.row == null) group.label = e.detail.value;
-      else {
-        const row = group.rows[Number(d.row)];
-        if (!row) return false;
+    const gi = Number(d.group);
+    const group = this.data.toolDraft && this.data.toolDraft.groups && this.data.toolDraft.groups[gi];
+    if (!group) return;
+    if (d.field === 'label' && d.row == null) {
+      this._patchToolDraft('toolDraft.groups[' + gi + '].label', e.detail.value);
+      return;
+    }
+    const ri = Number(d.row);
+    const row = group.rows && group.rows[ri];
+    if (!row) return;
+    if (d.field === 'kind' || d.field === 'key') {
+      this._editToolDraft((draft) => {
+        const target = draft.groups[gi] && draft.groups[gi].rows[ri];
+        if (!target) return false;
         if (d.field === 'kind') {
-          row.kind = this.data.slotKinds[Number(e.detail.value)].key;
-          row.key = ''; row.label = '';
-        } else if (d.field === 'key') row.key = (row.kind === 'VALUE' ? draft.valueSlots : draft.itemSlots)[Number(e.detail.value)].key;
-        else row[d.field] = e.detail.value;
-      }
-    });
+          target.kind = this.data.slotKinds[Number(e.detail.value)].key;
+          target.key = ''; target.label = '';
+        } else target.key = (target.kind === 'VALUE' ? draft.valueSlots : draft.itemSlots)[Number(e.detail.value)].key;
+      });
+      return;
+    }
+    if (!/^[A-Za-z][A-Za-z0-9]*$/.test(String(d.field || ''))) return;
+    this._patchToolDraft('toolDraft.groups[' + gi + '].rows[' + ri + '].' + d.field, e.detail.value);
   },
   addCostGroup: function () {
     this._editToolDraft((draft) => {
@@ -2554,21 +2658,25 @@ Page({
   },
   updateVotePlan: function (e) {
     const d = e.currentTarget.dataset;
-    this._editToolDraft((draft) => {
-      const plan = draft.plans[Number(d.plan)];
-      if (!plan) return false;
-      if (d.material != null) plan.materialCost[Number(d.material)][d.field] = d.field === 'itemId'
-        ? draft.itemSlots[Number(e.detail.value)].key : e.detail.value;
-      else plan[d.field] = e.detail.value;
-    });
+    const pi = Number(d.plan);
+    const plan = this.data.toolDraft && this.data.toolDraft.plans && this.data.toolDraft.plans[pi];
+    if (!plan || !/^[A-Za-z][A-Za-z0-9]*$/.test(String(d.field || ''))) return;
+    if (d.material != null) {
+      const mi = Number(d.material);
+      const material = plan.materialCost && plan.materialCost[mi];
+      if (!material) return;
+      const value = d.field === 'itemId' ? this.data.toolDraft.itemSlots[Number(e.detail.value)].key : e.detail.value;
+      this._patchToolDraft('toolDraft.plans[' + pi + '].materialCost[' + mi + '].' + d.field, value);
+      return;
+    }
+    this._patchToolDraft('toolDraft.plans[' + pi + '].' + d.field, e.detail.value);
   },
   updateClueRow: function (e) {
     const d = e.currentTarget.dataset;
-    this._editToolDraft((draft) => {
-      const row = draft.rows[Number(d.index)];
-      if (!row) return false;
-      row[d.field] = d.field === 'public' ? !!e.detail.value : e.detail.value;
-    });
+    const index = Number(d.index);
+    const row = this.data.toolDraft && this.data.toolDraft.rows && this.data.toolDraft.rows[index];
+    if (!row || (d.field !== 'name' && d.field !== 'public')) return;
+    this._patchToolDraft('toolDraft.rows[' + index + '].' + d.field, d.field === 'public' ? !!e.detail.value : e.detail.value);
   },
   addClueRow: function () {
     this._editToolDraft((draft) => {
@@ -2591,11 +2699,11 @@ Page({
   },
   updatePlanClue: function (e) {
     const d = e.currentTarget.dataset;
-    this._editToolDraft((draft) => {
-      const plan = draft.plans[Number(d.plan)];
-      if (!plan || !plan.clueNames) return false;
-      plan.clueNames[Number(d.index)] = e.detail.value;
-    });
+    const pi = Number(d.plan);
+    const ci = Number(d.index);
+    const names = this.data.toolDraft && this.data.toolDraft.plans && this.data.toolDraft.plans[pi] && this.data.toolDraft.plans[pi].clueNames;
+    if (!names || !(ci >= 0 && ci < names.length)) return;
+    this._patchToolDraft('toolDraft.plans[' + pi + '].clueNames[' + ci + ']', e.detail.value);
   },
   removePlanClue: function (e) {
     const d = e.currentTarget.dataset;
@@ -2630,20 +2738,32 @@ Page({
     });
   },
   updateSlotLabel: function (e) {
-    this._editToolDraft((draft) => {
-      draft.slots[Number(e.currentTarget.dataset.slot)].label = e.detail.value;
-      draft.valueSlots = [{ key: '', label: '新建需要的资源' }].concat(draft.slots.filter(slot => slot.kind === 'VALUE').map(slot => ({ key: slot.key, label: slot.label })));
-      draft.itemSlots = [{ key: '', label: '新建需要的资源' }].concat(draft.slots.filter(slot => slot.kind === 'ITEM').map(slot => ({ key: slot.key, label: slot.label })));
+    const index = Number(e.currentTarget.dataset.slot);
+    const slots = this.data.toolDraft && this.data.toolDraft.slots;
+    if (!slots || !slots[index]) return;
+    const label = e.detail.value;
+    const next = slots.map((slot, i) => (i === index ? Object.assign({}, slot, { label }) : slot));
+    const choice = (kind) => [{ key: '', label: '新建需要的资源' }].concat(next.filter(slot => slot.kind === kind).map(slot => ({ key: slot.key, label: slot.label })));
+    this.setData({
+      ['toolDraft.slots[' + index + '].label']: label,
+      'toolDraft.valueSlots': choice('VALUE'),
+      'toolDraft.itemSlots': choice('ITEM'),
+      toolError: null,
     });
   },
   saveTool: function () {
     const result = templateTools.apply(this.data.toolKey, this.data.toolDraft, this.data.advanced);
     if (result.error) { this.setData({ toolError: result }); return false; }
-    const reason = supportMatrix.validate(this._supportMatrix, Object.assign({}, this.data.formData, { advancedConfigJson: result.value }), this._supportContext);
-    if (reason) { this.setData({ toolError: { error: reason, field: this.data.toolKey } }); return false; }
+    const matrixError = (advanced) => supportMatrix.validate(this._supportMatrix, Object.assign({}, this.data.formData, { advancedConfigJson: advanced }), this._supportContext);
+    const reason = matrixError(result.value);
+    // 站点上本来就有的错不是这张工具单写出来的,不挪到工具单上(L04-009)
+    if (reason && reason !== matrixError(this.data.advanced)) { this.setData({ toolError: { error: reason, field: this.data.toolKey } }); return false; }
     this._toolSelected = templateTools.selected(result.value);
     this._toolSummaries = templateTools.summaries(result.value);
-    this._setFormState({ advanced: result.value, toolSheetOpen: false, toolError: null, advancedConfigError: '' });
+    const prior = this.data.advancedConfigError;
+    const patch = { advanced: result.value, toolSheetOpen: false, toolError: null };
+    if (prior && advancedGameConfig.validate(result.value, this._advancedValidateOpts()) !== prior) patch.advancedConfigError = '';
+    this._setFormState(patch);
     return true;
   },
   removeTool: function (e) {
@@ -2682,8 +2802,6 @@ Page({
     const locked = (this.data.lockedGames || {})[key]
       || supportMatrix.choice(this._supportMatrix, key, supportMatrix.pickAs(this.data.advanced, this._supportContext), this._supportContext);   // 第十二轮 k7 N5
     if (locked) { toast(locked); return; }
-    /* 整段 advanced 一次写回,不用「advanced.xx.enabled」这种拼出来的路径 ——
-       拼路径的写法过不了零消费门禁,也让人看不出到底动了哪几段。 */
     const advanced = nodeGameCatalog.applyToConfig(this.data.advanced, key);
     // 换主玩法时保留已加的其它客观题段（主玩法仍是客观题时）
     const objective = ['qa', 'sort', 'match', 'classify'];
@@ -2705,11 +2823,8 @@ Page({
     // validationMethod 只由参与方式修改；主玩法判定由 enabled section 决定。
     // L04-008:已存模板上换主玩法是一次修改，返回时要问。新建时选玩法、onLoad 按入口参数预选都不算(主人定:只选了玩法退出不弹)
     const authorEdit = !e.currentTarget.dataset.pristine && this._templateId > 0;
-    if (authorEdit) this.data.dirty = true;
-    const present = this._presentPatch(advanced, game.section); if (this._supportContext && this._supportContext.settled && ![4, 5].includes(Number(this.data.formData.validationMethod)) && !this._r5ParticipationChanged) this._setFormState({ 'formData.validationMethod': 5 });   // 第十二轮 k7 N5:任务站参与方式默认定位到达
-    this.setData({
-      advanced: advanced,
-      submitError: authorEdit ? '' : this.data.submitError,
+    const present = this._presentPatch(advanced, game.section);
+    const patch = Object.assign({
       gameKey: key,
       gameCurrent: game,
       gameSection: game.section,
@@ -2718,16 +2833,10 @@ Page({
       pvMethodLabel: game.label,
       pvMethodIconName: game.icon,
       presentChoice: present.presentChoice,
-      /* 2026-10-30 所有玩法都能内嵌:撤掉 presentInlineLocked(不再置灰) */
-      /* 同上撤掉 presentLockReason */
-    }, () => {
-      this._refreshOutcomeContract();
-      this._syncSegments();
-      this._prefillRuleSteps();
-      this.refreshPreviewState();
-    });
-    this._refreshSupportMatrix();
-    this._syncCheckDerived(advanced);
+    }, advancedWritePatch(this.data.advanced, advanced));
+    // 第十二轮 k7 N5:任务站参与方式默认定位到达
+    if (this._supportContext && this._supportContext.settled && ![4, 5].includes(Number(this.data.formData.validationMethod)) && !this._r5ParticipationChanged) patch['formData.validationMethod'] = 5;
+    this._setFormState(patch, function () { this._prefillRuleSteps(); }, { pristine: !authorEdit });
   },
 
   /** 按商家此刻填的这份配置试玩(原型 §1.1 玩法模块底下那一条)。
@@ -2874,7 +2983,7 @@ Page({
       || this.data.toolSheetOpen || this.data.gameSheetOpen || this.data.categorySheetVisible || this.data.showAddSheet || this.data.previewVisible;
     if (stillGuarded) {
       this.setData({ backGuardOff: true });
-      setTimeout(() => this.setData({ backGuardOff: false }), 50);
+      this._armPageTimer('_backGuardTimer', () => { this.setData({ backGuardOff: false }); }, 50);
     }
   },
 
@@ -3429,7 +3538,7 @@ Page({
             that.data.dirty = false;
             that.setData({ submitting: false, submittingAction: '', submitError: '' });
             toast.success('玩法已保存');
-            setTimeout(function () { if (current()) that.exitPage(); }, 600);
+            that._armPageTimer('_exitTimer', function () { if (current()) that.exitPage(); }, 600);
             return;
           }
           if (that.data.from === 'fabu') {
@@ -3954,7 +4063,7 @@ Page({
     this.data.dirty = false;
     this.setData({ submitting: false, submittingAction: '', submitError: '' });
     toast.success('玩法已发布');
-    setTimeout(() => { if (current()) this.exitPage(); }, 600);
+    this._armPageTimer('_exitTimer', () => { if (current()) this.exitPage(); }, 600);
   },
 });
 // j1 F2:从「发活动」页去建玩法时,活动草稿页还在栈里 —— 建完回到它,不 reLaunch 冲掉草稿。

@@ -148,11 +148,16 @@ test('模板详情加载显示旧组合原因且不改写；添加/切主玩法�
   assert.match(p.data.errors.advanced,/无法确认是否完成/);
 });
 
-test('工具子浮层保存不通过矩阵时保留输入；去掉旧工具后可继续编辑旧主玩法', () => {
+test('工具子浮层不把站点上已有的矩阵错误当成工具错误；去掉旧工具后可继续编辑旧主玩法', () => {
   const p = page('temp'); p.data.advanced = { estimate:{enabled:true}, ...cost }; p.data.gameKey='estimate';
+  p._refreshSupportMatrix();
+  assert.match(p.data.supportError, /无法确认是否完成/);
   p.data.toolKey='trade'; p.data.toolSheetOpen=true; p.data.toolDraft={allowTrade:true};
-  p.saveTool(); assert.match(p.data.toolError.error,/无法确认是否完成/);
-  assert.equal(p.data.toolSheetOpen,true); assert.equal(p.data.toolDraft.allowTrade,true);
+  assert.equal(p.saveTool(), true);
+  assert.equal(p.data.toolError, null);
+  assert.equal(p.data.toolSheetOpen, false);
+  assert.match(p.data.supportError, /无法确认是否完成/);
+  p.data.advanced = { estimate:{enabled:true}, ...cost }; p.data.gameKey='estimate';
   p.removeTool(tap('cost')); assert.equal(p.data.supportError,'');
   assert.equal(p.data.advanced.estimate.enabled,true);
 });
