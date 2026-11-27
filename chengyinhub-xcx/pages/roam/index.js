@@ -1471,19 +1471,20 @@ Page({
     const scope = this._roamReadScope(), seq = this._roamPoiSeq = (this._roamPoiSeq || 0) + 1, current = () => scope() && seq === this._roamPoiSeq; // 连续重拉只认最后一次,旧回包晚到不覆盖新结果
     // L05-043(业主默认项 A):筛选面板早已没有入口,不再读旧的本机筛选设置,统一用默认 3 公里
     const radiusM = ROAM_POI_RADIUS_M;
+    const live = () => current() && !this._unloaded;
     return req('/api/roam/pois', 'GET', { lat: String(c.lat), lng: String(c.lng), radius: String(radiusM) }, { silentError: !!(opts && opts.silent) }).then((res) => {
-      if (!current()) return;
+      if (!live()) return;
       // 网络故障 / 非 200 / 形态不对:地图上这些点既没被证实也没被证伪,一律不说「这一带没有」
       const got = !netFail(res) && apiOk(res) ? placeMap.unwrapPois(res) : null;
       if (!got || !isRecordList(got.rows)) {
-        this.setData({ poiEmpty: false }, () => this._syncGoal());
+        this.setData({ poiEmpty: false }, () => { if (live()) this._syncGoal(); });
         return;
       }
       const paint = (list) => {
-        if (!current()) return;
+        if (!live()) return;
         this._poiTruncated = got.truncated;
         this._poiFetchedAt = { lat: c.lat, lng: c.lng, radius: radiusM }; // 读成功才记;失败后 10 秒节流一过会再试
-        this.setData({ poiEmpty: !list.length }, () => this._syncGoal());
+        this.setData({ poiEmpty: !list.length }, () => { if (live()) this._syncGoal(); });
         // BL-01:换范围会重拉,上一轮的漫游点位先摘掉(打完卡的由 _mergeSessionDonePois 保留),否则同 id 叠两份。
         // A2.2:玩家走远后的重拉(opts.merge)按 id 去重合并,离新中心 2 倍半径外的旧点才丢。
         const rest = (this._pois || []).filter((p) => !p._roamId || (opts && opts.merge && !list.some((n) => n && Number(n.id) === Number(p._roamId))
@@ -1496,44 +1497,44 @@ Page({
           return;
         }
         const roamPois = list.filter((n) => normalizeTrack([n]).length).map((n) => {
-        // 展示分类只认 roam:* 保留标签;业务身份仍按 type(1 平台地点 / 2 商家据点),不按名字猜。
-        const m = presentationForPoi(n);
-        const color = m.cat === 'merchant' ? '#D9D9D9' : (m.cat === 'park' ? '#A6A6A6' : BRAND); /* ds-ok 与本页演示点 catMap 的 park / merchant 同色,原生 marker 只吃字面色值 */
-        const st = roamPoiLocalState(n);
-        const merchantAvatar = n.merchantAvatar || n.avatarUrl || n.avatar || '';
-        const npcAvatar = n.npcAvatar || '';
-        // A2.3:真实距离;没有玩家位置就不写
-        const distText = distLabel(placeMap.distanceFrom(this._player, n));
-        const cover = placeMap.coverKey(n);
-        return {
-          id: ROAM_POI_MK_BASE + Number(n.id), _roamId: n.id, cat: m.cat, isCityNode: n.type === 2 || !!n.templateId, name: n.name,
-          lat: Number(n.lat), lng: Number(n.lng), address: n.address || '', tags: n.tags || '',
-          // 非商户地点的 description 不是审核意义来源，绝不直出；商户说明仍走既有确定性探店信息。
-          desc: n.type === 2 ? (n.description || '') : '', points: n.xp || 20, serverXp: n.xp != null && Number(n.xp) > 0 ? Number(n.xp) : 0,
-          icon: m.icon, catLabel: m.catLabel, color,
-          imgUrl: MOCK_IMG, state: st, first: !n.found,
-          // 第九轮 m1:据点封面(roam_poi.cover_img)才是照片图钉;没有封面就是深色圆
-          photo: cover ? imgUrl(cover) : '',
-          // A4.2:推荐理由唯一受控字段(服务端 quotes 优先,其次目录 note);非商家绝不直出 description
-          quote: placeMap.reasonFor(n, null), credit: placeMap.credit(n), sourceList: placeMap.quoteSources(n),
-          gallery: placeMap.galleryKeys(n), found: !!n.found,
-          merchantId: n.merchantId || null,
-          metaLine: m.catLabel + (distText ? ' · ' + distText : ''), radiusM: n.radiusM || 80,
-          nodeLevel: placeMap.nodeLevel(n),
-          // 商家上传头像优先；没有时才使用门店 NPC 形象。
-          mapAvatar: merchantAvatar || npcAvatar,
-          mapAvatarKind: merchantAvatar ? 'merchant' : (npcAvatar ? 'npc' : ''),
-          npcAvatar,
-        };
+          // 展示分类只认 roam:* 保留标签;业务身份仍按 type(1 平台地点 / 2 商家据点),不按名字猜。
+          const m = presentationForPoi(n);
+          const color = m.cat === 'merchant' ? '#D9D9D9' : (m.cat === 'park' ? '#A6A6A6' : BRAND); /* ds-ok 与本页演示点 catMap 的 park / merchant 同色,原生 marker 只吃字面色值 */
+          const st = roamPoiLocalState(n);
+          const merchantAvatar = n.merchantAvatar || n.avatarUrl || n.avatar || '';
+          const npcAvatar = n.npcAvatar || '';
+          // A2.3:真实距离;没有玩家位置就不写
+          const distText = distLabel(placeMap.distanceFrom(this._player, n));
+          const cover = placeMap.coverKey(n);
+          return {
+            id: ROAM_POI_MK_BASE + Number(n.id), _roamId: n.id, cat: m.cat, isCityNode: n.type === 2 || !!n.templateId, name: n.name,
+            lat: Number(n.lat), lng: Number(n.lng), address: n.address || '', tags: n.tags || '',
+            // 非商户地点的 description 不是审核意义来源，绝不直出；商户说明仍走既有确定性探店信息。
+            desc: n.type === 2 ? (n.description || '') : '', points: n.xp || 20, serverXp: n.xp != null && Number(n.xp) > 0 ? Number(n.xp) : 0,
+            icon: m.icon, catLabel: m.catLabel, color,
+            imgUrl: MOCK_IMG, state: st, first: !n.found,
+            // 第九轮 m1:据点封面(roam_poi.cover_img)才是照片图钉;没有封面就是深色圆
+            photo: cover ? imgUrl(cover) : '',
+            // A4.2:推荐理由唯一受控字段(服务端 quotes 优先,其次目录 note);非商家绝不直出 description
+            quote: placeMap.reasonFor(n, null), credit: placeMap.credit(n), sourceList: placeMap.quoteSources(n),
+            gallery: placeMap.galleryKeys(n), found: !!n.found,
+            merchantId: n.merchantId || null,
+            metaLine: m.catLabel + (distText ? ' · ' + distText : ''), radiusM: n.radiusM || 80,
+            nodeLevel: placeMap.nodeLevel(n),
+            // 商家上传头像优先；没有时才使用门店 NPC 形象。
+            mapAvatar: merchantAvatar || npcAvatar,
+            mapAvatarKind: merchantAvatar ? 'merchant' : (npcAvatar ? 'npc' : ''),
+            npcAvatar,
+          };
         });
         // 真 POI 优先,拼在演示 POI 前(演示作兜底底色)
         this._pois = this._mergeSessionDonePois(roamPois.concat(rest));
         this._seenSweepHistory();
-        this._genIcons().then(() => { if (current()) { this._syncMarkers(); this._syncSparkCircles(); } });
+        this._genIcons().then(() => { if (live()) { this._syncMarkers(); this._syncSparkCircles(); } });
       };
       // 点位先上图。种子封面等许可清单,不让最慢的一个图集文件挡住这一层。
       paint((got.rows || []).map(holdSeedCover));
-      paint(await resolvePlaceMedia(getApp(), got.rows));
+      return resolvePlaceMedia(getApp(), got.rows).then((list) => paint(list));
     });
   },
 

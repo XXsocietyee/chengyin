@@ -41,14 +41,16 @@ function normalizeCode(value) {
 }
 
 // 归因跟着账号走:storage 是整机共享的,A 号捕获的标记不能带进同一台手机上 B 号的订单。
-// 会话字段 user_id 由 utils/session/session-store.js 维护,退出/换号时清空。
-// 优先读 App 会话(唯一真相);onLaunch 之前 getApp() 尚不可用时才退回同一 storage 键。
+// 归属只认 App 会话 getUserID()。wx storage 的 user_id 会在换号后残留,不能拿来绑定。
+// 会话还没有用户(onLaunch 之前、已退出、getUserID 为空或 getApp 不可用)就保持未绑定。
 function currentMemberId() {
   try {
     const app = typeof getApp === 'function' ? getApp() : null
-    if (app && typeof app.getUserID === 'function') return toPositiveLong(app.getUserID())
-  } catch (e) { /* fall through to storage */ }
-  try { return toPositiveLong(wx.getStorageSync('user_id')) } catch (e) { return null }
+    if (!app || typeof app.getUserID !== 'function') return null
+    return toPositiveLong(app.getUserID())
+  } catch (e) {
+    return null
+  }
 }
 
 function readRecord() {

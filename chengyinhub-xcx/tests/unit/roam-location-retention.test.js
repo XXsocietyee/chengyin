@@ -17,11 +17,14 @@ test('unconfirmed recovery keeps its linked run until real server finish readbac
 })
 test('actual player store persists cleanup and never silently succeeds on write failure', () => {
   const source = [{ ts: 1, distance: 2, track: [{ lat: 3 }] }]
-  let saved
-  const memory = createPlayerRoamMemory(8, { getStorageSync: k => k.endsWith(':sessions') ? source : null,
-    setStorageSync: (k, v) => { saved = v } })
+  const values = {}
+  const sessionsKey = 'roam_memory_v1:8:sessions'
+  const memory = createPlayerRoamMemory(8, {
+    getStorageSync: k => (Object.prototype.hasOwnProperty.call(values, k) ? values[k] : (k === sessionsKey ? source : null)),
+    setStorageSync: (k, v) => { values[k] = v },
+  })
   assert.equal(memory.readSessionState().sessions[0].track, undefined)
-  assert.equal(saved[0].distance, 2)
+  assert.equal(values[sessionsKey][0].distance, 2)
   const failing = createPlayerRoamMemory(9, { getStorageSync: k => k.endsWith(':sessions') ? source : null,
     setStorageSync: () => { throw Error('disk full') } })
   assert.deepEqual(failing.readSessionState(), { ok: false, sessions: [] })

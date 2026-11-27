@@ -5,7 +5,6 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const sourceInventory = require('../../scripts/mini-program-source-inventory')
-const withdrawForm = require('../../utils/withdraw-form.js')
 const { VERSIONS } = require('../../utils/compliance/usage-consent.js')
 
 const XCX_ROOT = path.join(__dirname, '../..')
@@ -35,7 +34,6 @@ function clientPairs() {
   const scene = /const CONSENT_SCENE = '([a-z_]+)'/.exec(merchant)
   assert.ok(doc && scene, 'pages/play/merchant 的 CONSENT_DOC/CONSENT_SCENE 解析失败')
   pairs.push(['pages/play/merchant/index.js', doc[1], scene[1]])
-  pairs.push(['utils/withdraw-form.js', withdrawForm.CONSENT_DOC_TYPE, withdrawForm.CONSENT_SCENE])
   for (const docType of Object.keys(VERSIONS)) pairs.push(['utils/compliance/usage-consent.js', docType, 'app_launch'])
   return pairs
 }
@@ -55,8 +53,8 @@ test('小程序每一处同意上报的 docType/scene 都在后端白名单内',
 })
 
 test('negative control:后端删掉一个场景,扫描必须报出来', () => {
-  const source = fs.readFileSync(SERVER_PATH, 'utf8').replace('setOf("withdrawal")', 'setOf("withdraw")')
+  const source = fs.readFileSync(SERVER_PATH, 'utf8').replace('setOf("object_photo")', 'setOf("object_photo_removed")')
   const table = serverScenes(source)
   const bad = clientPairs().filter(([, docType, scene]) => !(table.get(docType) && table.get(docType).has(scene)))
-  assert.ok(bad.some(([, docType]) => docType === 'bank_account_collection'))
+  assert.ok(bad.some(([, docType]) => docType === 'photo_model_processing'))
 })

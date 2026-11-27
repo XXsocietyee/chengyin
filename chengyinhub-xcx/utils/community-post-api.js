@@ -45,7 +45,7 @@ function normalizeComment(row) {
     isFollowTheUser: value(row, 'viewerFollowing', 'viewer_following'),
     rootId: value(row, 'rootId', 'root_id'), parentId: value(row, 'parentId', 'parent_id') });
 }
-function createClient(app, wxApi) {
+function createIsolatedClient(app, wxApi) {
   const posts = Object.create(null), comments = Object.create(null), pages = Object.create(null), uploads = Object.create(null), commands = Object.create(null);
   let owner = null, credential = '', ownerEpoch = 0, mutationRevision = 0, reporting = null;
   const currentCredential = () => typeof app.getAuthorization === 'function' ? app.getAuthorization() || '' : '';
@@ -370,6 +370,18 @@ function createClient(app, wxApi) {
       const row = commentRecovery.pending(wxApi, owner, postId);
       return row && row.status !== 'rejected' ? { ...row.wire } : null;
     } };
+}
+// L10-010:列表、详情、我的各自 createClient 时若各持一份帖文缓存,一边点过赞,另一边仍按未赞再点一次。
+// 同一个 App 实例共用一个客户端;换号仍由客户端里的 resetForOwner 清缓存。
+const sharedCommunityClients = new WeakMap();
+function createClient(app, wxApi) {
+  if (app && typeof app === 'object') {
+    const shared = sharedCommunityClients.get(app);
+    if (shared) return shared;
+  }
+  const client = createIsolatedClient(app, wxApi);
+  if (app && typeof app === 'object') sharedCommunityClients.set(app, client);
+  return client;
 }
 function mediaRows(rows) {
   return rows.map(m => ({ id: m.id,

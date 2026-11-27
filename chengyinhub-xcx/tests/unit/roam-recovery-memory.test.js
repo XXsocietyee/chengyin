@@ -17,8 +17,9 @@ test('同设备冷重进保留待确认操作，不串玩家，不能静默空�
   assert.equal(a.writeRecovery(record), true)
   assert.deepEqual(createPlayerRoamMemory('9', storage).readRecoveryState().record, record)
   assert.equal(createPlayerRoamMemory('10', storage).readRecoveryState().record, null)
-  storage.setStorageSync = () => {}
+  storage.setStorageSync = () => { throw new Error('full') }
   assert.equal(a.writeRecovery({ ...record, pendingTiles: [] }), false)
+  assert.deepEqual(a.readRecoveryState().record, record)
 })
 
 test('清空本机缓存必须连 recovery 一起清(否则清完再进还提示「已找回」)', () => {

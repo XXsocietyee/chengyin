@@ -6,9 +6,8 @@
 // 行为已不存在,留着只会让「三个入口还在建单」这个假事实常驻。本文件只保留两件仍成立的事:
 //   ① 俱乐部分润站内入口 → 我的资产宿主的场景栈导航(与提现表单无关);
 //   ② 提现能力门禁(withdrawable)仍由各入口统一读取;
-//   ③ 共享工具与后端接口不陪葬:utils/withdraw-form.js 仍在。
-// L09-124
-// 业主默认 A(2026-11-24):闲置的 subpackageA/utils/withdrawal-preflight.js 连同其单测删除,提现统一走客服。
+//   ③ 后端打款接口不在这次改动里新增或删除。
+// L09-124 / L10-016:提现表单与银行卡预检都没有生产 require,两份工具连同单测删除,提现统一走客服。
 // 新弹窗契约(入口打开客服会话说明,且不放微信号)见 withdraw-cs-popup-contract.test.js。
 
 const assert = require('node:assert/strict')
@@ -108,15 +107,28 @@ test('负控:任一宿主退回 player 角色判断时能力门禁必须判红',
   }
 })
 
-test('退役不陪葬:共享校验工具仍在,闲置的银行卡预检工具已删(后端接口不动)', () => {
-  const withdrawForm = require(path.join(ROOT, 'utils/withdraw-form.js'))
-  assert.equal(typeof withdrawForm.canSubmitWithdraw, 'function')
-  assert.equal(typeof withdrawForm.checkWithdrawForm, 'function')
-  assert.equal(typeof withdrawForm.CONSENT_DOC_TYPE, 'string')
+function productionJs() {
+  const out = []
+  const walk = (dir) => {
+    for (const name of fs.readdirSync(dir)) {
+      if (name === 'node_modules' || name === 'tests') continue
+      const abs = path.join(dir, name)
+      const stat = fs.statSync(abs)
+      if (stat.isDirectory()) walk(abs)
+      else if (name.endsWith('.js')) out.push(abs)
+    }
+  }
+  walk(ROOT)
+  return out
+}
 
-  // L09-124
-  // 银行卡预检工具已删(无入口调用),不得再打包
+test('L10-016:无生产引用的提现表单与预检已删,不新增打款接口', () => {
+  assert.equal(fs.existsSync(path.join(ROOT, 'utils/withdraw-form.js')), false)
   assert.equal(fs.existsSync(path.join(ROOT, 'subpackageA/utils/withdrawal-preflight.js')), false)
+  assert.equal(fs.existsSync(path.join(ROOT, 'utils/withdrawal-preflight.js')), false)
+  const requireHit = /require\([^)]*(withdraw-form|withdrawal-preflight)/
+  const hits = productionJs().filter((file) => requireHit.test(fs.readFileSync(file, 'utf8')))
+  assert.deepEqual(hits, [])
 })
 
 test('退役:三个原写入口的处理器里不得再出现建单/预检调用', () => {

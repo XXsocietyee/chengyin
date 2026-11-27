@@ -121,6 +121,10 @@ test('预下载:首页拉主题详情分包、主题详情拉报名所在分包,
   const rule = app.preloadRule;
   assert.ok(rule['pages/index/index'].packages.includes('subpackageTopic'));
   assert.equal(rule['pages/index/index'].packages.includes('subpackageTemplateDetail'), false);
+  assert.equal(rule['pages/index/index'].packages.includes('subpackageA'), false);
+  // L10-004:我的页的资料组件在会员分包里。进这一页要先预下载 subpackageMember,不能只预下载 subpackageA。
+  assert.equal(rule['pages/member/index/index'].packages[0], 'subpackageMember');
+  assert.ok(rule['pages/member/index/index'].packages.includes('subpackageA'));
   assert.deepEqual(rule['pages/topic/index/index'], { network: 'wifi', packages: ['subpackageMember', 'subpackagePlaykit'] }); // 2026-11-21 play 分包拆分:玩法组件分包一并预下载
   const names = new Set(app.subPackages.map((s) => s.name || s.root));
   for (const [page, r] of Object.entries(rule)) for (const pkg of r.packages) assert.ok(names.has(pkg), page + ' → ' + pkg);

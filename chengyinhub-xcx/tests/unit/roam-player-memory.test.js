@@ -50,6 +50,36 @@ test('漫游探索记忆按玩家隔离，同设备切换账号不会串迷雾�
   assert.equal(snapshot['roam_memory_v1:202:tiles'], undefined)
 })
 
+test('迷雾写入不回读整包，也不把历史序列化两遍', () => {
+  const values = {}
+  const reads = []
+  let stringify = 0
+  const original = JSON.stringify
+  JSON.stringify = function () {
+    stringify += 1
+    return original.apply(JSON, arguments)
+  }
+  const storage = {
+    getStorageSync(key) { reads.push(key); return values[key] },
+    setStorageSync(key, value) { values[key] = value },
+  }
+  try {
+    const memory = createPlayerRoamMemory('101', storage)
+    assert.equal(memory.writeTiles({ a: 1, b: 1 }, 4), true)
+    assert.deepEqual(reads.filter(key => key === 'roam_memory_v1:101:tiles'), ['roam_memory_v1:101:tiles'])
+    assert.equal(stringify, 0)
+    assert.equal(values['roam_memory_v1:101:tiles'].serverCursor, 4)
+    assert.equal(typeof values['roam_memory_stamp_v1:101:tiles'], 'string')
+    reads.length = 0
+    storage.setStorageSync = () => {}
+    assert.equal(memory.writeTiles({ a: 1 }, 5), false)
+    assert.equal(values['roam_memory_v1:101:tiles'].serverCursor, 4)
+    assert.equal(stringify, 0)
+  } finally {
+    JSON.stringify = original
+  }
+})
+
 test('缺少玩家身份时探索记忆读空且拒绝写入', () => {
   const storage = memoryStorage()
   const anonymous = createPlayerRoamMemory('', storage)
