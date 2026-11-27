@@ -136,14 +136,28 @@ public class PlayNodeQueryApplication {
     AjaxResult prepareNodes(NodeProjection read) {
         boolean branchGraph = TopicRouteModePolicy.isEffectiveBranchGraph(read.routeTopic, read.routeState);
         if (branchGraph) {
-            if (!read.registered) {
+            if (!read.registered && !read.trialMode) {
                 // 未报名没有权威路线局；返回注册空态，但绝不把未选支线素材塞进响应。
                 read.nodeList = new ArrayList<>();
+            } else if (read.trialMode) {
+                // 试玩态不建局：保留节点列表以便完整投影第 1 站，第 2 站及之后在 finishNode 统一剥离。
             } else if (read.routeState == null || !TopicRouteState.BRANCH_GRAPH.equals(read.routeState.getRouteMode())) {
                 return error("路线状态暂时不可用，请重试");
             } else {
                 read.nodeList = visibleBranchNodes(read.nodeList, read.routeState);
             }
+        }
+        if (read.trialMode) {
+            List<CmsTopicChapter> trialChapters = null;
+            if (cmsTopicChapterService != null) {
+                CmsTopicChapter chapterProbe = new CmsTopicChapter();
+                chapterProbe.setTopicId(read.tId);
+                trialChapters = cmsTopicChapterService.selectCmsTopicChapterList(chapterProbe);
+            }
+            CmsTopicNode firstStation = com.chengyinhub.business.service.support.FirstStationTrialPolicy
+                    .firstStation(read.nodeList, trialChapters);
+            read.trialStationId = firstStation == null ? null : firstStation.getId();
+            read.trialChapterId = firstStation == null ? null : firstStation.getChapterId();
         }
         read.puzzleHintLevelByNode = new HashMap<>();
         if (read.routeState != null && read.routeState.getOpening() != null
@@ -237,7 +251,9 @@ public class PlayNodeQueryApplication {
         read.playableNodeIds = new java.util.HashSet<>();
         // 节点探索值真源缓存(模板 xp 按 templateId 去重查询),与 advanceProgress 的 resolveNodeXp 同一口径
         read.nodeXpCache = new HashMap<>();
-        read.firstStationId = com.chengyinhub.business.service.support.StationImageVisibility.firstStationId(read.nodeList);
+        read.firstStationId = read.trialMode && read.trialStationId != null
+                ? read.trialStationId
+                : com.chengyinhub.business.service.support.StationImageVisibility.firstStationId(read.nodeList);
         read.visitedChapterIds = new java.util.HashSet<>();
         read.placeChapterIds = new java.util.HashSet<>();
         read.visitConfigByNode = new HashMap<>();
@@ -620,6 +636,14 @@ public class PlayNodeQueryApplication {
                     "validationMethod", "sensorType", "sensorConfig"));
         }
         if (read.playMode == PlayMode.FREE_COLLECT) projectFreeExploreVisit(read, n, m);
+        if (read.trialMode) {
+            boolean isTrialStation = read.trialStationId != null && read.trialStationId.equals(n.getId());
+            if (isTrialStation) {
+                m.put("trialStation", true);
+            } else {
+                com.chengyinhub.business.service.support.FirstStationTrialPolicy.stripLockedTrialNode(m);
+            }
+        }
         read.nodes.add(m);
     }
 
@@ -847,6 +871,15 @@ public class PlayNodeQueryApplication {
             data.put("storyUnlocked", read.visitedChapterIds.size());
             data.put("storyTotal", read.placeChapterIds.size());
         }
+        if (read.trialMode) {
+            chapters = com.chengyinhub.business.service.support.FirstStationTrialPolicy
+                    .gateTrialChapters(chapters, read.trialStationId, read.trialChapterId);
+            data.put("trialMode", true);
+            if (read.trialStationId != null) data.put("trialStationId", read.trialStationId);
+            if (topicForFlow != null && topicForFlow.getSelfPlayPrice() != null) {
+                data.put("selfPlayPrice", topicForFlow.getSelfPlayPrice());
+            }
+        }
         data.put("chapters", chapters);
         data.put("nodes", read.nodes);
         // FE-G7:主题级「只有权益、没有游戏」(判据见 PerkDisplayTerms.perkOnly)。只在为 true 时加字段,
@@ -1071,6 +1104,10 @@ public class PlayNodeQueryApplication {
         Map<Long, Integer> nodeXpCache;
         /** F07:城市定向第一站(到站前唯一下发站图的站)。 */
         Long firstStationId;
+        /** §3.2 第 1 站免费试玩态与第 1 站/章节标识。 */
+        boolean trialMode;
+        Long trialStationId;
+        Long trialChapterId;
         /** FE-STORY:自由探索各地点到访配置(visit_check / visit_radius_m)。 */
         Map<Long, com.chengyinhub.business.domain.FreeExploreVisitConfig> visitConfigByNode;
         /** FE-STORY:本次投影里已到访(可读剧情)的章节。 */

@@ -142,7 +142,7 @@ Page({
     topicTabs: [{ key: '0', label: '详情' }, { key: '1', label: '故事' }, { key: '2', label: '路线' }],
     // ===== 2026-10-22 动效与新增块(docs/design/动效界面落地_20261022) =====
     imgOn: {}, imgCtx: null, coverImages: [], kbIdx: 0, coverLeaving: false, detailEnter: false, heroIdx: 0, navSolid: false, storyChars: [], castRow: [], routeNote: '', sketchPoints: [], routeReal: false, tabPre: false, tabRun: false, buyOpts: [], buySel: 0, sessionPreferName: '',
-    publisher: { name: '', avatar: '' }, heroCta: { kind: '', text: '' }, faved: false,
+    publisher: { name: '', avatar: '' }, heroCta: { kind: '', text: '' }, showTrialCta: false, faved: false,
     docked: false, dockCtaStyle: '', dockFavStyle: '',
     shareCard: { show: false, card: {} },
     // 分享页「保存图片」走相册授权:页内弹隐私确认,不整页跳隐私页
@@ -384,10 +384,12 @@ Page({
     const sketchPoints = [].concat(...(data.chaptersList || []).map((c) => (c && c.nodes) || [])).map(routePoint).filter(Boolean).map((p) => ({ lat: p.latitude, lng: p.longitude }));
     const price = data.selfPlayPrice;
     const priceText = money.yuan(price) || '';
+    const heroCta = motion.buildHeroCta(data, { isJoin: this.data.is_join, merchantClosed: data.merchantClosed === true, priceText, preferSession: this._viaSession });
     this.setData({
       coverImages: motion.buildCoverImages(data), kbIdx: 0,
       publisher: motion.buildPublisher(data),
-      heroCta: motion.buildHeroCta(data, { isJoin: this.data.is_join, merchantClosed: data.merchantClosed === true, priceText, preferSession: this._viaSession }),
+      heroCta,
+      showTrialCta: motion.canOfferFirstStationTrial(data, { isJoin: this.data.is_join, merchantClosed: data.merchantClosed === true, heroCta }),
       merchantCards,
       storyCards: motion.buildStoryCards(data, merchantCards),
       storyMeta: motion.storyMeta(data),
@@ -571,6 +573,19 @@ Page({
     if (kind === 'joined') return this.goJoinedPlay();
     if (kind === 'selfplay') return this.selfPlayBuy();
     if (kind === 'signup') return this.bmClick({ currentTarget: { dataset: {} } });
+  },
+
+  onStartTrial() {
+    if (app.ensureLoginFor && !app.ensureLoginFor('play', () => this.onStartTrial(), { owner: this, target: () => [this.data.id, this.data.info && this.data.info.id] })) return;
+    const info = this.data.info || {};
+    const topicId = info.id || this.data.id;
+    if (!topicId || this._navigating) return;
+    this._navigating = true;
+    const name = info.name ? '&topicName=' + encodeURIComponent(info.name) : '';
+    wx.navigateTo({
+      url: '/pages/play/index?topicId=' + topicId + '&trial=1' + name,
+      complete: () => { this._navigating = false; },
+    });
   },
 
   // 收藏 = 既有的主题「喜欢」(我的-喜欢 同一个接口);进页读一次当前状态
@@ -1007,6 +1022,7 @@ Page({
     this.setData({
       is_join: 1,
       heroCta: motion.buildHeroCta(info, { isJoin: 1, merchantClosed: false, priceText }),
+      showTrialCta: false,
       reveal: {
         show: true,
         cover: (this.data.coverImages && this.data.coverImages[0]) || info.imgUrl || '',

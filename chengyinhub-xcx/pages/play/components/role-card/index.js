@@ -5,9 +5,21 @@ const { roleCardView } = require('../../utils/role-card-view.js');
 Component({
   properties: {
     view: { type: Object, value: null },
+    collapsible: { type: Boolean, value: false },
+    defaultCollapsed: { type: Boolean, value: false },
   },
-  data: { card: null },
+  data: { card: null, collapsed: false },
   observers: {
     view(value) { this.setData({ card: roleCardView(value) }); },
+    defaultCollapsed(value) { this.setData({ collapsed: !!value }); },
+  },
+  methods: {
+    toggleCollapse() {
+      if (!this.data.collapsible) return;
+      this.setData({ collapsed: !this.data.collapsed });
+    },
+    onEscapeSolo() {
+      this.triggerEvent('escapesolo', {}, { bubbles: true, composed: true });
+    },
   },
 });

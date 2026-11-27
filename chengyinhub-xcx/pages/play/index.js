@@ -66,6 +66,9 @@ const { createPlayTrail } = require('./utils/play-trail.js');
 const teamTrailKit = require('./utils/team-trail.js');
 const routeCard = require('./utils/route-card.js'); const routeCardMap = require('./utils/route-card-map.js');
 const playAccuracy = require('./utils/play-accuracy.js');       // 到达定位精度阈值(80m)与提示
+const trialUnlockUtil = require('./utils/trial-unlock.js');
+const productOrder = require('../../utils/commerce/product-order.js');
+const xpayPay = require('../../utils/checkout/selfplay-xpay-pay.js');
 const arrivalPolicy = require('./utils/arrival-radius.js'); const { ARRIVAL_RADIUS_METERS, ARRIVAL_START_RADIUS_TEXT } = arrivalPolicy; // 到达判定 v2 合同(开局 300m,精度放宽至多 200m);50m 只点亮「我已到达」,不自动到达
 const START_ACCURACY_LOW_TEXT = '定位不准，再试一次';
 const {
@@ -645,7 +648,11 @@ Page({
     // 音频播放
     audioPlaying: false, audioLoading: false, audioError: '', audioNodeId: null,
     // FE-19 入场码(玩家出动态码,商家/俱乐部扫核销);regId 由票夹带入,无则不显 fab
-    regId: ''
+    regId: '',
+    // §3.2 第 1 站免费试玩 + 第 2 站剧内主题风解锁 + 自玩双人 3 秒视角选择
+    trialMode: false,
+    trialUnlock: { show: false, stationName: '', options: [], selected: 0, loading: false, error: '', consentChecked: false },
+    duoRolePicker: { show: false, options: [], selected: '' }
   },
 
   // 隐私授权闸:app.js 优先调这里(真弹窗),没有这个方法的页面才回退到 /pages/privacy 路由页。
@@ -662,6 +669,9 @@ Page({
     this._playLoginContext = this._capturePlayLoginContext();
     this._playDisposed = false;
     options = options || {};
+    this._entryTrial = options.trial === '1' || options.trial === 'true';
+    this._trialUnlocked = false;
+    this._duoRoleHint = options.roleHint ? String(options.roleHint).trim().toUpperCase() : '';
     this._entryTopicName = options.topicName ? safeDecode(options.topicName) : '';
     this._routeState = normalizeRouteState(null);
     const win = (wx.getWindowInfo && wx.getWindowInfo()) || wx.getSystemInfoSync();
@@ -4779,7 +4789,9 @@ Page({
     if (!this.data.activityId && !this.data.topicId) { this.setData({ loading: false, emptyTip: '链接已失效', emptyKind: 'missing' }); return; }
     this._playLoadStarted = loadEpoch;
     const settled = () => { if (loadEpoch === this._playLoadStarted) this._playLoadSettled = loadEpoch; };
-    req('/api/play/nodes', 'GET', this._sessionParams()).then((res) => {
+    const nodesParams = Object.assign({}, this._sessionParams());
+    if (!this.data.activityId && this.data.topicId && this._entryTrial && !this._trialUnlocked) nodesParams.trial = true;
+    req('/api/play/nodes', 'GET', nodesParams).then((res) => {
       settled();
       if (!isCurrent()) return;
       if (res.code == 402 || res.code == '402') {
@@ -4802,8 +4814,8 @@ Page({
         return;
       }
       // 领队(leadSpectator)是运营身份,本来就不报名本场,不该被未报名空态挡住;
-      // 它只解锁渲染,玩家权益仍由 registered 管。判据见 play-lead-spectator-gate.test.js。
-      if (d.registered === false && !d.leadSpectator) {
+      // 第 1 站免费试玩(trialMode)未购票先体验第 1 站,同样放行渲染。
+      if (d.registered === false && !d.leadSpectator && !d.trialMode) {
         that.setData({ loading: false, emptyTip: '你还没有报名这个场次', emptyKind: 'signup' });
         return;
       }
@@ -4852,6 +4864,15 @@ Page({
       // subpackagePrefab。那条换轨让「用玩法模板 + 主题配置做出《预制人生》」永远无法验收 ——
       // 作者配得再对,一取这个名字就被顶掉,看到的仍是写死在 JS 里的那份。
       that._topicAudioUrl = d.topicAudioUrl || '';
+      that._trialStationId = d.trialStationId != null ? d.trialStationId : '';
+      if (d.selfPlayPrice != null) that._trialSelfPlayPrice = d.selfPlayPrice;
+      const isTrial = d.trialMode === true;
+      if (!isTrial && !that.data.activityId && d.topicId && !that._duoRoleHint) {
+        try {
+          const savedRole = wx.getStorageSync(trialUnlockUtil.duoRoleStorageKey(that._playOwner, d.topicId, d.runKey || routeState.sessionId || '0'));
+          if (savedRole) that._duoRoleHint = String(savedRole).trim().toUpperCase();
+        } catch (e) {}
+      }
       that.setData({
         loading: false, emptyTip: '', emptyKind: '', topicId: d.topicId || '', topicName, topicDesc: d.topicDesc || '', topicCover: d.topicCover || '', topicAiGenerated: d.topicAiGenerated === true,
         narrationAvailable: hasVoice(d, nodes), musicAvailable: hasMusic(d),
@@ -4862,9 +4883,10 @@ Page({
         routeNotice: that._routeNoticeForState(routeState),
         journeyAttributes: routeState.attributes,
         timeBanner: d.playable === false ? (d.timeNote || '') : '',
-        // M2 自玩态:顶部状态条"自由探索中 · 有效期至 M/D"
+        // M2 自玩态:顶部状态条"自由探索中 · 有效期至 M/D"；试玩态显式提示"免费试玩第 1 站"
         selfPlay: !!d.selfPlay,
-        selfPlayBanner: d.selfPlay ? ('自由探索中 · 有效期至 ' + that._fmtMD(d.expiresAt)) : '',
+        trialMode: isTrial,
+        selfPlayBanner: isTrial ? '免费试玩第 1 站' : (d.selfPlay ? ('自由探索中 · 有效期至 ' + that._fmtMD(d.expiresAt)) : ''),
         chapter, nodes, total: nodes.length,
         chapterCards,
         doneCount: nodes.filter((n) => n.done).length,
@@ -4896,6 +4918,13 @@ Page({
           }
           else that._openStory();
         } else if (!first && that.data.chapterFull) that.openChapterFull();
+        // §3.2 试玩解锁后无缝续玩第 2 站（零进度丢失）
+        if (!isTrial && that._pendingResumeNodeId != null) {
+          const resumeId = that._pendingResumeNodeId;
+          that._pendingResumeNodeId = null;
+          const target = that._nodeById(resumeId) || (that.data.nextNode && that._nodeById(that.data.nextNode.nodeId));
+          if (target && !target.done) that.openSheet(target);
+        }
         // R9-21:服务端态允许继续时,把上次暂停的会话恢复成 paused(不重开、不丢用时)
         that._restoreRunSession(d, routeState, nodes);
         // N3(2026-11-21 新玩家走查):进页不再弹定位说明 —— 那一刻玩家还没看到封面与故事。
@@ -5044,6 +5073,8 @@ Page({
       merchantId: n.merchantId || 0,                         // S1 卡堆行「合作商户」标注(后端未下发时恒为0,标注不显示)
       // 节点级前置解锁(服务端 /nodes 下发;硬闸在服务端,这里只做置灰与提示)
       locked: !!n.locked,
+      trialLocked: n.trialLocked === true,
+      trialStation: n.trialStation === true,
       paused: String(n.runtimeStatus || n.stationStatus || '').toUpperCase() === 'PAUSED',
       runtimeStatus: String(n.runtimeStatus || '').toUpperCase(),
       unlockAfterNodeId: n.unlockAfterNodeId != null ? Number(n.unlockAfterNodeId) : 0,
@@ -6314,6 +6345,11 @@ Page({
 
   // ---------- 节点详情卡 ----------
   openSheet(node) {
+    // §3.2 试玩态进入第 2 站及之后：弹出剧内主题风(--lk-*)解锁底单
+    if (node && trialUnlockUtil.isTrialBlockedNode(node, { trialMode: this.data.trialMode, trialStationId: this._trialStationId })) {
+      this._openTrialUnlock(node);
+      return;
+    }
     // 升级4:节点级前置解锁的**唯一收口**。onSeatTap 之外,还有 goToNode(手记行)也经这里
     // 进详情卡 —— 逐个入口加守卫必漏一个,
     // 所以闸放在这一层。(服务端四个完成入口另有硬闸,这里是 UX 层:先说清「还差什么」。)
@@ -6820,6 +6856,11 @@ Page({
     this.stopAudio();
     const node = this.data.sheet.node;
     if (!node) return;
+    if (typeof this._isTrialBlockedNode === 'function' && this._isTrialBlockedNode(node)) {
+      this._openTrialUnlock(node);
+      return;
+    }
+    if (typeof this._ensureStationRole === 'function') this._ensureStationRole(node);
     if (typeof this._stageEvent === 'function') this._stageEvent('stage_enter', node.nodeId);   // CG-01-P2-9
     if (this._startGate(node, () => this.startGame())) return;   // 开局定位 / 300 米在打开首站玩法之前判,不让玩家答完才被拒
     if (Number(this.data.mode) === 2 && !this.data.isPreview && !this.data.isMock
@@ -7804,7 +7845,14 @@ Page({
   continueNext() {
     this.setData({ 'sheet.show': false });
     const nx = this.data.nextNode;
-    if (nx) { const node = this._nodeById(nx.nodeId); if (node && node.lat && node.lng) this.setData({ fmCenter: { lat: node.lat, lng: node.lng } }); }
+    if (nx) {
+      const node = this._nodeById(nx.nodeId);
+      if (node && trialUnlockUtil.isTrialBlockedNode(node, { trialMode: this.data.trialMode, trialStationId: this._trialStationId })) {
+        this._openTrialUnlock(node);
+        return;
+      }
+      if (node && node.lat && node.lng) this.setData({ fmCenter: { lat: node.lat, lng: node.lng } });
+    }
   },
   diegetic(msg) { cyToast(msg); },
   /** 开局太远:不是一闪而过的 toast,而是停住的弹窗 + 「重新定位」重试(数字不断行) */
@@ -8781,6 +8829,7 @@ Page({
     const epoch = (this._checkProbeEpoch || 0) + 1;
     this._checkProbeEpoch = epoch;
     const params = { topicId: this.data.topicId, activityId: this.data.activityId || 0, nodeId: node.nodeId };
+    if (this._duoRoleHint) params.roleHint = this._duoRoleHint;
     const loadEpoch = this._playLoadEpoch;
     req('/api/play/encounter', 'GET', params, undefined, true).then((r) => {
       const sheet = this.data.sheet || {};
@@ -8792,6 +8841,7 @@ Page({
       if (!(r.code == 200 || r.code == '200') || !r.data) return;
       // F05 角色卡:roleView 与检定无关,先落(没配 roleViews 时服务端不给,这里清掉上一站的)
       this.setData({ stationRole: r.data.roleView && typeof r.data.roleView === 'object' ? { nodeId: node.nodeId, view: r.data.roleView } : null });
+      this._maybeOpenDuoRolePicker(node, r.data.roleView);
       if (r5PlayerRuntime.isR5(r.data)) {
         if ((r.data.allowedActions || []).includes('check')) this.setData({
           'sheet.show': false, journeyCheck: { show: false }, advancedPlay: { show: true, node },
@@ -10265,6 +10315,420 @@ Page({
     if (this.data.isPreview || this.data.isMock) return;
     const q = this._runQuery(true);
     if (q) wx.navigateTo({ url: '/subpackageJourney/pages/report/index?' + q });
+  },
+
+  // ================= §3.2 Item 3: 第 1 站免费试玩 → 第 2 站剧内解锁底单（原地微信支付 + 无缝续玩） =================
+  _isTrialBlockedNode(node) {
+    return trialUnlockUtil.isTrialBlockedNode(node, { trialMode: this.data.trialMode, trialStationId: this._trialStationId });
+  },
+
+  onOpenTrialUnlockBar() {
+    if (!this.data.trialMode) return;
+    const target = (this.data.nodes || []).find((n) => trialUnlockUtil.isTrialBlockedNode(n, { trialMode: true, trialStationId: this._trialStationId }));
+    this._openTrialUnlock(target || this.data.nextNode || null);
+  },
+
+  _openTrialUnlock(targetNode) {
+    if (!this.data.topicId || this.data.isPreview || this.data.isMock) return;
+    this._trialTargetNode = targetNode || null;
+    const options = trialUnlockUtil.buildTrialUnlockOptions({
+      selfPlayPrice: this._trialSelfPlayPrice,
+      products: this._trialSeatProducts || [],
+      topicId: this.data.topicId,
+    });
+    this.setData({
+      'sheet.show': false,
+      trialUnlock: {
+        show: true,
+        stationName: (targetNode && targetNode.name) || '第 2 站',
+        options,
+        selected: 0,
+        loading: false,
+        error: '',
+        consentChecked: !!this._trialConsentReady,
+      },
+    });
+    this._loadTrialUnlockProducts(this.data.topicId);
+  },
+
+  closeTrialUnlock() {
+    if (this.data.trialUnlock && this.data.trialUnlock.loading) return;
+    this.setData({ 'trialUnlock.show': false, 'trialUnlock.error': '' });
+  },
+
+  onPickTrialOption(e) {
+    const idx = Number(e && e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.index);
+    const opts = (this.data.trialUnlock && this.data.trialUnlock.options) || [];
+    if (!Number.isInteger(idx) || idx < 0 || idx >= opts.length) return;
+    this.setData({ 'trialUnlock.selected': idx, 'trialUnlock.error': '' });
+  },
+
+  onToggleTrialConsent() {
+    const cur = !!(this.data.trialUnlock && this.data.trialUnlock.consentChecked);
+    this.setData({ 'trialUnlock.consentChecked': !cur, 'trialUnlock.error': '' });
+  },
+
+  _loadTrialUnlockProducts(topicId) {
+    if (!topicId || this._trialProductsLoading) return;
+    const that = this;
+    this._trialProductsLoading = true;
+    app.sendRequest({
+      url: '/api/marketing/product/list', method: 'GET', hideLoading: true, autoErrorToast: false,
+      data: { limit: 50 },
+      success(res) {
+        that._trialProductsLoading = false;
+        if (!res || String(res.code) !== '200' || !Array.isArray(res.data)) return;
+        that._trialSeatProducts = res.data;
+        if (!that.data.trialUnlock || !that.data.trialUnlock.show) return;
+        const options = trialUnlockUtil.buildTrialUnlockOptions({
+          selfPlayPrice: that._trialSelfPlayPrice,
+          products: res.data,
+          topicId,
+        });
+        const sel = Math.min(that.data.trialUnlock.selected || 0, Math.max(0, options.length - 1));
+        that.setData({ 'trialUnlock.options': options, 'trialUnlock.selected': sel });
+      },
+      fail() {
+        that._trialProductsLoading = false;
+        if (that.data.trialUnlock && that.data.trialUnlock.show && !(that.data.trialUnlock.options || []).length) {
+          that.setData({ 'trialUnlock.error': '票种信息读取失败，可直接购买单人票' });
+        }
+      },
+    });
+  },
+
+  onConfirmTrialUnlock() {
+    const tu = this.data.trialUnlock || {};
+    if (tu.loading || this._trialSubmitting) return;
+    if (!tu.consentChecked) {
+      this.setData({ 'trialUnlock.error': '请先勾选同意参与人信息服务说明' });
+      return;
+    }
+    const topicId = this.data.topicId;
+    const option = (tu.options || [])[tu.selected || 0];
+    if (!topicId || !option) {
+      this.setData({ 'trialUnlock.error': '票种暂不可用，请稍后重试' });
+      return;
+    }
+    const proceed = () => {
+      if (option.kind === 'product' && option.productId) {
+        this._payDuoTrialProduct(option);
+      } else {
+        this._paySingleTrialPass(topicId);
+      }
+    };
+    if (this._trialConsentReady) { proceed(); return; }
+    if (!app.recordConsent) {
+      this.setData({ 'trialUnlock.error': '同意记录服务暂不可用，请稍后重试' });
+      return;
+    }
+    this.setData({ 'trialUnlock.loading': true, 'trialUnlock.error': '' });
+    app.recordConsent({
+      docType: 'activity_host_data_sharing',
+      scene: 'activity_signup',
+      eventType: 'AGREE',
+    }).then(() => {
+      this._trialConsentReady = true;
+      this.setData({ 'trialUnlock.loading': false });
+      proceed();
+    }).catch(() => {
+      this.setData({ 'trialUnlock.loading': false, 'trialUnlock.error': '同意记录未保存，请检查网络后重试' });
+    });
+  },
+
+  _loadTrialProfile(done) {
+    const that = this;
+    const parts = { realName: '', phone: '' };
+    let left = 2;
+    let failed = false;
+    const finish = () => {
+      if (--left > 0) return;
+      if (failed) { done(null, true); return; }
+      done(parts.realName && parts.phone ? parts : null, false);
+    };
+    app.sendRequest({
+      url: '/api/user/info', method: 'POST', hideLoading: true, autoErrorToast: false,
+      data: { member_id: app.getUserID && app.getUserID() },
+      success(res) {
+        if (!res || String(res.code) !== '200') { failed = true; finish(); return; }
+        const d = res.data || {};
+        parts.phone = String(d.phone || d.mobilePhone || '').trim();
+        finish();
+      },
+      fail() { failed = true; finish(); },
+    });
+    app.sendRequest({
+      url: '/api/user/address/list', method: 'POST', hideLoading: true, autoErrorToast: false,
+      data: {},
+      success(res) {
+        if (!res || String(res.code) !== '200') { failed = true; finish(); return; }
+        const rows = (res.data && Array.isArray(res.data.rows)) ? res.data.rows : [];
+        const picked = rows.find((r) => r && r.isDefault == 1) || rows[0] || null;
+        parts.realName = picked ? String(picked.name || picked.realName || '').trim() : '';
+        if (!parts.phone && picked && picked.phone) parts.phone = String(picked.phone).trim();
+        finish();
+      },
+      fail() { failed = true; finish(); },
+    });
+  },
+
+  _paySingleTrialPass(topicId) {
+    const that = this;
+    this._trialSubmitting = true;
+    this.setData({ 'trialUnlock.loading': true, 'trialUnlock.error': '' });
+    const fail = (msg) => {
+      that._trialSubmitting = false;
+      that.setData({ 'trialUnlock.loading': false, 'trialUnlock.error': msg || '支付未能发起，请重试' });
+    };
+    this._loadTrialProfile((profile, loadFailed) => {
+      if (loadFailed) { fail('资料读取失败，请检查网络后重试'); return; }
+      if (!profile) {
+        that._trialSubmitting = false;
+        that.setData({ 'trialUnlock.loading': false, 'trialUnlock.error': '下单前需完善姓名与手机号，请前往主题页补充' });
+        return;
+      }
+      if (!that._trialReqId) {
+        that._trialReqId = 'trial_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+      }
+      const body = {
+        ownerType: 1,
+        ownerId: Number(topicId),
+        realName: profile.realName,
+        phone: profile.phone,
+        isUsePoint: 0,
+        requestId: that._trialReqId,
+      };
+      app.sendRequest({
+        url: '/api/registration/create', method: 'POST', hideLoading: true, autoErrorToast: false,
+        header: { 'Content-Type': 'application/json' },
+        data: JSON.stringify(body),
+        success(res) {
+          if (!res || String(res.code) !== '200' || !res.data) {
+            fail((res && res.msg) || '下单失败，请重试');
+            return;
+          }
+          const d = res.data;
+          if (Number(d.payableAmount) === 0) {
+            that._trialReqId = null;
+            that._completeTrialUnlock();
+            return;
+          }
+          if (xpayPay.needsSigning(d)) {
+            xpayPay.signIntent(app, wx, d.registrationId, (signed) => {
+              if (!signed || !signed.ok) { fail((signed && signed.msg) || '支付参数获取失败'); return; }
+              const payData = Object.assign({}, d, signed.data);
+              xpayPay.requestPayment(wx, payData, {
+                onSuccess: () => { that._trialReqId = null; that._completeTrialUnlock(); },
+                onCancel: () => fail('已取消支付'),
+                onFail: (err) => fail((err && err.errMsg) || '支付失败，请重试'),
+              });
+            });
+            return;
+          }
+          const invokePay = (params) => {
+            wx.requestPayment(Object.assign({}, params, {
+              success() { that._trialReqId = null; that._completeTrialUnlock(); },
+              fail(err) {
+                if (/cancel/.test(String((err && err.errMsg) || ''))) { fail('已取消支付'); return; }
+                fail('支付未完成，请重试');
+              },
+            }));
+          };
+          if (d.payParams && d.payParams.package) { invokePay(d.payParams); return; }
+          app.sendRequest({
+            url: '/api/registration/pay', method: 'POST', hideLoading: true, autoErrorToast: false,
+            data: { id: d.registrationId },
+            success(payRes) {
+              const p = payRes && String(payRes.code) === '200' && payRes.data && payRes.data.payParams;
+              if (!p) { fail((payRes && payRes.msg) || '支付参数获取失败'); return; }
+              invokePay(p);
+            },
+            fail() { fail('支付发起失败，请重试'); },
+          });
+        },
+        fail() { fail('网络异常，请重试'); },
+      });
+    });
+  },
+
+  _payDuoTrialProduct(option) {
+    const that = this;
+    this._trialSubmitting = true;
+    this.setData({ 'trialUnlock.loading': true, 'trialUnlock.error': '' });
+    const fail = (msg) => {
+      that._trialSubmitting = false;
+      that.setData({ 'trialUnlock.loading': false, 'trialUnlock.error': msg || '双人票下单失败，请重试' });
+    };
+    const productId = Number(option.productId);
+    app.sendRequest({
+      url: '/api/marketing/product/quote', method: 'POST', hideLoading: true, autoErrorToast: false,
+      header: { 'content-type': 'application/json' },
+      data: JSON.stringify(productOrder.quoteRequest(productId)),
+      success(qRes) {
+        if (!qRes || String(qRes.code) !== '200' || !qRes.data) {
+          fail(productOrder.reasonText(qRes && qRes.reasonCode) || (qRes && qRes.msg));
+          return;
+        }
+        const quote = qRes.data;
+        if (!that._trialDuoReqId) that._trialDuoReqId = productOrder.newRequestId();
+        const orderBody = productOrder.orderRequest(productId, quote, productOrder.PAY_MODE.CASH, productOrder.FULFILLMENT.SELF, that._trialDuoReqId);
+        app.sendRequest({
+          url: '/api/marketing/product/order', method: 'POST', hideLoading: true, autoErrorToast: false,
+          header: { 'content-type': 'application/json' },
+          data: JSON.stringify(orderBody),
+          success(oRes) {
+            if (!oRes || String(oRes.code) !== '200' || !oRes.data) {
+              fail(productOrder.reasonText(oRes && oRes.reasonCode) || (oRes && oRes.msg));
+              return;
+            }
+            const order = oRes.data;
+            if (order.statusLabel === 'PAID') {
+              that._trialDuoReqId = null;
+              that._completeTrialUnlock();
+              return;
+            }
+            if (order.statusLabel !== 'PENDING_CASH' || !order.orderNo) {
+              fail('订单当前不可支付');
+              return;
+            }
+            that._payDuoSeatOrder(order.orderNo);
+          },
+          fail() { fail('下单请求失败，请重试'); },
+        });
+      },
+      fail() { fail('报价获取失败，请检查网络后重试'); },
+    });
+  },
+
+  _payDuoSeatOrder(orderNo) {
+    const that = this;
+    const fail = (msg) => {
+      that._trialSubmitting = false;
+      that.setData({ 'trialUnlock.loading': false, 'trialUnlock.error': msg || '支付未完成，请重试' });
+    };
+    app.sendRequest({
+      url: '/api/marketing/product/orders/' + encodeURIComponent(orderNo) + '/pay',
+      method: 'POST', hideLoading: true, autoErrorToast: false,
+      success(res) {
+        const p = res && String(res.code) === '200' && res.data && res.data.payParams;
+        if (!p) { fail(productOrder.reasonText(res && res.reasonCode) || '支付参数获取失败'); return; }
+        wx.requestPayment(Object.assign({}, p, {
+          success() { that._verifyDuoSeatOrder(orderNo, 0); },
+          fail(err) {
+            if (/cancel/.test(String((err && err.errMsg) || ''))) { fail('已取消支付'); return; }
+            that._verifyDuoSeatOrder(orderNo, 2);
+          },
+        }));
+      },
+      fail() { fail('支付发起失败，请重试'); },
+    });
+  },
+
+  _verifyDuoSeatOrder(orderNo, attempt) {
+    const that = this;
+    app.sendRequest({
+      url: '/api/marketing/product/orders/' + encodeURIComponent(orderNo),
+      method: 'GET', hideLoading: true, autoErrorToast: false,
+      success(res) {
+        const row = res && String(res.code) === '200' && res.data && res.data.orderNo === orderNo ? res.data : null;
+        if (row && row.statusLabel === 'PAID') {
+          that._trialDuoReqId = null;
+          that._completeTrialUnlock();
+          return;
+        }
+        if (attempt < 2) { setTimeout(() => that._verifyDuoSeatOrder(orderNo, attempt + 1), 1500); return; }
+        that._trialSubmitting = false;
+        that.setData({ 'trialUnlock.loading': false, 'trialUnlock.error': '支付确认中，请稍候重试' });
+      },
+      fail() {
+        that._trialSubmitting = false;
+        that.setData({ 'trialUnlock.loading': false, 'trialUnlock.error': '支付确认中，请稍候重试' });
+      },
+    });
+  },
+
+  _completeTrialUnlock() {
+    this._trialSubmitting = false;
+    this._trialUnlocked = true;
+    const target = this._trialTargetNode;
+    this._pendingResumeNodeId = target && target.nodeId != null ? target.nodeId : null;
+    this.setData({
+      trialMode: false,
+      'trialUnlock.show': false,
+      'trialUnlock.loading': false,
+      'trialUnlock.error': '',
+    });
+    cyToast('已解锁完整路线，继续第 2 站');
+    this.loadData(false);
+  },
+
+  // ================= §3.2 Item 4: 自玩双人 3 秒快速视角选择 + 谜题页常驻角色卡 + 全量逃生舱 =================
+  _ensureStationRole(node) {
+    if (!node || node.nodeId == null || node.done || this.data.isPreview || this.data.isMock || !this.data.topicId) return;
+    if (this.data.stationRole && String(this.data.stationRole.nodeId) === String(node.nodeId)) return;
+    this._refreshStationRole(node);
+  },
+
+  _maybeOpenDuoRolePicker(node, roleView) {
+    if (this.data.activityId || this.data.trialMode || this.data.isPreview || this.data.isMock) return;
+    if (this._duoRoleHint || this._duoPickerPrompted) return;
+    const options = trialUnlockUtil.buildDuoPickerOptions(roleView);
+    if (options.length < 2) return;
+    this._duoPickerPrompted = true;
+    this._duoPickerNode = node;
+    this.setData({ duoRolePicker: { show: true, options, selected: '' } });
+  },
+
+  closeDuoRolePicker() {
+    this.setData({ 'duoRolePicker.show': false });
+  },
+
+  onPickDuoRole(e) {
+    const role = String((e && e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.role) || '').trim().toUpperCase();
+    if (!role) return;
+    this._duoRoleHint = role;
+    try {
+      const key = trialUnlockUtil.duoRoleStorageKey(this._playOwner, this.data.topicId, this._serverRunKey || (this._routeState && this._routeState.sessionId) || '0');
+      wx.setStorageSync(key, role);
+    } catch (err) {}
+    this.setData({ duoRolePicker: { show: false, options: this.data.duoRolePicker.options || [], selected: role } });
+    const node = this._duoPickerNode || (this.data.sheet && this.data.sheet.node) || (this.data.game && this.data.game.nodeId != null ? this._nodeById(this.data.game.nodeId) : null);
+    if (node) this._refreshStationRole(node);
+    cyToast(role === 'SOLO' ? '已切换为全量线索' : ('已切换为视角 ' + role));
+  },
+
+  onRoleEscapeSolo() {
+    this._duoRoleHint = 'SOLO';
+    try {
+      const key = trialUnlockUtil.duoRoleStorageKey(this._playOwner, this.data.topicId, this._serverRunKey || (this._routeState && this._routeState.sessionId) || '0');
+      wx.setStorageSync(key, 'SOLO');
+    } catch (err) {}
+    const activeNode = (this.data.game && this.data.game.nodeId != null && this._nodeById(this.data.game.nodeId))
+      || (this.data.advancedPlay && this.data.advancedPlay.node)
+      || (this.data.sheet && this.data.sheet.node);
+    if (activeNode) this._refreshStationRole(activeNode);
+    cyToast('已为你展开全量线索');
+  },
+
+  _refreshStationRole(node) {
+    if (!this._isPlayAccountCurrent() || !node || node.nodeId == null || !this.data.topicId) return;
+    const params = { topicId: this.data.topicId, activityId: this.data.activityId || 0, nodeId: node.nodeId };
+    if (this._duoRoleHint) params.roleHint = this._duoRoleHint;
+    const loadEpoch = this._playLoadEpoch;
+    const seq = this._roleFetchSeq = (this._roleFetchSeq || 0) + 1;
+    app.sendRequest({
+      url: '/api/play/encounter', method: 'GET', hideLoading: true, autoErrorToast: false,
+      data: params,
+      success: (r) => {
+        if (!this._isPlayAccountCurrent() || seq !== this._roleFetchSeq || loadEpoch !== this._playLoadEpoch) return;
+        if (!r || !(r.code == 200 || r.code == '200') || !r.data) return;
+        this.setData({ stationRole: r.data.roleView && typeof r.data.roleView === 'object' ? { nodeId: node.nodeId, view: r.data.roleView } : null });
+        this._maybeOpenDuoRolePicker(node, r.data.roleView);
+      },
+      fail: () => {
+        if (this._duoRoleHint === 'SOLO') cyToast('全量线索拉取失败，请稍后重试');
+      },
+    });
   },
 });
 

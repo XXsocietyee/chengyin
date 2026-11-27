@@ -34,6 +34,7 @@ public class PlayNodeContext {
         boolean selfPlay;
         boolean nightWarning;
         boolean continuing;
+        boolean trialMode;
         CmsRegistration registration;
         AjaxResult error;
     }
@@ -46,6 +47,7 @@ public class PlayNodeContext {
     public static PlayCtx playContext(com.chengyinhub.business.service.support.PlayNodeAccessService.Context view) {
         PlayCtx ctx=new PlayCtx(); ctx.actId=view.activityId(); ctx.topicId=view.topicId();
         ctx.selfPlay=view.selfPlay(); ctx.nightWarning=view.nightWarning(); ctx.continuing=view.continuing();
+        ctx.trialMode=view.trialMode();
         if(view.registrationId()!=null) {
             ctx.registration=new CmsRegistration(); ctx.registration.setId(view.registrationId());
             ctx.registration.setPurchaseKind(view.purchaseKind());

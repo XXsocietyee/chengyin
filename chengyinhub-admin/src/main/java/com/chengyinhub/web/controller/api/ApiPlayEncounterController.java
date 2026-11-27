@@ -25,15 +25,21 @@ public class ApiPlayEncounterController extends BaseController {
 
     @Operation(summary = "玩法 Beat 只读解析")
     @GetMapping("/encounter")
-    public AjaxResult encounter(Long topicId, Long activityId, Long nodeId) {
+    public AjaxResult encounter(Long topicId, Long activityId, Long nodeId,
+            @org.springframework.web.bind.annotation.RequestParam(name = "roleHint", required = false) String roleHint) {
         Long memberId = currentMemberId();
         if (memberId <= 0) return error("请先登录");
         if (topicId == null || topicId <= 0L || nodeId == null || nodeId <= 0L) return error("参数有误");
         try {
-            return success(playEncounterService.resolve(memberId, topicId, activityId, nodeId));
+            return success(playEncounterService.resolve(memberId, topicId, activityId, nodeId, roleHint));
         } catch (ServiceException | IllegalArgumentException e) {
             return error(e.getMessage());
         }
+    }
+
+    /** 兼容旧三参调用与既有单测。 */
+    public AjaxResult encounter(Long topicId, Long activityId, Long nodeId) {
+        return encounter(topicId, activityId, nodeId, null);
     }
 
     private Long currentMemberId() {
