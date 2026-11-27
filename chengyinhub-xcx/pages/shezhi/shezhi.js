@@ -149,32 +149,36 @@ Page({
     const that = this;
     this.closeScene();
     // 按状态分流:不是主理人→申请;已是主理人无俱乐部→创建;已有俱乐部(含满2个)→管理台。
+    // 锁留到跳转结束。请求一完成就放开的话,转场前再点会再打一次 /api/club/my 并再开一页。
     loading.show('加载中');
+    let navigating = false;
+    const release = () => { that._clubTargetLoading = false; };
+    const stillHere = () => !that._unloaded && !that._hidden;
     app.sendRequest({
       url: '/api/club/my', method: 'POST', hideLoading: true, silentError: true,
       success(res) {
         loading.hide();
-        that._clubTargetLoading = false;
+        if (!stillHere()) { release(); return; }
         if (!res || res.code != '200' || !res.data || res.data.owned == null) {
+          release();
           toast(app.getRequestErrorMessage(res, '俱乐部信息加载失败'));
           return;
         }
         let owned = res.data.owned;
         if (owned && !Array.isArray(owned)) owned = [owned];
-        if (owned.length >= 1) {
-          wx.navigateTo({ url: '/pages/club/detail/index?owner=1&tab=manage' });
-        } else if (roleGuard.isClubLeader()) {
-          wx.navigateTo({ url: '/pages/club/create/index' });
-        } else {
-          wx.navigateTo({ url: '/pages/club/apply/index' });
-        }
+        const url = owned.length >= 1
+          ? '/pages/club/detail/index?owner=1&tab=manage'
+          : (roleGuard.isClubLeader() ? '/pages/club/create/index' : '/pages/club/apply/index');
+        navigating = true;
+        wx.navigateTo({ url, complete: release });
       },
       fail(res) {
-        that._clubTargetLoading = false;
         loading.hide();
+        release();
+        if (!stillHere()) return;
         toast(app.getRequestErrorMessage(res, '网络异常，俱乐部信息加载失败'));
       },
-      complete() { that._clubTargetLoading = false; }
+      complete() { if (!navigating) release(); }
     });
   },
   pickMerchant() {

@@ -192,6 +192,12 @@ Page({
   onFavoriteTabChange: function(e) {
     const key = e.detail && e.detail.key;
     if (!key || key === this.data.activeFavoriteTab || this.data.loading) return;
+    const tab = key === 'posts' ? 'posts' : (key === 'nodes' ? 'nodes' : 'topics');
+    const loaded = this._favoriteLoadedPages && this._favoriteLoadedPages[tab];
+    // 切回已经上拉过的帖文或主题:只重读第 1 页,回包时接上还在列表里的后面页。
+    this._favoriteReturnMerge = tab !== 'nodes' && loaded > 1
+      ? { tab: tab, pageNum: loaded }
+      : null;
     this.setData({
       activeFavoriteTab: key,
       pageConfig: { pageNum: 1, pageSize: 10 },
