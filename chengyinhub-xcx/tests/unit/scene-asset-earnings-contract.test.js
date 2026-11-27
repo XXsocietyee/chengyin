@@ -310,15 +310,15 @@ test('同账号普通续期后正常余额响应仍可落定', () => {
 })
 
 for (const callback of ['fail', 'successStatusAbnormal']) {
-  test(`刷新开始即清除旧金额，当前${callback}不能遗留先前金额`, () => {
+  test(`同成员刷新失败保留上次金额，当前${callback}不改成空加载`, () => {
     const h = readyBalance()
     h.ctx.refresh()
-    assert.equal(h.ctx.data.state, 'loading')
-    assert.equal(h.ctx.data.balance, '')
+    assert.equal(h.ctx.data.state, 'ready')
+    assert.equal(h.ctx.data.balance, '12.50')
     assert.equal(h.ctx.data.balanceK, null)
     h.requests[1][callback]()
-    assert.equal(h.ctx.data.state, 'error')
-    assert.equal(h.ctx.data.balance, '')
+    assert.equal(h.ctx.data.state, 'ready')
+    assert.equal(h.ctx.data.balance, '12.50')
   })
 }
 
@@ -424,9 +424,62 @@ test('收益错误态不把身份失效误报为网络原因，提现标签匹�
 })
 
 
-test('收益真实401/403与网络异常分别是登录/权限/读取故障，均不保留旧金额', () => {
-  for (const [code,state] of [[401,'login'],[403,'permission'],[500,'error']]) {
-    const h=readyBalance();h.ctx.refresh();h.requests[1].success({code,msg:'真实响应'});
-    assert.equal(h.ctx.data.state,state);assert.equal(h.ctx.data.balance,'');assert.equal(h.ctx.data.balanceK,null);
+test('首次读取的 401/403/网络异常分别是登录/权限/读取故障，且没有旧金额', () => {
+  for (const [code, state] of [[401, 'login'], [403, 'permission'], [500, 'error']]) {
+    const h = instantiate()
+    h.ctx.load(true)
+    h.requests[0].success({ code, msg: '真实响应' })
+    assert.equal(h.ctx.data.state, state)
+    assert.equal(h.ctx.data.balance, '')
+    assert.equal(h.ctx.data.balanceK, null)
   }
-});
+})
+
+test('同成员刷新遇到 401/403/网络异常仍保留上次金额', () => {
+  for (const code of [401, 403, 500]) {
+    const h = readyBalance()
+    h.ctx.refresh()
+    h.requests[1].success({ code, msg: '真实响应' })
+    assert.equal(h.ctx.data.state, 'ready')
+    assert.equal(h.ctx.data.balance, '12.50')
+  }
+})
+
+test('同成员隐藏不停空金额，只停落地；返回后新读到达前仍显示原金额', () => {
+  const h = readyBalance({ reducedMotion: false }, 88)
+  const run = h.sandbox.__motions[0]
+  assert.equal(h.ctx.data.balanceK, 0)
+  h.def.pageLifetimes.hide.call(h.ctx)
+  assert.ok(run.stopped)
+  assert.equal(h.ctx.data.state, 'ready')
+  assert.equal(h.ctx.data.balance, '88.00')
+  assert.equal(h.ctx.data.balanceK, null)
+  const hidden = JSON.stringify(h.ctx.data)
+  h.requests[0].success({ code: 200, data: { balance: 1 } })
+  assert.equal(JSON.stringify(h.ctx.data), hidden)
+  h.def.pageLifetimes.show.call(h.ctx)
+  assert.equal(h.ctx.data.state, 'ready')
+  assert.equal(h.ctx.data.balance, '88.00')
+  assert.equal(h.requests.length, 2)
+  h.requests[1].fail()
+  assert.equal(h.ctx.data.state, 'ready')
+  assert.equal(h.ctx.data.balance, '88.00')
+  h.ctx.refresh()
+  h.requests[2].success({ code: 200, data: { balance: 20 } })
+  assert.equal(h.ctx.data.balance, '20.00')
+})
+
+test('换成员立即清空，隐藏页或旧请求不能把旧余额画到新身份上', () => {
+  const h = readyBalance()
+  h.def.pageLifetimes.hide.call(h.ctx)
+  h.sandbox.__memberId = 2
+  h.requests[0].success({ code: 200, data: { balance: 88 } })
+  assert.equal(h.ctx.data.balance, '')
+  h.def.pageLifetimes.show.call(h.ctx)
+  assert.equal(h.ctx.data.state, 'loading')
+  assert.equal(h.ctx.data.balance, '')
+  h.requests[0].success({ code: 200, data: { balance: 88 } })
+  assert.equal(h.ctx.data.balance, '')
+  h.requests[1].success({ code: 200, data: { balance: 3 } })
+  assert.equal(h.ctx.data.balance, '3.00')
+})

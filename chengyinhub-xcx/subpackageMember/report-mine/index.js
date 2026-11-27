@@ -34,8 +34,7 @@ Page({
       fail() { that._settle(st) },
       successStatusAbnormal() { that._settle(st) },
     })
-    // L09-110
-    // 原因字典是静态的:同一进程 10 分钟内复用,不再每次 onShow / 每张详情都重读
+    // L09-110:同一账号的原因字典还在有效期内就不再请求;读失败可重试,换号另读
     taxonomy.readTaxonomyLabels(app, (labels) => { st.labels = labels; that._settle(st) })
   },
   // 两路都回来后再落数据;举报列表失败 → 首屏失败态 / 已有数据时轻提示。原因文案读不到只用兜底名,不挡列表。

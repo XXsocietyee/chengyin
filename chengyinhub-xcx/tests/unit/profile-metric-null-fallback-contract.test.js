@@ -25,3 +25,11 @@ test('兜底只在展示层:ready/error 判定仍用数值原值,不能被兜底
 test('metricNumber 的契约没变:缺值返回 null(这正是要兜底的原因)', () => {
   assert.match(src, /function metricNumber\(value\) \{\s*if \(value === null \|\| value === undefined \|\| value === ''\) return null;/)
 })
+
+test('他人主页获赞和粉丝缺字段显示「—」,不把省略写成 0', () => {
+  const wxml = fs.readFileSync(path.join(ROOT, 'subpackageMember/components/cy/profile/index.wxml'), 'utf8')
+  assert.match(wxml, /num\.n\(userInfo\.likeNum\)/)
+  assert.match(wxml, /num\.n\(userInfo\.fansNum\)/)
+  assert.doesNotMatch(wxml, /userInfo\.likeNum \|\| 0/)
+  assert.doesNotMatch(wxml, /userInfo\.fansNum \|\| 0/)
+})

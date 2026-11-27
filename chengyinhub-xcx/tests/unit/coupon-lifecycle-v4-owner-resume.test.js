@@ -511,12 +511,22 @@ test('L09-024 券码弹层:首次属性 observer + attached 只发一次 qr-toke
   assert.equal(h.requests.length, 2, '挂载后换券仍会重新取码')
 })
 
-test('L09-104 券码页:2 秒内连点「刷新二维码」不作废在途请求、不多发', () => {
+test('L09-104 券码页:刷新进行中再点「刷新二维码」不作废、不多发,结束后再点只刷新一次', () => {
   const h = mount(QR_PAGE, 'page', { owner: { value: 'member-A' } })
   h.instance.data.couponHistoryId = '77'
   h.instance.refreshToken()
+  const inflight = h.requests.at(-1)
   const before = h.requests.length
-  h.instance.retryNow(); h.instance.retryNow()
+  h.clock.now += 2500
+  h.instance.retryNow()
+  h.instance.retryNow()
   assert.equal(h.requests.length, before)
-  assert.equal(h.requests[before - 1].aborted, false)
+  assert.equal(inflight.aborted, false)
+  succeed(inflight, token('FIRST'))
+  h.instance.retryNow()
+  assert.equal(h.requests.length, before + 1)
+  assert.equal(h.requests.at(-1).aborted, false)
+  h.instance.retryNow()
+  assert.equal(h.requests.length, before + 1)
+  assert.equal(h.requests.at(-1).aborted, false)
 })

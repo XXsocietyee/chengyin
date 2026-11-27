@@ -28,7 +28,18 @@ function harness(options = { registrationId: ID }) {
   }, removeStorageSync: k => storage.delete(k) };
   vm.runInNewContext(source, { getApp: () => app, wx, Date, Page: definition => { page = definition; },
     require: name => name.includes('modal') ? { show: options => { confirm = options; } } : wire });
-  page.setData = patch => Object.assign(page.data, patch);
+  page.setData = patch => {
+    for (const key of Object.keys(patch)) {
+      if (!key.includes('.')) { page.data[key] = patch[key]; continue; }
+      const parts = key.split('.');
+      let cursor = page.data;
+      for (let i = 0; i < parts.length - 1; i++) {
+        if (!cursor || typeof cursor !== 'object') { cursor = null; break; }
+        cursor = cursor[parts[i]];
+      }
+      if (cursor && typeof cursor === 'object') cursor[parts[parts.length - 1]] = patch[key];
+    }
+  };
   page.onLoad(options); page.onShow();
   return { page, requests, quotes, storage, confirm: result => confirm.success(result), answer: (index, data) => requests[index].success({ code: 200, data }),
     cancel: waiver => { page.cancelReservation({ currentTarget: { dataset: { id: '41', waiver } } }); confirm.success({ confirm: true }); },
@@ -383,4 +394,85 @@ test('L09-108 explicit server refusal releases the pending review and unlocks in
     reply(h.requests[3]);
     assert.equal(h.page.data.reviewPending.requestId, id); assert.equal(h.storage.size, 1);
   }
+});
+
+// L09-038
+// 切走复制笔记再回来不丢评价正文、星级和未提交预约；换号、销毁、已离开本机的不放回。草稿不进 storage。
+function reservableOrder() {
+  const data = raw();
+  data.bundle.units[0].status = 'AVAILABLE';
+  data.bundle.chapters = [{ chapterId: '7', name: '第一章', stores: [
+    { offerId: '81', merchantName: '甲店' }, { offerId: '82', merchantName: '乙店' }] }];
+  return data;
+}
+function fillReserve(h) {
+  h.answer(0, reservableOrder());
+  h.page.openReserve({ currentTarget: { dataset: { id: '31' } } });
+  h.page.pickStore({ currentTarget: { dataset: { id: '82' } } });
+  h.page.pickDate({ detail: { value: '2026-12-01' } });
+  h.page.pickTime({ detail: { value: '15:30' } });
+}
+test('L09-038 free-explore draft survives hide/show for the same account only', () => {
+  const review = eligibleReview();
+  review.page.inputReview({ detail: { value: '想粘贴的体验' } });
+  review.page.rateReview({ detail: { value: 4 } });
+  review.page.onHide();
+  assert.equal(review.page.data.reviewContent, '');
+  assert.equal(review.page.data.review, null);
+  assert.equal(review.storage.size, 0, '未提交的评价不进 storage');
+  review.page.onShow();
+  assert.equal(review.page.data.reviewContent, '想粘贴的体验');
+  assert.equal(review.page.data.reviewRating, 4);
+  assert.equal(review.page.data.review.merchantRowId, '8001');
+  assert.equal(review.page.data.review.canCreate, true);
+  review.answer(review.requests.length - 1, raw());
+  assert.equal(review.page.data.reviewContent, '想粘贴的体验');
+  assert.equal(review.page.data.reviewRating, 4);
+  assert.equal(review.storage.size, 0);
+  review.page.onHide(); review.switchOwner(); review.page.onShow();
+  assert.equal(review.page.data.reviewContent, '');
+  assert.equal(review.page.data.review, null);
+
+  const booked = harness();
+  fillReserve(booked);
+  booked.page.onHide();
+  assert.equal(booked.page.data.reserveForm, null);
+  assert.equal(booked.storage.size, 0, '未提交的预约不进 storage');
+  booked.page.onShow();
+  assert.equal(booked.page.data.reserveForm.offerId, '82');
+  assert.equal(booked.page.data.reserveForm.date, '2026-12-01');
+  assert.equal(booked.page.data.reserveForm.time, '15:30');
+  booked.answer(booked.requests.length - 1, reservableOrder());
+  assert.equal(booked.page.data.reserveForm.offerId, '82');
+  assert.equal(booked.page.data.reserveForm.date, '2026-12-01');
+  assert.equal(booked.page.data.reserveForm.time, '15:30');
+  assert.equal(booked.storage.size, 0);
+  booked.page.onHide(); booked.switchOwner(); booked.page.onShow();
+  assert.equal(booked.page.data.reserveForm, null);
+
+  const unloaded = eligibleReview();
+  unloaded.page.inputReview({ detail: { value: '离开页面就丢掉' } });
+  unloaded.page.onUnload(); unloaded.page.onShow();
+  assert.equal(unloaded.page.data.reviewContent, '');
+  assert.equal(unloaded.page.data.review, null);
+  assert.equal(unloaded.storage.size, 0);
+
+  const sentReview = eligibleReview();
+  sentReview.page.inputReview({ detail: { value: '已经提交的评价' } });
+  sentReview.page.rateReview({ detail: { value: 2 } });
+  sentReview.page.submitReview(); sentReview.requests[3].fail({});
+  sentReview.page.onHide(); sentReview.page.onShow();
+  assert.equal(sentReview.page.data.reviewPending.content, '已经提交的评价');
+  assert.equal(sentReview.page.data.reviewContent, '');
+  assert.equal(sentReview.page.data.review, null);
+  assert.equal(sentReview.page.data.reviewRating, 5);
+  assert.equal(sentReview.storage.size, 1);
+
+  const sentReserve = harness();
+  fillReserve(sentReserve);
+  sentReserve.page.confirmReserve();
+  sentReserve.page.onHide(); sentReserve.page.onShow();
+  assert.equal(sentReserve.page.data.reserveForm, null);
+  assert.equal(sentReserve.page.data.reservePending.offerId, '82');
+  assert.equal(sentReserve.storage.size, 1);
 });

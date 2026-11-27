@@ -37,7 +37,7 @@ function methodBody(source, signature) {
 // —— 弹窗真源沙箱:modal / toast 换成记录桩,只测它自己发了什么 ——
 function loadWithdrawCs(source = read(WITHDRAW_CS_PATH)) {
   const file = path.join(ROOT, WITHDRAW_CS_PATH)
-  const calls = { modals: [], clipboard: [], toasts: [], clipboardFails: false }
+  const calls = { modals: [], clipboard: [], toasts: [] }
   const sandbox = {
     module: { exports: {} },
     console,
@@ -53,9 +53,6 @@ function loadWithdrawCs(source = read(WITHDRAW_CS_PATH)) {
     wx: {
       setClipboardData(options) {
         calls.clipboard.push(options && options.data)
-        if (calls.clipboardFails) {
-          if (options.fail) options.fail({ errMsg: 'setClipboardData:fail' })
-        } else if (options.success) options.success({})
       },
     },
   }
@@ -167,7 +164,7 @@ function loadEntry(relPath, source = read(relPath), fixture = {}) {
     Component: (config) => { definition = flattenComponentToPage(config) },
     require(request) {
       if (request.endsWith('utils/withdraw-cs.js')) {
-        return { showWithdrawCsPopup() { popups.push(true) }, WITHDRAW_CS_WECHAT_ID: 'stub-not-real' }
+        return { showWithdrawCsPopup() { popups.push(true) } }
       }
       if (request.endsWith('utils/analytics.js')) return { track() {} }
       if (request.endsWith('utils/roleGuard.js')) return { can: () => true, isMerchantView: () => false, load(callback) { if (fixture.deferGuard) guardCallbacks.push(callback); else callback() } }
@@ -220,10 +217,24 @@ test('弹窗合同:只说明走小程序客服,不展示个人微信号', () => 
   assert.equal(api.WITHDRAW_CS_WECHAT_ID, undefined)
   assert.doesNotMatch(opts.content, /\d{8,}/)
   assert.equal(calls.clipboard.length, 0, '弹窗本身不写剪贴板')
+  assert.deepEqual(calls.toasts, [])
+})
+
+test('确认不写剪贴板', () => {
+  const { api, calls } = loadWithdrawCs()
+  api.showWithdrawCsPopup()
+  const opts = calls.modals[0]
+  if (typeof opts.success === 'function') opts.success({ confirm: true })
+  assert.deepEqual(calls.clipboard, [])
+  assert.deepEqual(calls.toasts, [])
+  assert.doesNotMatch(read(WITHDRAW_CS_PATH), /setClipboardData|copyWithdrawCsWechat/)
 })
 
 test('个人微信号不再出现在小程序源码里', () => {
   const banned = '1801857' + '1626'
+  const source = read(WITHDRAW_CS_PATH)
+  assert.equal(source.includes(banned), false)
+  assert.doesNotMatch(source, /setClipboardData|copyWithdrawCsWechat|添加客服微信，确认金额后线下处理/)
   const hits = []
   const walk = (dir) => {
     fs.readdirSync(dir, { withFileTypes: true }).forEach((item) => {
@@ -231,7 +242,12 @@ test('个人微信号不再出现在小程序源码里', () => {
       const full = path.join(dir, item.name)
       if (item.isDirectory()) { walk(full); return }
       if (!/\.(js|wxml|wxss|json)$/.test(item.name)) return
-      if (fs.readFileSync(full, 'utf8').includes(banned)) hits.push(path.relative(ROOT, full))
+      const text = fs.readFileSync(full, 'utf8')
+      if (text.includes(banned)) hits.push(path.relative(ROOT, full))
+      const rel = path.relative(ROOT, full)
+      if (!rel.startsWith('tests' + path.sep) && text.includes('添加客服微信，确认金额后线下处理')) {
+        hits.push([rel, 'tip'])
+      }
     })
   }
   walk(ROOT)

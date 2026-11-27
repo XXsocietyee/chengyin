@@ -25,7 +25,8 @@ function normalizeAppeal(raw) {
   const kind = text(raw.kind).toUpperCase(), status = STATUS[text(raw.status).toUpperCase()]
   const id = positiveId(raw.id), sessionId = positiveId(raw.sessionId)
   if (!KIND[kind] || !id || !status) return null
-  const node = positiveId(raw.nodeIndex)
+  // L09-109: 契约与 orient-score-view 读 nodeId；载荷只有 nodeIndex 时仍用它。缺节点不编一个号。
+  const node = positiveId(raw.nodeId !== undefined ? raw.nodeId : raw.nodeIndex)
   const decided = status !== 'PENDING'
   return {
     key: kind + ':' + id,

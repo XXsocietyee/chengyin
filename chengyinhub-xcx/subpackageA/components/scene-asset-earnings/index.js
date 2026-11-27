@@ -12,6 +12,11 @@ function identityKey() {
   return [member == null ? '' : member, role || '', type == null ? '' : type].join('|')
 }
 
+function memberPart(key) {
+  const member = String(key == null ? '' : key).split('|')[0]
+  return member === '0' ? '' : member
+}
+
 function readBalance(raw) {
   const candidate = typeof raw === 'number' || (typeof raw === 'string' && raw.trim() !== '')
   if (!candidate) return null
@@ -47,14 +52,19 @@ Component({
   },
   pageLifetimes: {
     show() {
-      const refresh = this._hidden || this._loadIdentity !== identityKey()
+      const next = identityKey()
+      const refresh = this._hidden || this._loadIdentity !== next
+      if (memberPart(this._dataIdentity) && memberPart(this._dataIdentity) !== memberPart(next)) this._clearBalance()
       this._hidden = false
       if (refresh) this.load(true)
     },
     hide() {
       this._hidden = true
       this._loadToken = (this._loadToken || 0) + 1
-      this._clearBalance()
+      const stopCount = this._pmCounters && this._pmCounters.balanceK
+      if (stopCount) stopCount()
+      if (memberPart(this._dataIdentity) && memberPart(this._dataIdentity) !== memberPart(identityKey())) this._clearBalance()
+      else if (this.data.balanceK != null) this.setData({ balanceK: null })
     },
   },
   methods: {
@@ -64,6 +74,17 @@ Component({
       this._dataIdentity = null
       this.setData({ balance: '', balanceK: null })
     },
+    _keepsBalance(nextIdentity) {
+      const member = memberPart(nextIdentity == null ? identityKey() : nextIdentity)
+      if (!member || this.data.state !== 'ready') return false
+      if (this.data.balance === '' || this.data.balance == null) return false
+      return memberPart(this._dataIdentity) === member
+    },
+    _applyFailure(res, statusCode) {
+      if (this._keepsBalance(identityKey())) return
+      if (memberPart(this._dataIdentity) !== memberPart(identityKey())) this._clearBalance()
+      this.setData({ state: this._readFailureState(res, statusCode) })
+    },
     _recoverReadSession(res, statusCode, token) {
       if (this._detached || token !== this._loadToken) return false
       return recoverReadSession(this, app, res, function (anonymous) {
@@ -71,15 +92,19 @@ Component({
       }, () => this.load(true), statusCode)
     },
     _acceptRead(token) {
-      if (!Number.isInteger(token) || token !== this._loadToken || this._detached || this._hidden) return false
+      if (!Number.isInteger(token) || token !== this._loadToken || this._detached || this._hidden) {
+        if (!this._detached && memberPart(this._dataIdentity) && memberPart(this._dataIdentity) !== memberPart(identityKey())) this._clearBalance()
+        return false
+      }
       const current = identityKey()
       if (current === this._loadIdentity) return true
-      const previousMember = this._loadIdentity.split('|')[0]
-      const currentMember = current.split('|')[0]
+      const previousMember = memberPart(this._loadIdentity)
+      const currentMember = memberPart(current)
       this._loadToken += 1
+      if (previousMember && previousMember === currentMember && this._keepsBalance(current)) return false
       this._clearBalance()
       this.setData({ state: 'error' })
-      if ((!previousMember || previousMember === '0') && currentMember && currentMember !== '0') this.load(true)
+      if (!previousMember && currentMember) this.load(true)
       return false
     },
     _hasCurrentBalance() {
@@ -97,12 +122,18 @@ Component({
     load(forceRemote) {
       const token = (this._loadToken || 0) + 1
       this._loadToken = token
-      this._loadIdentity = identityKey()
-      this._clearBalance()
-      this.setData({ state: 'loading' })
+      const next = identityKey()
+      const keep = this._keepsBalance(next)
+      this._loadIdentity = next
+      const stopCount = this._pmCounters && this._pmCounters.balanceK
+      if (stopCount) stopCount()
+      if (!keep) {
+        this._clearBalance()
+        this.setData({ state: 'loading' })
+      } else if (this.data.balanceK != null) this.setData({ balanceK: null })
       const userInfo = (app.globalData || {}).userInfo
-      const member = this._loadIdentity.split('|')[0]
-      if (!member || member === '0') { this.setData({ state: 'login' }); return }
+      const member = memberPart(next)
+      if (!member) { this.setData({ state: 'login' }); return }
       const ownedCache = userInfo && Number(member) > 0 && String(userInfo.id) === member
       const cached = !forceRemote && ownedCache ? readBalance(userInfo.balance) : null
       if (cached !== null && cached !== false) {
@@ -120,18 +151,18 @@ Component({
           // balance=null/空串是「新用户 / 商家还没有收益」的正常数据(ApiUmsMemberController 的
           // balance 列可空,直接下发 null),按 0.00 展示;只有请求真的失败(非 200 / 无 data)
           // 或余额是坏值,才进错误态。
-          if (!res || res.code != '200' || !res.data) { this.setData({ state: this._readFailureState(res) }); return }
+          if (!res || res.code != '200' || !res.data) { this._applyFailure(res); return }
           const balance = readBalance(res.data.balance)
           if (balance !== null) this._showBalance(balance, token)
           else if (isMissingBalance(res.data.balance)) this._showBalance('0.00', token)
-          else this.setData({ state: 'error' })
+          else this._applyFailure(res)
         },
-        fail: (res, statusCode) => { if (!this._recoverReadSession(res, statusCode, token) && this._acceptRead(token)) this.setData({ state: this._readFailureState(res, statusCode) }) },
-        successStatusAbnormal: (res, statusCode) => { if (!this._recoverReadSession(res, statusCode, token) && this._acceptRead(token)) this.setData({ state: this._readFailureState(res, statusCode) }) },
+        fail: (res, statusCode) => { if (!this._recoverReadSession(res, statusCode, token) && this._acceptRead(token)) this._applyFailure(res, statusCode) },
+        successStatusAbnormal: (res, statusCode) => { if (!this._recoverReadSession(res, statusCode, token) && this._acceptRead(token)) this._applyFailure(res, statusCode) },
       })
     },
     /* 金额落定:共用件 countMoney 慢-快-慢落地(1300ms,与商家首页累计收入一致);只写进度 balanceK,
-     * 显示 = 真值 × 进度,换号/隐藏时 _clearBalance 停表并清空真值,不会闪出旧金额。减动效 / 非正数直接落定。 */
+     * 显示 = 真值 × 进度。隐藏只停表,同成员刷新保留屏上金额;换成员才清空真值。减动效 / 非正数直接落定。 */
     _showBalance(balance, token) {
       if (!this._acceptRead(token)) return
       this._dataIdentity = this._loadIdentity

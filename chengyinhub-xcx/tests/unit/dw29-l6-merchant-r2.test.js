@@ -217,6 +217,87 @@ test('M-32:组件按到达顺序合并;玩家视角不读俱乐部计酬;403 不
   assert.ok(!player.some((r) => r.url === '/api/club-direct-merchant/merchant'));
 });
 
+function mountMutableOverview() {
+  let member = 7;
+  const requests = [];
+  let def = null;
+  const file = path.join(ROOT, 'subpackageA/components/earnings-overview/index.js');
+  vm.runInNewContext(read('subpackageA/components/earnings-overview/index.js'), {
+    Component: (d) => { def = d; },
+    getApp: () => ({
+      globalData: {},
+      getUserID: () => member,
+      getUserRole: () => 'player',
+      getUserType: () => 1,
+      sendRequest: (o) => requests.push(o),
+    }),
+    console, Date,
+    require: (id) => require(path.resolve(path.dirname(file), id)),
+  });
+  const comp = Object.assign({}, def.methods, {
+    data: JSON.parse(JSON.stringify(def.data)),
+    properties: { merchant: false },
+  });
+  comp.setData = function (patch) { Object.assign(this.data, patch); };
+  return { comp, def, requests, member(id) { member = id; } };
+}
+
+function todayStamp() {
+  const today = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return today.getFullYear() + '-' + pad(today.getMonth() + 1) + '-' + pad(today.getDate()) + ' 10:00:00';
+}
+
+function paintOverview(h, amount) {
+  const balance = h.requests.filter((r) => r.url === '/api/user/balance/list').at(-1);
+  const assets = h.requests.filter((r) => r.url === '/api/wallet/stages').at(-1);
+  balance.success({ code: '200', data: { rows: [
+    { id: 'b1', changeType: 1, eventType: 1, changeBalance: amount, changeReason: '主题分润', createTime: todayStamp() },
+  ] } });
+  assets.success({ code: 200, data: { pendingSettlement: '3', disputed: '0', withdrawable: '9.50', complaintPeriod: [] } });
+}
+
+test('同成员隐藏本月收入和资产留在屏上，失败刷新不改成空列表', () => {
+  const h = mountMutableOverview();
+  h.def.lifetimes.attached.call(h.comp);
+  paintOverview(h, 10);
+  assert.equal(h.comp.data.month.total, '10.00');
+  assert.equal(h.comp.data.assets[0].amount, '9.50');
+  h.def.pageLifetimes.hide.call(h.comp);
+  h.requests[0].success({ code: '200', data: { rows: [
+    { id: 'old', changeType: 1, eventType: 1, changeBalance: 99, changeReason: '旧账', createTime: todayStamp() },
+  ] } });
+  assert.equal(h.comp.data.month.total, '10.00');
+  assert.equal(h.comp.data.assets.length, 2);
+  h.def.pageLifetimes.show.call(h.comp);
+  assert.equal(h.comp.data.month.total, '10.00');
+  assert.equal(h.comp.data.month.ready, true);
+  assert.equal(h.comp.data.assets[0].amount, '9.50');
+  h.requests.at(-2).fail();
+  h.requests.at(-1).fail();
+  assert.equal(h.comp.data.month.total, '10.00');
+  assert.equal(h.comp.data.assets[0].amount, '9.50');
+});
+
+test('换成员立即清空本月收入和资产，隐藏页的旧响应不能画到新身份上', () => {
+  const h = mountMutableOverview();
+  h.def.lifetimes.attached.call(h.comp);
+  paintOverview(h, 10);
+  h.def.pageLifetimes.hide.call(h.comp);
+  h.member(8);
+  h.requests[0].success({ code: '200', data: { rows: [
+    { id: 'old', changeType: 1, eventType: 1, changeBalance: 99, changeReason: '旧账', createTime: todayStamp() },
+  ] } });
+  assert.equal(h.comp.data.month.ready, false);
+  assert.equal(h.comp.data.assets.length, 0);
+  h.def.pageLifetimes.show.call(h.comp);
+  assert.equal(h.comp.data.month.ready, false);
+  assert.equal(h.comp.data.assets.length, 0);
+  paintOverview(h, 4);
+  assert.equal(h.comp.data.month.total, '4.00');
+  assert.equal(h.comp.data.assets[0].amount, '9.50');
+});
+
 test('M-26:我的项目长按菜单没有「复制」入口', () => {
   const wxml = read('subpackageA/pages/myproject/index.wxml');
   const keys = (wxml.match(/data-k="([a-zA-Z]+)"/g) || []).map((s) => s.slice(8, -1));

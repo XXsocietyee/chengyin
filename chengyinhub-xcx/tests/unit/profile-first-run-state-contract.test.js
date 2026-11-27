@@ -340,18 +340,20 @@ test('项目预览回包：旧分页首包不再向当前身份发下一页', as
   assert.deepEqual(component.data.projectPreviewList.map(row => row.id), [99])
 })
 
-test('项目预览回包：已发出的旧第二页不覆盖最新预览', async () => {
+test('项目预览回包：满页已结束不发第二页，随后刷新只看新的一页', async () => {
   const component = loadProfile()
   const old = component.loadProjectPreview()
   requests.at(-1).success({ code: 200, data: { rows: Array.from({ length: 8 }, (_, id) => ({ id, startDate: '2020-01-01', endDate: '2020-02-01' })), total: 16 } })
   await flush()
-  const oldSecondPage = requests.at(-1)
-  assert.equal(oldSecondPage.data.pageNum, 2)
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].data.pageNum, 1)
+  await old
+  assert.deepEqual(component.data.projectPreviewList, [])
   const current = component.loadProjectPreview()
   requests.at(-1).success({ code: 200, data: { rows: [{ id: 99, registrationStatus: 2, paymentStatus: 2 }] } })
   await current
-  oldSecondPage.success({ code: 200, data: { rows: [{ id: 88, registrationStatus: 2, paymentStatus: 2 }] } })
-  await old
+  assert.equal(requests.length, 2)
+  assert.equal(requests[1].data.pageNum, 1)
   assert.deepEqual(component.data.projectPreviewList.map(row => row.id), [99])
 })
 
@@ -956,30 +958,28 @@ test('我的页收起闸:余额确认 0 且零流水才收余额卡,悬赏零投
   assert.match(js, /balanceFlowCount: null, videoBountyCount: null/, '换号清空时回到「未知」')
 })
 
-// L09-010
-// 我的项目预览翻了多页才凑满时,60 秒内静默回访不再重翻;下拉刷新(force)/ 只翻一页的账号照常重读
-test('项目预览:多页扫描结果短时复用,force 刷新与单页账号照常重读', async () => {
+// L09-010:只读一页。本页进行中不足 8 条就显示这些;满页全结束也不发第二页。每次进入都重读这一页。
+test('项目预览:只读一页,进行中不足 8 条也停,下一次进入仍只再读一页', async () => {
   const ended = (id) => ({ id, startDate: '2020-01-01', endDate: '2020-01-02' })
   const live = (id) => ({ id, startDate: '2020-01-01', endDate: '2099-01-01' })
   const component = loadProfile()
   const first = component.loadProjectPreview()
-  requests.at(-1).success({ code: 200, data: { total: 9, rows: [1, 2, 3, 4, 5, 6, 7, 8].map(ended) } })
-  await new Promise((r) => setImmediate(r))
-  requests.at(-1).success({ code: 200, data: { total: 9, rows: [live(9)] } })
+  assert.equal(requests.at(-1).data.pageNum, 1)
+  assert.equal(requests.at(-1).data.pageSize, 8)
+  assert.equal(requests.at(-1).data.is_my, 1)
+  requests.at(-1).success({ code: 200, data: { total: 20, rows: [1, 2, 3, 4, 5, 6, 7].map(ended).concat([live(8)]) } })
   await first
-  assert.deepEqual(component.data.projectPreviewList.map(row => row.id), [9])
-  const before = requests.length
-  await component.loadProjectPreview()
-  assert.equal(requests.length, before, '静默回访不重翻')
-  component._projectPreviewAt = 0 // 等价 refreshAll(silent, force) 清标记
+  assert.equal(requests.length, 1, '本页只有 1 条进行中也不翻页')
+  assert.deepEqual(component.data.projectPreviewList.map(row => row.id), [8])
   const again = component.loadProjectPreview()
-  assert.equal(requests.length, before + 1, 'force 后重读')
-  requests.at(-1).success({ code: 200, data: { total: 1, rows: [live(10)] } })
+  assert.equal(requests.length, 2, '下一次进入照常重读,仍然只有一页')
+  assert.equal(requests.at(-1).data.pageNum, 1)
+  requests.at(-1).success({ code: 200, data: { total: 16, rows: [1, 2, 3, 4, 5, 6, 7, 8].map(ended) } })
   await again
-  const n = requests.length
-  component.loadProjectPreview()
-  assert.equal(requests.length, n + 1, '单页账号不缓存')
-  assert.match(read(PROFILE_JS), /if \(force \|\| !silent\) this\._projectPreviewAt = 0;/)
+  assert.equal(requests.length, 2, '满页且全结束也不发第二页')
+  assert.deepEqual(component.data.projectPreviewList, [])
+  assert.doesNotMatch(read(PROFILE_JS), /fetchPage\(pageNum \+ 1\)/)
+  assert.doesNotMatch(read(PROFILE_JS), /_projectPreviewAt/)
   assert.match(read(path.join(ROOT, 'pages/member/index/index.js')), /profile\.refreshAll\(true, true\)/)
 })
 

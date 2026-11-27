@@ -18,7 +18,7 @@ function mount(kind) {
   global.getApp = () => app; global.wx = wx;
   vm.runInNewContext(fs.readFileSync(file, 'utf8'), { getApp: () => app, wx, console,
     require: id => id.includes('community-post-api') ? require('../helpers/community-page-seam') : createRequire(file)(id),
-    Component: d => definition = d, Page: d => definition = d, setTimeout() {}, clearTimeout() {} }, { filename: file });
+    Component: d => definition = d, Page: d => definition = d, setTimeout, clearTimeout }, { filename: file });
   const page = Object.assign({}, definition, definition.methods, { data: JSON.parse(JSON.stringify(definition.data)) });
   page.setData = (patch, done) => { Object.entries(patch).forEach(([key,value]) => { const parts=key.split('.');let o=page.data;for(const p of parts.slice(0,-1))o=o[p]||(o[p]={});o[parts.at(-1)]=value; }); if(done)done(); };
   Object.assign(page.data, { userId: '8', isSelf: false, activeTab: 'posts', list: [{id: 12, contents: '缓存'}] });
@@ -59,6 +59,38 @@ test('L09-008 attached + first show share one in-flight feature read', async () 
   assert.equal(h.refreshes.length,1);
   h.flags(true,true);h.refreshes[0]();await flush();
   h.page._syncCommunityProfile();assert.equal(h.refreshes.length,2);
+});
+test('L09-008 attached and the first show sync the community profile once per visit', () => {
+  const h = mount('profile');
+  let n = 0;
+  h.page._syncCommunityProfile = () => { n += 1; };
+  h.page.initializeProfile = () => { h.page._profileShown = false; };
+  h.page._syncProfileReducedMotion = () => {};
+  h.page._syncProfileReadIdentity = () => false;
+  h.page.syncViewerIdentity = () => {};
+  h.page.refreshCoopPublisherAccess = () => {};
+  h.page.computeIsSelf = () => true;
+  h.page.data.isSelf = true;
+  h.page.refreshDirtyPosts = () => {};
+  h.page.syncMerchantView = () => {};
+  h.page.refreshAll = () => {};
+  h.page.lifetimes.attached.call(h.page);
+  h.page.pageLifetimes.show.call(h.page);
+  assert.equal(n, 1);
+  h.page.pageLifetimes.hide.call(h.page);
+  h.page.pageLifetimes.show.call(h.page);
+  assert.equal(n, 2);
+});
+test('profile tab motion timer does not setData after detach', async () => {
+  const h = mount('profile');
+  h.page.data.activeTab = 'projects';
+  h.page.data.reducedMotion = false;
+  h.page.onTabChange({ detail: { key: 'about' } });
+  assert.equal(h.page.data.pmTab, 1);
+  h.page.lifetimes.detached.call(h.page);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(h.page.data.pmTab, 1);
+  assert.equal(h.page._detached, true);
 });
 test('L09-012 like taps while a like request is pending are ignored', async () => {
   const h=mount('profile');h.page.data.list=[{id:12,isLiked:0,likeCount:0}];

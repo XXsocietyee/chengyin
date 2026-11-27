@@ -126,6 +126,42 @@ test('虚拟支付:SDK 成功但服务端一直未付 → 确认中并带回订�
   assert.equal(r.orderNo, 'PPO2');
 });
 
+test('订单回查定时器在离页取消后清掉,不再排下一跳', async () => {
+  const pending = new Map();
+  let seq = 1;
+  const origSet = global.setTimeout;
+  const origClear = global.clearTimeout;
+  global.setTimeout = (fn, ms) => {
+    const id = seq++;
+    pending.set(id, { fn, ms });
+    return id;
+  };
+  global.clearTimeout = (id) => { pending.delete(id); };
+  try {
+    const script = xpayScript();
+    const request = (o) => Promise.resolve(script(o));
+    const task = pp.purchase({ request, wx: script.wx }, 'MONTH', 'XPAY');
+    await new Promise((resolve) => origSet(resolve, 0));
+    assert.equal(pending.size, 1, '回查间隔必须落在可清除的定时器上');
+    assert.equal([...pending.values()][0].ms, 1500);
+    task.cancel();
+    assert.equal(pending.size, 0, '离页必须清掉回查定时器');
+    const result = await task;
+    assert.equal(result.state, 'pending');
+    assert.equal(pending.size, 0, '取消后不得再排下一跳');
+  } finally {
+    global.setTimeout = origSet;
+    global.clearTimeout = origClear;
+  }
+});
+
+test('开通页和订单页离页取消回查', () => {
+  for (const rel of ['subpackageMember/market/membership/index.js', 'subpackageMember/market/pass-order/index.js']) {
+    const js = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    assert.match(js, /onUnload\(\) \{[\s\S]*?this\._payTask\.cancel\(\)/, rel);
+  }
+});
+
 test('同一次购买意图重试沿用同一个 requestId', async () => {
   const script = xpayScript();
   const { deps, calls } = fakeDeps(script);

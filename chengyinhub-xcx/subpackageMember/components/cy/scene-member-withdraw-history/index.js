@@ -100,13 +100,20 @@ Component({
               that.setData({ loadErr: true })
               return
             }
-            const total = payload && payload.total != null ? Number(payload.total) : rows.length
+            const rawList = Array.isArray(payload)
+            const declaredTotal = !rawList && payload && payload.total != null ? Number(payload.total) : NaN
+            const total = Number.isFinite(declaredTotal) ? declaredTotal : rows.length
+            // 裸数组，或这一页的条数已经盖住 total：服务端这次给的就是全部记录。
+            // 再按页码拼上去，「加载更多」会把已经在屏上的提现再接一遍。
+            const complete = rawList || (Number.isFinite(declaredTotal) && rows.length >= declaredTotal)
+            const mapped = rows.map((item) => Object.assign({}, item, statusView(item.status), {
+              receivedAmountText: moneyText(item.receivedAmount),
+              createTimeText: item.createTime || '—',
+            }))
+            const pageNo = that.data.page_no
             that.setData({
-              list: that.data.list.concat(rows.map((item) => Object.assign({}, item, statusView(item.status), {
-                receivedAmountText: moneyText(item.receivedAmount),
-                createTimeText: item.createTime || '—',
-              }))),
-              hasMore: app.getTotalPage(Number.isFinite(total) ? total : rows.length, app.getPageSize()) > that.data.page_no,
+              list: !complete && pageNo > 1 ? that.data.list.concat(mapped) : mapped,
+              hasMore: !complete && app.getTotalPage(total, app.getPageSize()) > pageNo,
               loadErr: false,
             })
           } else {

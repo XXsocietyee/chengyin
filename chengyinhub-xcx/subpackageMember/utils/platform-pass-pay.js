@@ -5,6 +5,41 @@
 
 function orderPaid(order) { return !!(order && order.status === 'PAID') }
 
+// 回查间隔必须能在离页时清掉。stopped 拦住已经排上的下一跳;stop 同时 resolve 当前等待,避免悬挂。
+function pollGate() {
+  let stopped = false
+  let timer = null
+  let finishWait = null
+  return {
+    stopped() { return stopped },
+    stop() {
+      stopped = true
+      if (timer != null) {
+        clearTimeout(timer)
+        timer = null
+      }
+      if (finishWait) finishWait()
+    },
+    wait(ms) {
+      return new Promise((resolve) => {
+        if (stopped) { resolve(); return }
+        finishWait = () => { finishWait = null; resolve() }
+        timer = setTimeout(() => {
+          timer = null
+          const done = finishWait
+          finishWait = null
+          if (done) done()
+        }, ms)
+      })
+    }
+  }
+}
+
+function attachCancel(task, stop) {
+  task.cancel = stop
+  return task
+}
+
 function bizOk(res) { return res && String(res.code) === '200' && res.data }
 
 function newRequestId() {
@@ -19,42 +54,50 @@ function newRequestId() {
 function purchase(deps, planCode, channel, opts) {
   const request = deps.request
   const requestId = (opts && opts.requestId) || newRequestId()
-  if (channel !== 'XPAY') return Promise.resolve({ state: 'failed', message: '当前设备暂不支持开通' })
-  return request({ url: '/api/platform-pass/orders', method: 'POST', write: true, data: { planCode, channel, requestId } })
+  const gate = pollGate()
+  if (channel !== 'XPAY') return attachCancel(Promise.resolve({ state: 'failed', message: '当前设备暂不支持开通' }), gate.stop)
+  const task = request({ url: '/api/platform-pass/orders', method: 'POST', write: true, data: { planCode, channel, requestId } })
     .then((res) => {
+      if (gate.stopped()) return { state: 'pending' }
       if (!bizOk(res)) return { state: 'failed', message: res && res.msg }
-      return proceed(deps, res.data)
-    }, () => ({ state: 'failed' }))
+      return proceed(deps, res.data, gate)
+    }, () => (gate.stopped() ? { state: 'pending' } : { state: 'failed' }))
+  return attachCancel(task, gate.stop)
 }
 
 /** 已有订单继续:PAID 直接返回;待支付再拉起支付;其他状态只回查,不再支付。 */
 function resume(deps, orderNo, canPay) {
   const sendRequest = deps.request
-  return sendRequest({ url: '/api/platform-pass/orders/' + encodeURIComponent(orderNo), method: 'GET' }).then((res) => {
+  const gate = pollGate()
+  const task = sendRequest({ url: '/api/platform-pass/orders/' + encodeURIComponent(orderNo), method: 'GET' }).then((res) => {
+    if (gate.stopped()) return { state: 'pending', orderNo }
     if (!bizOk(res)) return { state: 'failed', orderNo, message: res && res.msg }
     const order = res.data
     if (orderPaid(order)) return { state: 'paid', order, orderNo }
     if (order.status !== 'PENDING') return { state: 'closed', order, orderNo }
     if (!canPay || order.channel !== 'XPAY') return { state: 'pending', order, orderNo }
-    return proceed(deps, order)
-  }, () => ({ state: 'failed', orderNo }))
+    return proceed(deps, order, gate)
+  }, () => (gate.stopped() ? { state: 'pending', orderNo } : { state: 'failed', orderNo }))
+  return attachCancel(task, gate.stop)
 }
 
-function proceed(deps, order) {
+function proceed(deps, order, gate) {
   const request = deps.request
   const sendRequest = deps.request // 轮询读单:与 app.sendRequest 同形(GET 权限矩阵按调用点登记)
   const wxApi = deps.wx
+  const session = gate || pollGate()
   const pollTimes = deps.pollTimes || 4
-  const wait = deps.wait || ((ms) => new Promise((r) => setTimeout(r, ms)))
+  const wait = deps.wait || ((ms) => session.wait(ms))
   const orderNo = order.orderNo
 
   function poll(n) {
+    if (session.stopped()) return Promise.resolve({ state: 'pending', orderNo })
     return sendRequest({ url: '/api/platform-pass/orders/' + orderNo, method: 'GET' }).then((res) => {
       const o = bizOk(res) ? res.data : null
       if (orderPaid(o)) return { state: 'paid', order: o, orderNo }
-      if (n <= 1) return { state: 'pending', order: o, orderNo }
-      return wait(1500).then(() => poll(n - 1))
-    }, () => (n <= 1 ? { state: 'pending', orderNo } : wait(1500).then(() => poll(n - 1))))
+      if (n <= 1 || session.stopped()) return { state: 'pending', order: o, orderNo }
+      return wait(1500).then(() => (session.stopped() ? { state: 'pending', order: o, orderNo } : poll(n - 1)))
+    }, () => (n <= 1 || session.stopped() ? { state: 'pending', orderNo } : wait(1500).then(() => (session.stopped() ? { state: 'pending', orderNo } : poll(n - 1)))))
   }
 
   function payXpay(vp) {

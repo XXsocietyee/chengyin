@@ -103,3 +103,39 @@ test('L09-079 冷启动会话未就绪时先骨架,就绪后有会话就读、�
     else { assert.equal(requests.length, 0); assert.equal(c.data.authRequired, true) }
   }
 })
+
+function withdrawal(id) {
+  return { id, receivedAmount: 10, status: 1, createTime: '2026-01-01' }
+}
+
+test('一次返回的全部提现不再显示加载更多，也不会被接成第二份', () => {
+  for (const payload of [
+    Array.from({ length: 12 }, (_, index) => withdrawal(index + 1)),
+    { rows: Array.from({ length: 12 }, (_, index) => withdrawal(index + 1)), total: 12 },
+  ]) {
+    const { vm, sandbox } = loadComponent()
+    vm.getList()
+    sandbox.requests[0].success({ code: '200', data: payload })
+    sandbox.requests[0].complete()
+    assert.equal(vm.data.list.length, 12)
+    assert.equal(vm.data.hasMore, false)
+    vm.loadMore()
+    assert.equal(sandbox.requests.length, 1)
+    assert.deepEqual(vm.data.list.map((row) => row.id), Array.from({ length: 12 }, (_, index) => index + 1))
+  }
+})
+
+test('分页回包接在已加载记录后面，不丢掉前一页', () => {
+  const { vm, sandbox } = loadComponent()
+  vm.getList()
+  sandbox.requests[0].success({ code: '200', data: { rows: Array.from({ length: 10 }, (_, index) => withdrawal(index + 1)), total: 25 } })
+  sandbox.requests[0].complete()
+  assert.equal(vm.data.list.length, 10)
+  assert.equal(vm.data.hasMore, true)
+  vm.loadMore()
+  assert.equal(sandbox.requests[1].data.pageNum, 2)
+  sandbox.requests[1].success({ code: '200', data: { rows: Array.from({ length: 10 }, (_, index) => withdrawal(index + 11)), total: 25 } })
+  sandbox.requests[1].complete()
+  assert.deepEqual(vm.data.list.map((row) => row.id), Array.from({ length: 20 }, (_, index) => index + 1))
+  assert.equal(vm.data.hasMore, true)
+})

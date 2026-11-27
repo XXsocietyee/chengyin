@@ -557,6 +557,9 @@ Component({
       this._syncCommunityProfile();
     },
     detached: function () {
+      this._detached = true;
+      clearTimeout(this._pmTabTimer);
+      this._pmTabTimer = null;
       if (this._offIdentity) { this._offIdentity(); this._offIdentity = null; }
       this._verificationGeneration = (this._verificationGeneration || 0) + 1;
       this._profileAttached = false;
@@ -586,7 +589,8 @@ Component({
       // 登录态可能在页面存续期变化(登录 / 退出 / 换号)⇒ 每次 onShow 重算
       // effectiveIsSelf 与观看者身份;身份变了就整块重来。
       this.syncViewerIdentity();
-      this._syncCommunityProfile();
+      // L09-008:这一次进入 attached 已经同步过社区资料,首个 show 不再打第二遍。
+      if (!firstShow) this._syncCommunityProfile();
       this.refreshCoopPublisherAccess();
       if (this.computeIsSelf() !== this.data.isSelf) {
         this.initializeProfile();
@@ -810,7 +814,7 @@ Component({
     // 回包前 communityReadable() 为假,同一次 show 里的 observer 会把「帖文」踢回「关于」。
     const flagsCurrent = !!owner && app._communityFeatureOwner === owner
       && typeof app.getAuthorization === 'function' && app._communityFeatureAuthorization === app.getAuthorization();
-    // L09-008:attached 与首个 show 各调一次 ⇒ 同账号同 token 的在途读取复用,不再并发两次(先回的那次会被 epoch 丢掉)。
+    // 同一次进入里重叠的同步复用在途开关读取,不并发打两次 loadFeatureFlags。
     const flagsKey = owner + '|' + (typeof app.getAuthorization === 'function' ? app.getAuthorization() : '');
     let pending = null;
     if (!flagsCurrent && this._flagsPending && this._flagsPendingKey === flagsKey) pending = this._flagsPending;
@@ -1204,11 +1208,10 @@ Component({
     });
   },
 
-  refreshAll: function (silent, force) {
+  refreshAll: function (silent) {
     const read = this._captureProfileRead(true);
     if (!read) return Promise.resolve();
     var that = this;
-    if (force || !silent) this._projectPreviewAt = 0;
     if (!silent) this.setData({ page_no: 1, list: [], clubPostList: [], hasMore: false, nodata: false, feedErr: false });
     this.resetProfileMetricState();
     // ⚠️ 按视角分流，不能无条件拉全部：下面这些接口要么用 app.getUserID()（当前登录用户）、
@@ -1565,10 +1568,8 @@ Component({
     });
   },
 
-  // UI-7:预览原来只取第一页 8 条,这 8 条全结束时预览就是空的 —— 第二页的进行中项目
-  // 用户永远看不到。接口(is_my=1)没有「未结束」过滤参数,所以这里按页取够:只在
-  // 「本页零进行中且还有下一页」时继续翻,拿到 8 条进行中或翻完为止(接口口径不变)。
-  // MAX_PAGES 是兜底:预览不值得为一个老账号翻几十页,5 页内没有进行中的就如实收起。
+  // L09-010:主页「我的项目」只读 /api/topic/list?is_my=1 的第一页。
+  // 这一页里还在档期内的不足 8 条就显示这些,不再翻页去凑满。
   loadProjectPreview: function () {
     const read = this._captureProfileRead(true);
     if (!read) return Promise.resolve();
@@ -1581,12 +1582,6 @@ Component({
       that.setData({ projectPreviewList: [], projectErr: false, projectAuthError: false });
     }
     that._projectPreviewMemberId = memberId;
-    // L09-010
-    // 玩家预览要翻多页才凑满时,60 秒内静默回访沿用上次结果;下拉刷新 / 首次进入照常重读
-    if (!that.data.isMerchantView && that._projectPreviewAt && Date.now() - that._projectPreviewAt < 60000) {
-      that._projectPreviewRequestId = requestId - 1;
-      return Promise.resolve();
-    }
     // M-25(2026-10-27):商家视角的「我的项目」= 作为承接方报名的主题进度(章节承接申请),不是自己发布的路线
     if (that.data.isMerchantView) {
       return req('/api/merchant/chapter-application/mine', {}).then(function (res) {
@@ -1601,21 +1596,7 @@ Component({
       });
     }
     var PAGE_SIZE = 8;
-    var MAX_PAGES = 5;
     var live = [];
-    var fetched = 0;
-
-    function render() {
-      var list = live.slice(0, PAGE_SIZE).map(normalizeProjectPreview);
-      that._projectPreviewAt = fetched > 1 ? Date.now() : 0;
-      // 全部结束时收起预览，不拿演示数据顶替。
-      that.setData({
-        projectErr: false,
-        projectAuthError: false,
-        projectPreviewList: list
-      });
-    }
-
     function fetchPage(pageNum) {
       return req('/api/topic/list', {
         is_my: 1,
@@ -1635,22 +1616,18 @@ Component({
           that.setData({ projectErr: true, projectAuthError: false });
           return;
         }
-        fetched += 1;
         rows.forEach(function (item) {
           if (live.length >= PAGE_SIZE) return;
           if (isLiveProject(item)) live.push(item);
         });
-        var total = Number(res.data.total);
-        var hasNextPage = rows.length >= PAGE_SIZE
-          && (Number.isFinite(total) ? fetched * PAGE_SIZE < total : true);
-        if (live.length >= PAGE_SIZE || !hasNextPage || fetched >= MAX_PAGES) {
-          render();
-          return;
-        }
-        return fetchPage(pageNum + 1);
+        // L09-010: 本页到此为止,不按剩余条数翻下一页。
+        that.setData({
+          projectErr: false,
+          projectAuthError: false,
+          projectPreviewList: live.slice(0, PAGE_SIZE).map(normalizeProjectPreview)
+        });
       });
     }
-
     return fetchPage(1);
   },
 
