@@ -174,6 +174,31 @@ test('L03-015 清空行动上限输入框不关掉行动开关、不写入 0', (
   assert.equal(JSON.parse(page.data.formData.themeRuntimeConfig).actionLimit, 35)
 })
 
+test('L03-015 清空生命上限和背包容量不写成 0', () => {
+  const initial = require('../../pages/publish/utils/publish/story-initial-state.js')
+  const page = makePage()
+  page.data.formData.journeyRules = JSON.stringify({
+    schemaVersion: 1,
+    hp: { enabled: true, init: 8, max: 20 },
+    luck: { enabled: true, init: 3, max: 10 },
+  })
+  page.data.formData.themeRuntimeConfig = JSON.stringify({ capacity: 6, allowDiscard: true, items: [], chapters: [] })
+  page._syncRuntimeStats()
+  page.onRuntimeStatMax({ currentTarget: { dataset: { stat: 'hp' } }, detail: { value: '' } })
+  assert.equal(initial.parse(page.data.formData.journeyRules).hp.max, 20)
+  assert.equal(page.data.runtimeHpMax, '')
+  page.onRuntimeStatMax({ currentTarget: { dataset: { stat: 'luck' } }, detail: { value: '  ' } })
+  assert.equal(initial.parse(page.data.formData.journeyRules).luck.max, 10)
+  assert.equal(page.data.runtimeLuckMax, '')
+  page.onRuntimeStatMax({ currentTarget: { dataset: { stat: 'hp' } }, detail: { value: '12' } })
+  assert.equal(initial.parse(page.data.formData.journeyRules).hp.max, 12)
+  page.onRuntimePolicy({ currentTarget: { dataset: { field: 'capacity' } }, detail: { value: '' } })
+  assert.equal(JSON.parse(page.data.formData.themeRuntimeConfig).capacity, 6)
+  assert.equal(page.data.runtimeBag.capacity, '')
+  page.onRuntimePolicy({ currentTarget: { dataset: { field: 'capacity' } }, detail: { value: '8' } })
+  assert.equal(JSON.parse(page.data.formData.themeRuntimeConfig).capacity, 8)
+})
+
 test('L03-012 刷新主题统计不覆盖归零编辑器正在用的挑战节点列表', () => {
   const page = makePage()
   page.data.runtimeChallengeNodes = [{ id: 7, name: '编辑器里的节点', disabled: false }]
@@ -279,6 +304,17 @@ test('L03-007 路线图与节点不变时发布模拟只跑一次，改图后重
   assert.equal(spy.mock.callCount(), 1)
   page._routeGraph = { edges: [{ from: 'a', to: 'c' }] }
   page._routeSimulationReport()
+  assert.equal(spy.mock.callCount(), 2)
+})
+
+test('L03-007 刷新主按钮时 evaluateProfessionalDraft 只算一次', t => {
+  const policy = require('../../pages/publish/utils/publish/pro-editor-policy.js')
+  const spy = t.mock.method(policy, 'evaluateProfessionalDraft')
+  const page = makePage()
+  page.refreshPrimaryActionState()
+  assert.equal(spy.mock.callCount(), 1)
+  page.data.formData.name = '改过的主题'
+  page.refreshPrimaryActionState()
   assert.equal(spy.mock.callCount(), 2)
 })
 
@@ -437,6 +473,46 @@ test('L03-041 编辑章节「完成」不原地改页面数据，产生新的章
   assert.equal(page.data.formData.chapters[0].name, '新名字')
 })
 
+test('编辑章节完成不盖掉弹层打开后故事流改过的块、节点和概述', () => {
+  const page = makePage()
+  page.data.formData.productType = 1
+  page.data.formData.chapters = [{
+    _localId: 'c0', name: '第1章', description: '旧概述', nodes: [],
+    blocks: [{ type: 'text', key: 'p', content: '旧' }],
+  }]
+  page.showEditChapter({ currentTarget: { dataset: { index: 0 } } })
+  page.data.formData.chapters[0] = Object.assign({}, page.data.formData.chapters[0], {
+    description: '新概述',
+    blocks: [{ type: 'text', key: 'p', content: '新剧情' }],
+    nodes: [{ _localId: 'n1', name: '新节点' }],
+  })
+  page.setData({ 'chapterForm.name': '新名字' })
+  page.confirmChapter()
+  const chapter = page.data.formData.chapters[0]
+  assert.equal(chapter.name, '新名字')
+  assert.equal(chapter.description, '新概述')
+  assert.equal(chapter.blocks[0].content, '新剧情')
+  assert.equal(chapter.nodes[0].name, '新节点')
+})
+
+test('自由探索章节完成仍保存弹层里改过的概述，节点以后加的为准', () => {
+  const page = makePage()
+  page.data.formData.productType = 2
+  page.data.formData.chapters = [{
+    _localId: 'c0', name: '第1章', description: '旧', nodes: [{ _localId: 'n1', name: '点' }], blocks: [],
+  }]
+  page.showEditChapter({ currentTarget: { dataset: { index: 0 } } })
+  page.data.formData.chapters[0] = Object.assign({}, page.data.formData.chapters[0], {
+    nodes: [{ _localId: 'n1', name: '点' }, { _localId: 'n2', name: '后加的' }],
+  })
+  page.setData({ 'chapterForm.description': '弹层里的概述', 'chapterForm.name': '新章名' })
+  page.confirmChapter()
+  const chapter = page.data.formData.chapters[0]
+  assert.equal(chapter.name, '新章名')
+  assert.equal(chapter.description, '弹层里的概述')
+  assert.equal(chapter.nodes.map(node => node.name).join(','), '点,后加的')
+})
+
 test('L03-046 AI 草稿缺票种时，城市定向稿兜底的是定向票(mode 1)', () => {
   const page = makePage()
   page.applyAiDraft({ from: 'ai', formData: { productType: 1, name: '定向路线', chapters: [] } })
@@ -544,6 +620,29 @@ test('L03-048 canplay 时时长为 0(iOS)会再读几次；取消章节弹窗时
   } finally { wx.createInnerAudioContext = original }
 })
 
+test('L03-048 canplay 时长一直是 0 时不把 0 写成真实时长', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const page = makePage()
+  const audios = []
+  const original = wx.createInnerAudioContext
+  wx.createInnerAudioContext = () => {
+    const a = { duration: 0, destroyed: false, onCanplay(cb) { a.canplay = cb }, onError() {}, destroy() { a.destroyed = true } }
+    audios.push(a)
+    return a
+  }
+  try {
+    page.data.popChapter = true
+    page._chapterAudioToken = 1
+    page.data.chapterForm = Object.assign({}, page.data.chapterForm, { audioUrl: 'https://example.com/a.mp3', audioDuration: 0 })
+    page.autoDetectAudioDuration('https://example.com/a.mp3')
+    audios[0].canplay()
+    assert.equal(page.data.chapterForm.audioDuration, null, '一读到 0 就清掉,不等待期间也不是 0')
+    for (let i = 0; i < 5; i += 1) t.mock.timers.tick(200)
+    assert.equal(page.data.chapterForm.audioDuration, null)
+    assert.equal(audios[0].destroyed, true)
+  } finally { wx.createInnerAudioContext = original }
+})
+
 test('L03-057 票种已存日期超出 31 天候选时补进列表并选中它', () => {
   const page = makePage()
   page.data.dateList = [{ date: '2026-11-23', display: '11月23日' }, { date: '2026-11-24', display: '11月24日' }]
@@ -607,6 +706,90 @@ test('L03-161 连续两次定位：前一次的清空不会抹掉后一次的锚
   assert.equal(page.data.scrollIntoView, 'b')
   t.mock.timers.tick(300)
   assert.equal(page.data.scrollIntoView, 'b')
+})
+
+function startTimePage() {
+  const page = makePage()
+  page.data.dateList = [{ date: '2026-12-01', display: '12月1日' }]
+  page.data.hours = ['09']
+  page.data.minutes = ['00']
+  page.data.startDateIndex = [0]
+  page.data.startTimeIndex = [0, 0]
+  page.data.formData.startDate = '2026-12-01 09:00:00'
+  page.data.formData.endDate = '2026-12-08 18:00:00'
+  return page
+}
+
+test('L03-142 确认开始后 300ms 打开结束选择；离开后这个定时器不再写页面', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const open = startTimePage()
+  open.confirmStartTime()
+  assert.equal(open.data.endTimePicker.show, false)
+  t.mock.timers.tick(300)
+  assert.equal(open.data.endTimePicker.show, true, '人还在时结束选择照常打开')
+  const gone = startTimePage()
+  gone.confirmStartTime()
+  gone.onUnload()
+  t.mock.timers.tick(300)
+  assert.equal(gone.data.endTimePicker.show, false)
+})
+
+test('L03-142 返回键重挂守卫的定时器在离开后不再写页面', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const page = makePage()
+  page._installDraftAutosave()
+  page.setData({ topicDetailShow: true, lookSheetShow: true })
+  page.onNativeBackGuard()
+  assert.equal(page.data.backGuardOff, true)
+  assert.equal(page.data.lookSheetShow, false)
+  page.onUnload()
+  t.mock.timers.tick(50)
+  assert.equal(page.data.backGuardOff, true)
+})
+
+test('L03-142 故事块拖拽量尺寸：人还在就拿起；离开后回包不再写页面', () => {
+  const query = {}
+  query.selectAll = () => query
+  query.select = () => query
+  query.boundingClientRect = () => query
+  query.scrollOffset = () => query
+  query.exec = (cb) => { query.cb = cb }
+  const original = wx.createSelectorQuery
+  wx.createSelectorQuery = () => query
+  try {
+    const reply = () => query.cb([[{ top: 10, height: 40 }], { top: 0, bottom: 200, height: 200 }, { scrollTop: 0, scrollHeight: 400 }])
+    const arm = (page) => {
+      page.data.formData.chapters = [{ _localId: 'c', blocks: [{ type: 'image', key: 'b1' }] }]
+      page.data.storyEditor = Object.assign({}, page.data.storyEditor, { chapterIndex: 0 })
+      page.onStoryDragArm({ currentTarget: { dataset: { blockkey: 'b1', index: 0 } }, touches: [{ clientY: 20 }] })
+    }
+    const live = makePage()
+    arm(live)
+    reply()
+    assert.equal(live.data.storyDrag.key, 'b1')
+    const gone = makePage()
+    arm(gone)
+    gone.onUnload()
+    reply()
+    assert.equal(gone.data.storyDrag.key, '')
+  } finally {
+    if (original) wx.createSelectorQuery = original
+    else delete wx.createSelectorQuery
+  }
+})
+
+test('L03-142 录入地点的选点回包在离开后不再写入待编排', () => {
+  const page = makePage()
+  const calls = []
+  const original = wx.chooseLocation
+  wx.chooseLocation = (options) => { calls.push(options) }
+  try {
+    page.startClubPlaceCapture()
+    assert.equal(calls.length, 1)
+    page.onUnload()
+    calls[0].success({ name: '旧码头', address: '滨江路', longitude: 121.48, latitude: 31.23 })
+    assert.deepEqual(page.data.pendingMaterials, [])
+  } finally { wx.chooseLocation = original }
 })
 
 test('L03-154 卸载后迟到的俱乐部列表回包不写页面', () => {

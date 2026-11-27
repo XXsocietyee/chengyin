@@ -142,6 +142,16 @@ test('L03-072 采用公共模板途中登录续期(同一账号):照常绑定,�
   assert.equal(h.toasts.includes('请重新选择'), false)
 })
 
+test('L03-072 采用途中为打开浮层隐藏页面:照常绑定,不再点了没反应', () => {
+  const h = adoptionPage()
+  const write = startAdoption(h)
+  h.p.onHide()
+  write.success(receipt(h))
+  h.sent.at(-1).success({ code: 200, data: adopted })
+  assert.deepEqual(h.bound(), adopted)
+  assert.equal(h.toasts.includes('请重新选择'), false)
+})
+
 test('L03-072 采用途中换账号:结果被丢弃、不绑定,并提示「请重新选择」', () => {
   const h = adoptionPage()
   const write = startAdoption(h)
@@ -152,8 +162,8 @@ test('L03-072 采用途中换账号:结果被丢弃、不绑定,并提示「请�
   assert.equal(h.toasts.at(-1), '请重新选择')
 })
 
-test('L03-072 选「我的玩法」读详情途中续期照常绑定;换节点后被丢弃时提示「请重新选择」', () => {
-  for (const change of ['renew', 'node']) {
+test('L03-072 选「我的玩法」读详情途中续期或打开浮层照常绑定;换节点后被丢弃时提示「请重新选择」', () => {
+  for (const change of ['renew', 'hide', 'node']) {
     const h = adoptionPage()
     h.p._bindNodeTemplate = h.realBind
     h.p._openNodePlanEndings = () => {}
@@ -161,10 +171,11 @@ test('L03-072 选「我的玩法」读详情途中续期照常绑定;换节点�
     const read = h.sent.find((r) => r.url === '/api/template/author-myinfo')
     assert.ok(read, change)
     if (change === 'renew') h.renew()
+    else if (change === 'hide') h.p.onHide()
     else h.p.data.nodesForm = { name: '另一节点', templateId: 9 }
     read.success({ code: 200, data: { id: 77, title: '我的玩法', advancedConfigJson: '{}' } })
-    if (change === 'renew') {
-      assert.equal(h.p.data.nodesForm.templateId, 77, '续期不是换人')
+    if (change === 'renew' || change === 'hide') {
+      assert.equal(h.p.data.nodesForm.templateId, 77, '续期或藏页开浮层不是换人')
       assert.equal(h.toasts.includes('请重新选择'), false)
     } else {
       assert.equal(h.p.data.nodesForm.templateId, 9)

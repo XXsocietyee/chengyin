@@ -245,30 +245,93 @@ test('iOS 不解析裸日期时间时，结束时间仍拒绝相等、倒序及�
 test('恢复草稿后日期滚轮选中已保存时间，取消的滚轮修改不影响再次打开', () => {
   const page = makePage()
   page.refreshPrimaryActionState = () => {}
-  page.data.dateList = [
-    { date: '2026-10-03', display: '10月3日' },
-    { date: '2026-10-04', display: '10月4日' },
-    { date: '2026-10-07', display: '10月7日' },
-  ]
   page.data.formData.startDate = '2026-10-04 10:15:00'
   page.data.formData.endDate = '2026-10-07 19:30:00'
   page.showStartTimePicker()
-  assert.deepEqual(page.data.startDateIndex, [1])
+  assert.equal(page.data.dateList[page.data.startDateIndex[0]].date, '2026-10-04')
   assert.deepEqual(page.data.startTimeIndex, [10, 15])
   page.closeStartTimePicker()
   page.showEndTimePicker()
-  assert.deepEqual(page.data.endDateIndex, [2])
+  assert.equal(page.data.dateList[page.data.endDateIndex[0]].date, '2026-10-07')
   assert.deepEqual(page.data.endTimeIndex, [19, 30])
   page.onEndDateChange({ detail: { value: [0] } })
   page.onEndTimePickerChange({ detail: { value: [8, 0] } })
   page.closeEndTimePicker()
   page.showEndTimePicker()
-  assert.deepEqual(page.data.endDateIndex, [2])
+  assert.equal(page.data.dateList[page.data.endDateIndex[0]].date, '2026-10-07')
   assert.deepEqual(page.data.endTimeIndex, [19, 30])
   page.confirmEndTime()
   assert.equal(page.data.formData.startDate, '2026-10-04 10:15:00')
   assert.equal(page.data.formData.endDate, '2026-10-07 19:30:00')
   assert.equal(page.data.endTimePicker.show, false)
+})
+
+function ymd(date) {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+test('L04-022 已有起止日早于今天或超出 31 天时仍在滚轮里，确认不换成另一天', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const page = makePage()
+  page.refreshPrimaryActionState = () => {}
+  page.data.formData.startDate = '2020-03-15 09:30:00'
+  page.data.formData.endDate = '2027-08-20 18:45:00'
+  page.generateDateList()
+  const dates = page.data.dateList.map((item) => item.date)
+  assert.equal(dates[0], '2020-03-15')
+  assert.equal(dates.at(-1), '2027-08-20')
+
+  page.showStartTimePicker()
+  assert.equal(page.data.dateList[page.data.startDateIndex[0]].date, '2020-03-15')
+  page.confirmStartTime()
+  assert.equal(page.data.formData.startDate, '2020-03-15 09:30:00')
+  assert.equal(page.data.formData.endDate, '2027-08-20 18:45:00')
+
+  page.showEndTimePicker()
+  assert.equal(page.data.dateList[page.data.endDateIndex[0]].date, '2027-08-20')
+  page.confirmEndTime()
+  assert.equal(page.data.formData.endDate, '2027-08-20 18:45:00')
+  assert.equal(page.data.formData.startDate, '2020-03-15 09:30:00')
+})
+
+test('L04-022 只有远期开始或只有过去的结束也留在滚轮里，确认不换日', () => {
+  const page = makePage()
+  page.refreshPrimaryActionState = () => {}
+  page.showEndTimePicker = () => {}
+  page.data.formData.startDate = '2027-06-01 09:00:00'
+  page.data.formData.endDate = ''
+  page.showStartTimePicker()
+  assert.equal(page.data.dateList[page.data.startDateIndex[0]].date, '2027-06-01')
+  page.confirmStartTime()
+  assert.equal(page.data.formData.startDate, '2027-06-01 09:00:00')
+
+  const ended = makePage()
+  ended.refreshPrimaryActionState = () => {}
+  ended.data.formData.startDate = ''
+  ended.data.formData.endDate = '2020-01-02 18:00:00'
+  ended.showEndTimePicker()
+  assert.equal(ended.data.dateList[0].date, '2020-01-02')
+  assert.equal(ended.data.dateList[ended.data.endDateIndex[0]].date, '2020-01-02')
+  ended.confirmEndTime()
+  assert.equal(ended.data.formData.endDate, '2020-01-02 18:00:00')
+  assert.equal(ended.data.formData.startDate, '')
+})
+
+test('L04-022 新草稿没有日期时滚轮仍从今天起 31 天，不另造一天', () => {
+  const page = makePage()
+  page.data.formData.startDate = ''
+  page.data.formData.endDate = ''
+  page.generateDateList()
+  assert.equal(page.data.dateList.length, 31)
+  assert.equal(page.data.dateList[0].date, ymd(new Date()))
+  const dates = page.data.dateList.map((item) => item.date)
+  const past = new Date()
+  past.setDate(past.getDate() - 40)
+  const far = new Date()
+  far.setDate(far.getDate() + 40)
+  assert.equal(dates.includes(ymd(past)), false)
+  assert.equal(dates.includes(ymd(far)), false)
 })
 
 test('自由探索空态主动作自动落「第1章」并打开正式节点弹窗（2026-08-20 拍板，取代旧的待编排入口）', () => {

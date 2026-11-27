@@ -689,11 +689,14 @@ const methods = {
   onValueEnabled(e) { if (!e.detail.value) this.removeValue(e); },
   /** 生命/幸运上限归主题数值域；开局值超出时在发布前检查里拦截，不在这里改开局值。 */
   onRuntimeStatMax(e) {
-    // L03-015:清空输入是编辑中途。Number('')===0 且能通过 isInteger,写进去会把上限收成 0。
+    const stat = e.currentTarget.dataset.stat;
+    if (!['hp', 'luck'].includes(stat)) return;
+    // L03-015:清空是编辑中途。Number('') === 0 且能通过 isInteger，会把上限写成 0。
     const raw = String(e.detail.value == null ? '' : e.detail.value).trim();
-    if (!raw) return;
-    const r = initial.parse(this.data.formData.journeyRules), stat = e.currentTarget.dataset.stat, max = Number(raw);
-    if (!['hp', 'luck'].includes(stat) || !Number.isInteger(max)) return;
+    if (!raw) { this.setData({ [stat === 'hp' ? 'runtimeHpMax' : 'runtimeLuckMax']: '' }); return; }
+    const max = Number(raw);
+    if (!Number.isInteger(max)) return;
+    const r = initial.parse(this.data.formData.journeyRules);
     r[stat].max = max;
     this.setData({ 'formData.journeyRules': initial.preserveChanges(this.data.formData.journeyRules, r),
       runtimeValueError: Number(r[stat].init) > max ? '第一章开局值超过上限，请调整初始状态' : '' });
@@ -721,10 +724,10 @@ const methods = {
   onRuntimePolicy(e) {
     const c = this._runtimeConfig(), f = e.currentTarget.dataset.field;
     if (f === 'capacity') {
-      // L03-015:空串不能落成容量 0。显式输入的数字仍照旧写入。
+      // L03-015:空串不是 0。容量留着上次的数，输入框只回显空。
       const raw = String(e.detail.value == null ? '' : e.detail.value).trim();
-      if (!raw) return;
-      c[f] = Number(raw);
+      if (!raw) { this.setData({ 'runtimeBag.capacity': '' }); return; }
+      c.capacity = Number(raw);
     } else c[f] = !!e.detail.value;
     this._afterRuntimeChange(c, 'editor');
   },

@@ -852,6 +852,65 @@ test('W8：同名结果旧组件事件不能污染新打开节点，显式撤销
  assert.equal(Object.keys(page._routeRuleDrafts).length,0);
 });
 
+test('L03-053 下一站地点名单只存一份，改一行规则不改另一行', () => {
+  const page = makePage()
+  page.data.formData.chapters = withPreferenceTemplate()
+  page.data.formData.routeMode = 'BRANCH_GRAPH'
+  page._routeGraph = {
+    schemaVersion: 1, startNodeId: 'node_a', terminalNodeIds: ['node_c'], variables: {},
+    fallbacks: [{ fromNodeId: 'node_a', toNodeId: 'node_b' }],
+    edges: [
+      { id: 'art', fromNodeId: 'node_a', toNodeId: 'node_c', trigger: { type: 'PREFERENCE_RESULT', outcomeCode: 'ART' },
+        conditions: [{ op: 'HAS_CONDITION', value: 'art' }], effects: [{ op: 'GRANT_XP', value: 1 }], priority: 0, weight: 1 },
+      { id: 'history', fromNodeId: 'node_a', toNodeId: 'node_b', trigger: { type: 'PREFERENCE_RESULT', outcomeCode: 'HISTORY' },
+        conditions: [{ op: 'HAS_CONDITION', value: 'history' }], effects: [{ op: 'GRANT_XP', value: 2 }], priority: 1, weight: 1 },
+    ],
+  }
+  const patches = []
+  const base = page.setData
+  page.setData = function (patch, cb) { patches.push(patch); return base.call(this, patch, cb) }
+  page.openNodeRouteMapping({ currentTarget: { dataset: { nodeid: 'node_a' } } })
+  const opened = patches.find((patch) => patch.routeMappingRows)
+  assert.ok(opened.routeMappingTargets)
+  assert.equal(opened.routeMappingRows.some((row) => Object.prototype.hasOwnProperty.call(row, 'targetOptions')), false)
+  assert.deepEqual(page.data.routeMappingTargets.map((item) => item.label), ['继续故事流', '历史地点', '艺术地点'])
+  const art = page.data.routeMappingRows.find((row) => row.code === 'ART')
+  const history = page.data.routeMappingRows.find((row) => row.code === 'HISTORY')
+  assert.deepEqual(art.ruleConfig.conditions, [{ op: 'HAS_CONDITION', value: 'art' }])
+  assert.deepEqual(history.ruleConfig.conditions, [{ op: 'HAS_CONDITION', value: 'history' }])
+  assert.notEqual(art.ruleConfig, history.ruleConfig)
+  assert.notEqual(art.ruleConfig.conditions, history.ruleConfig.conditions)
+  assert.notEqual(art.ruleConfig.effects, history.ruleConfig.effects)
+  assert.notEqual(art.ruleBaseline, history.ruleBaseline)
+  assert.notEqual(art.ruleConfig, art.ruleBaseline)
+  const historyBefore = JSON.parse(JSON.stringify(history.ruleConfig))
+  const historyRule = history.ruleConfig
+  const historyBaseline = history.ruleBaseline
+  patches.length = 0
+  page.onRouteRulesChange({
+    detail: {
+      identity: art.formIdentity,
+      value: { conditions: [{ op: 'HAS_CONDITION', value: 'changed' }], effects: [{ op: 'GRANT_XP', value: 9 }] },
+    },
+  })
+  assert.equal(patches.some((patch) => Object.prototype.hasOwnProperty.call(patch, 'routeMappingRows')), false)
+  assert.ok(patches.some((patch) => Object.keys(patch).some((key) => /^routeMappingRows\[\d+\]\.ruleConfig$/.test(key))))
+  const artAfter = page.data.routeMappingRows.find((row) => row.code === 'ART')
+  const historyAfter = page.data.routeMappingRows.find((row) => row.code === 'HISTORY')
+  assert.deepEqual(artAfter.ruleConfig, { conditions: [{ op: 'HAS_CONDITION', value: 'changed' }], effects: [{ op: 'GRANT_XP', value: 9 }] })
+  assert.deepEqual(historyAfter.ruleConfig, historyBefore)
+  assert.equal(historyAfter.ruleConfig, historyRule)
+  assert.equal(historyAfter.ruleBaseline, historyBaseline)
+  const artIndex = page.data.routeMappingRows.findIndex((row) => row.code === 'ART')
+  const historyId = historyAfter.toNodeId
+  patches.length = 0
+  page.onRouteMappingTargetPick({ currentTarget: { dataset: { rowindex: artIndex, optionindex: 1 } } })
+  assert.equal(page.data.routeMappingRows[artIndex].toNodeId, page.data.routeMappingTargets[1].id)
+  assert.equal(page.data.routeMappingRows[artIndex].targetLabel, page.data.routeMappingTargets[1].label)
+  assert.equal(page.data.routeMappingRows.find((row) => row.code === 'HISTORY').toNodeId, historyId)
+  assert.equal(patches.some((patch) => Object.prototype.hasOwnProperty.call(patch, 'routeMappingRows')), false)
+})
+
 test('AUDIT-1122 L03-037 删一个故事节点只发一次 setData（章节、路线、撤销条合并）', () => {
   const page = makePage()
   page.data.formData.chapters = nodes()

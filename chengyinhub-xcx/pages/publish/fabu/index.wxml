@@ -1081,6 +1081,9 @@
         <text class="temp-seg__tit">公共模板</text>
         <text class="temp-seg__sub" wx:if="{{publicTempState === 'ready' && !publicTempList.length}}">暂无公共模板</text>
       </view>
+      <view class="public-temp-search">
+        <input class="public-temp-search__input" type="text" confirm-type="search" placeholder="搜索公共模板" placeholder-class="public-temp-search__ph" value="{{publicTempKeyword}}" bindinput="onPublicTempKeywordInput" bindconfirm="onPublicTempSearch" aria-label="搜索公共模板" />
+      </view>
       <cy-skeleton wx:if="{{publicTempState === 'loading' && !publicTempList.length}}" type="list" count="3" />
       <cy-inline-error wx:if="{{publicTempState === 'error'}}" kind="network" title="公共模板加载失败" action="重试" bind:action="getPublicTempList" />
       <!-- l-editor(编辑器原型 v2 · 4):模板选择改成列表,一行一个模板(图 / 名 / 人数·时长 / 来源 / 勾);
@@ -1095,6 +1098,9 @@
           <text class="pk-row__mode">公共</text>
           <view class="pk-row__ck"><cy-icon name="check" size="24" /></view>
         </view>
+      </view>
+      <view id="public-temp-more" class="public-temp-more" wx:if="{{publicTempHasMore || publicTempMoreState === 'error'}}">
+        <cy-inline-error wx:if="{{publicTempMoreState === 'error'}}" kind="network" title="后面的公共模板没有加载" action="重试" bind:action="retryPublicTempMore" />
       </view>
 
       <view class="temp-seg">
@@ -1146,7 +1152,7 @@
               <view class="route-mapping-dest">
                 <cy-list-row title="去往" value="{{mapping.targetLabel}}" fold open="{{routeMappingDestOpen}}" bind:press="toggleRouteMappingDest" />
                 <block wx:if="{{routeMappingDestOpen}}">
-                  <cy-list-row wx:for="{{mapping.targetOptions}}" wx:key="id" wx:for-item="option" wx:for-index="optionIndex" title="{{option.label}}" hr data-rowindex="{{mappingIndex}}" data-optionindex="{{optionIndex}}" bind:press="onRouteMappingTargetPick"><cy-icon wx:if="{{option.id === mapping.toNodeId}}" name="check" size="28" /></cy-list-row>
+                  <cy-list-row wx:for="{{routeMappingTargets}}" wx:key="id" wx:for-item="option" wx:for-index="optionIndex" title="{{option.label}}" hr data-rowindex="{{mappingIndex}}" data-optionindex="{{optionIndex}}" bind:press="onRouteMappingTargetPick"><cy-icon wx:if="{{option.id === mapping.toNodeId}}" name="check" size="28" /></cy-list-row>
                 </block>
               </view>
             </block>

@@ -10,6 +10,20 @@ const DRAFT_PERSIST_MS = 400; // L03-003:本机草稿落盘节流窗口
 const cyToast = require('../../../utils/toast.js');
 const familyTicket = require('../utils/family-ticket.js'); // F12 亲子票
 const priceInput = require('../utils/price-input.js');
+// L03-050:先收到最多两位,再落库。整数保持整数;带小数的留原文字,
+// 不能 Number("12.349") —— 那个二进制浮点比两位更长。
+function storedTicketPrice(raw) {
+  if (raw === '' || raw == null) return '';
+  const text = String(raw).trim();
+  if (/^-/.test(text)) return text;
+  const capped = priceInput.typingPrice(text);
+  if (!priceInput.isValidPrice(capped)) return capped;
+  const parts = capped.split('.');
+  const whole = parts[0].replace(/^0+(?=\d)/, '') || '0';
+  const frac = parts[1] || '';
+  if (!frac || /^0+$/.test(frac)) return Number(whole);
+  return whole + '.' + frac;
+}
 const TICKET_PAYLOAD_FIELDS = ['id', 'name', 'price', 'totalStock', 'mode', 'meetingPoint', 'meetingPointAddress',
   'meetingPointLongitude', 'meetingPointLatitude', 'gatherLng', 'gatherLat', 'teamSize', 'startTime', 'endTime',
   'saleStartTime', 'saleEndTime', 'description', 'refundSupported', 'syncWithTheme',
@@ -74,6 +88,27 @@ function allowedCategoryCsv(primaryId, ids) {
     if (Number.isInteger(id) && id > 0 && out.indexOf(id) < 0 && out.length < 8) out.push(id);
   });
   return out.length > 1 ? out.join(',') : null;
+}
+
+// 章节设置弹层真正编辑的字段。完成时只回写这些，不把打开弹层时的整章快照盖回去
+//（故事流在弹层开着时仍会改 blocks / 节点 / 概述，整份 Object.assign 会把那些改动丢掉）。
+const CHAPTER_SHEET_FIELDS = [
+  'name', 'rewardText', 'audioUrl', 'audioDuration', 'audioFileName',
+  'videoUrl', 'videoPosterUrl', 'atmospherePreset', 'ending', 'required',
+  'recruitEnabled', 'category', 'categoryId', 'allowedCategoryIds',
+  'termsMode', 'perkMinValue', 'maxPerHeadFee', 'maxMerchant',
+];
+
+function chapterSheetPatch(form, productType) {
+  const patch = {};
+  CHAPTER_SHEET_FIELDS.forEach((key) => {
+    if (form && Object.prototype.hasOwnProperty.call(form, key)) patch[key] = form[key];
+  });
+  // 自由探索的概述只在这个弹层里写；城市定向的概述由故事流投影，不能用打开时的旧文案盖掉。
+  if (Number(productType) === 2 && form && Object.prototype.hasOwnProperty.call(form, 'description')) {
+    patch.description = form.description;
+  }
+  return patch;
 }
 
 function emptyChapterForm(name = '', opening = false) {
@@ -433,7 +468,10 @@ Page({
 
     tempList: [], //我自己的模板
     tempListState: 'loading', // 我的模板读取:loading / ready / error —— 读失败不能看起来像「没有模板」
-    publicTempList: [], //公共玩法库(平台精选/热门/最新)
+    publicTempList: [], //公共玩法库(平台精选/热门/最新)。只保留已打开的页,不在打开时把整库读进内存
+    publicTempKeyword: '',
+    publicTempHasMore: false,
+    publicTempMoreState: '', // '' | loading | error。下一页失败留重试,不把已加载的库说成空的
     selectedTempId: null, // 当前选中的模板ID
     selectedTempSource: '', // 'public' = 公共库 id(须先采用成我的草稿);'mine' = 会员模板 id。两库 id 会重号,不能只凭 id 区分
     selectedTempInfo: null, // 选中的模板完整信息
@@ -541,6 +579,7 @@ Page({
     routeMappingSourceLabel: '',
     routeMappingTemplateLabel: '',
     routeMappingRows: [],
+    routeMappingTargets: [], // L03-053:地点名单只留这一份
     routeMappingFallbackLabel: '继续故事流',
     routeNodeMappingSummary: {},
 
@@ -1453,7 +1492,11 @@ Page({
     if (top) top.close();
     if (this._backGuardOn()) {
       this.setData({ backGuardOff: true });
-      setTimeout(() => this.setData({ backGuardOff: false }), 50);
+      if (this._backGuardTimer) clearTimeout(this._backGuardTimer);
+      this._backGuardTimer = setTimeout(() => {
+        this._backGuardTimer = null;
+        if (!this._unloaded) this.setData({ backGuardOff: false });
+      }, 50);
     }
   },
 
@@ -2204,6 +2247,7 @@ Page({
       .exec((res) => {
         if (this._storyArming !== arming) return;
         this._storyArming = null;
+        if (this._unloaded) return; // L03-142:量尺寸是异步的,离开后不再拿起这块
         const rects = (res && res[0]) || [];
         const area = (res && res[1]) || { top: 0, bottom: 0, height: 0 };
         const offset = (res && res[2]) || {};
@@ -2266,10 +2310,11 @@ Page({
     this.onStoryDragSlot();
   },
 
-  // 贴边自动滚屏:渲染层每两帧报一次目标 scrollTop
+  // 贴边自动滚屏:渲染层每两帧报一次目标 scrollTop;和 data 里已有的值相同就不写
   onStoryDragScroll(arg) {
     const top = Math.max(0, Number(arg && arg.scrollTop) || 0);
     this._storyScrollNow = top;
+    if (this.data.storyScrollTop === top) return;
     this.setData({ storyScrollTop: top });
   },
 
@@ -2696,7 +2741,7 @@ Page({
   },
 
   startClubPlaceCapture() {
-    if (this._clubPlaceCaptureActive) return;
+    if (this._unloaded || this._clubPlaceCaptureActive) return;
     this._clubPlaceCaptureActive = true;
     this._pickNextClubPlace();
   },
@@ -2705,6 +2750,7 @@ Page({
     if (!this._clubPlaceCaptureActive || this._unloaded) return;
     pickLocation({
       onPick: (poi) => {
+        if (!this._clubPlaceCaptureActive || this._unloaded) return;
         const node = this._emptyNodesForm();
         node._localId = this._genLocalId();
         node.name = poi.name || '';
@@ -3489,9 +3535,10 @@ Page({
     if (this._pendingUndoTimer) clearTimeout(this._pendingUndoTimer);
     this._pendingUndoTimer = null;
     this._pendingUndoSnapshot = null;
-    // L03-142/185:卸载后不再让地图重绘、撤销条、滚动锚点的定时器回来 setData
-    [this._routeMapTimer, this._storyUndoTimer, this._pageUndoTimer, this._scrollSheetTimer].forEach(t => { if (t) clearTimeout(t); });
-    this._routeMapTimer = this._storyUndoTimer = this._pageUndoTimer = this._scrollSheetTimer = null;
+    // L03-142/185:卸载后不再让地图重绘、撤销条、滚动锚点、结束时间选择和返回守卫的定时器回来 setData
+    this._resetPublicTempMore();
+    [this._routeMapTimer, this._storyUndoTimer, this._pageUndoTimer, this._scrollSheetTimer, this._endPickerTimer, this._backGuardTimer].forEach(t => { if (t) clearTimeout(t); });
+    this._routeMapTimer = this._storyUndoTimer = this._pageUndoTimer = this._scrollSheetTimer = this._endPickerTimer = this._backGuardTimer = null;
     this._clubPlaceCaptureActive = false;
     this._precheckToken = (this._precheckToken || 0) + 1; // 让在途预检回调失效
     this._identityStatusEpoch = (this._identityStatusEpoch || 0) + 1;
@@ -3508,10 +3555,41 @@ Page({
     }
   },
 
-  // 生成日期列表（今天至30天内）
+  // 表单里已有的起止日 → 当天 00:00。认不出或日历不存在(如 2 月 30 日)返回 null,不另造一天。
+  _themeDateBound(value) {
+    const normalized = publishDate.normalizeDateTime(value, '00:00:00');
+    const match = normalized && /^(\d{4})-(\d{2})-(\d{2})/.exec(normalized);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+    return date;
+  },
+
+  // L04-022:把已有起止日交给 buildDateList。较早的那天做 start(早于今天时表从那天起),
+  // 较晚的那天做 end(超出 31 天时表盖到那天)。没有日期就不传范围。
+  _themeDateRange() {
+    const form = this.data.formData || {};
+    const bounds = [this._themeDateBound(form.startDate), this._themeDateBound(form.endDate)].filter(Boolean);
+    if (!bounds.length) return undefined;
+    return {
+      start: bounds.reduce((earliest, bound) => (bound < earliest ? bound : earliest)),
+      end: bounds.reduce((latest, bound) => (bound > latest ? bound : latest))
+    };
+  },
+
+  _themeDateList() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return publishDate.buildDateList(today, this._themeDateRange());
+  },
+
+  // 生成日期列表。没有已存起止日时仍是今天起 31 天;有则把那两天包进表里。
   generateDateList() {
     this.setData({
-      dateList: publishDate.buildDateList(new Date())
+      dateList: this._themeDateList()
     });
   },
 
@@ -3530,23 +3608,24 @@ Page({
       this.data.formData[`${type}Date`], type === 'start' ? '09:00:00' : '18:00:00'
     );
     const match = saved && /^(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2}):/.exec(saved);
-    const dateList = match && Number.isFinite(toTimestamp(saved)) ? this._dateListWith(match[1]) : this.data.dateList; // L03-057
-    if (dateList !== this.data.dateList) this.setData({ dateList });
-    const dateIndex = match && Number.isFinite(toTimestamp(saved))
-      ? dateList.findIndex(item => item.date === match[1]) : -1;
+    // 表和滚轮下标一次写入。已存的那天必须在表里,确认才不会落到另一天。
+    const dateList = this._themeDateList();
+    const dateIndex = match ? dateList.findIndex(item => item.date === match[1]) : -1;
+    const patch = { dateList };
     if (type === 'start') {
-      this.setData({
-        'startTimePicker.show': true,
-        startDateIndex: dateIndex >= 0 ? [dateIndex] : this.data.startDateIndex,
-        startTimeIndex: dateIndex >= 0 ? [Number(match[2]), Number(match[3])] : this.data.startTimeIndex,
-      });
+      patch['startTimePicker.show'] = true;
+      if (dateIndex >= 0) {
+        patch.startDateIndex = [dateIndex];
+        patch.startTimeIndex = [Number(match[2]), Number(match[3])];
+      }
     } else {
-      this.setData({
-        'endTimePicker.show': true,
-        endDateIndex: dateIndex >= 0 ? [dateIndex] : this.data.endDateIndex,
-        endTimeIndex: dateIndex >= 0 ? [Number(match[2]), Number(match[3])] : this.data.endTimeIndex,
-      });
+      patch['endTimePicker.show'] = true;
+      if (dateIndex >= 0) {
+        patch.endDateIndex = [dateIndex];
+        patch.endTimeIndex = [Number(match[2]), Number(match[3])];
+      }
     }
+    this.setData(patch);
   },
 
   
@@ -3605,9 +3684,11 @@ Page({
     }, () => this.refreshPrimaryActionState());
     this.updateTicketTimes(startDateTime, this.data.formData.endDate);
 
-    // 显示结束时间选择器
-    setTimeout(() => {
-      this.showEndTimePicker();
+    // 显示结束时间选择器。离开页面要停掉,否则 300ms 后还会把选择器写回已卸载的页
+    if (this._endPickerTimer) clearTimeout(this._endPickerTimer);
+    this._endPickerTimer = setTimeout(() => {
+      this._endPickerTimer = null;
+      if (!this._unloaded) this.showEndTimePicker();
     }, 300);
   },
 
@@ -4309,12 +4390,13 @@ Page({
       // 编辑现有章节的逻辑保持不变
       let chapterIndex = that.data.popChapterIndex;
       // 同上:不再用占位文案凑完成态
-      // L03-041:不原地改 this.data;把弹窗里的字段合并到当前章(弹窗开着时故事流可能已改了本章其它字段)
+      // L03-041:不原地改 this.data。弹层开着时故事流可能已改了本章的块、节点和概述，
+      // 只回写弹层自己的字段，避免用打开时的整章快照把那些改动盖掉。
       const chapters = that.data.formData.chapters.slice();
       if (!this._saveChapterRules()) return false;
       this._chapterRulesOpenFor = null;
       this._pushUndo();
-      chapters[chapterIndex] = Object.assign({}, chapters[chapterIndex], newChapter);
+      chapters[chapterIndex] = Object.assign({}, chapters[chapterIndex], chapterSheetPatch(newChapter, this.data.formData.productType));
       this.destroyPreviewAudio(); // R9-36:完成编辑=弹层关闭,正在播的本章旁白一起收
       this._assignPendingLocalId = '';
       this._setChapters(chapters, {
@@ -5070,7 +5152,8 @@ Page({
   onFePriceInput(e) {
     const index = Number(e.currentTarget.dataset.index);
     if (!(index >= 0) || this.data.fePricing.disabled) return;
-    this.setData({ ['fePricing.rows[' + index + '].price']: String(e.detail.value == null ? '' : e.detail.value) });
+    // L03-050:开售票价与票种编辑器同一套输入规整,12.349 留成 "12.34",不转成浮点
+    this.setData({ ['fePricing.rows[' + index + '].price']: priceInput.typingPrice(e.detail && e.detail.value) });
   },
 
   // 置灰的「发布」被点:把面板上那句「还有 N 个位置待承接 / 加载失败」再说一遍,不让一次点击石沉大海
@@ -5556,7 +5639,7 @@ Page({
           name: ticket.name || '',
           // L03-006(业主 2026-11-24 默认 A):没填的票价保持为空,不再当 0 元。自由探索 = 开售前定价,
           // 城市定向由 _ticketBlockReason 拦「请填写票价」;真正填了 0 的仍是 0。
-          price: ticket.price === '' || ticket.price == null ? '' : ticket.price,
+          price: ticket.price === '' || ticket.price == null ? '' : storedTicketPrice(ticket.price),
           totalStock: ticket.totalStock == null || ticket.totalStock === '' ? 100 : ticket.totalStock,
           mode: this.data.formData.productType || 1,
           meetingPoint: ticket.meetingPoint || '',
@@ -5704,8 +5787,8 @@ Page({
     const stock = et.totalStock == null || et.totalStock === '' ? NaN : Number(et.totalStock);
     const ticketData = {
       name: et.name,
-      // 到这里票价已过 _ticketBlockReason:空 = 自由探索开售前定价;非空必是最多两位小数的合法金额
-      price: et.price === '' || et.price == null ? '' : Number(String(et.price).trim()),
+      // 到这里票价已过 _ticketBlockReason:空 = 自由探索开售前定价;非空先收到两位再落库
+      price: storedTicketPrice(et.price),
       totalStock: Number.isFinite(stock) ? stock : 100,
       mode: this.data.formData.productType || 1,
       meetingPoint: et.meetingPoint,
@@ -6256,16 +6339,17 @@ Page({
         // “继续故事流”。否则目标恰好等于相邻节点时会被伪装成未配置，重进后看不出对应。
         const selectedId = edge ? edge.toNodeId : '';
         const selected = targetOptions.find((item) => item.id === selectedId) || targetOptions[0];
+        // L03-053:地点名单不进每一行。规则单独克隆，改一行不会碰到另一行或原边。
+        const rule = JSON.parse(JSON.stringify({ conditions: edge ? edge.conditions : [], effects: edge ? edge.effects : [] }));
         all.push({
           mappingKey: edge ? 'edge:' + edge.id : 'outcome:' + outcome.triggerType + ':' + outcome.code,
           edgeId: edge ? edge.id : '',
-          ruleConfig: JSON.parse(JSON.stringify({ conditions: edge ? edge.conditions : [], effects: edge ? edge.effects : [] })),
+          ruleConfig: rule,
           code: outcome.code,
           triggerType: outcome.triggerType,
           label: outcome.label + (matches.length > 1 ? ' · 分支 ' + (branchIndex + 1) : ''),
           toNodeId: selected.id,
           targetLabel: selected.label,
-          targetOptions,
         });
       });
       return all;
@@ -6288,6 +6372,7 @@ Page({
       routeMappingTemplateLabel: (source.templateInfo && source.templateInfo.title)
         || source.templateName || '节点完成结果',
       routeMappingRows: rows,
+      routeMappingTargets: targetOptions,
       routeRuleNodes: nodes.map(node => ({ id: node.id, label: node.label })),
       routeRuleVariables: this._routeRuleState(graph.variables || {}, nodes), // 文档二 L3：名单与展开状态在 theme-route-names.js
       routeMappingFallbackLabel: nextNodeId ? '继续故事流' : '故事流结束',
@@ -6300,17 +6385,18 @@ Page({
         || this._routeRulesOwner !== memberId(app)
         || this._routeRulesScope !== this.data.operationScope) return;
     const detail = e.detail || {};
-    const rows = (this.data.routeMappingRows || []).map(row => Object.assign({}, row));
-    const row = rows.find(row => row.formIdentity === detail.identity);
-    if (!row || !detail.value || !Array.isArray(detail.value.conditions) || !Array.isArray(detail.value.effects)) return;
-    row.ruleConfig = JSON.parse(JSON.stringify(detail.value));
+    const rows = this.data.routeMappingRows || [];
+    const index = rows.findIndex(row => row.formIdentity === detail.identity);
+    const row = rows[index];
+    if (index < 0 || !detail.value || !Array.isArray(detail.value.conditions) || !Array.isArray(detail.value.effects)) return;
+    const rule = JSON.parse(JSON.stringify(detail.value));
     this._routeRuleDrafts = Object.assign(Object.create(null), this._routeRuleDrafts || {});
     const draft = this._routeRuleDrafts[this._routeMappingSourceNodeId] = this._routeRuleDrafts[this._routeMappingSourceNodeId] || {};
     if (detail.discard) {
       delete draft[row.mappingKey];
       if (!Object.keys(draft).length) delete this._routeRuleDrafts[this._routeMappingSourceNodeId];
-    } else draft[row.mappingKey] = row.ruleConfig;
-    this.setData({ routeMappingRows: rows });
+    } else draft[row.mappingKey] = rule;
+    this.setData({ ['routeMappingRows[' + index + '].ruleConfig']: rule });
     this._setSaveState(this._persistDraftEnvelope() ? 'local' : 'localFailed');
   },
 
@@ -6320,13 +6406,14 @@ Page({
         || this._routeRulesOwner !== memberId(app)
         || this._routeRulesScope !== this.data.operationScope) return;
     const rowIndex = Number(e.currentTarget.dataset.rowindex);
-    const rows = (this.data.routeMappingRows || []).map((row) => Object.assign({}, row));
-    const row = rows[rowIndex];
-    const selected = row && row.targetOptions[Number(e.currentTarget.dataset.optionindex ?? (e.detail || {}).value)]; // 就地勾选传 optionindex
+    const row = (this.data.routeMappingRows || [])[rowIndex];
+    const selected = row && (this.data.routeMappingTargets || [])[Number(e.currentTarget.dataset.optionindex ?? (e.detail || {}).value)]; // 就地勾选传 optionindex
     if (!selected) return;
-    row.toNodeId = selected.id;
-    row.targetLabel = selected.label;
-    this.setData({ routeMappingRows: rows, routeMappingDestOpen: false });
+    this.setData({
+      ['routeMappingRows[' + rowIndex + '].toNodeId']: selected.id,
+      ['routeMappingRows[' + rowIndex + '].targetLabel']: selected.label,
+      routeMappingDestOpen: false,
+    });
   },
 
   closeNodeRouteMapping() {
@@ -6480,16 +6567,34 @@ Page({
   refreshPrimaryActionState() {
     this._collectSetData(() => this._refreshPrimaryActionStateNow());
   },
+  _professionalDraftInput() {
+    const formData = (this.data && this.data.formData) || {};
+    return {
+      formData,
+      clubId: formData.clubId,
+      pendingMaterials: this.data.pendingMaterials,
+      categoryIds: this.data.selectedCategoryIds,
+    };
+  },
+  // L03-007:刷新主按钮时策略层只算一次。校验袋里还会再要同一份结果，输入没变就直接交回。
+  _reuseProfessionalDraft(policy, run) {
+    const input = this._professionalDraftInput();
+    const original = proEditorPolicy.evaluateProfessionalDraft;
+    proEditorPolicy.evaluateProfessionalDraft = (next) => {
+      const formData = (next && next.formData) || {};
+      if (next && formData === input.formData && next.clubId === input.clubId
+          && next.pendingMaterials === input.pendingMaterials
+          && next.categoryIds === input.categoryIds) return policy;
+      return original(next);
+    };
+    try { return run(); }
+    finally { proEditorPolicy.evaluateProfessionalDraft = original; }
+  },
   _refreshPrimaryActionStateNow() {
     this.syncIdentityReady();
     const d = this.data;
     // 章节状态与「还差几项」由策略层统一算,页面不复制判据(见 pro-editor-policy 头注)
-    const policy = proEditorPolicy.evaluateProfessionalDraft({
-      formData: d.formData,
-      clubId: d.formData && d.formData.clubId,
-      pendingMaterials: d.pendingMaterials,
-      categoryIds: d.selectedCategoryIds,
-    });
+    const policy = proEditorPolicy.evaluateProfessionalDraft(this._professionalDraftInput());
     // 入口卡只数主题详情弹窗里那几项;章节缺剧情/缺节点由章节卡自己标,算进来会让人打开弹窗却找不到要填什么
     const missing = policy.blockingIssues.filter(issue => TOPIC_DETAIL_ISSUE_KEYS.indexOf(issue.key) !== -1).length;
     const openingIndex = (d.formData.chapters || []).findIndex(chapter => chapter.opening === true);
@@ -6525,7 +6630,7 @@ Page({
     if (missing !== d.topicDetailMissing) summaryPatch.topicDetailMissing = missing;
     if (Object.keys(summaryPatch).length) this.setData(summaryPatch);
 
-    const bag = this._buildValidationBag(policy); // L03-007:上面那次 evaluateProfessionalDraft 的结果直接给校验袋
+    const bag = this._reuseProfessionalDraft(policy, () => this._buildValidationBag(policy));
     const needsClub = Number(d.formData.productType) === 1 && d.myClubs.length > 0;
     const canPublish = bag.isValid() && (!needsClub || !!d.formData.clubId)
       && !templateBinding.issues(d.formData.chapters, d.formData.themeRuntimeConfig,
@@ -8736,15 +8841,15 @@ Page({
    * 结果不确定(超时/断网)时不自动重发,避免重复建草稿;请作者去「我的玩法」查回。
    */
   // 复用原节点对象/身份与选择代次；编辑器导航可正常返回，换节点/主题/账号不能接旧结果。
-  _nodeTemplateTargetCurrent(editorReturn = false) {
+  _nodeTemplateTargetCurrent() {
     const node = this.data.nodesForm, key = templateBinding.nodeKey(node);
     const owner = memberId(app), scope = this.data.operationScope, topicId = this.data.editingTopicId;
     const token = this._nodeTemplateLoadToken;
     const draftUuid = this.data.draftUuid, editToken = this._editLoadToken;
-    // L03-072(与 L03-008 同一规则,业主 2026-11-24 默认 A):同一人只看账号 + 操作身份,
-    // 不再比登录凭证、会话对象 / 版本或 onHide 登录代次;换账号 / 换操作身份照旧丢弃结果。
-    // A child editor emits before navigateBack, while its opener is hidden; only that path may arrive hidden.
-    return () => !this._unloaded && (editorReturn || !this._hidden)
+    // L03-072(与 L03-008 同一规则,业主 2026-11-24 默认 A):同一人只看账号 + 操作身份。
+    // 静默续期、以及为打开选图/浮层而 onHide(页面藏起、登录代次加一),都不是换人,不能丢掉刚选的模板。
+    // 页面已卸载、换账号、换操作身份、换节点/主题/草稿仍丢弃。
+    return () => !this._unloaded
       && owner === memberId(app) && scope === this.data.operationScope
       && draftUuid === this.data.draftUuid && editToken === this._editLoadToken
       && topicId === this.data.editingTopicId && token === this._nodeTemplateLoadToken
@@ -8896,7 +9001,7 @@ Page({
       this._loadingSelectedTemplate = templateAdoption.id(selectedTemplate.id);
       const token = (this._nodeTemplateLoadToken || 0) + 1;
       this._nodeTemplateLoadToken = token;
-      const current = this._nodeTemplateTargetCurrent(); // L03-072:不再比登录代次
+      const current = this._nodeTemplateTargetCurrent(); // L03-072:续期或藏页开浮层都不算换人
       this._loadingSelectedTemplateCurrent = current;
       const that = this;
       app.sendRequest({ url: '/api/template/author-myinfo', method: 'POST', hideLoading: true, silentError: true,
@@ -9219,15 +9324,25 @@ Page({
   // 切换到游戏选择视图
   showTemp: function () {
     this._refreshSupportMatrix();
-    if (!this._publicTempListToken || this.data.publicTempState === 'error'
+    const owner = memberId(app);
+    const scope = this.data.operationScope;
+    const switched = !!this._publicTempListToken && (this._publicTempOwner !== owner || this._publicTempScope !== scope);
+    if (switched) {
+      this._publicTempKeyword = '';
+      this._publicTempKeywordDraft = '';
+    }
+    if (!this._publicTempListToken || switched || this.data.publicTempState === 'error'
       || (this.data.publicTempState === 'loading' && !this._publicTempListLive)) this.getPublicTempList();
     if (!this._tempListReadEpoch || this.data.tempListState === 'error') this.getTempList();
     const info = this.data.nodesForm && this.data.nodesForm.templateInfo;
+    const that = this;
     this.setData({
       nodeSheetView: 'games',
       selectedTempId: this.data.nodesForm && this.data.nodesForm.templateId ? this.data.nodesForm.templateId : null,
       selectedTempSource: this.data.nodesForm && this.data.nodesForm.templateId ? 'mine' : '',
       selectedTempInfo: info && info.title ? info : null
+    }, function () {
+      if (that.data.publicTempHasMore && !that.data.publicTempMoreState) that._armPublicTempMore();
     });
   },
   // 返回按钮：回到节点详情视图
@@ -9252,7 +9367,7 @@ Page({
     if (this._navigating) return;
     this._nodeTemplateLoadToken = (this._nodeTemplateLoadToken || 0) + 1;
     const that = this;
-    const targetCurrent = this._nodeTemplateTargetCurrent(true);
+    const targetCurrent = this._nodeTemplateTargetCurrent();
     const themeName = this.data.formData.name;
     const nodeName = this.data.nodesForm.name || ''; // 没起名就留空让作者在玩法页起,别把内部编号 lid3 当名字带过去
     this._navigating = true; wx.navigateTo({ // 跳转中不响应连点,免得叠两层玩法编辑页
@@ -9278,46 +9393,162 @@ Page({
     });
   },
 
-  // 公共玩法库完整分页：list 的 category_id 可省略，homeData 只是推荐切片，不能替代库。
+  // L03-065:打开玩法选择只读公共库第一页。下一页只在人滚近列表末尾时读；搜索另起第一页,不把命中的整库拉完。
+  // 某一页失败给重试,不把失败说成库是空的。换账号或换经营范围从第一页重来。
+  // category_id 可省略，homeData 只是推荐切片，不能替代库。
   // ⚠️ 拉不到就留空并在界面上直说,不塞占位假模板:选中一个不存在的 templateId
   // 会让玩家端到了点位打不开玩法,而创作者这边显示"已配置"。
   // 公共玩法库三态分开:加载中 / 已加载(可能为空) / 请求失败(给重试),别把「库里没有」说成「拉不到」
   getPublicTempList: function () {
-    const that = this, rows = [], seen = new Set(), pageSize = 100;
     // L03-004:公共库是只读列表,不随 onHide 的登录续接纪元失效(owner/scope 已覆盖换号);在途标记让 showTemp 能补拉被丢弃的请求
     const owner = memberId(app), scope = this.data.operationScope;
     const token = this._publicTempListToken = (this._publicTempListToken || 0) + 1;
     this._publicTempListLive = token;
-    const settle = () => { if (that._publicTempListLive === token) that._publicTempListLive = 0; };
+    this._publicTempOwner = owner;
+    this._publicTempScope = scope;
+    this._publicTempSeen = new Set();
+    this._publicTempReceived = 0;
+    this._publicTempPage = 0;
+    this._publicTempMoreBusy = false;
+    this._publicTempKeyword = String(this._publicTempKeyword || '').trim();
+    this._resetPublicTempMore();
+    this.setData({
+      publicTempList: [],
+      publicTempState: 'loading',
+      publicTempMoreState: '',
+      publicTempHasMore: false,
+      publicTempKeyword: this._publicTempKeyword,
+    });
+    this._requestPublicTempPage(1);
+  },
+  _requestPublicTempPage: function (pageNum) {
+    const that = this;
+    const append = pageNum > 1;
+    if (append) {
+      if (this._publicTempMoreBusy) return;
+      this._publicTempMoreBusy = true;
+      this._resetPublicTempMore();
+      this.setData({ publicTempMoreState: 'loading' });
+    }
+    const pageSize = 100;
+    const keyword = String(this._publicTempKeyword || '').trim();
+    const owner = this._publicTempOwner, scope = this._publicTempScope;
+    const token = this._publicTempListToken;
+    const seen = this._publicTempSeen;
+    const receivedBefore = this._publicTempReceived;
+    const settle = () => {
+      if (that._publicTempListLive === token) that._publicTempListLive = 0;
+      if (token === that._publicTempListToken) that._publicTempMoreBusy = false;
+    };
     const current = () => !that._unloaded && token === that._publicTempListToken
       && owner === memberId(app) && scope === that.data.operationScope;
-    const fail = () => { settle(); if (current()) that.setData({ publicTempList: [], publicTempState: 'error' }); };
-    this.setData({ publicTempList: [], publicTempState: 'loading' });
-    let received = 0;
-    const load = pageNum => app.sendRequest({
+    const data = { pageNum: pageNum, pageSize: pageSize };
+    if (keyword) data.keyword = keyword;
+    app.sendRequest({
       hideLoading: true,
       url: '/api/template/list',
       method: 'POST',
-      data: { pageNum: pageNum, pageSize: pageSize },
+      data: data,
       success: function (res) {
         if (!current()) { settle(); return; }
-        const data = res && res.data, total = Number(data && data.total);
-        if (!(res && res.code == '200' && isRecord(data) && isRecordList(data.rows)
-          && Number.isSafeInteger(total) && total >= 0)) { fail(); return; }
+        const body = res && res.data, total = Number(body && body.total), rows = body && body.rows;
+        if (!(res && res.code == '200' && isRecord(body) && isRecordList(rows)
+          && Number.isSafeInteger(total) && total >= 0)) { that._failPublicTempPage(append, current, settle); return; }
         // 重复页/坏ID/总数前提前空页不能冒充完整库；失败只重读，不产生采用写入。
-        if (new Set(data.rows.map(item => String(item.id))).size !== data.rows.length
-          || data.rows.some(item => !templateAdoption.id(item.id)
-          || seen.has(String(item.id))) || (!data.rows.length && received < total)) { fail(); return; }
-        data.rows.forEach(item => { seen.add(String(item.id)); rows.push(templateCardImage(item)); });
-        received += data.rows.length;
-        if (received < total) { load(pageNum + 1); return; }
+        if (new Set(rows.map(item => String(item.id))).size !== rows.length
+          || rows.some(item => !templateAdoption.id(item.id) || seen.has(String(item.id)))
+          || (!rows.length && receivedBefore < total)) { that._failPublicTempPage(append, current, settle); return; }
+        rows.forEach(item => seen.add(String(item.id)));
+        const mapped = rows.map(templateCardImage);
+        that._publicTempReceived = receivedBefore + rows.length;
+        that._publicTempPage = pageNum;
+        const hasMore = that._publicTempReceived < total;
+        const list = append ? (that.data.publicTempList || []).concat(mapped) : mapped;
         settle();
-        that.setData({ publicTempList: rows, publicTempState: 'ready' });
-        that._refreshSupportMatrix();
+        that.setData({
+          publicTempList: list,
+          publicTempState: 'ready',
+          publicTempHasMore: hasMore,
+          publicTempMoreState: '',
+        }, function () {
+          that._refreshSupportMatrix();
+          if (current() && hasMore) that._armPublicTempMore();
+          else that._resetPublicTempMore();
+        });
       },
-      fail: fail,
+      fail: function () { that._failPublicTempPage(append, current, settle); },
     });
-    load(1);
+  },
+  _failPublicTempPage: function (append, current, settle) {
+    settle();
+    if (!current()) return;
+    this._resetPublicTempMore();
+    if (append && this.data.publicTempList.length) {
+      this.setData({ publicTempMoreState: 'error', publicTempHasMore: true });
+      return;
+    }
+    this.setData({ publicTempList: [], publicTempState: 'error', publicTempMoreState: '', publicTempHasMore: false });
+  },
+  onPublicTempNearEnd: function () {
+    if (this._publicTempListToken && (this._publicTempOwner !== memberId(app) || this._publicTempScope !== this.data.operationScope)) {
+      this._publicTempKeyword = '';
+      this._publicTempKeywordDraft = '';
+      this.getPublicTempList();
+      return;
+    }
+    if (this._publicTempMoreBusy || this.data.publicTempState !== 'ready' || !this.data.publicTempHasMore) return;
+    if (this.data.publicTempMoreState === 'error' || this.data.publicTempMoreState === 'loading') return;
+    this._requestPublicTempPage((this._publicTempPage || 1) + 1);
+  },
+  retryPublicTempMore: function () {
+    if (this._publicTempOwner !== memberId(app) || this._publicTempScope !== this.data.operationScope) {
+      this._publicTempKeyword = '';
+      this._publicTempKeywordDraft = '';
+      this.getPublicTempList();
+      return;
+    }
+    if (this.data.publicTempState === 'error' || !this.data.publicTempList.length) { this.getPublicTempList(); return; }
+    this._publicTempMoreBusy = false;
+    this.setData({ publicTempMoreState: '' });
+    this._requestPublicTempPage((this._publicTempPage || 1) + 1);
+  },
+  onPublicTempKeywordInput: function (e) {
+    this._publicTempKeywordDraft = String(e && e.detail && e.detail.value || '');
+    this.setData({ publicTempKeyword: this._publicTempKeywordDraft });
+  },
+  onPublicTempSearch: function (e) {
+    const raw = e && e.detail && e.detail.value != null ? e.detail.value : this._publicTempKeywordDraft;
+    const keyword = String(raw || '').trim();
+    if (keyword === String(this._publicTempKeyword || '') && this.data.publicTempState === 'ready' && this.data.publicTempMoreState !== 'error') return;
+    this._publicTempKeyword = keyword;
+    this._publicTempKeywordDraft = keyword;
+    this.getPublicTempList();
+  },
+  _resetPublicTempMore: function () {
+    if (!this._publicTempMoreIo) return;
+    try { this._publicTempMoreIo.disconnect(); } catch (e) {}
+    this._publicTempMoreIo = null;
+  },
+  // 列表末尾靠近屏幕时再读下一页。观察器挂上时的那一次不算滚动;必须先看到末尾在画面外,再进入画面。
+  _armPublicTempMore: function () {
+    this._resetPublicTempMore();
+    if (this._unloaded || this.data.publicTempState !== 'ready' || !this.data.publicTempHasMore) return;
+    if (this.data.publicTempMoreState || typeof this.createIntersectionObserver !== 'function') return;
+    const token = this._publicTempListToken;
+    let seenHidden = false;
+    const that = this;
+    const io = this.createIntersectionObserver({ thresholds: [0] });
+    this._publicTempMoreIo = io;
+    try {
+      io.relativeToViewport({ bottom: 160 }).observe('#public-temp-more', function (res) {
+        if (token !== that._publicTempListToken || that._unloaded) return;
+        const visible = !!(res && res.intersectionRatio > 0);
+        if (!visible) { seenHidden = true; return; }
+        if (!seenHidden) return;
+        seenHidden = false;
+        that.onPublicTempNearEnd();
+      });
+    } catch (e) { this._publicTempMoreIo = null; }
   },
 
   getTempList: function () {

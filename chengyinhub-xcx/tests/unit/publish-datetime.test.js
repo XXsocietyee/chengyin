@@ -194,5 +194,7 @@ test('L04-022 日期表覆盖表单已有的起止日;不传范围仍是今天�
   assert.equal(past[0].date, '2026-11-01', '已开始的场次从原开始日起');
   const far = d.buildDateList(today, { start: new Date(2027, 0, 10), end: new Date(2027, 1, 20) });
   assert.equal(far.at(-1).date, '2027-02-20', '远期结束日也在表里');
+  const acrossDst = d.buildDateList(today, { start: new Date(2027, 5, 1), end: new Date(2027, 5, 1) });
+  assert.equal(acrossDst.at(-1).date, '2027-06-01', '跨夏令时的结束日不能少一天');
   assert.equal(d.formatDateTimeForAPI('bad', 9, 0), '');
 });
