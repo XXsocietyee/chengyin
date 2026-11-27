@@ -327,7 +327,7 @@ page { background: var(--cy-color-bg-page); }
 
 /* 前往中陪伴态的底部整条已随 .navbar 一起退场,读数移到顶部 .navtop */
 /* 途中 NPC 气泡:陪伴条上方,黑白高对比胶囊 */
-.navbubble{ position:absolute; left:var(--cy-space-3-5); right:var(--cy-space-3-5); bottom:calc(340rpx + env(safe-area-inset-bottom)); z-index:60; max-width:640rpx; margin:0 auto;
+.navbubble{ position:fixed; left:var(--cy-space-3-5); right:var(--cy-space-3-5); bottom:calc(340rpx + env(safe-area-inset-bottom)); z-index:107; max-width:640rpx; margin:0 auto;
   display:flex; align-items:center; gap:var(--cy-legacy-14); background: var(--cy-color-play-accent); color: var(--cy-color-text-inverse);
   border-radius: var(--cy-radius-pill); padding:var(--cy-space-2-5) 30rpx; box-shadow:0 20rpx 48rpx rgba(0,0,0,.45); animation:bubbleIn .24s ease-out; /* ds-ok 刻意:浮层投影,--cy-shadow-card 暗端为 none */ }
 .nb-spark{ flex:none; }
@@ -353,7 +353,7 @@ page { background: var(--cy-color-bg-page); }
  *   下半 .b:白底 · 圆角只在下两角 12px = 23rpx · 内边距 9px 18px = 17/35rpx ·
  *        字 12px = 23rpx 700 #111(原 #1E2939 非 700)· 原来写死 83rpx 高
  *   ⚠️ 原型的整条**没有外层圆角与投影**:圆角分别落在上下两半上。 */
-.navtop{ position:absolute; left:31rpx; right:31rpx; z-index:45; }
+.navtop{ position:fixed; left:31rpx; right:31rpx; z-index:107; }
 .navtop__main{ box-sizing:border-box; display:flex; align-items:baseline; gap:15rpx; /* ds-ok 原型 .a gap:8px */
   padding:27rpx 35rpx; border-radius:31rpx 31rpx 0 0; background:#0B0B0C; } /* ds-ok 原型 .a */
 .navtop__ic{ flex:none; width:100rpx; height:100rpx; color:#FFFFFF; align-self:center; } /* ds-ok 原型 .navtop 图标白 */
@@ -441,6 +441,9 @@ page { background: var(--cy-color-bg-page); }
 
 .chfull__pad{height:calc(440rpx + env(safe-area-inset-bottom));} /* x-fix4 N-1 底部留白含 Home 条安全区 */
 .chfull__pad:first-child{height:max(440rpx, calc(var(--chfull-fade-end) + var(--cy-space-6)));} /* ds-ok 正文第一段永远落在顶栏渐隐终点下方一档,不贴着罗盘 / 圆钮 */
+/* §3.2 1c:章末轻点提示(复用既有 fade 关键帧,不新增 @keyframes;减动效 / 低端机静止) */
+.chfull__tapcue{ display:block; margin:var(--cy-space-5) var(--cy-space-6) 0; font-size:24rpx; line-height:1.5; letter-spacing:.12em; text-align:center; color:var(--atmo-muted, var(--lk-mute, var(--cy-color-text-tertiary))); pointer-events:none; animation:fade 2.4s ease-in-out infinite alternate; } /* ds-ok 复用既有 fade 关键帧 */
+.play--reduced-motion .chfull__tapcue, .play--lite .chfull__tapcue{ animation:none; opacity:.72; }
 .chfull__cover{ display:block; height:346rpx; background:#101418; } /* ds-ok 原型 图 180px / 底 #101418;宽与圆角见下方 .chfull__img,.chfull__cover(L01-142) */
 .chfull__para{display:block;min-height:0;padding:0;font-size:34rpx;line-height:1.95;color:var(--cy-color-text-primary);} /* ds-ok 用户指定原型正文 17px/1.95 */
 /* ★ 内嵌玩法(契约 §1.5):故事流里的这一块。三个变量把 cy-play-stage 从「四边贴死」
@@ -2253,3 +2256,19 @@ page { background: var(--cy-color-bg-page); }
 .gp2__spacer{ height:200rpx; } /* ds-ok 原内联字面值:题卡滚动区底部留白 */
 .finsheet__card--route{ padding-top:var(--cy-space-2); }
 .chfull__kit{ --pk-es-reel-h:860rpx; --pk-es-q-display:none; } /* ds-ok 原内联字面值;单列一条,首条 .chfull__kit 须与发布页预览变量逐条一致 */
+
+/* §3.2 1b:户外浅底高对比模式(切换 look-palette--white + 去掉扫描线 / 模糊 / 暗角 / 文字阴影) */
+.play.play--outdoor{ --atmo-bg:var(--lk-bg, #F5F6F8); --atmo-card:var(--lk-card, #E3E4E6); --atmo-control:var(--lk-ctl, #CCCDD0); --atmo-text:var(--lk-ink, #111318); --atmo-muted:var(--lk-mute, #5B6270); --look-bg:var(--lk-bg, #F5F6F8); background:var(--lk-bg, #F5F6F8); color:var(--lk-ink, #111318); } /* ds-ok 户外浅底高对比 */
+.play.play--outdoor .chfull, .play.play--outdoor .chfull[class*="atmosphere--"], .play.play--outdoor .fx-story, .play.play--outdoor .fx-story[class*="atmosphere--"]{ --atmo-bg:var(--lk-bg, #F5F6F8); --atmo-card:var(--lk-card, #E3E4E6); --atmo-control:var(--lk-ctl, #CCCDD0); --atmo-text:var(--lk-ink, #111318); --atmo-muted:var(--lk-mute, #5B6270); background:var(--lk-bg, #F5F6F8); color:var(--lk-ink, #111318); } /* ds-ok 户外浅底高对比 */
+.play.play--outdoor .chfull__cap, .play.play--outdoor .chfull[class*="atmosphere--"] .chfull__cap{ background:var(--lk-bg, #F5F6F8); } /* ds-ok 户外浅底高对比 */
+.play.play--outdoor .look-tex{ display:none; background:none; }
+.play.play--outdoor .st-line, .play.play--outdoor .st-line.is-in, .play.play--outdoor .tfx__c, .play.play--outdoor .chfull__para.tfx--fog, .play.play--outdoor .chfull__para.tfx--fog.is-in, .play.play--outdoor .fx-bg__im, .play.play--outdoor .fx-hero__bgim{ filter:none; }
+.play.play--outdoor .lk-pop, .play.play--outdoor .lk-card, .play.play--outdoor .lk-btn--ghost, .play.play--outdoor .lk-chip, .play.play--outdoor .glass{ -webkit-backdrop-filter:none; backdrop-filter:none; }
+.play.play--outdoor .lk-pop::before, .play.play--outdoor .lk-card::before{ display:none; }
+.play.play--outdoor .lk-title, .play.play--outdoor .lk-story, .play.play--outdoor .lk-dim{ text-shadow:none; }
+
+/* §3.2 2b & 2d:3:4 海报三版式切换条 + 存图后一键复制不剧透小红书文案 */
+.finsheet__layouts{ display:flex; align-items:center; justify-content:center; gap:var(--cy-space-2); margin:0 auto var(--cy-space-3); }
+.finsheet__layout{ min-height:60rpx; padding:0 var(--cy-space-3); border-radius:var(--cy-radius-pill); display:inline-flex; align-items:center; justify-content:center; font-size:var(--cy-type-label); font-weight:500; background:rgba(255,255,255,.08); color:rgba(255,255,255,.72); border:1rpx solid rgba(255,255,255,.14); transition:var(--cy-tr-press); } /* ds-ok 完成页深色底切换胶囊 */
+.finsheet__layout.is-on{ background:#FFFFFF; color:#111318; border-color:#FFFFFF; font-weight:700; } /* ds-ok 完成页选中态 */
+.finsheet__xhs{ margin-top:var(--cy-space-3); min-height:80rpx; padding:0 var(--cy-space-4); border-radius:var(--cy-radius-pill); display:flex; align-items:center; justify-content:center; font-size:var(--cy-type-label); font-weight:600; background:rgba(255,255,255,.12); color:#FFFFFF; border:1rpx solid rgba(255,255,255,.32); transition:var(--cy-tr-press); } /* ds-ok 存图后复制小红书文案条 */

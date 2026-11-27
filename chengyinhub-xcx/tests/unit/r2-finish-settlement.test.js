@@ -60,9 +60,9 @@ test('r2-finish 结算页:注册在分包、挂隐私弹窗、评价走既有评
   const wxml = read('pages/play/index.wxml')
   assert.match(wxml, /<view class="finsheet__settle" wx:if="\{\{allDone && !isPreview && !isMock && topicId\}\}" bindtap="openSettlement"/)
   const settle = read('subpackageJourney/pages/settle/index.wxml')
-  // 2026-11-10 l-after(业主批准原型 st-share:「底部只有一行:分享 + 完成」):视频分享 / 保存图片按钮撤掉,
-  // 分享卡只剩一颗 open-type=share 的「分享」+「完成」;两格数据按原型只留 分数 / 节点,用时不再在总览出现。
-  assert.doesNotMatch(settle, /videoOk|保存图片|分享视频/, '分享步只有 分享 + 完成')
+  // §3.2 2c:结算分享步恢复「保存图片」按钮并补全 onShareTimeline;视频分享仍撤掉。
+  assert.doesNotMatch(settle, /videoOk|分享视频/, '不再恢复视频分享')
+  assert.match(settle, /bindtap="saveShareImage">保存图片<\/cy-btn>/)
   assert.match(settle, /<button class="st-share" open-type="share" aria-label="分享"><cy-btn variant="primary">分享<\/cy-btn><\/button>/)
   assert.match(settle, /<view class="st-two__c" wx:if="\{\{report.scored\}\}">/, '没计分不出分数格')
 })

@@ -71,14 +71,18 @@ test('开局闸:首站(本局没有完成站)玩法已解开也要先定位,不�
   assert.deepEqual(calls, ['location']);
 });
 
-test('k2 没解开的站仍按原样:mode 2 开导航,mode 1 先要定位', () => {
+test('k2 没解开的站:mode 1 与 mode 2 均进入步行陪伴导航,已在导航中再点我已到达才要定位', () => {
   let { page, calls } = solvedSetup(2);
   page._advancedReadyNodeId = null;
   page.onSheetGoTap();
   assert.deepEqual(calls, ['nav']);
   ({ page, calls } = solvedSetup(1));
   page._advancedReadyNodeId = null;
-  page.data.nodes = [page.data.sheet.node];   // 未开局才要定位;已开局的后续站不再逐站定位
+  page.data.nodes = [page.data.sheet.node];
+  page.onSheetGoTap();
+  assert.deepEqual(calls, ['nav']);
+  calls.length = 0;
+  page.data.nav = { active: true, targetNodeId: page.data.sheet.node.nodeId };
   page.onSheetGoTap();
   assert.deepEqual(calls, ['location']);
 });

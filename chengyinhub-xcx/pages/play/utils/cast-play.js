@@ -52,9 +52,9 @@ function findCast(cfg, id) { return (cfg && cfg.cast || []).find((c) => c.id ===
 /** 台词说话人:玩家 / 角色;角色已被删 → null(正文照常显示,不带名字,不崩) */
 function speakerOf(cfg, speaker, profile) {
   if (!cfg) return null;
-  if (speaker === 'player') return { name: playerName(profile), castId: '', player: true };
+  if (speaker === 'player') return { name: playerName(profile), castId: '', color: '', player: true };
   const c = findCast(cfg, speaker);
-  return c ? { name: c.name, castId: c.id, player: false } : null;
+  return c ? { name: c.name, castId: c.id, color: c.color || '', player: false } : null;
 }
 
 /** 这句有没有声音可放:自带录音,或说话角色配了预设声音(服务端合成) */
@@ -72,7 +72,7 @@ function lineItem(block, cfg, profile, base) {
   const text = para ? para.text : '';
   if (!text) return null;
   return Object.assign({ kind: 'text', text, hand: para.hand, who: who ? who.name : '', whoId: who ? who.castId : '',
-    lineKey: str(block.key), voice: !!who && lineHasVoice(cfg, block), dur: '' }, base || {});
+    whoColor: who ? (who.color || '') : '', lineKey: str(block.key), voice: !!who && lineHasVoice(cfg, block), dur: '' }, base || {});
 }
 
 /** 分支选项的信任变化里真有变化(且角色还在)的那几位 */

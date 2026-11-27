@@ -47,12 +47,15 @@ test('卡片底图:没有街道格网,有快照才 drawImage 铺底', () => {
   assert.doesNotMatch(src, /bezierCurveTo|gridBold|街道/)
   const calls = []
   const g = new Proxy({}, { get: (t, k) => (k === 'measureText' ? () => ({ width: 1 }) : k === 'createLinearGradient' ? () => ({ addColorStop() {} }) : (typeof k === 'string' ? (...a) => calls.push([k, a]) : undefined)), set: () => true })
-  const model = rc.cardModel({ track: route, name: 'A' })
-  rc.drawCard(g, model, 0.5, null, null)
+  const trackModel = rc.cardModel({ layout: 'track', track: route, name: 'A' })
+  rc.drawCard(g, trackModel, 0.5, null, null)
   assert.ok(!calls.some(([k]) => /^(bezierCurveTo|stroke|drawImage)$/.test(k)))
   calls.length = 0
   const snap = { snap: 1 }
-  rc.drawCard(g, model, 1, null, snap)
+  rc.drawCard(g, trackModel, 1, null, snap)
+  assert.strictEqual(calls.find(([k]) => k === 'drawImage')[1][0], snap)
+  calls.length = 0
+  rc.drawCard(g, rc.cardModel({ layout: 'ticket', track: route, name: 'A' }), 1, null, snap)
   assert.strictEqual(calls.find(([k]) => k === 'drawImage')[1][0], snap)
 })
 

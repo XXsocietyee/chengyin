@@ -187,7 +187,7 @@ test('结构约束:一个 item 一个 .chfull__para;不再拼「某某：」;没
   assert.ok(!/@keyframes/.test(css.replace(/\/\*[\s\S]*?\*\//g, '')), '只用过渡,不加 @keyframes')
   assert.match(css, /\.chfull__para--who\{ position:relative; \}/, '说话人段与其它正文同一条左边线,不再额外缩进')
   assert.match(css, /\.chfull__who\{[^}]*left:calc\(var\(--cy-space-3\) - var\(--cy-space-8\)\);/, '名字落在阅读栏左页边里')
-  assert.match(css, /\.chfull__who\{[^}]*font-size:20rpx; font-weight:400;[^}]*opacity:\.46;/)
+  assert.match(css, /\.chfull__who\{[^}]*font-size:24rpx; font-weight:500;[^}]*opacity:\.82;/)
 })
 
 test('开场门:新局先起名 → 人物表 → 正文;重进 / 没开角色直接放行', () => {

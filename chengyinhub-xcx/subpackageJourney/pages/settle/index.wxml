@@ -73,7 +73,8 @@
       <view class="st-scard st-scard--{{shareKind}}" aria-role="img" aria-label="分享卡：{{topicName || '本局'}}">
         <image wx:if="{{shareImage}}" class="st-scard__img" src="{{shareImage}}" mode="aspectFit" />
       </view>
-      <!-- 微信分享卡片图:画在隐藏画布上,导出的同一张图既做上面的预览也做 onShareAppMessage imageUrl,不另出存图按钮 -->
+      <view class="st-xhs" wx:if="{{posterSaved}}" bindtap="copyXhsCopy" aria-role="button" aria-label="复制不剧透小红书文案" hover-class="cy-pressed" hover-stay-time="80">复制不剧透小红书文案</view>
+      <!-- 微信分享卡片图:画在隐藏画布上,导出的同一张图既做上面的预览也做 onShareAppMessage / onShareTimeline imageUrl,支持保存相册 -->
       <canvas type="2d" id="share-cv" class="st-cv" aria-hidden="true"></canvas>
     </view>
 
@@ -90,6 +91,7 @@
         <view class="st-link" bindtap="skipRate" aria-role="button" aria-label="跳过" hover-class="cy-pressed" hover-stay-time="80">跳过</view>
       </block>
       <block wx:else>
+        <cy-btn class="st-footer__i" variant="secondary" bindtap="saveShareImage">保存图片</cy-btn>
         <button class="st-share" open-type="share" aria-label="分享"><cy-btn variant="primary">分享</cy-btn></button>
         <cy-btn class="st-footer__i" variant="ghost" bindtap="done">完成</cy-btn>
       </block>
@@ -105,5 +107,7 @@
       </view>
     </view>
   </block>
+  <cy-toast id="cy-toast" lift />
+  <cy-modal-host id="cy-modal-host" />
   <cy-privacy-gate show="{{privacyGateShow}}" bind:settled="onPrivacyGateSettled" />
 </view>

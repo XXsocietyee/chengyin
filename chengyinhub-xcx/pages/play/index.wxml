@@ -1,4 +1,4 @@
-<view class="play {{lookClass}} {{reducedMotion ? 'play--reduced-motion' : ''}} {{liteDevice ? 'play--lite' : ''}} {{story.show ? 'play--scaled' : ''}} {{chapterFull && chapterGate.show ? 'play--gate' : ''}}" style="--cy-psheet-max-h: calc(100vh - {{chrome.sheetTop}}px)">
+<view class="play {{lookClass}} {{outdoorMode ? 'play--outdoor' : ''}} {{reducedMotion ? 'play--reduced-motion' : ''}} {{liteDevice ? 'play--lite' : ''}} {{story.show ? 'play--scaled' : ''}} {{chapterFull && chapterGate.show ? 'play--gate' : ''}}" style="--cy-psheet-max-h: calc(100vh - {{chrome.sheetTop}}px)">
   <cy-toast id="cy-toast" lift />
   <cy-look-transition id="lookTx" kind="{{lookTransition}}" reduced-motion="{{reducedMotion}}" />
   <include src="theme-backpack.wxml" />
@@ -41,7 +41,7 @@
   </view>
 </template>
 <!-- L01-127:「提示」入口条件在故事流与工具抽屉各用一次 -->
-<wxs module="helpHere">function on(hp, ap, pk) { return !!(hp && hp.enabled && ap && ap.show && pk && pk.kit && !pk.kit.done && hp.nodeId == (ap.node ? ap.node.nodeId : undefined)); } module.exports = { on: on };</wxs>
+<wxs module="helpHere">function on(hp, ap, pk) { return !!(hp && hp.enabled && ap && ap.show && pk && pk.kit && !pk.kit.done && hp.nodeId == (ap.node ? ap.node.nodeId : undefined)); } module.exports = { on: on };</wxs><wxs module="storyEnd">function ready(paras) { if (!paras || !paras.length) return false; var last = paras[paras.length - 1]; if (!last || !last.in) return false; var k = last.kind; return (k !== 'game' && k !== 'kit' && k !== 'journeyCheck' && k !== 'choice') || !!last.done; } module.exports = { ready: ready };</wxs>
 
 <cy-advanced-game id="advancedGame" hide-panel="{{(!!playKit.kit && (chapterFull || playKit.show)) || (journeyCheck.r5 && journeyCheck.show)}}" show="{{advancedPlay.show}}" node="{{advancedPlay.node}}" continue-label="{{chapterFull ? '继续故事' : ''}}" reduced-motion="{{reducedMotion}}" style="--cy-comp-sheet-max-h: calc(100vh - {{chrome.sheetTop}}px)"
   activity-id="{{activityId}}" topic-id="{{topicId}}" preview="{{isPreview}}" mock="{{isMock}}"
@@ -292,11 +292,11 @@
                 aria-role="button" aria-label="{{o.n}}，{{o.t}}" aria-disabled="{{item.busy}}" hover-class="cy-pressed" hover-stay-time="80"><text class="chfull__choice-n">{{o.n}}</text><text class="chfull__choice-t cy-story-hand">{{o.t}}</text></view>
         </view>
         <!-- 正文段:说话人(who)画在左侧页边、与首行齐平,不拼「某某：」;有配音的台词下面一行「▶︎ 0:08」,改了信任跟一句「X会记住这件事」—— 都在同一个 .chfull__para 里 -->
-        <block wx:else><view wx:if="{{item.who}}" class="chfull__who" data-i="{{item.i}}" catchtap="openCastCard" aria-role="{{item.whoId ? 'button' : 'text'}}" aria-label="{{item.who}}" hover-class="{{item.whoId ? 'cy-pressed' : 'none'}}" hover-stay-time="80">{{item.who}}</view><text class="chfull__cond" wx:if="{{item.cond}}">{{item.cond}}</text><text wx:if="{{item.chars}}" wx:for="{{item.chars}}" wx:for-item="c" wx:key="i" class="tfx__c {{c.raw ? 'is-raw' : ''}}" style="--i:{{c.i}};--r:{{c.r}};--dx:{{c.dx}}px;--dy:{{c.dy}}px" aria-hidden="true">{{c.ch}}</text><block wx:if="{{!item.chars}}"><text wx:if="{{item.drop}}" class="chfull__drop" aria-hidden="true">{{item.drop}}</text>{{item.drop ? item.rest : item.text}}</block><text wx:if="{{item.chars}}" class="tfx__sr">{{item.text}}</text><view wx:if="{{item.voice}}" class="chfull__vrow" data-i="{{item.i}}" catchtap="playCastLine" aria-role="button" aria-label="播放这一句{{item.dur ? '，' + item.dur : ''}}" hover-class="cy-pressed" hover-stay-time="80"><cy-icon name="play" size="20" /><text wx:if="{{item.dur}}" class="chfull__vrow-t">{{item.dur}}</text></view><view wx:if="{{item.remember}}" class="chfull__remember">{{item.remember}}</view></block>
+        <block wx:else><view wx:if="{{item.who}}" class="chfull__who" style="{{item.whoColor ? '--who-dot:' + item.whoColor : ''}}" data-i="{{item.i}}" catchtap="openCastCard" aria-role="{{item.whoId ? 'button' : 'text'}}" aria-label="{{item.who}}" hover-class="{{item.whoId ? 'cy-pressed' : 'none'}}" hover-stay-time="80">{{item.who}}</view><text class="chfull__cond" wx:if="{{item.cond}}">{{item.cond}}</text><text wx:if="{{item.chars}}" wx:for="{{item.chars}}" wx:for-item="c" wx:key="i" class="tfx__c {{c.raw ? 'is-raw' : ''}}" style="--i:{{c.i}};--r:{{c.r}};--dx:{{c.dx}}px;--dy:{{c.dy}}px" aria-hidden="true">{{c.ch}}</text><block wx:if="{{!item.chars}}"><text wx:if="{{item.drop}}" class="chfull__drop" aria-hidden="true">{{item.drop}}</text>{{item.drop ? item.rest : item.text}}</block><text wx:if="{{item.chars}}" class="tfx__sr">{{item.text}}</text><view wx:if="{{item.voice}}" class="chfull__vrow" data-i="{{item.i}}" catchtap="playCastLine" aria-role="button" aria-label="播放这一句{{item.dur ? '，' + item.dur : ''}}" hover-class="cy-pressed" hover-stay-time="80"><cy-icon name="play" size="20" /><text wx:if="{{item.dur}}" class="chfull__vrow-t">{{item.dur}}</text></view><view wx:if="{{item.remember}}" class="chfull__remember">{{item.remember}}</view></block>
       </view>
       <!-- 2026-11-24 业主:故事流里除了「我已到达」和答题确认不留按钮。章末 / 玩完 = 点屏幕继续(onStoryTap),不出「继续探索 / 继续故事」 -->
       <!-- E2 页脚(2026-11-21 业主「字压在一起」):跟在章末流里,不再钉在屏底压住最后一段 -->
-      <view class="chfull__runfoot" wx:if="{{cast.on && cast.footer}}" aria-hidden="true">{{cast.footer}}</view>
+      <view class="chfull__runfoot" wx:if="{{cast.on && cast.footer}}" aria-hidden="true">{{cast.footer}}</view><view class="chfull__tapcue" wx:if="{{storyEnd.ready(chapterParas)}}" aria-hidden="true">轻点屏幕 · 前往下一站</view>
       <view class="chfull__pad"></view>
     </scroll-view>
     <view class="chfull__cap" aria-hidden="true"></view>
@@ -472,6 +472,11 @@
           <view class="dcopy"><text class="dt">动态效果</text><text class="ds">{{reducedMotion ? '已减少' : '正常播放'}}</text></view>
           <view class="dsw {{reducedMotion ? '' : 'is-on'}}" catchtap="toggleReducedMotion" aria-role="switch" aria-checked="{{!reducedMotion}}" aria-label="动态效果" hover-class="cy-pressed" hover-stay-time="80"><view class="dsw-i"></view></view>
         </view>
+        <view class="drow" bindtap="toggleOutdoorMode" aria-role="switch" aria-checked="{{outdoorMode}}" aria-label="户外浅底高对比" hover-class="cy-pressed" hover-stay-time="80">
+          <view class="dic pic pic--gear"></view>
+          <view class="dcopy"><text class="dt">户外浅底高对比</text><text class="ds">{{outdoorMode ? '已开启 · 去扫描线与模糊' : '强光下更清晰'}}</text></view>
+          <view class="dsw {{outdoorMode ? 'is-on' : ''}}"><view class="dsw-i"></view></view>
+        </view>
     </scroll-view>
 </view>
 
@@ -590,26 +595,25 @@
     <cy-icon wx:elif="{{index==chapterPick.cur}}" class="chpick__check" name="check" size="40" />
   </view>
 </view>
-<block wx:if="{{!screen && (!allDone || canContinueGames) && !emptyTip && !loading && !chapterFull}}">
-
-  <!-- ===== 导航态顶部条(Figma 3962:14212)=====
-       ⚠️ 稿上写的是「7 米后 右转」这种逐向指令。我们没有导航 SDK,拿不到转向动作,
-       所以只显示能证实的两件事:直线剩余距离 + 目标名。编一个「右转」是把猜测印成事实。
-       下面一行的用时/到达同理,按步行 5km/h 估,文案里标了「预计」。 -->
-  <view class="navtop" wx:if="{{nav.active}}" style="top:{{chrome.contentTop}}px">
-    <view class="navtop__main">
-      <cy-icon class="navtop__ic" name="turn-right" size="100" />
-      <text class="navtop__n">{{nav.remainM}}</text>
-      <text class="navtop__u">米</text>
-      <text class="navtop__t">{{nav.targetName}}</text>
-      <view class="navtop__x" catchtap="stopNav" aria-role="button" aria-label="结束前往" hover-class="cy-pressed" hover-stay-time="80"><cy-icon name="close-sm" size="32" /></view>
-    </view>
-    <view class="navtop__meta">
-      <text>{{navMeta.km}} 公里</text>
-      <text>预计 {{navMeta.dur}}</text>
-      <text>{{navMeta.eta}} 到达</text>
-    </view>
+<!-- ===== 导航态顶部条(mode=1 城市定向 & mode=2 自由探索共用;故事流里同样可见)=====
+     ⚠️ 稿上写的是「7 米后 右转」这种逐向指令。我们没有导航 SDK,拿不到转向动作,
+     所以只显示能证实的两件事:直线剩余距离 + 目标名。编一个「右转」是把猜测印成事实。
+     下面一行的用时/到达同理,按步行 5km/h 估,文案里标了「预计」。 -->
+<view class="navtop" wx:if="{{nav.active && !screen && (!allDone || canContinueGames) && !emptyTip && !loading}}" style="top:{{chrome.contentTop}}px">
+  <view class="navtop__main">
+    <cy-icon class="navtop__ic" name="turn-right" size="100" />
+    <text class="navtop__n">{{nav.remainM}}</text>
+    <text class="navtop__u">米</text>
+    <text class="navtop__t">{{nav.targetName}}</text>
+    <view class="navtop__x" catchtap="stopNav" aria-role="button" aria-label="结束前往" hover-class="cy-pressed" hover-stay-time="80"><cy-icon name="close-sm" size="32" /></view>
   </view>
+  <view class="navtop__meta">
+    <text>{{navMeta.km}} 公里</text>
+    <text>预计 {{navMeta.dur}}</text>
+    <text>{{navMeta.eta}} 到达</text>
+  </view>
+</view>
+<block wx:if="{{!screen && (!allDone || canContinueGames) && !emptyTip && !loading && !chapterFull}}">
 
   <!-- ═══════ 自由探索(mode2)首屏:通行证头 + 卡包 → 六宫格 ═══════
        自由探索是「跨店获客联盟」不是剧情游戏:4–6 家互补商户、一张 21–30 天的权益地图,
@@ -1392,6 +1396,9 @@
   <view class="finsheet__top">
     <template is="finishHeader" data="{{finishDateLabel, allDone, topicCompleted, topicName, chapter, finishResult}}" />
   </view>
+    <view class="finsheet__layouts" wx:if="{{routeCard.ready}}" aria-role="tablist" aria-label="海报版式">
+      <view wx:for="{{routeCardLayouts}}" wx:key="key" class="finsheet__layout {{routeCardLayout === item.key ? 'is-on' : ''}}" data-layout="{{item.key}}" bindtap="switchRouteCardLayout" aria-role="tab" aria-selected="{{routeCardLayout === item.key}}" aria-label="{{item.label}}" hover-class="cy-pressed" hover-stay-time="80">{{item.label}}</view>
+    </view>
     <view class="finsheet__routewrap {{routeCard.error && !routeCard.ready ? 'is-fallback' : ''}}">
       <free-map id="routemap" class="finsheet__routemap" wx:if="{{routeMap.points.length && !routeCard.error}}" nodes="{{[]}}" fit="{{true}}" fit-points="{{routeMap.points}}" fit-padding="{{[96, 72, 400, 72]}}"
                 map-polyline="{{routeMap.lines}}" scale="14" center="{{fmCenter}}" subkey="{{routeMap.subkey}}" layer-style="{{routeMap.layerStyle}}" tone="{{routeMap.tone}}" palette="{{routeMap.palette}}"
@@ -1404,6 +1411,7 @@
       <cy-btn variant="secondary" style="flex:1" bindtap="saveFinishCard">保存图片</cy-btn>
       <cy-btn variant="primary" style="flex:1" bindtap="shareRouteCard">分享</cy-btn>
     </view>
+    <view class="finsheet__xhs" wx:if="{{posterSaved}}" bindtap="copyXhsCopy" aria-role="button" aria-label="复制不剧透小红书文案" hover-class="cy-pressed" hover-stay-time="80">复制不剧透小红书文案</view>
   </view>
   <view class="finsheet__map" wx:if="{{!routeCard.on || newLifeOS.show}}">
     <image class="finsheet__map-fallback" wx:if="{{finishSnap}}" src="{{finishSnap}}" mode="aspectFit"></image>

@@ -8,12 +8,13 @@ const { ticketWalletUrl } = require('../../utils/ticket-wallet-url.js');
 const finishOffer = require('../../utils/finish-offer.js');
 const analytics = require('../../../utils/analytics.js');
 const { isMerchantView } = require('../../../utils/roleGuard.js');
+const cyToast = require('../../../utils/toast.js');
+const cyModal = require('../../../utils/modal.js');
 const app = getApp();
 
 /* r2-finish 结算流程 → l-after(2026-11-10)按业主批准的原型改:整局走完后 总览 → 排行榜(导航栏以下的近全屏弹层,只有 全体 / 队内)
- * → 评价(五星 + 标签片 + 一句话,可跳过)→ 分享(帖文 / 故事卡,底部一行 分享 + 完成)。
- * 只读服务端事实:战报 /api/play/player-journey/report;评价走既有 /api/comment/add(owner_type 1 主题 / 2 场次)。
- * 微信分享卡片图仍用隐藏画布按同一版式画(onShareAppMessage imageUrl);「保存图片 / 分享视频」按业主「底部只有一行:分享 + 完成」撤掉。 */
+ * → 评价(五星 + 标签片 + 一句话,可跳过)→ 分享(帖文 / 故事卡,保存图片 + 分享 + 完成,支持朋友圈分享与存图后一键复制不剧透小红书文案)。
+ * 只读服务端事实:战报 /api/play/player-journey/report;评价走既有 /api/comment/add(owner_type 1 主题 / 2 场次)。 */
 
 const STEPS = ['overview', 'rank', 'rate', 'share'];
 const MAX_REVIEW = 500;
@@ -37,7 +38,7 @@ Page({
     step: 'overview', stepIndex: 0, steps: STEPS, navTop: 64, reduced: false,
     report: null, offer: null, topicName: '', ovOn: false, soK: null, rankOn: false,
     stars: 0, starList: [1, 2, 3, 4, 5], tags: TAGS.map(label => ({ label, on: false })), review: '', reviewMax: MAX_REVIEW, rateBusy: false, rateError: '', thanks: false,
-    shareImage: '', shareKind: 'post', shareTabs: [{ key: 'post', label: '帖文' }, { key: 'story', label: '故事' }],
+    shareImage: '', posterSaved: false, shareKind: 'post', shareTabs: [{ key: 'post', label: '帖文' }, { key: 'story', label: '故事' }],
     privacyGateShow: false
   },
 
@@ -48,6 +49,9 @@ Page({
       topicId: view.isId(o.topicId) ? o.topicId : '',
       runId: view.isId(o.runId) ? o.runId : ''
     };
+    if (typeof wx !== 'undefined' && typeof wx.showShareMenu === 'function') {
+      wx.showShareMenu({ menus: ['shareAppMessage', 'shareTimeline'] });
+    }
     this.setData({ topicName: o.topicName ? decodeURIComponent(o.topicName) : '', navTop: navTopPx(), reduced: !!readReducedMotion() });
     if (!this._query.activityId && !this._query.topicId) {
       this.setData({ state: 'missing', stateKind: 'missing-param', stateTitle: '链接已失效', stateCta: '返回' });
@@ -265,8 +269,66 @@ Page({
       wx.canvasToTempFilePath({ canvas: this._cv, success: r => { this._cardImage = r.tempFilePath; resolve(r.tempFilePath); }, fail: () => resolve('') }, this);
     });
   },
+  saveShareImage() {
+    this._cardImageUrl().then((path) => {
+      if (this._gone) return;
+      if (!path) { cyToast('分享图还在生成，请稍后再试'); return; }
+      this._saveShareToAlbum(path);
+    });
+  },
+  _saveShareToAlbum(path) {
+    wx.saveImageToPhotosAlbum({
+      filePath: path,
+      success: () => {
+        if (this._gone) return;
+        this.setData({ posterSaved: true });
+        cyToast('已保存到相册');
+      },
+      fail: (e) => {
+        if (this._gone) return;
+        const msg = String((e && e.errMsg) || '').toLowerCase();
+        if (msg.indexOf('cancel') >= 0) return;
+        if (msg.indexOf('auth') >= 0 || msg.indexOf('deny') >= 0 || msg.indexOf('denied') >= 0) {
+          cyModal.show({
+            title: '需要相册权限',
+            content: '保存海报需要相册权限，请在设置中开启「保存到相册」，返回后自动保存。',
+            confirmText: '去设置',
+            cancelText: '先不存',
+            success: (r) => {
+              if (!r.confirm || this._gone) return;
+              wx.openSetting({
+                success: (setting) => {
+                  if (!this._gone && setting && setting.authSetting && setting.authSetting['scope.writePhotosAlbum']) {
+                    this._saveShareToAlbum(path);
+                  }
+                },
+              });
+            },
+          });
+          return;
+        }
+        cyToast('保存失败，请再试一次');
+      },
+    });
+  },
+  copyXhsCopy() {
+    const copy = shareCard.buildXhsCopy(this.data.report, this.data.topicName);
+    if (typeof wx !== 'undefined' && typeof wx.setClipboardData === 'function') {
+      wx.setClipboardData({ data: copy, success: () => { if (!this._gone) cyToast('已复制不剧透小红书文案'); } });
+    }
+  },
   showPrivacyGate() { this.setData({ privacyGateShow: true }); },
   onPrivacyGateSettled() { this.setData({ privacyGateShow: false }); },
+
+  onShareTimeline() {
+    const report = this.data.report || {};
+    const title = (this.data.topicName ? this.data.topicName + ' · ' : '') + (report.shareTitle || '一起来玩');
+    const query = view.isId(report.topicId) ? 'id=' + report.topicId : '';
+    const out = { title, query };
+    const imageUrl = this.data.shareImage || this._cardImage;
+    if (imageUrl) out.imageUrl = imageUrl;
+    return out;
+  },
 
   onShareAppMessage() {
     const report = this.data.report || {};
