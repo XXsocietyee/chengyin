@@ -776,6 +776,49 @@ test('L04-042 工具草稿改动走 _editToolDraft:越界不改、改了清错�
   assert.equal(p.data.toolError, null);
 });
 
+test('L04-042 费用、线索、投票逐字输入只写该字段，不整份回传 toolDraft', () => {
+  const p = page();
+  const keys = [];
+  const set = p.setData;
+  p.setData = function (patch, done) { keys.push(...Object.keys(patch)); return set.call(this, patch, done); };
+  const arm = () => { keys.length = 0; p.data.toolError = { error: '旧错误' }; return p.data.toolDraft; };
+  p.data.toolDraft = { mode: 'FIXED', groups: [{ label: '', rows: [{ kind: 'VALUE', key: '', label: '', amount: '' }] }] };
+  const cost = arm();
+  p.updateCostRow(event({ group: 0, row: 0, field: 'amount' }, '3'));
+  assert.equal(p.data.toolDraft, cost, '数量逐字不换整份草稿');
+  assert.equal(p.data.toolDraft.groups[0].rows[0].amount, '3');
+  assert.equal(p.data.toolError, null);
+  assert.deepEqual(keys, ['toolDraft.groups[0].rows[0].amount', 'toolError']);
+  const afterMiss = keys.length;
+  p.updateCostRow(event({ group: 3, row: 0, field: 'amount' }, '9'));
+  assert.equal(keys.length, afterMiss, '越界费用行不写');
+  assert.equal(p.data.toolDraft.groups[0].rows[0].amount, '3');
+
+  p.data.toolDraft = { rows: [{ name: '', public: false }], publicOnce: false };
+  const clue = arm();
+  p.updateClueRow(event({ index: 0, field: 'name' }, '门后'));
+  assert.equal(p.data.toolDraft, clue);
+  assert.equal(p.data.toolDraft.rows[0].name, '门后');
+  assert.equal(keys.includes('toolDraft'), false);
+
+  p.data.toolDraft = { plans: [{ title: '', summary: '', materialCost: [], clueNames: [''] }], itemSlots: [] };
+  const vote = arm();
+  p.updateVotePlan(event({ plan: 0, field: 'title' }, '继续'));
+  p.updatePlanClue(event({ plan: 0, index: 0 }, '信'));
+  assert.equal(p.data.toolDraft, vote);
+  assert.equal(p.data.toolDraft.plans[0].title, '继续');
+  assert.equal(p.data.toolDraft.plans[0].clueNames[0], '信');
+  assert.equal(keys.includes('toolDraft'), false);
+
+  p.data.toolDraft = { slots: [{ key: 'item_1', kind: 'ITEM', label: '旧名' }] };
+  const slot = arm();
+  p.updateSlotLabel(event({ slot: 0 }, '门票'));
+  assert.equal(p.data.toolDraft, slot);
+  assert.equal(p.data.toolDraft.slots[0].label, '门票');
+  assert.equal(p.data.toolDraft.itemSlots[1].label, '门票');
+  assert.equal(keys.includes('toolDraft'), false);
+});
+
 test('L04-051 检定派生态没变就不 setData;放宽选项变了照常刷新', () => {
   const p = page(); p.data.advanced = cfg.parse(base()).value; p.data.gameKey = 'qaPick'; p.data.gameSection = 'qa';
   delete p._syncCheckDerived; p._syncCheckDerived = definition._syncCheckDerived;

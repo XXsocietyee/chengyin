@@ -2557,42 +2557,63 @@ Page({
       content: tool.sub + (this._toolSelected[tool.key] ? '\n当前配置：' + this._toolSummaries[tool.key] : ''),
       showCancel: false });
   },
-  // 工具面板的草稿改动一律走这里(L04-042):深拷一份、改、整份回写并清错误;mutate 返回 false 表示不改
+  // 增减行、换类型仍整份换草稿(L04-042):结构变了,路径写不全。mutate 返回 false 表示不改。
   _editToolDraft: function (mutate) {
     const draft = JSON.parse(JSON.stringify(this.data.toolDraft));
     if (mutate(draft) === false) return;
     this.setData({ toolDraft: draft, toolError: null });
   },
+  // 逐字只写这一格(L04-042):费用数量、线索名、投票标题不再深拷并回传整份 toolDraft。
+  _patchToolDraft: function (path, value) {
+    if (!path) return;
+    this.setData({ [path]: value, toolError: null });
+  },
   updateToolField: function (e) {
     const field = e.currentTarget.dataset.field;
     const value = e.detail && e.detail.value;
-    this._editToolDraft((draft) => {
-      if (field === 'mode') {
+    if (field === 'mode') {
+      this._editToolDraft((draft) => {
         draft.mode = value ? 'OPTIONS' : 'FIXED';
         if (value && draft.groups.length < 2) draft.groups.push({ label: '', rows: [{ kind: this.data.toolKey === 'reward' ? 'ITEM' : 'VALUE', key: '', label: '', amount: '' }] });
-      } else if (['decidesEnding', 'publicOnce', 'requireArrival'].includes(field)) draft[field] = !!value;
-      else if (field === 'scope' || field === 'votePolicy') {
-        const options = field === 'scope' ? this.data.toolScopes : this.data.votePolicies;
-        draft[field] = (options[Number(value)] || options[0]).key;
-      } else draft[field] = value;
-    });
+      });
+      return;
+    }
+    if (!/^[A-Za-z][A-Za-z0-9]*$/.test(String(field || ''))) return;
+    let next = value;
+    if (['decidesEnding', 'publicOnce', 'requireArrival'].includes(field)) next = !!value;
+    else if (field === 'scope' || field === 'votePolicy') {
+      const options = field === 'scope' ? this.data.toolScopes : this.data.votePolicies;
+      const picked = options && (options[Number(value)] || options[0]);
+      if (!picked) return;
+      next = picked.key;
+    }
+    this._patchToolDraft('toolDraft.' + field, next);
   },
   updateCostRow: function (e) {
     const d = e.currentTarget.dataset;
-    this._editToolDraft((draft) => {
-      const group = draft.groups[Number(d.group)];
-      if (!group) return false;
-      if (d.field === 'label' && d.row == null) group.label = e.detail.value;
-      else {
-        const row = group.rows[Number(d.row)];
-        if (!row) return false;
+    const gi = Number(d.group);
+    const group = this.data.toolDraft && this.data.toolDraft.groups && this.data.toolDraft.groups[gi];
+    if (!group) return;
+    if (d.field === 'label' && d.row == null) {
+      this._patchToolDraft('toolDraft.groups[' + gi + '].label', e.detail.value);
+      return;
+    }
+    const ri = Number(d.row);
+    const row = group.rows && group.rows[ri];
+    if (!row) return;
+    if (d.field === 'kind' || d.field === 'key') {
+      this._editToolDraft((draft) => {
+        const target = draft.groups[gi] && draft.groups[gi].rows[ri];
+        if (!target) return false;
         if (d.field === 'kind') {
-          row.kind = this.data.slotKinds[Number(e.detail.value)].key;
-          row.key = ''; row.label = '';
-        } else if (d.field === 'key') row.key = (row.kind === 'VALUE' ? draft.valueSlots : draft.itemSlots)[Number(e.detail.value)].key;
-        else row[d.field] = e.detail.value;
-      }
-    });
+          target.kind = this.data.slotKinds[Number(e.detail.value)].key;
+          target.key = ''; target.label = '';
+        } else target.key = (target.kind === 'VALUE' ? draft.valueSlots : draft.itemSlots)[Number(e.detail.value)].key;
+      });
+      return;
+    }
+    if (!/^[A-Za-z][A-Za-z0-9]*$/.test(String(d.field || ''))) return;
+    this._patchToolDraft('toolDraft.groups[' + gi + '].rows[' + ri + '].' + d.field, e.detail.value);
   },
   addCostGroup: function () {
     this._editToolDraft((draft) => {
@@ -2623,21 +2644,25 @@ Page({
   },
   updateVotePlan: function (e) {
     const d = e.currentTarget.dataset;
-    this._editToolDraft((draft) => {
-      const plan = draft.plans[Number(d.plan)];
-      if (!plan) return false;
-      if (d.material != null) plan.materialCost[Number(d.material)][d.field] = d.field === 'itemId'
-        ? draft.itemSlots[Number(e.detail.value)].key : e.detail.value;
-      else plan[d.field] = e.detail.value;
-    });
+    const pi = Number(d.plan);
+    const plan = this.data.toolDraft && this.data.toolDraft.plans && this.data.toolDraft.plans[pi];
+    if (!plan || !/^[A-Za-z][A-Za-z0-9]*$/.test(String(d.field || ''))) return;
+    if (d.material != null) {
+      const mi = Number(d.material);
+      const material = plan.materialCost && plan.materialCost[mi];
+      if (!material) return;
+      const value = d.field === 'itemId' ? this.data.toolDraft.itemSlots[Number(e.detail.value)].key : e.detail.value;
+      this._patchToolDraft('toolDraft.plans[' + pi + '].materialCost[' + mi + '].' + d.field, value);
+      return;
+    }
+    this._patchToolDraft('toolDraft.plans[' + pi + '].' + d.field, e.detail.value);
   },
   updateClueRow: function (e) {
     const d = e.currentTarget.dataset;
-    this._editToolDraft((draft) => {
-      const row = draft.rows[Number(d.index)];
-      if (!row) return false;
-      row[d.field] = d.field === 'public' ? !!e.detail.value : e.detail.value;
-    });
+    const index = Number(d.index);
+    const row = this.data.toolDraft && this.data.toolDraft.rows && this.data.toolDraft.rows[index];
+    if (!row || (d.field !== 'name' && d.field !== 'public')) return;
+    this._patchToolDraft('toolDraft.rows[' + index + '].' + d.field, d.field === 'public' ? !!e.detail.value : e.detail.value);
   },
   addClueRow: function () {
     this._editToolDraft((draft) => {
@@ -2660,11 +2685,11 @@ Page({
   },
   updatePlanClue: function (e) {
     const d = e.currentTarget.dataset;
-    this._editToolDraft((draft) => {
-      const plan = draft.plans[Number(d.plan)];
-      if (!plan || !plan.clueNames) return false;
-      plan.clueNames[Number(d.index)] = e.detail.value;
-    });
+    const pi = Number(d.plan);
+    const ci = Number(d.index);
+    const names = this.data.toolDraft && this.data.toolDraft.plans && this.data.toolDraft.plans[pi] && this.data.toolDraft.plans[pi].clueNames;
+    if (!names || !(ci >= 0 && ci < names.length)) return;
+    this._patchToolDraft('toolDraft.plans[' + pi + '].clueNames[' + ci + ']', e.detail.value);
   },
   removePlanClue: function (e) {
     const d = e.currentTarget.dataset;
@@ -2699,10 +2724,17 @@ Page({
     });
   },
   updateSlotLabel: function (e) {
-    this._editToolDraft((draft) => {
-      draft.slots[Number(e.currentTarget.dataset.slot)].label = e.detail.value;
-      draft.valueSlots = [{ key: '', label: '新建需要的资源' }].concat(draft.slots.filter(slot => slot.kind === 'VALUE').map(slot => ({ key: slot.key, label: slot.label })));
-      draft.itemSlots = [{ key: '', label: '新建需要的资源' }].concat(draft.slots.filter(slot => slot.kind === 'ITEM').map(slot => ({ key: slot.key, label: slot.label })));
+    const index = Number(e.currentTarget.dataset.slot);
+    const slots = this.data.toolDraft && this.data.toolDraft.slots;
+    if (!slots || !slots[index]) return;
+    const label = e.detail.value;
+    const next = slots.map((slot, i) => (i === index ? Object.assign({}, slot, { label }) : slot));
+    const choice = (kind) => [{ key: '', label: '新建需要的资源' }].concat(next.filter(slot => slot.kind === kind).map(slot => ({ key: slot.key, label: slot.label })));
+    this.setData({
+      ['toolDraft.slots[' + index + '].label']: label,
+      'toolDraft.valueSlots': choice('VALUE'),
+      'toolDraft.itemSlots': choice('ITEM'),
+      toolError: null,
     });
   },
   saveTool: function () {
