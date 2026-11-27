@@ -102,6 +102,7 @@ Component({
     templatesLoading: false,
     templatesError: '',
     perkTemplates: [],
+    perkTemplatesError: '',
     perkTemplatesLoading: false,
     perkMinText: '',
     perkBelowMin: false,
@@ -157,7 +158,8 @@ Component({
       // L06-032:地图选点/选地址回来不重拉;只有去创建过玩法(或上次失败)才重拉模板列表
       if (this.data.formMode !== 'offer' && (this._templatesStale || this.data.templatesError)) this.loadMyTemplates();
       // 地图选点 / 选图也会让页面 show 一次。权益模板只在打开表单、去创建过、或上次没拉到时重拉。
-      if (this.data.formMode === 'offer' && this.data.termsMode === 'PERK' && this._perkTemplatesStale) {
+      if (this.data.formMode === 'offer' && this.data.termsMode === 'PERK'
+          && (this._perkTemplatesStale || this.data.perkTemplatesError)) {
         this.loadMyPerkTemplates();
       }
     },
@@ -414,7 +416,8 @@ Component({
       const that = this;
       if (that.data.perkTemplatesLoading) return;
       that._perkTemplatesStale = false;
-      that.setData({ perkTemplatesLoading: true });
+      const seq = (that._perkListSeq = (that._perkListSeq || 0) + 1);
+      that.setData({ perkTemplatesLoading: true, perkTemplatesError: '' });
       app.sendRequest({
         hideLoading: true,
         url: '/api/coop/perk-template/list',
@@ -422,21 +425,29 @@ Component({
         header: { 'Content-Type': 'application/json' },
         data: JSON.stringify({}),
         success(res) {
-          const rows = (res.code == '200' || res.code === 200) && Array.isArray(res.data)
-            ? res.data.filter(function (row) {
-              const retailValue = Number(row && row.retailValue);
-              const quota = Number(row && row.quota);
-              return Number.isFinite(retailValue) && retailValue > 0
-                && Number.isInteger(quota) && quota > 0;
-            })
-            : [];
-          that.setData({ perkTemplates: rows }, () => that.refreshSubmitState());
+          if (seq !== that._perkListSeq || !that.data.show) return;
+          // 读失败不能显示成「还没有常备权益」(与玩法模板 L06-031 同一口径)
+          const ok = (res && (res.code == '200' || res.code === 200) && Array.isArray(res.data));
+          if (!ok) {
+            that._perkTemplatesStale = true;
+            that.setData({ perkTemplates: [], perkTemplatesError: (res && res.msg) || '常备权益读取失败' });
+            return;
+          }
+          const rows = res.data.filter(function (row) {
+            const retailValue = Number(row && row.retailValue);
+            const quota = Number(row && row.quota);
+            return Number.isFinite(retailValue) && retailValue > 0
+              && Number.isInteger(quota) && quota > 0;
+          });
+          that.setData({ perkTemplates: rows, perkTemplatesError: '' }, () => that.refreshSubmitState());
         },
         fail() {
+          if (seq !== that._perkListSeq || !that.data.show) return;
           that._perkTemplatesStale = true;
-          that.setData({ perkTemplates: [] });
+          that.setData({ perkTemplates: [], perkTemplatesError: '网络异常，常备权益未读取' });
         },
         complete() {
+          if (seq !== that._perkListSeq) return;
           that.setData({ perkTemplatesLoading: false });
         },
       });

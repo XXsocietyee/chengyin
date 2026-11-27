@@ -86,6 +86,7 @@
             <cy-icon class="cnf-arrow" name="arrow-right" size="32" />
           </view>
         </cy-dropdown>
+        <cy-inline-error wx:elif="{{perkTemplatesError && !perkTemplatesLoading}}" kind="data" title="{{perkTemplatesError}}" action="重试" bind:action="loadMyPerkTemplates" />
         <view class="cnf-perk-empty" wx:else>
           <text>{{perkTemplatesLoading ? '正在读取常备权益…' : '还没有常备权益，先创建后再回来选择'}}</text>
           <cy-btn wx:if="{{!perkTemplatesLoading}}" variant="ghost" size="sm" bindtap="goCreatePerkTemplate">去创建常备权益</cy-btn>

@@ -757,10 +757,15 @@ Page({
   openTeamLobby() {
     const info = this.data.info || {};
     if (Number(this.data.is_join) !== 1 || Number(info.productType) !== 1 || !info.id) return;
+    if (this._navigating) return;
+    this._navigating = true;
     const row = (this.data.teams.rows || []).find((r) => r && r.activityId) || null;
     const scope = [info.name, row && row.when ? row.when + ' 场' : ''].filter(Boolean).join(' · ');
-    wx.navigateTo({ url: '/subpackageRoam/my-teams/index?tab=open&ownerType=' + (row ? 2 : 1)
-      + '&ownerId=' + encodeURIComponent(row ? row.activityId : info.id) + '&scope=' + encodeURIComponent(scope) });
+    wx.navigateTo({
+      url: '/subpackageRoam/my-teams/index?tab=open&ownerType=' + (row ? 2 : 1)
+        + '&ownerId=' + encodeURIComponent(row ? row.activityId : info.id) + '&scope=' + encodeURIComponent(scope),
+      complete: () => { this._navigating = false; },
+    });
   },
 
   onMerchantOpen(e) {
