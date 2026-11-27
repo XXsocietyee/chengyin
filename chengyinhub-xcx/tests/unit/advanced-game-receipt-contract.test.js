@@ -833,7 +833,9 @@ test('照片回执 404 可确认同意后重放原照片：保留原版本/键/�
   const disk = photoDisk();
   const game = createGame([{ err: Error('lost') }, { res: { code: 404 } }, okAction(10)]);
   await game.action('SUBMIT_PHOTO_CHECK', photoInput()); await tick();
-  assert.equal(game.data.photoRetryable, true); assert.ok(disk.size > 0);
+  assert.equal(game.data.photoRetryable, true); assert.equal(game.data.originalRetryable, false);
+  assert.doesNotMatch(game.data.unknownText, /重新提交原请求/);
+  assert.ok(disk.size > 0);
   const original = JSON.parse(JSON.stringify(game.calls[0].data));
   game.data.state.sessionId = '42';
   game.data.state.version = 9;

@@ -42,6 +42,67 @@
 </template>
 <!-- L01-127:「提示」入口条件在故事流与工具抽屉各用一次 -->
 <wxs module="helpHere">function on(hp, ap, pk) { return !!(hp && hp.enabled && ap && ap.show && pk && pk.kit && !pk.kit.done && hp.nodeId == (ap.node ? ap.node.nodeId : undefined)); } module.exports = { on: on };</wxs><wxs module="storyEnd">function ready(paras) { if (!paras || !paras.length) return false; var last = paras[paras.length - 1]; if (!last || !last.in) return false; var k = last.kind; return (k !== 'game' && k !== 'kit' && k !== 'journeyCheck' && k !== 'choice') || !!last.done; } module.exports = { ready: ready };</wxs>
+<!-- L01-017/018:滚动与拖动手势在渲染层改样式,不逐事件 setData。竖向拖动只 callMethod 去 scrollTo。 -->
+<wxs module="heroMotion">
+function turned(ry) { var a = ((ry % 180) + 180) % 180; return a > 8 && a < 172; }
+function paintScroll(owner, top) {
+  var p = top / 220; if (p < 0) p = 0; if (p > 1) p = 1;
+  var ss = (1 - 0.88 * p).toFixed(2);
+  var faded = p > 0.92, collapsed = p > 0.85;
+  var st = owner.getState();
+  if (ss === st.ss && faded === st.faded && collapsed === st.collapsed) return;
+  st.ss = ss; st.faded = faded; st.collapsed = collapsed;
+  var card = owner.selectComponent('.fx-hero__card');
+  var hdr = owner.selectComponent('.fx-hero__hdr');
+  if (card) { card.setStyle({ '--ss': ss }); if (faded) card.addClass('is-faded'); else card.removeClass('is-faded'); }
+  if (hdr) { if (collapsed) hdr.addClass('is-on'); else hdr.removeClass('is-on'); }
+}
+function scroll(e, owner) {
+  var top = (e.detail && e.detail.scrollTop) || 0;
+  owner.getState().scrollTop = top;
+  paintScroll(owner, top);
+}
+function start(e, owner) {
+  var t = e.touches && e.touches[0]; if (!t) return;
+  var st = owner.getState();
+  st.drag = { x0: t.pageX, y0: t.pageY, axis: '', dx: 0, ry0: (e.currentTarget.dataset.ry * 1) || 0, top0: st.scrollTop || 0 };
+  owner.callMethod('onHeroDragBegan', {});
+}
+function move(e, owner) {
+  var s = owner.getState().drag; if (!s) return;
+  var t = e.touches && e.touches[0]; if (!t) return;
+  var dx = t.pageX - s.x0, dy = t.pageY - s.y0;
+  if (!s.axis) {
+    if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+    s.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+  }
+  if (s.axis === 'y') {
+    var top = Math.round(Math.max(0, s.top0 - dy));
+    var st = owner.getState();
+    st.scrollTop = top;
+    paintScroll(owner, top);
+    if (st.lastSent == null || Math.abs(top - st.lastSent) >= 8) { st.lastSent = top; owner.callMethod('onHeroDragScroll', { top: top }); }
+    return;
+  }
+  s.dx = dx;
+  var ry = s.ry0 + dx * 0.8;
+  var box = owner.selectComponent('.fx-card3d');
+  if (!box) return;
+  box.setStyle({ '--ry': ry + 'deg' });
+  if (turned(ry)) box.addClass('is-turned'); else box.removeClass('is-turned');
+}
+function end(e, owner) {
+  var st = owner.getState();
+  var s = st.drag;
+  st.drag = null;
+  if (!s || s.axis !== 'x') { owner.callMethod('onHeroDragEnded', {}); return; }
+  var snap = Math.round((s.ry0 + (s.dx || 0) * 0.8) / 180) * 180;
+  var box = owner.selectComponent('.fx-card3d');
+  if (box) { box.setStyle({ '--ry': snap + 'deg' }); box.removeClass('is-turned'); }
+  owner.callMethod('onHeroDragEnded', { ry: snap });
+}
+module.exports = { scroll: scroll, start: start, move: move, end: end };
+</wxs>
 
 <cy-advanced-game id="advancedGame" hide-panel="{{(!!playKit.kit && (chapterFull || playKit.show)) || (journeyCheck.r5 && journeyCheck.show)}}" show="{{advancedPlay.show}}" node="{{advancedPlay.node}}" continue-label="{{chapterFull ? '继续故事' : ''}}" reduced-motion="{{reducedMotion}}" style="--cy-comp-sheet-max-h: calc(100vh - {{chrome.sheetTop}}px)"
   activity-id="{{activityId}}" topic-id="{{topicId}}" preview="{{isPreview}}" mock="{{isMock}}"
@@ -232,7 +293,7 @@
         <!-- 内嵌玩法(契约 §1.5):一块一个 .chfull__para(整块玩法都在这一层里,
              ⚠️ 里面再多元素也不进 measureChapter 的 selectAll 选择器,但外层少一个就整屏错位)。
              kit 直接绑页面上的 playKit.kit:作答/提交后 setData 更新它,这一块就地跟着变,
-             不必重铺整章。show 传 true —— 它在流里露着,不由弹层那套控制。 -->
+             不必重铺整章。流里这份在没另开整屏时露着;页级那份(playKit.show 且不是岔路弹窗)开着时这里关掉,同一站不能两套一起动。 -->
         <!-- 终章反转:对面回的话,左侧气泡;读到这一块整章翻成对话框(.chfull.is-chat) -->
         <view wx:elif="{{item.kind === 'divider'}}" class="chfull__divider" aria-hidden="true"></view>
         <!-- 延伸阅读(作者标 optional 的文字块):折叠卡,默认收起,点一下展开 / 收起;who 作副标题。整卡仍是一个 .chfull__para -->
@@ -277,7 +338,7 @@
             <view class="chfull__kitcard-copy"><text class="chfull__kitcard-type" wx:if="{{playKit.cardLabel}}">{{playKit.cardLabel}}</text><text class="chfull__kitcard-title">{{advancedPlay.node.name || playKit.kit.title || playKit.kit.kicker || '玩法'}}</text></view>
             <view class="chfull__kitcard-play" aria-hidden="true"><view class="chfull__kitcard-tri"></view></view>
           </view>
-          <cy-playkit wx:else kit="{{playKit.kit}}" show="{{true}}" inline="{{true}}" bind:kitaction="onPlayKitAction" />
+          <cy-playkit wx:else kit="{{playKit.kit}}" show="{{!(playKit.show && !playKit.pop)}}" inline="{{true}}" bind:kitaction="onPlayKitAction" />
         </view>
         <view wx:elif="{{item.kind === 'journeyCheck'}}" class="chfull__kit kit-tapsurface" catchtap="noop" hover-class="none">
           <template is="chfullKitAnchor" data="{{item, chrome}}" />
@@ -395,7 +456,7 @@
         <view class="drow drow--hold" wx:if="{{mode!=2 && !allDone}}" bindtap="onRunToggleFromTools"
               bindtouchstart="onRunHoldStart" bindtouchend="onRunHoldEnd" bindtouchcancel="onRunHoldEnd"
               aria-role="button" aria-label="{{runState === 'running' ? '暂停这一局' : '开始这一局'}}{{runState === 'idle' ? '' : '，长按结束本次'}}" hover-class="cy-pressed" hover-stay-time="80">
-          <view class="drow__hold drow__hold--run" wx:if="{{runHoldPct > 0}}" style="transform:scaleX({{runHoldPct / 100}})"></view>
+          <view class="drow__hold drow__hold--run" wx:if="{{runHoldPct > 0}}"></view>
           <view class="dic pic {{runState === 'running' ? 'pic--pause' : 'pic--play'}}"></view>
           <view class="dcopy"><text class="dt">{{runState === 'running' ? '暂停这一局' : '开始这一局'}}</text><text class="ds" wx:if="{{runState !== 'idle'}}">{{runHoldPct > 0 ? (runHoldLeft > 0 ? '还有 ' + runHoldLeft + ' 站未完成 · 松开取消' : '松开取消') : '长按结束这一局'}}</text></view>
           <view class="darr"></view>
@@ -775,7 +836,7 @@
        ★ 卡片克隆里只放图:文字跟着 scale 放大两倍会糊,章节 / 营业态都挪进正文首行。
        ★ 物理返回 / iOS 侧滑由 0 尺寸 page-container 守卫吃掉(同 publish/fabu 的做法),
          afterleave 落到 onHeroNativeBack 关 hero,而不是把整个 play 页弹出去。 -->
-  <page-container wx:if="{{mode==2}}" show="{{hero.show}}" duration="{{0}}" overlay="{{false}}"
+  <page-container wx:if="{{mode==2 && !chapStory.show && !shopNpc.show}}" show="{{hero.show}}" duration="{{0}}" overlay="{{false}}"
     custom-style="width:0;height:0;background:transparent;pointer-events:none"
     bind:afterleave="onHeroNativeBack" />
   <view class="fx-hero {{hero.open ? 'is-open' : ''}}" wx:if="{{mode==2 && hero.show}}"
@@ -798,8 +859,8 @@
          打开时自转一圈,平时轻微浮动,也能跟手左右转。 -->
     <view class="fx-hero__card {{hero.node.done ? 'is-done' : ''}} {{hero.faded ? 'is-faded' : ''}} {{hero.spun ? 'is-landed' : ''}}" style="{{hero.style}};--sx:{{hero.sx}}px;--ss:{{hero.ss}}">
       <view class="fx-card3d__float {{hero.spun ? 'is-settled' : ''}}">
-      <view class="fx-card3d" style="--ry:{{hero.ry}}deg"
-            bindtap="openChapStory" bindtouchstart="onCardTouchStart" bindtouchmove="onCardTouchMove" bindtouchend="onCardTouchEnd"
+      <view class="fx-card3d {{hero.turned ? 'is-turned' : ''}}" style="--ry:{{hero.ry}}deg" data-ry="{{hero.ry}}"
+            bindtap="openChapStory" bindtouchstart="{{heroMotion.start}}" bindtouchmove="{{heroMotion.move}}" bindtouchend="{{heroMotion.end}}" bindtouchcancel="{{heroMotion.end}}"
             aria-role="button" aria-label="读这一章的剧情；左右拖可以转动卡片"
             hover-class="cy-pressed" hover-stay-time="80">
         <view class="fx-card3d__face fx-card3d__front">
@@ -814,18 +875,15 @@
           <view class="fx-card3d__bp">{{hero.node.chapLead}}</view>
         </view>
         <!-- 侧脊只在卡片转起来时渲染:正面朝前时它会在卡片两侧漏出两条竖条,看着像描边 -->
-        <block wx:if="{{hero.turned}}">
-          <view class="fx-card3d__side fx-card3d__side--l"></view>
-          <view class="fx-card3d__side fx-card3d__side--r"></view>
-        </block>
+        <view class="fx-card3d__side fx-card3d__side--l"></view>
+        <view class="fx-card3d__side fx-card3d__side--r"></view>
       </view>
       </view>
     </view>
     <!-- 正文从卡片背后滚上去(滚动区从顶栏下面就开始,内容自己顶一段占位)。
          滚动区压到卡片下方的话,卡片缩走会在上面留一块空背景。 -->
     <scroll-view class="fx-hero__body" scroll-y enhanced show-scrollbar="{{false}}"
-                 style="top:{{chrome.contentTop}}px" bindscroll="onHeroScroll"
-                 scroll-top="{{hero.scrollTop}}" scroll-with-animation="{{false}}">
+                 style="top:{{chrome.contentTop}}px" bindscroll="{{heroMotion.scroll}}">
       <view class="fx-hero__hold" style="height:{{hero.bodyTop - chrome.contentTop}}px"></view>
       <!-- 章节名与营业态都下沉到各自那一段了,这里只留「排队/凭证」这类**当下**状态 -->
       <view class="fx-hero__chips fx-hero__in" style="--i:0" wx:if="{{hero.node.crowded || hero.node.statusText}}">
@@ -954,7 +1012,7 @@
       <cy-btn variant="secondary" style="flex:1" bindtap="closeChapStory">回到卡片</cy-btn>
       <cy-btn variant="primary" style="flex:1" bindtap="heroEnter">{{hero.node.perkOnly ? (hero.node.done ? '查看权益' : '我已到店') : (hero.node.playName ? '开始 · ' + hero.node.playName : '到店打卡')}}</cy-btn>
     </view>
-    <page-container show="{{chapStory.show}}" duration="{{0}}" overlay="{{false}}" bind:afterleave="onStoryNativeBack" />
+    <page-container wx:if="{{!shopNpc.show}}" show="{{chapStory.show}}" duration="{{0}}" overlay="{{false}}" bind:afterleave="onStoryNativeBack" />
   </view>
 
   <!-- ④ 店铺分身对话。形象居中占屏幕上半,开场问候是居中大字,点输入框就让位给消息流。
@@ -1655,7 +1713,7 @@
 
 <!-- 路线恢复横幅优先于活动时间提示；冲突会自动只读刷新，不重放上一次完成动作。
      2026-09-18 顶边复查:横幅从胶囊底下起(env 在模拟器/无刘海机为 0,原来的 top:0+padding 会压进胶囊行) -->
-<view class="play-timebar" wx:if="{{!loading && routeNotice}}" style="top:calc({{chrome.sheetTop}}px + 8rpx)">{{routeRefreshing ? '正在同步路线…' : routeNotice}}</view>
+<view class="play-timebar" wx:if="{{!loading && routeNotice}}" style="top:calc({{chrome.sheetTop}}px + 8rpx)" bindtap="retryRouteState">{{routeRefreshing ? '正在同步路线…' : routeNotice}}</view>
 <!-- 非阻断横幅:活动未开始/已结束(仍可查看足迹) -->
 <view class="play-timebar" wx:elif="{{!loading && timeBanner}}" style="top:calc({{chrome.sheetTop}}px + 8rpx)">{{timeBanner}}</view>
 <!-- 空态遮罩:缺活动信息 / 加载失败 / 未报名 / 无打卡点 -->

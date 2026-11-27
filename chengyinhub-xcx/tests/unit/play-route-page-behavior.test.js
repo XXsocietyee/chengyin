@@ -112,21 +112,31 @@ test('play 页版本冲突不会重放动作，而是刷新服务端路线状态
   assert.equal(page.data.routeNotice, '路线状态有更新，正在同步…')
 })
 
-test('路线同步失败或状态不可用时禁用旧 PLAYABLE 节点', async () => {
+test('路线同步失败时保留上一份路线并提示重试,回包前不锁;状态不可用仍禁用', async () => {
   const { definition, requests } = loadPage()
   const page = context(definition, {
     topicId: 9,
     routeState: { routeMode: 'BRANCH_GRAPH', status: 'ACTIVE', version: 4, nodeStates: { 30: 'PLAYABLE' } },
-    nodes: [{ nodeId: 30, routeNodeState: 'PLAYABLE', playable: true }],
+    nodes: [{ nodeId: 30, routeNodeState: 'PLAYABLE', playable: true, locked: false }],
+    nextNode: { nodeId: 30 },
   })
   page._routeNodeCatalog = page.data.nodes.slice()
   page.rebuild = () => {}
 
   const pending = page.refreshRouteState()
+  assert.equal(requests.length, 1)
+  assert.equal(page.data.nodes[0].playable, true, '回包前不锁')
+  assert.equal(page.data.nodes[0].locked, false)
+  assert.equal(page.data.nextNode.nodeId, 30)
+  assert.equal(page.data.routeRefreshing, false)
+  assert.notEqual(page.data.routeNotice, '正在同步路线…')
   requests[0].success({ code: 500, msg: '同步失败' })
   await pending
-  assert.equal(page.data.nodes[0].playable, false)
-  assert.equal(page._routeInteractionBlocked(), true)
+  assert.equal(page.data.nodes[0].playable, true, '失败仍留着上一份')
+  assert.equal(page.data.nodes[0].locked, false)
+  assert.equal(page.data.nextNode.nodeId, 30)
+  assert.match(page.data.routeNotice, /重试/)
+  assert.equal(page._routeInteractionBlocked(), false)
 
   page._applyRouteState({ routeMode: 'BRANCH_GRAPH', status: 'UNAVAILABLE', version: 5, nodeStates: { 30: 'PLAYABLE' } })
   assert.equal(page.data.nodes[0].playable, false)

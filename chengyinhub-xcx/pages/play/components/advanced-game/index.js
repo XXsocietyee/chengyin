@@ -134,6 +134,7 @@ Component({
       this._requestEpoch = (this._requestEpoch || 0) + 1;
       const context = this._startingContext = this.sessionRequestContext();
       this._unknownCommand = null;
+      this._submittedCommand = null;
       if (this.data.preview || this.data.mock) {
         const config = node.advancedConfig || {};
         this._previewTypeStartedAt = 0;
@@ -296,20 +297,21 @@ Component({
           || !(['FAILED', 'EXPIRED'].includes(state.status) || state.status === 'COMPLETED' && !!state.challenge)) return false;
       return this.action('RETRY', {});
     },
-    action(name, payload, originalPhoto) {
+    action(name, payload, originalCommand) {
       if (this.data.acting || this.data.unknown || !this.data.state) return;
-      if (originalPhoto && (name !== 'SUBMIT_PHOTO_CHECK' || originalPhoto !== this._unknownCommand
-          || String(originalPhoto.sessionId) !== String(this.data.state.sessionId))) return;
+      if (originalCommand && (originalCommand !== this._unknownCommand || originalCommand.action !== name
+          || String(originalCommand.sessionId) !== String(this.data.state.sessionId))) return;
       if (name === 'CHOOSE' && isR5(this.data.state)
           && !feedbackWritable(this.data.state, { stepId: (this.data.currentStep || {}).id })) return;
       if (this.data.preview || this.data.mock) return this.previewAction(name, payload || {});
       const context = this.sessionRequestContext();
-      const sessionId = originalPhoto ? originalPhoto.sessionId : this.data.state.sessionId;
-      const version = originalPhoto ? originalPhoto.version : this.data.state.version;
-      const body = JSON.parse(JSON.stringify(payload || {}));
+      const sessionId = originalCommand ? originalCommand.sessionId : this.data.state.sessionId;
+      const version = originalCommand ? originalCommand.version : this.data.state.version;
+      const body = JSON.parse(JSON.stringify(originalCommand ? (originalCommand.payload || {}) : (payload || {})));
       // 幂等键由「session + 服务端 version + 动作 + 入参」派生：同一次意图重试复用同一个键，
       // 服务端 selectByIdempotencyKey 才能 replay；写成功后 version 前进，下一动作自动换键。
-      const idempotencyKey = originalPhoto ? originalPhoto.idempotencyKey : buildActionKey(sessionId, version, name, body);
+      // 原命令重提必须沿用该键，不能按当前 version 再派生。
+      const idempotencyKey = originalCommand ? originalCommand.idempotencyKey : buildActionKey(sessionId, version, name, body);
       if (!id(sessionId) || !idempotencyKey) {
         this.setData({ error: '当前玩法状态不完整，请退出节点后重新进入' });
         return;
@@ -325,7 +327,8 @@ Component({
         catch (error) { this.setData({ acting: false, error: error.message }); this.emitActionFail(name, sessionId); return Promise.resolve(false); }
       }
       // 普通动作只持久化脱敏身份；照片沿既有 photoPending 保存原本站媒体引用。
-      const original = isPhoto ? command : { sessionId, version, idempotencyKey, action: name };
+      // 内存里留完整原命令，回执 404 时才能按同一键、原版本和原入参再提交。
+      const original = isPhoto ? JSON.parse(JSON.stringify(command)) : { sessionId, version, idempotencyKey, action: name };
       const originalState = { sessionId, version, nodeId: this.data.state.nodeId,
         ownerId: this.data.state.ownerId, ownerType: this.data.state.ownerType,
         challenge: this.data.state.challenge ? {} : null };
@@ -387,7 +390,7 @@ Component({
         if (!this.currentRequestContext(context)) return;
         this._unknownAction = name;
         this._unknownRequestContext = context;
-        this._unknownCommand = original;
+        this._unknownCommand = command;
         this.enterUnknown(version);
       });
     },
@@ -508,8 +511,11 @@ Component({
         sessionId: original.sessionId, idempotencyKey: original.idempotencyKey
       }).then(res => {
         if (!this.currentRequestContext(context)) return false;
+        // 404：这个幂等键没有回执。保留原命令（不删 pending），同一键和原版本可以再提交。
+        // 服务端已落账则 replay，版本已变则拒绝。回执请求失败（网络 / 5xx / 抛错）不进这里。
+        // 照片仍走同意后重试原照片，不改成跳过同意的重提。
         if (Number(res.code) === 404 && capturedPhoto) {
-          this.setData({ readingBack: false, unknown: true, photoRetryable: true,
+          this.setData({ readingBack: false, unknown: true, photoRetryable: true, originalRetryable: false,
             unknownText: '未查到不代表未提交；可重新确认同意后重试原照片' });
           return false;
         }

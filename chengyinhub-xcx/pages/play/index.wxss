@@ -1443,8 +1443,9 @@ page { background: var(--cy-color-bg-page); }
 /* 侧脊:立在卡片两边,竖排店名与章节 —— 这是「有厚度」唯一看得见的地方 */
 /* 侧脊压暗:用提亮色时,卡片正对镜头那一刻它会从边缘漏出一条亮边,看着像给卡片描了边。
    上下按圆角内缩:卡面是 32rpx 圆角,侧脊铺满全高会从圆角外面探出两个尖。 */
-.fx-card3d__side{ position:absolute; top:var(--cy-radius-lg); bottom:var(--cy-radius-lg); width:var(--T);
+.fx-card3d__side{ display:none; position:absolute; top:var(--cy-radius-lg); bottom:var(--cy-radius-lg); width:var(--T);
   background:var(--cy-color-bg-surface); }
+.fx-card3d.is-turned .fx-card3d__side{ display:block; }
 .fx-card3d__side--l{ left:calc(var(--T) / 2); transform-origin:left center; transform:rotateY(-90deg) translateZ(calc(var(--T) / 2)); }
 .fx-card3d__side--r{ right:calc(var(--T) / 2); transform-origin:right center; transform:rotateY(90deg) translateZ(calc(var(--T) / 2)); }
 /* 卡面只放照片,不写字(用户 2026-09-08:卡片上的字小到看不清,章节名与介绍都归背面) */
@@ -1746,7 +1747,8 @@ page { background: var(--cy-color-bg-page); }
    这里改用一条从左推进的底色,语义不变:涨满 = 这一局结束。
    ⚠️ .drow 本体在 style/proto-sheet.wxss,与漫游抽屉共用 —— 不去那边加 position,只在 play 这层挂。 */
 .drow--hold { position: relative; }
-.drow__hold--run { width: 100%; transform-origin: left center; transition: transform 2970ms linear; } /* L01-012 长按进度由合成层过渡走满(不动 width),时长 = RUN_HOLD_MS - 首帧 30ms */
+@keyframes drow-hold-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.drow__hold--run { width: 100%; transform-origin: left center; animation: drow-hold-fill 3000ms linear forwards; } /* L01-012 与 RUN_HOLD_MS 同一段,挂上就走满,不再 setData 进度 */
 .drow__hold { position: absolute; left: 0; top: 0; bottom: 0;
   background: rgba(255, 255, 255, .10); pointer-events: none; } /* ds-ok 长按进度底色,同 proto-sheet 分隔线的裸 rgba 口径 */
 

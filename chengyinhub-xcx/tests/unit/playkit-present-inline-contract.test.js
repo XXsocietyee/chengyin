@@ -150,8 +150,31 @@ test('★kit 段的外层仍是循环里那个唯一的 .chfull__para —— 少
   assert.equal(loops.length, 1, '.chfull__para 的外层循环只能有一个，且不带条件')
   // 内嵌 kit 的渲染分支在同一个循环体内(wx:elif),不是另起一个循环
   // V3-10/53/11:要整屏的玩法在同一块里换成入口卡(wx:if playKit.card),其余仍是同一份 playKit.kit 内嵌
-  assert.match(wxml, /wx:elif="\{\{item\.kind === 'kit'\}\}"[\s\S]*?cy-playkit wx:else kit="\{\{playKit\.kit\}\}" show="\{\{true\}\}"/,
+  // L01-038:流里这份和页级那份绑同一份 kit,show 必须互斥,否则同一站两套传感器一起动
+  assert.match(wxml, /wx:elif="\{\{item\.kind === 'kit'\}\}"[\s\S]*?cy-playkit wx:else kit="\{\{playKit\.kit\}\}" show="\{\{!\(playKit\.show && !playKit\.pop\)\}\}"/,
     'kit 段没有在循环里渲染，或 kit 绑的不是页面上那份 playKit.kit')
+})
+
+test('★故事流内嵌 cy-playkit 与页级 cy-playkit 不能同时 show', () => {
+  const wxml = read('pages/play/index.wxml')
+  const story = wxml.match(/<cy-playkit wx:else kit="\{\{playKit\.kit\}\}" show="\{\{([^"]+)\}\}" inline="\{\{true\}\}"/)
+  const page = wxml.match(/<cy-playkit id="playKit"[^>]*kit="\{\{playKit\.kit\}\}" show="\{\{([^"]+)\}\}"/)
+  assert.ok(story, '故事流里的 cy-playkit 还在')
+  assert.ok(page, '页级 cy-playkit 还在')
+  const evalShow = (expr, show, pop) => {
+    const src = expr.replace(/playKit\.show/g, JSON.stringify(!!show)).replace(/playKit\.pop/g, JSON.stringify(!!pop))
+    return !!Function(`"use strict"; return (${src});`)()
+  }
+  for (const show of [false, true]) {
+    for (const pop of [false, true]) {
+      assert.equal(evalShow(story[1], show, pop) && evalShow(page[1], show, pop), false,
+        `show=${show} pop=${pop} 两份都露着`)
+    }
+  }
+  assert.equal(evalShow(story[1], false, false), true, '故事流自己在露着')
+  assert.equal(evalShow(page[1], false, false), false, '故事流露着时页级必须关掉')
+  assert.equal(evalShow(page[1], true, false), true, '玩家打开的是页级')
+  assert.equal(evalShow(story[1], true, false), false, '页级开着时故事流那份必须关掉')
 })
 
 // ===== ③ play-stage 内嵌档:在流里 + 退出钮隐藏 + z-index/skin 不走样 =====
