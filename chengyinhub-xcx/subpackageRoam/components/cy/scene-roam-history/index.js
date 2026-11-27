@@ -1,7 +1,7 @@
 'use strict'
 
 const { currentPlayerRoamMemory } = require('../../../../utils/roam-player-memory.js'); const pageMotion = require('../../../../utils/page-motion.js')
-const { validRecovery } = require('../../../../utils/roam-recovery.js')
+const { validRecovery, exactSessionId } = require('../../../../utils/roam-recovery.js')
 const { readNonNegative, readDurationSeconds, formatDistance, formatDuration, sessionDateParts } = require('../../../../utils/roam-history-metrics.js')
 const { routeGeo } = require('../../../../utils/roam-route-geo.js')
 const { createReader, merge } = require('../../../../utils/roam-passport-read.js')
@@ -56,7 +56,17 @@ Component({
   },
   pageLifetimes: {
     hide() { if (this._historyReader) this._historyReader.dispose() },
-    show() { this._load() },
+    show() {
+      const owner = exactSessionId(getApp().getUserID && getApp().getUserID())
+      // 回来时后面几页还在:只重挂读句柄,不从第一页重拉把已加载的记录丢掉。换账号才整表重读。
+      if (owner && owner === this._historyOwner && Array.isArray(this._remoteSessions) && this._remoteSessions.length) {
+        this._refreshing = false
+        this._historyReader = createReader(getApp(), wx)
+        if (this.data.remoteLoading) this.setData({ remoteLoading: false, remoteError: false, hasMore: !!this._nextBefore })
+        return
+      }
+      this._load()
+    },
   },
   methods: {
     _loadLocal() {
@@ -87,6 +97,7 @@ Component({
       // L05-073:唯一调用方 _load 合并远端缓存后马上 _sync,这里不再先发一遍整表
     },
     _load() {
+      this._historyOwner = exactSessionId(getApp().getUserID && getApp().getUserID())
       const previous = this._historyReader && this._historyReader.current() ? this._remoteSessions || [] : []
       if (this._historyReader) this._historyReader.dispose()
       const reader = this._historyReader = createReader(getApp(), wx)

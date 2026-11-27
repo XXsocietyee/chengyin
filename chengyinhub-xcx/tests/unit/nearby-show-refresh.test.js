@@ -49,6 +49,23 @@ test('拖图:挪动不到查询半径 1/4 且没缩放不重拉;隐藏时清掉�
   assert.equal(page._regionTimer, null);
 });
 
+test('卸载后半屏入场与卡片展开不再 setData', async () => {
+  const { page } = mount();
+  page.data.reducedMotion = false;
+  page._pcBox = { top: 120, h: 280, w: 260, W: 375, H: 667 };
+  const writes = [];
+  const setData = page.setData;
+  page.setData = function (patch) { writes.push(patch); setData.call(this, patch); };
+  page._openSheet('team');
+  page._expand(true);
+  page.onUnload();
+  assert.equal(page._sheetInTimer, null);
+  assert.equal(page._pcTimer, null);
+  const before = writes.length;
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(writes.length, before);
+});
+
 // L05-134 / L05-135:我的队伍回前台只在必要时重读;连点进队伍页只推一层。
 function mountMyTeams() {
   const file = path.resolve(__dirname, '../../subpackageRoam/my-teams/index.js');

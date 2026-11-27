@@ -174,7 +174,12 @@ Page({
     teamRecovery.dispose(this);
   },
 
-  onUnload() { this._unloaded = true; teamRecovery.dispose(this); if (this._regionTimer) clearTimeout(this._regionTimer); },
+  onUnload() {
+    this._unloaded = true; teamRecovery.dispose(this); if (this._regionTimer) clearTimeout(this._regionTimer);
+    // 半屏入场、卡片展开离开后不再 setData
+    if (this._sheetInTimer) { clearTimeout(this._sheetInTimer); this._sheetInTimer = null; }
+    if (this._pcTimer) { clearTimeout(this._pcTimer); this._pcTimer = null; }
+  },
 
   goBack() {
     if (getCurrentPages().length > 1) wx.navigateBack();
@@ -564,7 +569,7 @@ Page({
     if (this._sheetInTimer) { clearTimeout(this._sheetInTimer); this._sheetInTimer = null; }
     if (this._sheetOutTimer) { this._pendingSheet = name; return; }
     this.setData({ sheet: name, sheetIn: false });
-    this._sheetInTimer = setTimeout(() => this.setData({ sheetIn: true }), this.data.reducedMotion ? 0 : 20);
+    this._sheetInTimer = setTimeout(() => { this._sheetInTimer = null; if (!this._unloaded) this.setData({ sheetIn: true }); }, this.data.reducedMotion ? 0 : 20);
   },
   closeSheet() {
     if (this._sheetInTimer) { clearTimeout(this._sheetInTimer); this._sheetInTimer = null; }
@@ -1085,10 +1090,10 @@ Page({
     clearTimeout(this._pcTimer);
     if (on) {
       this.setData({ poiExpand: true, pcClip: inset + 'transition: none;' });
-      this._pcTimer = setTimeout(() => this.setData({ pcClip: 'clip-path: inset(0 round 21px);' }), 30);
+      this._pcTimer = setTimeout(() => { if (!this._unloaded) this.setData({ pcClip: 'clip-path: inset(0 round 21px);' }); }, 30);
     } else {
       this.setData({ pcClip: inset });
-      this._pcTimer = setTimeout(() => this.setData({ poiExpand: false, pcClip: '' }), 420);
+      this._pcTimer = setTimeout(() => { if (!this._unloaded) this.setData({ poiExpand: false, pcClip: '' }); }, 420);
     }
   },
   closePoiCard() {
