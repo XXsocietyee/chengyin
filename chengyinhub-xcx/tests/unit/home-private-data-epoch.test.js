@@ -86,6 +86,7 @@ test('当前账号的用户资料响应可以正常写入', () => {
   sent[0].success({ code: '200', data: { nickname: '当前账号', phone: '13800000000' } })
 
   assert.equal(page.data.userInfo.nickname, '当前账号')
+  assert.equal(page.data.userInfo.phone, undefined, '手机号等非问候字段不进 setData')
 })
 
 test('未绑定手机号的账号回到首页不会被主动弹窗索取手机号(F-L5C-04)', () => {
@@ -263,6 +264,7 @@ test('M-15:onShow刷新核销权限，失效和请求失败不沿用旧权限', 
   assert.equal(page.data._needsRedirect, false)
   page.onShow()
   assert.deepEqual(redirects, [], '未收到有效权限前不跳工作台')
+  page.onHide()
 })
 
 test('M-15:无权限、失效、错误或畸形access不进入工作台', () => {
@@ -325,6 +327,48 @@ test('L10-019/L10-020:onShow 不再直接发 /api/user/info;appReady 前不发 a
   page.onHide()
 })
 
+test('L10-019:同一轮展示里 loadPageData 和 onShow 定时器只发一次 /api/user/info', async () => {
+  const page = makePage()
+  page.data.isAppReady = true
+  page.getHomeCityLocation = () => {}
+  page.getListData = () => {}
+  page.loadBottomTopicList = () => {}
+  page.loadBottomActivityList = () => {}
+  page.onShow()
+  page.loadPageData()
+  await new Promise(resolve => setTimeout(resolve, 150))
+  assert.equal(sent.filter(r => r.url === '/api/user/info').length, 1)
+  page.onHide()
+  sent.length = 0
+  page.onShow()
+  await new Promise(resolve => setTimeout(resolve, 150))
+  assert.equal(sent.filter(r => r.url === '/api/user/info').length, 1, '下一轮展示仍要刷新一次')
+  page.onHide()
+})
+
+test('L10-020:app 已就绪时冷启动只发一次 access/me 和 user/info', async () => {
+  async function coldStart(showBeforeReadyMicrotask) {
+    sent.length = 0
+    const page = makePage()
+    page.getHomeCityLocation = () => {}
+    page.getListData = () => {}
+    page.loadBottomTopicList = () => {}
+    page.loadBottomActivityList = () => {}
+    try {
+      page.onLoad({})
+      if (!showBeforeReadyMicrotask) await new Promise(resolve => setTimeout(resolve, 0))
+      page.onShow()
+      await new Promise(resolve => setTimeout(resolve, 150))
+      assert.equal(sent.filter(r => r.url === '/api/user/info').length, 1)
+      assert.equal(sent.filter(r => r.url === '/api/merchant/access/me').length, 1)
+    } finally {
+      page.onUnload()
+    }
+  }
+  await coldStart(false)
+  await coldStart(true)
+})
+
 test('L10-023:user/info 连续 401 时页面层最多重登一次', () => {
   const page = makePage()
   let relogins = 0
@@ -357,4 +401,40 @@ test('L10-021:首页刷新只加载当前分栏的底部列表', () => {
     page.loadPageData()
     assert.deepEqual([topics, activities], [topic, activity])
   }
+})
+
+function bottomActivityFeed(rows) {
+  return rows.filter((request) => request.url === '/api/activity/list'
+    && request.data && request.data.pageSize === 20 && request.data.status === 1)
+}
+
+test('L10-021:主题首屏不拉底部活动信息流，再进活动分栏或换账号才拉', () => {
+  const page = makePage()
+  page.loadPageData()
+  assert.equal(bottomActivityFeed(sent).length, 0, '主题首屏不请求底部活动信息流')
+  assert.equal(sent.filter((request) => request.url === '/api/activity/list' && request.data && request.data.pageSize === 4).length, 2)
+
+  sent = []
+  page.data.bottomTopicList = [{ id: 2 }]
+  page.data.bottomActivityList = [{ id: 1 }]
+  page.switchTab({ detail: { key: '0' } })
+  assert.equal(bottomActivityFeed(sent).length, 0, '回到主题不重拉')
+
+  page.switchTab({ detail: { key: '1' } })
+  assert.equal(bottomActivityFeed(sent).length, 1, '再次打开活动分栏会拉')
+
+  sent = []
+  page.data.bottomTopicList = [{ id: 2 }]
+  page.switchTab({ detail: { key: '0' } })
+  assert.equal(bottomActivityFeed(sent).length, 0)
+
+  userId = 'member-2'
+  page.getUserData()
+  assert.equal(bottomActivityFeed(sent).length, 0, '人在主题分栏时换账号不拉底部活动信息流')
+
+  sent = []
+  page.data.activeTab = '1'
+  userId = 'member-3'
+  page.getUserData()
+  assert.equal(bottomActivityFeed(sent).length, 1, '人在活动分栏时换账号重拉')
 })

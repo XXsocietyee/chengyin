@@ -60,11 +60,30 @@ function normalizeMemberId(memberId) {
   return memberId || '';
 }
 
+// 第一次记下账号不算变更。之后换了账号，活动分栏正在显示才重拉底部活动信息流。
+function homeAccountChanged(page, memberId) {
+  const normalized = normalizeMemberId(memberId);
+  const previous = page._homeFeedMemberId;
+  page._homeFeedMemberId = normalized;
+  return previous !== undefined && previous !== normalized;
+}
+
 function clearPrivateDisplay(page) {
   page.setData({
     userInfo: { avatar: '', nickname: '', point: '0' },
     heroGreeting: homeGreeting(null),
   });
+}
+
+// 问候区只用头像、昵称、积分。资料接口里的手机号等其余字段不进 setData。
+function visibleHomeUser(raw, avatar) {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const point = source.point == null || source.point === '' ? '0' : String(source.point);
+  return {
+    avatar: avatar || '',
+    nickname: source.nickname ? String(source.nickname) : '',
+    point: point,
+  };
 }
 
 function capturePrivateRequest(page, memberId) {
@@ -120,6 +139,7 @@ function applyCityFallback(page) {
 function showHomeCityLocationError(page, scope, kind) {
   hideLocationLoading(page, scope);
   if (!isCurrentLocationRequest(page, scope)) return;
+  endHomeLocationRequest(page, scope);
   // V-01:冷启动/onShow 的自动定位失败不弹提示，保留上次城市，没有就露出手动选择；只有用户主动点定位才提示。
   if (scope.userInitiated) cyToast(homeCity.message(kind));
   else if (!page.data.city) applyCityFallback(page);
@@ -129,6 +149,87 @@ function hideLocationLoading(page, scope) {
   if (!scope || page._locationLoadingEpoch !== scope.epoch) return;
   page._locationLoadingEpoch = null;
   cyLoading.hide();
+}
+
+// 定位请求从读同意开始算在途，直到成功、拒绝、失败或页面把这一轮作废。
+function beginHomeLocationRequest(page, opts) {
+  const scope = captureLocationRequest(page);
+  scope.userInitiated = !!(opts && opts.userInitiated);
+  scope.gateCoversLocation = !!(opts && opts.gateCoversLocation);
+  page._locationRequestInFlight = true;
+  page._resumeHomeLocation = false;
+  page._locationResumeOpts = {
+    userInitiated: scope.userInitiated,
+    gateCoversLocation: scope.gateCoversLocation,
+  };
+  return scope;
+}
+
+function endHomeLocationRequest(page, scope) {
+  if (!scope || scope.epoch !== (page._locationEpoch || 0)) return;
+  page._locationRequestInFlight = false;
+}
+
+const HOME_FEED_PAGE_SIZE = 20;
+const HOME_MOTION_TIMERS = [
+  '_pm_recommendedTopicListTimer',
+  '_pm_nearbyActivityListTimer',
+  '_pm_upcomingActivityListTimer',
+  '_pmFeedTimer',
+];
+
+function clearHomePageTimers(page) {
+  if (page._onShowRefreshTimer) {
+    clearTimeout(page._onShowRefreshTimer);
+    page._onShowRefreshTimer = null;
+  }
+  if (page._refreshEndTimer) {
+    clearTimeout(page._refreshEndTimer);
+    page._refreshEndTimer = null;
+  }
+  if (page._recoTransitionUnlockTimer) {
+    clearTimeout(page._recoTransitionUnlockTimer);
+    page._recoTransitionUnlockTimer = null;
+  }
+  page._recoTransitionLocked = false;
+  HOME_MOTION_TIMERS.forEach(function (key) {
+    if (!page[key]) return;
+    clearTimeout(page[key]);
+    page[key] = null;
+  });
+  if (page._countdownTimer) {
+    clearInterval(page._countdownTimer);
+    page._countdownTimer = null;
+  }
+  if (!page._unloaded && page.data && page.data.refreshing) page.setData({ refreshing: false });
+}
+
+// page-motion 的计时器只在卸载时停。切走首页是 onHide，不拦的话入场计时仍会在隐藏页 setData。
+function enterHomeListMotion(page, key) {
+  if (!page || page._unloaded || page._homeLocationHidden) return;
+  pageMotion.enter(page, key, { once: true });
+}
+
+// L10-122:距离徽标只代表这次请求测出来的距离。经纬度要同时在范围内才算测过,0 也是有效坐标。
+function coordinateIncluded(value, limit) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    value = Number(trimmed);
+  }
+  return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= limit;
+}
+
+function requestIncludedCoordinates(params) {
+  return !!params && coordinateIncluded(params.latitude, 90) && coordinateIncluded(params.longitude, 180);
+}
+
+function distanceTextFromMeters(distance) {
+  if (distance == null || distance === '') return '';
+  const meters = typeof distance === 'number' ? distance : Number(String(distance).trim());
+  // 缺距离、非数字、0 和负数都不是这次测出来的距离,徽标留空。
+  if (!Number.isFinite(meters) || meters <= 0) return '';
+  return (meters / 1000).toFixed(2) + 'km';
 }
 
 // 即将上线倒计时:还剩N天 / 还剩N小时 / 已开始(j1 F23 不用英文单位)
@@ -144,12 +245,24 @@ function fmtRemain(startDateStr) {
 
 const RECO_INACTIVE_SCALE = 280 / 306;
 const RECO_BLUR_PX = 8;
+const RECO_PROGRESS_STEPS = 48;
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
 }
 
-const RECO_PROGRESS_STEPS = 48;
+// 冷启动的 waitForAppReady 可能先于 onShow 把资料和商家入口发出去。
+// 第一次真正留下的 onShow 认领这一轮，不再各发第二次。
+function claimColdStartPrivate(page, showEpoch) {
+  if (page._bootstrapPrivateEpoch !== 0) return;
+  page._bootstrapPrivateEpoch = showEpoch;
+  if (page._accessFetchEpoch === 0) page._accessFetchEpoch = showEpoch;
+  if (page._userFetchEpoch === 0) page._userFetchEpoch = showEpoch;
+}
+
+function markColdStartPrivate(page) {
+  if (!page._showEpoch) page._bootstrapPrivateEpoch = 0;
+}
 
 function recoCardStyle(focus) {
   const normalizedFocus = clamp01(focus);
@@ -165,6 +278,14 @@ function buildRecoCardStyles(count, current, target, progress) {
     if (index === target) focus = normalizedProgress;
     return recoCardStyle(focus);
   });
+}
+
+function recoCardStylesUnchanged(previous, next) {
+  if (!Array.isArray(previous) || previous.length !== next.length) return false;
+  for (let i = 0; i < next.length; i += 1) {
+    if (previous[i] !== next[i]) return false;
+  }
+  return true;
 }
 
 // feed/卡片多图:发布页(publish/fabu)写入的 imgArr 与章节同为 "," 分隔，历史数据也有 ";"。
@@ -219,9 +340,7 @@ Page({
     // 首次加载和重试都必须立即给反馈；否则网络慢时用户点“重试”看起来完全没生效。
     listLoading: {}, listLoaded: {}, // H-03b:listLoaded = 该区已落地过一次;此后刷新不回骨架、不重挂区块,页面高度不跳
 
-    // 分页相关数据
-    bottomTopicPageNo: 1,
-    bottomActivityPageNo: 1,
+    // 分页相关数据。页码和 pageSize 只在逻辑里用，不进视图。
     hasMoreBottomTopic: false,
     hasMoreBottomActivity: false,
     isBottomLoading: false,
@@ -229,7 +348,6 @@ Page({
     // wxml 据此在列表底部渲染 cy-inline-error,重试沿用失败页而不是从头再拉。
     bottomTopicFailedPage: 0,
     bottomActivityFailedPage: 0,
-    pageSize:20,
     
     // 倒计时相关
     
@@ -273,8 +391,10 @@ Page({
       goMerchantHome();
       return;
     }
-    this.setData({ _needsRedirect: false, isAppReady: true });
+    this.data.isAppReady = true;
+    this.setData({ _needsRedirect: false });
     this.loadPageData();
+    markColdStartPrivate(this);
     this.getHomeCityLocation({ gateCoversLocation: event.detail.location === true }); // P-38:隐私闸已一并征得首页城市定位同意,直接进定位,不再弹「首页城市定位」
   },
 
@@ -332,9 +452,10 @@ Page({
           return;
         }
       }
-      that.setData({ isAppReady: true });
+      that.data.isAppReady = true;
       that.loadOperatorAccess();
       that.loadPageData();
+      markColdStartPrivate(that);
       that.getHomeCityLocation();
       that.retryPendingInviter();
     }).catch(err => {
@@ -424,8 +545,10 @@ Page({
       goMerchantHome();
       return;
     }
-    this.setData({ _needsRedirect: false, isAppReady: true });
+    this.data.isAppReady = true;
+    this.setData({ _needsRedirect: false });
     this.loadPageData();
+    markColdStartPrivate(this);
     this.getHomeCityLocation();
   },
 
@@ -471,7 +594,10 @@ Page({
     
     // 清除已有的定时器
     if (that._countdownTimer) clearInterval(that._countdownTimer);
+    that._countdownTimer = null;
     // 每60秒更新一次倒计时(L10-120:定时器句柄是实例字段,启停不再各发一次 setData)
+    // 人已经离开首页就不要再挂。晚到的即将上线回包会从这里把计时器重新拉起来。
+    if (that._unloaded || that._homeLocationHidden) return;
     that._countdownTimer = setInterval(() => {
       that.updateUpcomingActivitiesCountdown();
     }, COUNTDOWN_INTERVAL_MS);
@@ -482,6 +608,7 @@ Page({
    */
   updateUpcomingActivitiesCountdown: function() {
     const that = this;
+    if (that._unloaded || that._homeLocationHidden) return;
     const upcomingList = that.data.upcomingActivityList;
     
     if (!upcomingList || upcomingList.length === 0) {
@@ -500,8 +627,8 @@ Page({
       return Object.assign({}, item, { remainingTime: r.remainingTime, started: r.started });
     });
     
-    // 如果有更新，则设置数据
-    if (updated) {
+    // 如果有更新，则设置数据。计算过程中人可能已经离开，离开后不再 setData。
+    if (updated && !that._unloaded && !that._homeLocationHidden) {
       that.setData({
         upcomingActivityList: updatedList
       });
@@ -513,6 +640,7 @@ Page({
    */
   ensureCountdownTimerRunning: function() {
     const that = this;
+    if (that._unloaded || that._homeLocationHidden) return;
     
     if (!that._countdownTimer) {
       that.startCountdownTimer();
@@ -524,8 +652,9 @@ Page({
    */
   onShow() {
     this.setData({ fontScaleStyle: readPageStyle() });
-    // L10-002:城市已由本页定位/手选落定后，切回首页不再重跑同意读取 + GPS + 逆地理；点城市仍可重定位。
-    const resumeHomeLocation = this._homeLocationHidden === true && !this._homeCityResolved;
+    // L10-002:切回首页不是定位动作。只有离开时定位请求仍在途，才续读同意并取城市；城市只是问候。
+    const resumeHomeLocation = this._resumeHomeLocation === true;
+    const resumeOpts = this._locationResumeOpts;
     const locationEpochAtShow = this._locationEpoch || 0;
     this._homeLocationHidden = false;
     wx.hideTabBar();
@@ -535,34 +664,43 @@ Page({
     // 2026-10-24:游客在别处登录后回到首页,补发一次待发的邀请关系(A-01)。
     if (this._pendingInviter) this.retryPendingInviter();
     // 热启动扫小程序码只在 App.onShow 收下 pending。这里消费一次就清掉。
-    if (this.consumeDoorScene()) return;
-    if (this._doorSceneInFlight) return;
+    if (this.consumeDoorScene()) {
+      this._bootstrapPrivateEpoch = null;
+      return;
+    }
+    if (this._doorSceneInFlight) {
+      this._bootstrapPrivateEpoch = null;
+      return;
+    }
 
     // 身份分流：每次进首页 tab 都同步检查一次身份
     // (冷启动时登录可能还在途、此处判不出商家;那一路由 onLoad 的 waitForAppReady 复判兜住)
     if (isMerchantView()) {
+      this._bootstrapPrivateEpoch = null;
       this.setData({ _needsRedirect: true });
       goMerchantHome();
       return;
     }
 
     // onShow 也要复位旧快照留下的隐藏闸，确保角色切换后页面可见。
+    const showEpoch = this._showEpoch = (this._showEpoch || 0) + 1;
+    claimColdStartPrivate(this, showEpoch);
     this.setData({ _needsRedirect: false });
-    // L10-020:冷启动由 waitForAppReady 发一次,不在 appReady 前重复发
-    if (this.data.isAppReady) this.loadOperatorAccess();
+    // L10-020:同一轮展示只发一次。冷启动若已由 waitForAppReady 发过，这里认领而不再发。
+    if (this.data.isAppReady && this._accessFetchEpoch !== showEpoch) this.loadOperatorAccess();
 
     // 确认留在首页后,保持深色:状态栏/导航切深色(白字)。离开首页时 onHide 复位浅色。
     applyTheme('dark');
 
-    // 兜底的跨设备升级商户检查(/api/user/info 的 role)合进 getUserData:每次 onShow 只发一次(L10-019)。
+    // L10-019:同一轮展示只走 getUserData 一次。loadPageData 已经发过的，这次定时器不再补发。
 
     if (this._onShowRefreshTimer) clearTimeout(this._onShowRefreshTimer);
     this._onShowRefreshTimer = setTimeout(() => {
       this._onShowRefreshTimer = null;
-      // 刷新用户数据（可选）
+      if (showEpoch !== that._showEpoch || that._unloaded) return;
       if (that.data.isAppReady) {
-        that.getUserData();
-        if (resumeHomeLocation && (that._locationEpoch || 0) === locationEpochAtShow) that.getHomeCityLocation();
+        if (that._userFetchEpoch !== showEpoch) that.getUserData();
+        if (resumeHomeLocation && (that._locationEpoch || 0) === locationEpochAtShow) that.getHomeCityLocation(resumeOpts || undefined);
       }
 
       // 重新启动倒计时定时器
@@ -577,6 +715,7 @@ Page({
     const requestEpoch = capturePrivateRequest(this, memberId);
     const accessEpoch = this._operatorAccessEpoch = (this._operatorAccessEpoch || 0) + 1;
     if (!memberId || wx.getStorageSync('debug_user_view') === 'user') return;
+    this._accessFetchEpoch = this._showEpoch || 0;
     app.sendRequest({
       hideLoading: true,
       url: '/api/merchant/access/me',
@@ -599,26 +738,22 @@ Page({
    * 页面隐藏时
    */
   onHide() {
+    // 在途定位被这次离开打断时才续；普通切 tab 不记续跑。
+    this._resumeHomeLocation = this._locationRequestInFlight === true || this._resumeHomeLocation === true;
+    if (!this._resumeHomeLocation) this._locationResumeOpts = null;
+    this._locationRequestInFlight = false;
     this._homeLocationHidden = true;
     this._operatorAccessEpoch = (this._operatorAccessEpoch || 0) + 1;
     this._locationEpoch = (this._locationEpoch || 0) + 1;
+    this._locationPromptScope = null;
     if (this._locationLoadingEpoch != null) {
       this._locationLoadingEpoch = null;
       cyLoading.hide();
     }
+    if (this.data.locationPrompt) this.setData({ locationPrompt: null });
     // 全站暗色默认:离开首页保持深色导航/状态栏(后续页同为暗底)。
     applyTheme('dark');
-
-    if (this._onShowRefreshTimer) {
-      clearTimeout(this._onShowRefreshTimer);
-      this._onShowRefreshTimer = null;
-    }
-
-    // 清除倒计时定时器以节省资源
-    if (this._countdownTimer) {
-      clearInterval(this._countdownTimer);
-      this._countdownTimer = null;
-    }
+    clearHomePageTimers(this);
   },
 
   /**
@@ -628,23 +763,14 @@ Page({
     this._unloaded = true;
     if (this._offIdentity) { this._offIdentity(); this._offIdentity = null; }
     this._locationEpoch = (this._locationEpoch || 0) + 1;
+    this._locationRequestInFlight = false;
+    this._resumeHomeLocation = false;
+    this._locationResumeOpts = null;
     if (this._locationLoadingEpoch != null) {
       this._locationLoadingEpoch = null;
       cyLoading.hide();
     }
-    if (this._onShowRefreshTimer) {
-      clearTimeout(this._onShowRefreshTimer);
-      this._onShowRefreshTimer = null;
-    }
-    if (this._recoTransitionUnlockTimer) {
-      clearTimeout(this._recoTransitionUnlockTimer);
-      this._recoTransitionUnlockTimer = null;
-    }
-    // 清除倒计时定时器
-    if (this._countdownTimer) {
-      clearInterval(this._countdownTimer);
-      this._countdownTimer = null;
-    }
+    clearHomePageTimers(this);
     invalidatePrivateRequests(this, false);
     const listControls = this._listControls || {};
     // 先让全部旧回调失效，再 abort。微信 abort 可能同步触发 fail/complete；
@@ -670,10 +796,10 @@ Page({
     that.setData({ activeTab: index });
     
     if (index === '0') {
-      // 切换到主题
+      // 回到主题不重拉底部活动信息流。主题列表空了才补拉一次。
       if (that.data.bottomTopicList.length === 0) {
+        that._bottomTopicPageNo = 1;
         that.setData({
-          bottomTopicPageNo: 1,
           hasMoreBottomTopic: false,
           bottomTopicList: []
         }, () => {
@@ -681,16 +807,9 @@ Page({
         });
       }
     } else if (index === '1') {
-      // 切换到活动
-      if (that.data.bottomActivityList.length === 0) {
-        that.setData({
-          bottomActivityPageNo: 1,
-          hasMoreBottomActivity: false,
-          bottomActivityList: []
-        }, () => {
-          that.loadBottomActivityList(1, true);
-        });
-      }
+      // L10-021:每次打开活动分栏都拉底部活动信息流，包括再次打开。
+      that._bottomActivityPageNo = 1;
+      that.loadBottomActivityList(1, true);
     }
   },
 
@@ -709,13 +828,24 @@ Page({
     if (this.data.refreshing) return;
     this.setData({ refreshing: true });
     this.loadPageData();
-    setTimeout(() => this.setData({ refreshing: false }), 800);
+    if (this._refreshEndTimer) clearTimeout(this._refreshEndTimer);
+    this._refreshEndTimer = setTimeout(() => {
+      this._refreshEndTimer = null;
+      if (this._unloaded || this._homeLocationHidden) return;
+      this.setData({ refreshing: false });
+    }, 800);
   },
 
   loadPageData: function () {
     const that = this;
 
-    that.getUserData();
+    // 这一轮自己会按当前分栏拉底部列表，getUserData 里的换账号重拉不要再发一次。
+    that._loadingPageData = true;
+    try {
+      that.getUserData();
+    } finally {
+      that._loadingPageData = false;
+    }
 
 
     // 固定行动 Banner 不再请求后台随机图。
@@ -736,15 +866,17 @@ Page({
       sort_type: 2,
     });
 
-    // L10-021:只加载当前分栏的底部列表;另一栏清空,切过去时由 switchTab 按空列表懒加载一次。
+    // L10-021:只加载当前分栏的底部列表。主题首屏不请求底部活动信息流。
+    // 打开活动分栏由 switchTab 重拉；回到主题不重拉。换账号且正停在活动分栏时由 getUserData 重拉。
     if (that.data.activeTab === '1') {
-      that.setData({ bottomActivityPageNo: 1, hasMoreBottomActivity: false, bottomTopicList: [] }, () => {
+      that._bottomActivityPageNo = 1;
+      that.setData({ hasMoreBottomActivity: false, bottomTopicList: [] }, () => {
         that.loadBottomActivityList(1, true);
       });
     } else {
       // 底部主题 - 初始化第一页
+      that._bottomTopicPageNo = 1;
       that.setData({
-        bottomTopicPageNo: 1,
         hasMoreBottomTopic: false,
         bottomActivityList: []
         // H-03:不先清空 bottomTopicList —— 刷新时旧的几行留在屏上,新一页到了整体替换(isRefresh),页面高度和滚动位置不跳
@@ -844,15 +976,14 @@ Page({
     const count = this.data.recoCards.length;
     if (count < 2 || this.data.reducedMotion || this._recoTransitionLocked) return;
     const dx = Number(e.detail && e.detail.dx) || 0;
-    // L10-024:transition 每帧都触发;进度量化到 1/48(拖动约 6px 一档,肉眼无级),同一档不再重发整组样式。
+    // L10-024:transition 每帧都来。进度收成 1/48，样式字符串没变就不重发整组；变了卡仍跟着动。
     const progress = Math.round(clamp01(Math.abs(dx) / (this._recoSnapPx || 1)) * RECO_PROGRESS_STEPS) / RECO_PROGRESS_STEPS;
     const current = this.data.recoCurrent || 0;
     const direction = dx < 0 ? 1 : -1;
     const target = progress ? (current + direction + count) % count : -1;
-    const frameKey = current + ':' + target + ':' + progress;
-    if (frameKey === this._recoFrameKey) return;
-    this._recoFrameKey = frameKey;
-    this.setData({ recoCardStyles: buildRecoCardStyles(count, current, target, progress) });
+    const recoCardStyles = buildRecoCardStyles(count, current, target, progress);
+    if (recoCardStylesUnchanged(this.data.recoCardStyles, recoCardStyles)) return;
+    this.setData({ recoCardStyles });
   },
 
   _lockRecoTransitionTail() {
@@ -964,6 +1095,11 @@ Page({
   getUserData: function () {
     const that = this;
     const memberId = normalizeMemberId(app.getUserID());
+    // L10-021:人在活动分栏时换了账号，重拉这一栏。人在主题分栏时不请求底部活动信息流。
+    if (homeAccountChanged(that, memberId) && String(that.data.activeTab) === '1' && !that._loadingPageData) {
+      that._bottomActivityPageNo = 1;
+      that.loadBottomActivityList(1, true);
+    }
     const requestEpoch = capturePrivateRequest(that, memberId);
     if (!that._getUserDataRetryCount) that._getUserDataRetryCount = 0;
     if (!memberId) {
@@ -971,6 +1107,7 @@ Page({
       that._getUserDataRetryCount = 0;
       return;
     }
+    that._userFetchEpoch = that._showEpoch || 0;
     app.sendRequest({
       hideLoading: true,
       url: '/api/user/info',
@@ -992,7 +1129,7 @@ Page({
           }
           // F-L5C-04/F-W1-14:首页不再主动弹窗索取手机号,只在确需的业务动作里按需请求或由用户在个人资料页绑定。
           // V-15:头像过 getImgUrl(http 签名链接 / 相对路径真机拒载)
-          const userInfo = Object.assign({}, res.data, { avatar: avatarSrc(res.data.avatar, app.getImgUrl && app.getImgUrl.bind(app)) });
+          const userInfo = visibleHomeUser(res.data, avatarSrc(res.data.avatar, app.getImgUrl && app.getImgUrl.bind(app)));
           that.setData({ userInfo: userInfo, heroGreeting: homeGreeting(userInfo) });
         } else if (res && res.code == "401") {
           // L10-023:request-client 已静默重登过一次;页面层最多再重登一次,仍 401 就停在当前(游客)态。
@@ -1067,6 +1204,8 @@ Page({
           
           // L10-121:日期整形只在 index-format 一处
           indexFormat.shapeListDates(list, true);
+          // L10-122:没传坐标就不展示距离(哪怕回包里带了 distance)。传了坐标也只保留正数实测值,0 不是距离。
+          const measuredDistance = requestIncludedCoordinates(params);
           for (let i = 0; i < list.length; i++) {
             if (list[i]['startDate']) {
               // 初始化倒计时
@@ -1074,9 +1213,7 @@ Page({
               list[i]['remainingTime'] = r.remainingTime;
               list[i]['started'] = r.started;
             }
-            if (list[i]['distance']) {
-              list[i]['distance'] = (list[i]['distance'] / 1000).toFixed(2) + 'km';
-            }
+            list[i]['distance'] = measuredDistance ? distanceTextFromMeters(list[i]['distance']) : '';
           }
           
           if (dataProcessor && typeof dataProcessor === 'function') {
@@ -1086,8 +1223,10 @@ Page({
           list = decorateImgs(list);   // 多图拆分 imgArr → imgList/cover
 
           const dataObj = {};
-          dataObj[listName] = list;
-          dataObj['listErr.' + listName] = false; pageMotion.enter(that, 'pm_' + listName, { once: true }); // 2026-10-23:列表到达时依次浮上来(H-02:只在首屏入场一次,下拉刷新不再藏起来重播)
+          // 编辑精选只喂给 _buildRecoHero，模板不渲染 recommendedTopicList 本身。
+          if (listName === 'recommendedTopicList') that.data.recommendedTopicList = list;
+          else dataObj[listName] = list;
+          dataObj['listErr.' + listName] = false; enterHomeListMotion(that, 'pm_' + listName); // 2026-10-23:列表到达时依次浮上来(H-02:只在首屏入场一次,下拉刷新不再藏起来重播)
           that.setData(dataObj, function () {
             // L10-118:编辑精选卡只依赖 recommendedTopicList;行动 Banner 是 data 里的冻结常量,不再重设。
             if (listName === 'recommendedTopicList') that._buildRecoHero();
@@ -1126,6 +1265,10 @@ loadBottomTopicList: function(pageNo, isRefresh = false) {
   const that = this;
   
   if (that.data.isBottomLoading && !isRefresh) return;
+  // 只认最后一次。更早的刷新回来会整表换掉已经翻出来的后面页，也会把后一次失败清成成功。
+  const requestEpoch = (that._bottomTopicEpoch || 0) + 1;
+  that._bottomTopicEpoch = requestEpoch;
+  const isCurrent = function () { return that._bottomTopicEpoch === requestEpoch; };
   
   that.setData({ isBottomLoading: true });
   
@@ -1136,10 +1279,11 @@ loadBottomTopicList: function(pageNo, isRefresh = false) {
     auth: false,
     data: {
       pageNum: pageNo,
-      pageSize: that.data.pageSize,
+      pageSize: HOME_FEED_PAGE_SIZE,
       sort_type: 1,
     },
     success: function (res) {
+      if (!isCurrent()) return;
       if (!(res && res.code == "200" && res.data && isRecordList(res.data.rows))) {
         // A-14-2:原来只弹一次 toast,信息流底部仍是空的、用户没有任何重试入口。
         // 失败落「失败页」标记,由列表底部的 cy-inline-error 承接并可原地重试。
@@ -1155,20 +1299,19 @@ loadBottomTopicList: function(pageNo, isRefresh = false) {
         indexFormat.shapeListDates(list);
         
         // 计算总页数
-        const totalPages = Math.ceil(total / that.data.pageSize);
+        const totalPages = Math.ceil(total / HOME_FEED_PAGE_SIZE);
+        that._bottomTopicPageNo = pageNo;
         
         if (isRefresh) {
-          pageMotion.enter(that, 'pmFeed', { once: true }); // 刷新时替换数据(2026-10-23:新的一页依次浮上来;H-02 只首屏一次)
+          enterHomeListMotion(that, 'pmFeed'); // 刷新时替换数据(2026-10-23:新的一页依次浮上来;H-02 只首屏一次)
           that.setData({
             bottomTopicList: decorateImgs(list),
-            bottomTopicPageNo: pageNo,
             hasMoreBottomTopic: totalPages > pageNo
           });
         } else {
           // 加载更多只按数组路径回传新增行(P0-4:整表 concat 会把已加载行每次全量跨序列化线重发)
           that.setData(Object.assign(
             {
-              bottomTopicPageNo: pageNo,
               hasMoreBottomTopic: totalPages > pageNo
             },
             appendByIndex('bottomTopicList', that.data.bottomTopicList.length, decorateImgs(list))
@@ -1179,6 +1322,7 @@ loadBottomTopicList: function(pageNo, isRefresh = false) {
       that.setData({ isBottomLoading: false, bottomTopicFailedPage: 0, 'listLoaded.bottomTopicList': true });
     },
     fail: function (res) {
+      if (!isCurrent()) return;
       // A-14-2:网络失败同样落行内重试,不再只弹一次 toast。
       that.setData({ isBottomLoading: false, bottomTopicFailedPage: pageNo });
     }
@@ -1189,6 +1333,9 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
   const that = this;
   
   if (that.data.isBottomLoading && !isRefresh) return;
+  const requestEpoch = (that._bottomActivityEpoch || 0) + 1;
+  that._bottomActivityEpoch = requestEpoch;
+  const isCurrent = function () { return that._bottomActivityEpoch === requestEpoch; };
   
   that.setData({ isBottomLoading: true });
   
@@ -1200,11 +1347,12 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
     data: {
       is_my: 0,
       pageNum: pageNo,
-      pageSize: that.data.pageSize,
+      pageSize: HOME_FEED_PAGE_SIZE,
       sort_type: 1,
       status: 1,
     },
     success: function (res) {
+      if (!isCurrent()) return;
       if (!(res && res.code == "200" && res.data && isRecordList(res.data.rows))) {
         // A-14-2:同主题列表,失败落行内重试。
         that.setData({ isBottomLoading: false, bottomActivityFailedPage: pageNo });
@@ -1219,20 +1367,19 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
         indexFormat.shapeListDates(list);
         
         // 计算总页数
-        const totalPages = Math.ceil(total / that.data.pageSize);
+        const totalPages = Math.ceil(total / HOME_FEED_PAGE_SIZE);
+        that._bottomActivityPageNo = pageNo;
         
         if (isRefresh) {
-          pageMotion.enter(that, 'pmFeed', { once: true }); // 刷新时替换数据(2026-10-23:新的一页依次浮上来;H-02 只首屏一次)
+          enterHomeListMotion(that, 'pmFeed'); // 刷新时替换数据(2026-10-23:新的一页依次浮上来;H-02 只首屏一次)
           that.setData({
             bottomActivityList: decorateImgs(list),
-            bottomActivityPageNo: pageNo,
             hasMoreBottomActivity: totalPages > pageNo
           });
         } else {
           // 加载更多只按数组路径回传新增行(P0-4:整表 concat 会把已加载行每次全量跨序列化线重发)
           that.setData(Object.assign(
             {
-              bottomActivityPageNo: pageNo,
               hasMoreBottomActivity: totalPages > pageNo
             },
             appendByIndex('bottomActivityList', that.data.bottomActivityList.length, decorateImgs(list))
@@ -1242,6 +1389,7 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
       that.setData({ isBottomLoading: false, bottomActivityFailedPage: 0, 'listLoaded.bottomActivityList': true });
     },
     fail: function (res) {
+      if (!isCurrent()) return;
       // A-14-2:网络失败同样落行内重试,不再只弹一次 toast。
       that.setData({ isBottomLoading: false, bottomActivityFailedPage: pageNo });
     }
@@ -1257,7 +1405,7 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
     if (that.data.activeTab === '0') {
       // 主题列表触底
       if (that.data.hasMoreBottomTopic && !that.data.isBottomLoading) {
-        const nextPage = that.data.bottomTopicPageNo + 1;
+        const nextPage = (that._bottomTopicPageNo || 1) + 1;
         that.loadBottomTopicList(nextPage);
       } else {
         // 只在确实没有更多数据时显示提示
@@ -1268,7 +1416,7 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
     } else if (that.data.activeTab === '1') {
       // 活动列表触底
       if (that.data.hasMoreBottomActivity && !that.data.isBottomLoading) {
-        const nextPage = that.data.bottomActivityPageNo + 1;
+        const nextPage = (that._bottomActivityPageNo || 1) + 1;
         that.loadBottomActivityList(nextPage);
       } else {
         // 只在确实没有更多数据时显示提示
@@ -1293,10 +1441,9 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
 
   getHomeCityLocation(opts) {
     if (this._unloaded || this._homeLocationHidden) return;
-    const scope = captureLocationRequest(this);
-    scope.userInitiated = !!(opts && opts.userInitiated);
-    scope.gateCoversLocation = !!(opts && opts.gateCoversLocation);
+    const scope = beginHomeLocationRequest(this, opts);
     if (!(Number(scope.memberId) > 0) || !scope.authorization || scope.authorization === 'dev-token') {
+      endHomeLocationRequest(this, scope);
       const guestCity = this.data.city || homeCity.readLastCity();
       this.setData({ city: guestCity, cityManual: false, cityPicker: true, cityPickerIndex: homeCity.CITY_OPTIONS.indexOf(guestCity) });
       return;
@@ -1305,6 +1452,7 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
     this.setData({ city: this.data.city || homeCity.readLastCity(), cityManual: false, cityPicker: false });
     // Round5 #7:本机记过「暂不定位」→ 自动流程到此为止(沿用上次城市/默认城市),等用户点城市再问
     if (!scope.userInitiated && homeCity.readLocationDeclined()) {
+      endHomeLocationRequest(this, scope);
       if (!this.data.city) applyCityFallback(this);
       return;
     }
@@ -1320,7 +1468,7 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
         if (!res || Number(res.code) !== 200) { showHomeCityLocationError(that, scope, 'consent'); return; }
         const previous = res.data;
         if (previous && previous.docType === 'privacy_policy' && previous.scene === 'home_city_location'
-            && previous.eventType === 'REVOKE') return;
+            && previous.eventType === 'REVOKE') { endHomeLocationRequest(that, scope); return; }
         if (isHomeCityAgreement(res.data)) {
           scope.consentRequestId = res.data.requestId;
           that.executeHomeCityLocation(scope);
@@ -1334,8 +1482,8 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
   },
 
   requestHomeCityConsent(scope) {
-    const that = this;
-    if (!isCurrentLocationRequest(this, scope) || this.data.privacyGateShow || (app.getUsageConsent && !app.getUsageConsent().granted())) return; // P-38:隐私闸未关不叠定位弹窗,同意后 onPrivacyGateSettled 会重新发起
+    if (!isCurrentLocationRequest(this, scope)) return;
+    if (this.data.privacyGateShow || (app.getUsageConsent && !app.getUsageConsent().granted())) { endHomeLocationRequest(this, scope); return; } // P-38:隐私闸未关不叠定位弹窗,同意后 onPrivacyGateSettled 会重新发起
     if (scope.gateCoversLocation) { this.recordHomeCityConsent(scope); return; } // P-38:隐私闸已一并同意定位
     // x-fix6 L2-1:不再用居中弹窗盖住 feed,改成 feed 顶部的非阻塞卡片,文案与隐私规则不变。
     this._locationPromptScope = scope;
@@ -1355,7 +1503,7 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
     if (this.data.locationPrompt) this.setData({ locationPrompt: null });
     if (!scope || !isCurrentLocationRequest(this, scope)) return;
     homeCity.saveLocationDeclined(!confirm);
-    if (!confirm) { if (!this.data.city) applyCityFallback(this); return; }
+    if (!confirm) { endHomeLocationRequest(this, scope); if (!this.data.city) applyCityFallback(this); return; }
     this.recordHomeCityConsent(scope);
   },
 
@@ -1374,12 +1522,15 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
       scope.consentRequestId = row.requestId;
       that.executeHomeCityLocation(scope);
     }).catch(() => {
-      if (isCurrentLocationRequest(that, scope)) cyToast('定位同意记录未保存，请重试');
+      if (!isCurrentLocationRequest(that, scope)) return;
+      endHomeLocationRequest(that, scope);
+      cyToast('定位同意记录未保存，请重试');
     });
   },
 
   executeHomeCityLocation(scope) {
-    if (!isCurrentLocationRequest(this, scope) || !scope.consentRequestId) return;
+    if (!isCurrentLocationRequest(this, scope)) return;
+    if (!scope.consentRequestId) { endHomeLocationRequest(this, scope); return; }
     if (typeof wx.getLocation !== 'function') { showHomeCityLocationError(this, scope, 'device'); return; }
     const that = this;
     cyLoading.show('确定城市中...');
@@ -1418,7 +1569,7 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
         if (!isCurrentLocationRequest(that, scope)) return;
         const data = res && Number(res.code) === 200 && res.data;
         const city = data && data.city;
-        if (typeof city === 'string' && city.trim()) { that._homeCityResolved = true; that.setData({ city: city.trim(), cityManual: false }); homeCity.saveLastCity(city.trim()); return; }
+        if (typeof city === 'string' && city.trim()) { endHomeLocationRequest(that, scope); that._homeCityResolved = true; that.setData({ city: city.trim(), cityManual: false }); homeCity.saveLastCity(city.trim()); return; }
         if (data && data.manualInputRequired) { offerManualCity(that, scope, data.reason); return; }
         showHomeCityLocationError(that, scope, 'empty');
       },
@@ -1431,7 +1582,18 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
   onManualCityChange(e) {
     const idx = Number(e && e.detail && e.detail.value);
     const city = String(homeCity.CITY_OPTIONS[idx] || '').trim();
-    if (city) { this._homeCityResolved = true; this.setData({ city: city, cityManual: false, cityPickerIndex: idx }); homeCity.saveLastCity(city); }
+    if (!city) return;
+    this._homeCityResolved = true;
+    this._locationEpoch = (this._locationEpoch || 0) + 1;
+    this._locationRequestInFlight = false;
+    this._resumeHomeLocation = false;
+    this._locationResumeOpts = null;
+    if (this._locationLoadingEpoch != null) {
+      this._locationLoadingEpoch = null;
+      cyLoading.hide();
+    }
+    this.setData({ city: city, cityManual: false, cityPickerIndex: idx });
+    homeCity.saveLastCity(city);
   },
 
   // V-01:用户主动点城市重新定位，失败时才提示。
@@ -1452,6 +1614,7 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
 function offerManualCity(page, scope, reason) {
   hideLocationLoading(page, scope);
   if (!isCurrentLocationRequest(page, scope)) return;
+  endHomeLocationRequest(page, scope);
   if (!page.data.city) applyCityFallback(page);
   if (scope.userInitiated) cyToast(reason === 'MAP_RATE_LIMITED' ? '定位请求较频繁，请手动选择城市' : '暂时无法自动识别城市，请手动选择');
 }
@@ -1460,6 +1623,7 @@ function offerManualCity(page, scope, reason) {
 function offerLocationSettings(page, scope) {
   hideLocationLoading(page, scope);
   if (!isCurrentLocationRequest(page, scope)) return;
+  endHomeLocationRequest(page, scope);
   if (!scope.userInitiated) { if (!page.data.city) applyCityFallback(page); return; }
   if (page._locationSettingsOffered) { cyToast(homeCity.message('device')); return; }
   page._locationSettingsOffered = true;
