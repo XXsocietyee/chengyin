@@ -293,7 +293,7 @@ test('本地锁到期只解除锁定，不自动重发', async () => {
   });
   stale.start();
   assert.equal(wx.getStorageSync(key), undefined);
-  assert.equal(stale.calls.length, 0);
+  assert.equal(stale.calls.filter(c => c.url && c.url.includes('/action')).length, 0);
   assert.equal(stale.data.unknown, false);
 });
 

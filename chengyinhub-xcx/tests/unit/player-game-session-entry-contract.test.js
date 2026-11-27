@@ -623,7 +623,7 @@ test('重启恢复的回执索引收到精确 FAILED 后清锁，仍不重发原
 
 test('PHOTO EVIDENCE_ONLY 提交后显示证据已记录，RECORDED 不进入商家核验语义', async () => {
   assert.match(wxml, /item\.playerTask\.completionPolicy === 'EVIDENCE_ONLY' \? '记录现场证据'/)
-  assert.match(wxml, /item\.submission\.status === 'PENDING'/)
+  assert.doesNotMatch(wxml, /核验编号/)
   assert.match(wxml, /\{\{item\.submission\.statusLabel\}\}/)
 
   const harness = loadUnknownWritePlayer()

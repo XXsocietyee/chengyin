@@ -288,6 +288,8 @@ const MATRIX = [
   ['utils/marketing-consent-entry.js', "url: '/api/merchant/crm/marketing-consents'", 'required', 'member', 'self-marketing-consent'],
   // 2026-10-20 FOLLOWUP-A-1:主题/玩法举报先读平台举报原因,与动态举报同一端点(默认认证,无个人态)。
   ['pages/topic/utils/content-report.js', "url: '/api/v1/community/capabilities'", 'required', 'member', 'global-authenticated-read'],
+  // 2026-11-27 N1-03:玩法详情恢复举报(同包内调用,避免跨分包 require pages/topic),同端点同权限档(默认认证,无个人态)。
+  ['pages/templatedetail/templatedetail.js', "url: '/api/v1/community/capabilities'", 'required', 'member', 'global-authenticated-read'],
   // 2026-10-20 FOLLOWUP-A-2:作者本人内容的审核时间线,ApiAuditController.timeline 按内容 owner 校验。
   ['subpackageA/pages/myproject/index.js', "url: '/api/audit/timeline'", 'required', 'author', 'self-publisher'],
   // 2026-10-19 Claude 小程序线移植到 master:本线新增 20 处 GET 逐条归类(收藏据点页暂不进 master)。全部不在 SecurityConfig permitAll 清单 ⇒ required;
@@ -570,7 +572,8 @@ test('全部 GET 调用点都有 URL + method + auth/角色/scope 分类，新�
   // 2026-11-22 平台兑换码:通行证页入口与礼品页兑换码模式各读一次开关(已入 MATRIX),150 → 152。
   // 2026-11-24 F09b L09-110:举报列表 / 详情两处原因字典读取收进 report-common/taxonomy.js 一处(同端点同权限档),152 → 151。
   // 2026-11-24 DEC-F12:主题页多人票付款回查本人一单 + 票夹读本人已领同伴席位(均已入 MATRIX),151 → 153。
-  assert.equal(directCount, 153, '直接 GET 数量变化时必须逐条复核权限并更新矩阵');
+  // 2026-11-27 N1-03:玩法详情页同包内直接读举报原因字典 GET /api/v1/community/capabilities(同端点同权限档,已入 MATRIX),153 → 154。
+  assert.equal(directCount, 154, '直接 GET 数量变化时必须逐条复核权限并更新矩阵');
   // 2026-10-09 U04 只读主题请求增加6处，22 → 28。
   // 2026-10-19 Claude 小程序线移植到 master(用户批准冻结数值更新):漫游 BL-41 可参与官方活动 req 包装 GET +1(已入 MATRIX),28 → 29。
   // 2026-10-22 L21 BL-186:pages/play 本章结算 GET /api/play/journey/stage-end(与 /ending 同档),29 → 30。

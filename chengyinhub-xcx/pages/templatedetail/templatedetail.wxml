@@ -266,7 +266,8 @@
       </view>
     </view>
 
-    <view wx:if="{{!(isMyScope && info.canEdit === true)}}" class="ugc-report ugc-report--block" bindtap="reportTemplate" aria-role="button" aria-label="举报">举报</view>
+    <view wx:if="{{!isMyScope}}" class="ugc-report ugc-report--block" bindtap="reportTemplate" aria-role="button" aria-label="举报" hover-class="cy-pressed" hover-stay-time="80">举报</view>
+    <view wx:elif="{{info.canEdit !== true}}" class="ugc-report ugc-report--block" bindtap="reportPersonalTemplate" aria-role="button" aria-label="举报" hover-class="cy-pressed" hover-stay-time="80">举报</view>
 
     <view class="xb-scroll-pad"></view>
   </scroll-view>

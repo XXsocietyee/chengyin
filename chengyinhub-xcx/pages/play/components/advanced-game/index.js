@@ -72,10 +72,10 @@ Component({
          打开(show 由假变真)或换了节点才重开;关掉清掉记号,下次打开照旧重开。 */
       const key = show && nodeId ? String(nodeId) : '';
       if (key && this._startedFor !== key) { this._startedFor = key; this.start(); }
-      if (!show) { this._startedFor = ''; this._requestEpoch = (this._requestEpoch || 0) + 1; this.clearLockTimer(); this.stopTimer(); this.stopDrawAudio(); this.stopBackgroundMusic(); }
+      if (!show) { this._startedFor = ''; this._requestEpoch = (this._requestEpoch || 0) + 1; if (this.clearLockTimer) this.clearLockTimer(); this.stopTimer(); this.stopDrawAudio(); this.stopBackgroundMusic(); }
     }
   },
-  lifetimes: { detached() { this._requestEpoch = (this._requestEpoch || 0) + 1; this.clearLockTimer(); this.stopTimer(); this.destroyDrawAudio(); this.stopBackgroundMusic(); } },
+  lifetimes: { detached() { this._requestEpoch = (this._requestEpoch || 0) + 1; if (this.clearLockTimer) this.clearLockTimer(); this.stopTimer(); this.destroyDrawAudio(); this.stopBackgroundMusic(); } },
   pageLifetimes: { hide() { this.stopDrawAudio(); } },
   methods: {
     sessionRequestContext() {
@@ -414,6 +414,7 @@ Component({
         if ((this._requestEpoch || 0) !== epoch) return;
         this.expireLocalLock();
       }, left);
+      if (this._lockTimer && typeof this._lockTimer.unref === 'function') this._lockTimer.unref();
     },
     /** 到期或确认没写入:解除本地锁。不自动重发。 */
     expireLocalLock() {
@@ -434,7 +435,7 @@ Component({
       if (Date.now() - started >= LOCAL_LOCK_MS) { this.expireLocalLock(); return; }
       this.setData({
         readingBack: false, acting: false, unknown: true, originalRetryable: true,
-        unknownText: '原请求没有送达，可重新提交原请求',
+        unknownText: '原请求未核对送达，可再核对或重新提交原请求',
       });
       this.armLockExpiry(started);
     },
@@ -470,7 +471,12 @@ Component({
           return true;
         }
         const status = Number(res.code);
-        if (status >= 400 && status < 500 && status !== 408 && !isGateway5xx(res)) {
+        if (status === 404 || isGateway5xx(res)) {
+          this._replayCommand = command;
+          this.markOriginalRetryable();
+          return false;
+        }
+        if (status >= 400 && status < 500 && status !== 408) {
           try { wx.removeStorageSync(this.pendingKey()); } catch (_) {}
           this._unknownCommand = null;
           this._replayCommand = null;
@@ -480,7 +486,6 @@ Component({
           return false;
         }
         this._replayCommand = command;
-        if (Number(res.code) === 404 || isGateway5xx(res)) { this.markOriginalRetryable(); return false; }
         this.enterUnknown(command.version);
         return false;
       }).catch(() => {
@@ -528,7 +533,7 @@ Component({
       }).catch((err) => {
         if (!this.currentRequestContext(context)) return false;
         if (capturedPhoto || (err && err.message === 'Original receipt unconfirmed')) {
-          this.setData({ readingBack: false, unknown: true,
+          this.setData({ readingBack: false, unknown: true, originalRetryable: false,
             unknownText: '原请求仍待确认，未查到不代表未提交；请勿重复提交，核对原结果' });
           return false;
         }

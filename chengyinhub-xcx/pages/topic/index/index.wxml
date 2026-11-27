@@ -304,7 +304,7 @@
                     </view>
                     <view class="col2">
                       <cy-icon wx:for="{{ item.rating }}" wx:key="*this" name="star-filled" size="24" />
-                      <text class="ugc-report" catchtap="reportComment" data-id="{{item.id}}" aria-role="button">举报</text>
+                      <text class="ugc-report" catchtap="reportComment" data-id="{{item.id}}" aria-role="button" aria-label="举报评价" hover-class="cy-pressed" hover-stay-time="80">举报</text>
                     </view>
                   </view>
                   <view class="item-desc">
@@ -315,7 +315,7 @@
             </view>
           </block>
         </view>
-        <view wx:if="{{canReport}}" class="ugc-report ugc-report--block" bindtap="reportTopic" aria-role="button" aria-label="举报">举报</view>
+        <view wx:if="{{canReport}}" class="ugc-report ugc-report--block" bindtap="reportTopic" aria-role="button" aria-label="举报" hover-class="cy-pressed" hover-stay-time="80">举报</view>
         <!-- 业主 2026-10-22:详情页没有底栏(v13);价格按钮滚出顶栏后停到右下角。
              自玩主题另有拼场场次时,留一行进场次选择,不让这条路断掉。 -->
         <view class="topic-audio" wx:if="{{is_join == 0 && info.selfPlay == 1 && info.activityList.length}}" bindtap="bmClick" aria-role="button" aria-label="查看场次" hover-class="cy-pressed" hover-stay-time="80"><cy-icon name="calendar" size="36" /><text>查看场次</text><cy-icon name="chevron-right" size="28" /></view>

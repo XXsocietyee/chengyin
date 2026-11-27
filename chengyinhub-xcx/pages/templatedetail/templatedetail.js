@@ -313,11 +313,59 @@ Page({
     });
   },
 
-  reportTemplate() {
-    if (this.data.loading || this.data.loadError || !this.data.id) return;
+  _runTemplateReport(submit) {
+    if (this.data.loading || this.data.loadError || !this.data.id || this._contentReporting) return;
     if (this.data.isMyScope && this.data.info && this.data.info.canEdit === true) return;
-    const contentReport = require('../topic/utils/content-report.js');
-    contentReport.reportTemplate(this, app, this.data.id, this.data.scope === 'my');
+    const id = this.data.id;
+    const modal = require('../../utils/modal.js');
+    const toast = require('../../utils/toast.js');
+    const reportSheet = require('../../utils/community-report-sheet.js');
+    if (app.ensureLoginFor && !app.ensureLoginFor('report', () => this._runTemplateReport(submit), { owner: this, target: () => [id] })) return;
+    const owner = String(app.getUserID() || '');
+    const current = () => !this._unloaded && !this._disposed && owner === String(app.getUserID() || '');
+    const done = () => { this._contentReporting = false; };
+    this._contentReporting = true;
+    modal.show({
+      title: '举报内容',
+      content: '确认举报这条内容？举报后将提交平台审核。',
+      confirmText: '举报',
+      success: (res) => {
+        if (!res.confirm || !current()) { done(); return; }
+        app.sendRequest({
+          hideLoading: true, silentError: true, url: '/api/v1/community/capabilities', method: 'GET', data: {},
+          success: (resp) => {
+            if (!current()) { done(); return; }
+            const reasons = resp && Number(resp.code) === 200 && resp.data && resp.data.reporting && Array.isArray(resp.data.reporting.reasons)
+              ? resp.data.reporting.reasons.map((r) => r && typeof r.label === 'string' ? r.label.trim() : '').filter(Boolean) : [];
+            if (!reasons.length) { done(); toast('举报原因暂不可用'); return; }
+            reportSheet.open(this, reasons, { aborted: false }).then((index) => {
+              if (!current()) { done(); return; }
+              submit({ id: id, reason: reasons[index] }, {
+                done: done, current: current,
+                success: (r) => { done(); if (current()) toast((r && r.msg) || (r && r.code == '200' ? '已提交举报' : '举报失败')); },
+                fail: () => { done(); if (current()) toast('网络异常，请重试'); }
+              });
+            }, (error) => { done(); if (current() && error && Number(error.code) !== 499) toast(error.msg || '举报失败'); });
+          },
+          fail: () => { done(); if (current()) toast('网络异常，请重试'); }
+        });
+      },
+      fail: done
+    });
+  },
+  reportTemplate() {
+    const toast = require('../../utils/toast.js');
+    this._runTemplateReport((data, cb) => app.sendRequest({
+      hideLoading: true, silentError: true, url: '/api/template/report', method: 'POST', data: data,
+      success: cb.success, fail: () => { cb.done(); if (cb.current()) toast('网络异常，请重试'); }
+    }));
+  },
+  reportPersonalTemplate() {
+    const toast = require('../../utils/toast.js');
+    this._runTemplateReport((data, cb) => app.sendRequest({
+      hideLoading: true, silentError: true, url: '/api/template/personal-report', method: 'POST', data: data,
+      success: cb.success, fail: () => { cb.done(); if (cb.current()) toast('网络异常，请重试'); }
+    }));
   },
   onReportReasonSelect(e) { require('../../utils/community-report-sheet.js').select(this, e); },
   onReportReasonCancel() { require('../../utils/community-report-sheet.js').cancel(this); },

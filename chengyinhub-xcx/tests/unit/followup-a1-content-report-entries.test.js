@@ -120,8 +120,11 @@ test('2026-11-26 玩法详情恢复举报,走模板举报接口和原因弹层',
   const wxml = read('pages/templatedetail/templatedetail.wxml').replace(/<!--[\s\S]*?-->/g, '');
   const js = read('pages/templatedetail/templatedetail.js');
   assert.match(wxml, /bindtap="reportTemplate"/);
+  assert.match(wxml, /bindtap="reportPersonalTemplate"/);
   assert.match(wxml, /reportReasonShow/);
-  assert.match(js, /contentReport\.reportTemplate\(this, app, this\.data\.id, this\.data\.scope === 'my'\)/);
+  assert.match(js, /\/api\/template\/report/);
+  assert.match(js, /\/api\/template\/personal-report/);
+  assert.match(js, /community-report-sheet\.js/);
   assert.equal(JSON.parse(read('pages/templatedetail/templatedetail.json')).usingComponents['cy-option-sheet'], '/components/cy/option-sheet/index');
 });
 
