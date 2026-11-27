@@ -231,14 +231,15 @@ function unifiedCompatible(keyword, categoryId, filters) {
     && !(numericOrNull(f.maxPrice) != null && numericOrNull(f.maxPrice) < 1000);
 }
 
-function unifiedPage(data, allowedTypes) {
+// playerView 只改模板卡的 typeLabel(主题/玩法);不传则保留「主题模板 / 玩法模板」。
+function unifiedPage(data, allowedTypes, playerView) {
   if (!data || !Array.isArray(data.rows) || !(typeof data.total === 'number' || typeof data.total === 'string' && /^[0-9]+$/.test(data.total)) || !Number.isSafeInteger(Number(data.total)) || Number(data.total) < 0) return null;
   const items = [];
   for (const row of data.rows) {
     if (!row || !allowedTypes.includes(row.type)
       || !(typeof row.id === 'string' && /^[1-9][0-9]*$/.test(row.id)
         || typeof row.id === 'number' && Number.isSafeInteger(row.id) && row.id > 0)) return null;
-    items.push(decorateItem(row.type, row));
+    items.push(decorateItem(row.type, row, playerView));
   }
   return { items, total: Number(data.total), count: data.rows.length };
 }

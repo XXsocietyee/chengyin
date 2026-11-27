@@ -333,7 +333,7 @@ Page({
         if (switched()) { this.runSearch(); return; }
         if (!current() || settled) return;
         if (!res || Number(res.code) !== 200) { failed(res); return; }
-        const result = discoverSearch.unifiedPage(res.data, state.types);
+        const result = discoverSearch.unifiedPage(res.data, state.types, !this.data.merchantView);
         if (!result) { failed({ code: 500 }); return; }
         settled = true; state.loading = false; state.page = page;
         result.items.forEach(item => { item.cover = app.getImgUrl(item.cover); });
