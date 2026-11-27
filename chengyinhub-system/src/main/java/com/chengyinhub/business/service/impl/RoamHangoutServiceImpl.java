@@ -40,9 +40,10 @@ public class RoamHangoutServiceImpl implements IRoamHangoutService {
 
     @Override
     public Map<String, Object> nearby(Long viewerId, double lat, double lng, int radiusM) {
+        if (radiusM > MAX_RADIUS_M) throw new ServiceException("查询半径不能超过50公里", 400);
         boolean guest = viewerId == null || viewerId <= 0;
         viewerId = guest ? 0L : viewerId;
-        int r = radiusM <= 0 ? DEFAULT_RADIUS_M : Math.min(radiusM, MAX_RADIUS_M);
+        int r = radiusM <= 0 ? DEFAULT_RADIUS_M : radiusM;
         double[] box = bbox(lat, lng, r);
         List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
         // 2026-09-15 裁决:搭子局(A)下架,地图不再返回 kind=hangout 图层(也不再按局数探半径)。

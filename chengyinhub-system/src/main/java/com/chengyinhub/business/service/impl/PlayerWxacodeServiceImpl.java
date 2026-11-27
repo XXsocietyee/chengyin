@@ -35,7 +35,7 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 微信 getwxacodeunlimit 玩家个人码：固定落地页、签名 scene、Redis 单飞与永久复用。
+ * 微信 getwxacodeunlimit 玩家个人码：固定落地页、签名 scene、Redis 单飞与带 TTL 的对象 key 复用。
  * E-4:缓存里存 OSS 对象 key,每次读取现签地址;永久缓存一条预签名 URL 会在 AccessKey 轮换或桶迁移后变成空白码图。
  */
 @Service
@@ -48,6 +48,8 @@ public class PlayerWxacodeServiceImpl implements IPlayerWxacodeService {
     private static final String LOCK_SUFFIX = ":lock";
     private static final String TOKEN_REFRESH_LOCK = "wx:mini:access-token:refresh-lock";
     private static final int LOCK_SECONDS = 300;
+    /** 对象 key 缓存。过期后按同一 scene 重生成,避免 Redis 永久堆积。 */
+    static final int CODE_CACHE_TTL_DAYS = 7;
     private static final String RATE_KEY = "wx:player-code:rate";
     private static final long RATE_LIMIT_PER_MINUTE = 4800L;
     private static final DefaultRedisScript<Long> RATE_LIMIT_SCRIPT = new DefaultRedisScript<>(
@@ -148,7 +150,7 @@ public class PlayerWxacodeServiceImpl implements IPlayerWxacodeService {
             if (StringUtils.isEmpty(objectKey)) {
                 throw new IllegalStateException("个人码存储失败，请稍后重试");
             }
-            redisCache.setCacheObject(cacheKey, objectKey);
+            redisCache.setCacheObject(cacheKey, objectKey, CODE_CACHE_TTL_DAYS, TimeUnit.DAYS);
             return storage.url(objectKey);
         } finally {
             releaseOwnedLock(lockKey, lockOwner, lockLabel);

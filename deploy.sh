@@ -50,9 +50,11 @@ is_healthy() {
   systemctl is-active --quiet "$SERVICE" && python3 "$HEALTH_CHECKER" "$DEPLOY_HEALTH_TOKEN_FILE"
 }
 
+# 冷启动经常超过 30 秒。等太短会把已经在起来的好部署判失败并回滚。
+HEALTH_WAIT_SECONDS=120
 wait_healthy() {
   i=0
-  while [ "$i" -lt 30 ]; do
+  while [ "$i" -lt "$HEALTH_WAIT_SECONDS" ]; do
     is_healthy && return 0
     i=$((i + 1))
     sleep 1
