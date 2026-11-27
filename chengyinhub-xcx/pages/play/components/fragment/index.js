@@ -4,13 +4,18 @@ const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js')
 Component({
   behaviors: [reducedMotionBehavior],
   properties: {
-    show: { type: Boolean, value: false, observer(v) { if (v) { this.setData({ flip: false, fly: false });
+    show: { type: Boolean, value: false, observer(v) {
+      clearTimeout(this._flipT);
+      if (!v) return;
+      this.setData({ flip: false, fly: false });
       if (this.data.reducedMotion) this.setData({ flip: true });
-      else setTimeout(() => this.setData({ flip: true }), 30); } } },
+      else this._flipT = setTimeout(() => { if (!this._gone) this.setData({ flip: true }); }, 30);
+    } },
     text: { type: String, value: '' },
     step: { type: String, value: '' }
   },
   data: { flip: false, fly: false },
+  lifetimes: { detached() { this._gone = true; clearTimeout(this._flipT); clearTimeout(this._flyT); } },
   methods: {
     // M10 碎片飞入手记:轻触先播放飞向左下手记 fab 的动画(520ms),落定再通知页面收尾
     onTap() {
@@ -20,7 +25,8 @@ Component({
         return;
       }
       this.setData({ fly: true });
-      setTimeout(() => { this.triggerEvent('done'); this.setData({ fly: false }); }, FLY_MS);
+      clearTimeout(this._flyT);
+      this._flyT = setTimeout(() => { if (this._gone) return; this.triggerEvent('done'); this.setData({ fly: false }); }, FLY_MS);
     }
   }
 });

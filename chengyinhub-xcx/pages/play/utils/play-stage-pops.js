@@ -58,11 +58,28 @@ function stationLabel(t) {
 }
 /** 地点卡上的数字:距离(有定位或上一站才算)、步行分钟(按 80 m/min,只在有距离时)、开放时段(节点营业时间原样) */
 const WALK_MAX_MIN = 60; // 超过一小时步行不报分钟,只留距离(km,一位小数)
+// L02-009: geo.distanceText 实际是「1.2 公里 / 800 米」(空格可有可无,也认旧的 1.2km)。认不出就留上次的读数,不改成空白,也不把原文再摆成另一种写法。
+function sheetMeters(text) {
+  const m = /^([\d.]+)\s*(km|m|公里|米)$/.exec(String(text || '').trim());
+  if (!m) return null;
+  const meters = (m[2] === 'km' || m[2] === '公里') ? Number(m[1]) * 1000 : Number(m[1]);
+  return Number.isFinite(meters) ? meters : null;
+}
+function applySheetDistance(out, meters) {
+  out.distText = distanceText(meters);
+  if (meters > 0) {
+    const min = Math.max(1, Math.ceil(meters / WALK_M_PER_MIN));
+    if (min <= WALK_MAX_MIN) out.walkText = String(min);
+  }
+}
 function sheetFacts(node, distText) {
-  const out = { distText: distText || '', walkText: '', hoursText: '' };
-  // L02-009
-  const m = /^([\d.]+)\s*(km|m|公里|米)$/.exec(String(distText || '').trim());
-  if (m) { const meters = (m[2] === 'km' || m[2] === '公里') ? Number(m[1]) * 1000 : Number(m[1]); out.distText = distanceText(meters); if (meters > 0) { const min = Math.max(1, Math.ceil(meters / WALK_M_PER_MIN)); if (min <= WALK_MAX_MIN) out.walkText = String(min); } }
+  const out = { distText: '', walkText: '', hoursText: '' };
+  const meters = sheetMeters(distText);
+  if (meters != null) applySheetDistance(out, meters);
+  else {
+    const prev = sheetMeters(node && node.distText);
+    if (prev != null) applySheetDistance(out, prev);
+  }
   const biz = String(node && node.businessTime || '');
   if (biz && !/^\s*00:00\s*[-–~至]\s*23:59\s*$/.test(biz)) out.hoursText = biz.replace(/:00/g, '').replace(/\s*[-~至]\s*/, '–');
   // x-fix2 P-8:大字格只放时段;「公共区域观察;以现场…为准」这类说明已在地址行(metaLine)里,不挤进数字位
@@ -215,7 +232,19 @@ function methods() {
         if (wait && wait.key === key) return true;
         drop();
         const next = this._finishTrailWait = { key, expired: false, timer: 0 };
-        next.timer = setTimeout(() => { if (this._finishTrailWait === next && keyOf() === key) { next.expired = true; this.openFinish(); } }, 6000);
+        // 藏到后台或已经离页时不能打开通关页:那一拍会停表并写上完成屏。回到前台再放行。
+        const fire = () => {
+          if (this._playDisposed || this._unloaded || this._detached) return;
+          if (this._finishTrailWait !== next || keyOf() !== key) return;
+          if (this._themeHidden) {
+            next.timer = setTimeout(fire, 400);
+            this._fxTimers = (this._fxTimers || []).concat(next.timer);
+            return;
+          }
+          next.expired = true;
+          this.openFinish();
+        };
+        next.timer = setTimeout(fire, 6000);
         this._fxTimers = (this._fxTimers || []).concat(next.timer);
         return true;
       }

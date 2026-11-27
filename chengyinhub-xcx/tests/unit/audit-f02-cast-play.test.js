@@ -50,12 +50,33 @@ test('L02-008: duration and hide-voice updates touch single paragraphs by path',
 test('L02-009: station sheet walking minutes work with the real distanceText output', () => {
   const { distanceText } = require('../../utils/geo.js');
   const pops = require('../../pages/play/utils/play-stage-pops.js');
-  const sheetFacts = pops.sheetFacts || (pops.__test && pops.__test.sheetFacts);
+  const sheetFacts = pops.sheetFacts;
   assert.equal(typeof sheetFacts, 'function');
   assert.equal(sheetFacts({}, distanceText(1700)).walkText, '22');
   assert.equal(sheetFacts({}, distanceText(350)).walkText, '5');
   assert.equal(sheetFacts({}, distanceText(1700)).distText, '1.7 公里');
+  assert.equal(sheetFacts({}, distanceText(800)).distText, '800 米');
+  assert.equal(sheetFacts({}, '1.2公里').distText, '1.2 公里');
+  assert.equal(sheetFacts({}, '1.2公里').walkText, '15');
+  assert.equal(sheetFacts({}, '800米').distText, '800 米');
+  assert.equal(sheetFacts({}, '800米').walkText, '10');
   assert.equal(sheetFacts({}, '1.2km').walkText, '15');
+  const kept = sheetFacts({ distText: '1.7 公里', walkText: '22' }, '不远');
+  assert.equal(kept.distText, '1.7 公里');
+  assert.equal(kept.walkText, '22');
+  assert.equal(sheetFacts({ distText: '800 米', walkText: '10' }, '').distText, '800 米');
+  assert.equal(sheetFacts({ distText: '800 米', walkText: '10' }, '').walkText, '10');
+  assert.equal(sheetFacts({}, '不远').distText, '');
+  assert.equal(sheetFacts({}, '不远').walkText, '');
+  const api = pops.methods();
+  const writes = [];
+  const page = Object.assign({}, api, {
+    data: { sheet: { show: true, node: Object.assign({ lat: 31.2, lng: 121.4 }, sheetFacts({}, distanceText(1700))) } },
+    _distText() { return '附近'; },
+    setData(p) { writes.push(p); },
+  });
+  page._refreshSheetFacts();
+  assert.deepEqual(writes, []);
 });
 
 test('L02-077: daily-sign date and casebook times use China time on any phone time zone', () => {

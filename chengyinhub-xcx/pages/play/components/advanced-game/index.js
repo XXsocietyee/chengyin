@@ -76,7 +76,7 @@ Component({
       if (!show) { this._startedFor = ''; this._requestEpoch = (this._requestEpoch || 0) + 1; if (this.clearLockTimer) this.clearLockTimer(); this.stopTimer(); this.stopDrawAudio(); this.stopBackgroundMusic(); }
     }
   },
-  lifetimes: { detached() { this._requestEpoch = (this._requestEpoch || 0) + 1; if (this.clearLockTimer) this.clearLockTimer(); this.stopTimer(); this.destroyDrawAudio(); this.stopBackgroundMusic(); } },
+  lifetimes: { detached() { this._detached = true; this._requestEpoch = (this._requestEpoch || 0) + 1; if (this.clearLockTimer) this.clearLockTimer(); this.stopTimer(); this.destroyDrawAudio(); this.stopBackgroundMusic(); } },
   pageLifetimes: { hide() { this.stopDrawAudio(); } },
   methods: {
     sessionRequestContext() {
@@ -607,13 +607,15 @@ Component({
     initDrawAudio() {
       if (this._drawAudio) return;
       const audio = audioSession.register(wx.createInnerAudioContext(), { kind: audioSession.VOICE });
+      audio.obeyMuteSwitch = false;
       audio.onPlay(() => { audioSession.duck('drawAudio', true); });
-      audio.onPause(() => { audioSession.duck('drawAudio', false); this.setData({ playingDrawId: '' }); });
+      audio.onPause(() => { audioSession.duck('drawAudio', false); if (!this._detached) this.setData({ playingDrawId: '' }); });
       // 切换音频时 stop 可能晚于新 play 回调 这里不能把新播放态清掉
       audio.onStop(() => {});
-      audio.onEnded(() => { audioSession.duck('drawAudio', false); this.setData({ playingDrawId: '' }); });
+      audio.onEnded(() => { audioSession.duck('drawAudio', false); if (!this._detached) this.setData({ playingDrawId: '' }); });
       audio.onError(() => {
         audioSession.duck('drawAudio', false);
+        if (this._detached) return;
         this.setData({ playingDrawId: '' });
         toast('音频加载失败');
       });
@@ -645,9 +647,9 @@ Component({
     },
     stopDrawAudio() {
       if (!this._drawAudio) return;
-      this._drawAudio.stop();
+      try { this._drawAudio.stop(); } catch (e) { /* 已停 */ }
       audioSession.duck('drawAudio', false);
-      this.setData({ playingDrawId: '' });
+      if (!this._detached) this.setData({ playingDrawId: '' });
     },
     /* 背景音乐(模板互动工具,2026-10-22):玩这一关时播放,离开 / 收起就停。
        本组件不自己出声,交给页面那一路站点配乐(bind:bgm):同一时刻只有一首配乐,跟随「背景音乐」开关,
@@ -663,15 +665,16 @@ Component({
     stopBackgroundMusic() {
       if (!this._bgmSrc) return;
       this._bgmSrc = '';
-      this.triggerEvent('bgm', { music: null });
+      if (!this._detached) this.triggerEvent('bgm', { music: null });
     },
     destroyDrawAudio() {
       if (!this._drawAudio) return;
-      audioSession.duck('drawAudio', false);
-      audioSession.unregister(this._drawAudio);
-      this._drawAudio.destroy();
+      const audio = this._drawAudio;
       this._drawAudio = null;
-      this.setData({ playingDrawId: '' });
+      audioSession.duck('drawAudio', false);
+      audioSession.unregister(audio);
+      try { audio.stop(); audio.destroy(); } catch (e) { /* 已销毁 */ }
+      if (!this._detached) this.setData({ playingDrawId: '' });
     },
     choose(e) { this.action('CHOOSE', { optionId: e.currentTarget.dataset.id }); },
     completeUnit() {
@@ -719,6 +722,7 @@ Component({
       // L02-001
       const expiryKey = String(this.data.state.sessionId || '') + '@' + deadline;
       const tick = () => {
+        if (this._detached) { this.stopTimer(); return; }
         const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
         this.setData({ remainingSeconds: left });
         if (left) return;

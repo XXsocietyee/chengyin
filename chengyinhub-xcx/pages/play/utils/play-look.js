@@ -42,6 +42,7 @@ const PUNCT = /^[,.!?;:，。！？；：、」』）)…—]$/;
 /** L01-037:逐字特效的上限 —— 每章前 CHAR_FX_HEAD 段照旧逐字;之后超过 CHAR_FX_MAX_LEN 字的段改整段浮现。 */
 const CHAR_FX_HEAD = 3, CHAR_FX_MAX_LEN = 120;
 const GLYPH = 'ｱｲｳｴｵｶｷｸｹｺ01#%&*<>/=+';
+function pageGone(page) { return !page || page._playDisposed || page._unloaded || page._detached; }
 
 function methods() {
   // 写成 const 对象再返回:台账 / 处理器门禁(xcx-scan)只扫模块里 `const X = {` 的键
@@ -92,7 +93,7 @@ function methods() {
       this._litAt = flashAt;
       this.setData({ lookLit: true });
       clearTimeout(this._litTimer);
-      this._litTimer = setTimeout(() => this.setData({ lookLit: false }), 420);
+      this._litTimer = setTimeout(() => { if (!pageGone(this)) this.setData({ lookLit: false }); }, 420);
     },
     /** 故事正文第 i 段的文字动效(选过风格的主题才有):fx = 动效名;逐字类再给 chars(标点粘在前一个字上,不会单独掉到行首)。 */
     _textFx(item, i) {
@@ -142,6 +143,7 @@ function methods() {
       this._decodeReal[i] = { text: para.text, real };
       clearTimeout((this._decodeTimers || {})[i]); this._decodeTimers = this._decodeTimers || {};
       const tick = (k) => {
+        if (pageGone(this)) { delete this._decodeTimers[i]; return; }
         this.setData({ [key]: para.chars.map((c, j) => Object.assign({}, c, { ch: j < (real.length * k) / steps ? real[j] : GLYPH[(Math.random() * GLYPH.length) | 0], raw: j >= (real.length * k) / steps })) });
         if (k < steps) this._decodeTimers[i] = setTimeout(() => tick(k + 1), readingMotion.READ_DECODE_TICK_MS);
         else delete this._decodeTimers[i];

@@ -1,5 +1,14 @@
 // l-play:没有配图的物品按名字挑一张插图(cy-illus;认不出就用「藏品」),只是看法,不改物品数据
 const STEP_SYNC_MS = 180000;  // L02-013
+function thoughtRowSignature(route) {
+  try { return JSON.stringify((route && route.thoughts) || []); }
+  catch (e) { return ''; }
+}
+function paintsThoughtRows(patch) {
+  if (!patch || typeof patch !== 'object') return false;
+  return Object.keys(patch).some((key) => key === 'chapterParas' || key === 'chapStory.lines'
+    || key.indexOf('chapterParas[') === 0 || key.indexOf('chapStory.lines[') === 0 || key.indexOf('chapStory.lines.') === 0);
+}
 function illusFor(name) {
   const n = String(name || '');
   if (/钥|匙|锁/.test(n)) return 'key';
@@ -19,6 +28,21 @@ const trade = require('./theme-trade.js');
 const plans = require('./theme-plans.js');
 const coop = require('./coop-help.js');
 const titles = { WAIT: '休息恢复', CHALLENGE: '归零挑战', STEPS: '步行恢复', BLOCK_HP_COST: '暂停消耗任务', BLOCK_PAID: '暂停付费任务', THEME_FAIL: '本局结束' };
+// L02-014:背包模板(含游玩页上读 themeBag 的那几处)实际绑定的键。缺了的也要留在 setData 里,否则视图层会留下上一包的旧值。
+const BAG_FIELDS = ['actionRows', 'actions', 'allowDiscard', 'awaitingChallenge', 'capacity', 'challenge', 'challengeNodes', 'challengeProgressLabel', 'challengeProgressText', 'challengeRestoreText', 'challengeRetryText', 'claimOnly', 'clues', 'cooperation', 'hp', 'hpEnabled', 'hpMax', 'inventoryEnabled', 'items', 'luck', 'names', 'pendingRows', 'planBallotText', 'planCanAccept', 'planCanRejectVote', 'planGlobalActions', 'planMaterials', 'planPhaseText', 'planPolicyText', 'planReadback', 'planResult', 'planRows', 'replayAllowed', 'result', 'scope', 'sessionId', 'tradeLockedText', 'tradeRows', 'tradeTargets', 'used', 'valueRows'];
+function viewBag(source) {
+  const bag = {};
+  for (const key of BAG_FIELDS) bag[key] = source[key] === undefined ? null : source[key];
+  return bag;
+}
+function retainRaw(bag, view) {
+  if (!bag || !view || typeof view !== 'object') return bag;
+  for (const key of Object.keys(view)) {
+    if (BAG_FIELDS.indexOf(key) >= 0) continue;
+    Object.defineProperty(bag, key, { value: view[key], enumerable: false, writable: true, configurable: true });
+  }
+  return bag;
+}
 
 function presentZeroHp(view) {
   const zero = view.zeroHp;
@@ -65,13 +89,16 @@ function present(view, nodes) {
   (view.attributes || []).filter(row => row.visible !== false && !String(row.key).startsWith('sys.')).forEach(row => valueRows.push({ key: row.key, name: row.label, value: row.value, max: row.max }));
   const challenge = view.challenge || {};
   const challengeIds = [challenge.nodeId].concat(challenge.alternativeNodeIds || []).filter(id => Number.isSafeInteger(Number(id)) && Number(id) > 0);
-  return Object.assign({}, view, trade.present(view, nodes), plans.present(view, nodes), { items, clues, valueRows, claimOnly, names, actionRows: gameplay.actionRows(view, nodes),
+  const derived = Object.assign({}, trade.present(view, nodes), plans.present(view, nodes), { items, clues, valueRows, claimOnly, names, actionRows: gameplay.actionRows(view, nodes),
     challengeNodes: challengeIds.map((id, index) => ({ id: Number(id), name: ((nodes || []).find(node => Number(node.nodeId) === Number(id)) || {}).name || (index ? '备选挑战' : '主挑战') })),
     challengeRestoreText: Number.isInteger(challenge.restoreTo) && challenge.restoreTo > 0 ? '恢复到 ' + challenge.restoreTo : '恢复',
     challengeProgressLabel: view.scope === 'TEAM' ? '全队进度' : '挑战进度',
     challengeProgressText: typeof challenge.progress === 'number' && typeof challenge.goal === 'number' ? challenge.progress + '/' + challenge.goal : '',
     challengeRetryText: challenge.disabledReason === 'CHALLENGE_LIMIT' ? '挑战次数已达上限（' + challenge.used + '/' + challenge.limit + '）' : challenge.disabledReason || '失败后可免费重试',
     pendingRows: Object.keys(view.pending || {}).map(id => ({ ...view.pending[id], name: view.pending[id].name || rewards.itemName(view.pending[id].itemId, view), id, canClaim: !claimOnly || rewards.canClaim(view, id) })) });
+  const shown = {};
+  for (const key of BAG_FIELDS) shown[key] = Object.prototype.hasOwnProperty.call(derived, key) ? derived[key] : view[key];
+  return retainRaw(viewBag(shown), view);
 }
 function methods(req) {
   const client = themeCommand.clientFor(req);   // L02-091:共用一份适配器,一个 methods() 只建一个客户端
@@ -164,7 +191,17 @@ function methods(req) {
       const acceptKeys = sameRound && this._themePlanAcceptanceDirty ? this.data.themePlanAcceptKeys || [] : view.world && view.world.ownAcceptance && view.world.ownAcceptance.planKeys || [];
       if (!sameRound) this._themePlanAcceptanceDirty = false;
       next.planRows = next.planRows.map(row => ({ ...row, acceptSelected: acceptKeys.includes(row.proposalKey) }));
-      this.setData({ themeBag: next, themePlanAcceptKeys: acceptKeys, themeBagError: this._gameplayPending && this._gameplayPending.input.operation.startsWith('ZERO_HP_') && this.data.themeBagUnknown ? this.data.themeBagError : '' });
+      this._themeView = view;
+      if (!this._themeBagRetain && typeof this.setData === 'function') {
+        const rawSet = this.setData;
+        this._themeBagRetain = true;
+        this.setData = (patch, cb) => {
+          const result = rawSet.call(this, patch, cb);
+          if (this._themeView && this.data && this.data.themeBag) retainRaw(this.data.themeBag, this._themeView);
+          return result;
+        };
+      }
+      this.setData({ themeBag: viewBag(next), themePlanAcceptKeys: acceptKeys, themeBagError: this._gameplayPending && this._gameplayPending.input.operation.startsWith('ZERO_HP_') && this.data.themeBagUnknown ? this.data.themeBagError : '' });
       this._applyZeroHpView(view);
       if (this._applyR5OutcomeView) this._applyR5OutcomeView(view);
       if (this._applyPlayerOpsView) this._applyPlayerOpsView(view);
@@ -182,7 +219,7 @@ function methods(req) {
     _startThemePoll() {
       const bag = this.data.themeBag;
       if (this._themeHidden || this._themeTimer || !bag.sessionId || !(bag.timeEggs || bag.stepEggs || bag.awaitingChallenge || bag.zeroHp && ['RECOVERING', 'AWAITING_BASELINE'].includes(bag.zeroHp.phase) || this.data.themeBackpackOpen && (bag.planRows || []).length) || !['ACTIVE', 'RUNNING'].includes(bag.status)) return;
-      this._themeTimer = setInterval(() => { if (!this._themeSending) (bag.stepEggs && this._themeStepSyncDue() ? this._syncThoughts([]) : Promise.resolve()).then(() => this.refreshThemeBackpack()); }, bag.awaitingChallenge || bag.zeroHp && ['RECOVERING', 'AWAITING_BASELINE'].includes(bag.zeroHp.phase) || (bag.planRows || []).length ? 10000 : 30000);
+      this._themeTimer = setInterval(() => { if (!this._themeSending) return (bag.stepEggs && this._themeStepSyncDue() ? this._syncPolledThoughts() : Promise.resolve()).then(() => this.refreshThemeBackpack()); }, bag.awaitingChallenge || bag.zeroHp && ['RECOVERING', 'AWAITING_BASELINE'].includes(bag.zeroHp.phase) || (bag.planRows || []).length ? 10000 : 30000);
     },
     // L02-013
     _themeStepSyncDue(now) {
@@ -190,6 +227,30 @@ function methods(req) {
       if (this._themeStepSyncAt && at - this._themeStepSyncAt < STEP_SYNC_MS) return false;
       this._themeStepSyncAt = at;
       return true;
+    },
+    // L02-013:轮询带回的伏笔行没变就不 setData;进度或应验变了照常写回。
+    // 路线 setData 的回调在回包之后才跑,伏笔行就画在那个回调里,所以闸要留到回调结束。
+    _syncPolledThoughts() {
+      if (typeof this._syncThoughts !== 'function') return Promise.resolve(false);
+      const before = thoughtRowSignature(this._routeState);
+      const raw = this.setData;
+      let armed = true, settled = false, pending = 0, inPollCb = false;
+      const release = () => {
+        if (!settled || pending > 0) return;
+        armed = false;
+        if (this.setData !== raw) this.setData = raw;
+      };
+      this.setData = (patch, cb) => {
+        if (inPollCb && thoughtRowSignature(this._routeState) === before && paintsThoughtRows(patch)) return;
+        if (!armed || typeof cb !== 'function') return raw.call(this, patch, cb);
+        pending += 1;
+        return raw.call(this, patch, () => {
+          const prev = inPollCb;
+          inPollCb = true;
+          try { cb(); } finally { inPollCb = prev; pending -= 1; release(); }
+        });
+      };
+      return Promise.resolve(this._syncThoughts([])).then((value) => { settled = true; release(); return value; }, (error) => { settled = true; release(); throw error; });
     },
     _stopThemePoll() { if (this._themeTimer) clearInterval(this._themeTimer); this._themeTimer = null; },
     refreshThemeBackpack() {

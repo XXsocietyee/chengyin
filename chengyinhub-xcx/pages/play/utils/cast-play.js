@@ -265,14 +265,32 @@ function methods(req) {
     try { wx.setStorageSync(CAST_INDEX, list); } catch (e) { /* 索引存不上:下次再清 */ }
   };
   const api = {
-    /** /api/play/nodes 成功后:取本局档案,并读主题的角色配置(主题详情已读过就用缓存) */
+    /** 角色配置缓存按「当前账号 + 主题」分。没有账号时主包键是 `:主题`,退出登录后会串到下一个人,所以这里不读不写。 */
+    _castCacheOn() {
+      const bound = typeof this._boundPlayOwner === 'function' ? str(this._boundPlayOwner()) : '';
+      let live = '';
+      try {
+        const app = typeof getApp === 'function' ? getApp() : null;
+        live = app && typeof app.getUserID === 'function' ? str(app.getUserID()) : '';
+      } catch (e) { live = ''; }
+      return /^[1-9]\d*$/.test(bound) && bound === live;
+    },
+    _rememberCast(topicId, raw) {
+      if (!topicId || !this._castCacheOn()) return normalizeCast(raw);
+      return remember(topicId, raw);
+    },
+    _cachedCast(topicId) {
+      if (!topicId || !this._castCacheOn()) return null;
+      return cached(topicId);
+    },
+    /** /api/play/nodes 成功后:取本局档案,并读主题的角色配置(同一账号的主题详情已读过就用缓存) */
     _applyCast(d) {
       const route = (d && d.routeState) || {};
       if (route.playerProfile !== undefined || !this._castProfile) this._castProfile = profileOf(route.playerProfile);
       const topicId = str(d && d.topicId) || str(this.data.topicId);
       if (!topicId || this.data.isPreview || this.data.isMock) return;
-      if (d && d.castConfig !== undefined) { this._castSet(remember(topicId, d.castConfig)); return; }   // 游玩回包自己带了就用它
-      const hit = cached(topicId);
+      if (d && d.castConfig !== undefined) { this._castSet(this._rememberCast(topicId, d.castConfig)); return; }   // 游玩回包自己带了就用它
+      const hit = this._cachedCast(topicId);
       if (hit) { this._castSet(hit.cfg); return; }
       // 没在详情页读过:只有回包里真有角色的痕迹(台词块 / 本局档案)才补读一次主题信息 ——
       // 没有角色的主题开局请求与今天逐条一致,不多一次查询、不多等一拍
@@ -286,8 +304,9 @@ function methods(req) {
         if (this._castLoading !== topicId) return;
         this._castLoading = '';
         const ok = res && (res.code == 200 || res.code == '200') && isObj(res.data);
-        if (!refresh) { this._castSet(ok ? remember(topicId, res.data.castConfig) : null); return; }
-        const cfg = ok ? remember(topicId, res.data.castConfig) : null;
+        if (this._playDisposed) return;
+        if (!refresh) { this._castSet(ok ? this._rememberCast(topicId, res.data.castConfig) : null); return; }
+        const cfg = ok ? this._rememberCast(topicId, res.data.castConfig) : null;
         if (cfg && this._cast) this._cast = cfg;
       }).catch(() => { if (this._castLoading === topicId) this._castLoading = ''; });
       return this._castReady;
@@ -354,7 +373,7 @@ function methods(req) {
       if (this._castGated) return false;
       if (this._castLoading && !this._castWaited) {
         this._castWaited = true;   // 只等一次:超时就照常进故事,配置晚到只重铺正文
-        Promise.race([this._castReady, new Promise((r) => setTimeout(r, START_WAIT_MS))]).then(() => next());
+        Promise.race([this._castReady, new Promise((r) => setTimeout(r, START_WAIT_MS))]).then(() => { if (!this._playDisposed) next(); });
         return true;
       }
       this._castGated = true;
@@ -368,7 +387,7 @@ function methods(req) {
       const user = (app && app.globalData && app.globalData.userInfo) || {};
       const nick = str(user.nickName || user.nickname).slice(0, 12);
       this.setData({ 'cast.start': { show: true, in: !!this.data.reducedMotion, step: cfg.playerName ? 'name' : 'identity', more: cfg.playerName && cfg.playerIdentity, name: nick, pick: '', identities: cfg.identities, busy: false } },
-        () => { if (!this.data.reducedMotion) setTimeout(() => this.setData({ 'cast.start.in': true }), 20); });
+        () => { if (!this.data.reducedMotion) setTimeout(() => { if (!this._playDisposed) this.setData({ 'cast.start.in': true }); }, 20); });
       return true;
     },
     onCastName(e) { this.setData({ 'cast.start.name': str(e && e.detail && e.detail.value).slice(0, 12) }); },
@@ -402,7 +421,7 @@ function methods(req) {
       const bill = playbill(this._cast, this._castProfile, this.data.topicName);
       if (!bill) { this._castContinue(); return; }
       this.setData({ 'cast.bill': Object.assign({ show: true, in: !!this.data.reducedMotion, menu: !!fromMenu }, bill), sessionToolsOpen: false },
-        () => { if (!this.data.reducedMotion) setTimeout(() => this.setData({ 'cast.bill.in': true }), 20); });
+        () => { if (!this.data.reducedMotion) setTimeout(() => { if (!this._playDisposed) this.setData({ 'cast.bill.in': true }); }, 20); });
     },
     /** ⋯ 菜单「人物表」 */
     openCastBill() { this._castShowBill(true); },
@@ -438,7 +457,7 @@ function methods(req) {
       const card = cardView(this._cast, item.whoId, { trust: this._castMine().trust, reached, voiceKey });
       if (!card) return;
       this.setData({ 'cast.card': Object.assign(card, { in: !!this.data.reducedMotion }) },
-        () => { if (!this.data.reducedMotion) setTimeout(() => this.setData({ 'cast.card.in': true }), 20); });
+        () => { if (!this.data.reducedMotion) setTimeout(() => { if (!this._playDisposed) this.setData({ 'cast.card.in': true }); }, 20); });
       // 服务端按本局进度裁线索:缓存的配置可能是开局前读的,还有锁住的就补读一次,读到后原卡就地刷新线索
       const topicId = str(this.data.topicId);
       const chapterKey = topicId + ':' + str((this.data.chapter || {}).id);
@@ -476,23 +495,26 @@ function methods(req) {
         if (a.src !== url) a.src = url;
         a.play();
       };
+      const owner = typeof this._boundPlayOwner === 'function' ? str(this._boundPlayOwner()) : '';
+      const urlKey = owner + ':' + str(this.data.topicId) + ':' + str(chapterId) + ':' + str(blockKey);
       const urls = this._castUrls = this._castUrls || {};
-      if (urls[blockKey]) { play(urls[blockKey]); return; }
+      if (owner && urls[urlKey]) { play(urls[urlKey]); return; }
       // L02-006
       const inflight = this._castVoiceInflight = this._castVoiceInflight || {};
-      if (inflight[blockKey]) return;
-      inflight[blockKey] = true;
+      if (inflight[urlKey]) return;
+      inflight[urlKey] = true;
       req('/api/topic/cast/voice', 'GET', { topicId: this.data.topicId, chapterId, blockKey, runId: (this._routeState || {}).sessionId || '' }, undefined, true).then((res) => {
-        inflight[blockKey] = false;
+        inflight[urlKey] = false;
         if (this._playDisposed) return;
         const url = res && (res.code == 200 || res.code == '200') && res.data && res.data.url;
-        if (url) { urls[blockKey] = url; play(url); return; }
+        if (url) { if (owner) urls[urlKey] = url; play(url); return; }
         if (voiceHidden(res)) { this._castHideVoice(res.data.errorCode); return; }
         cyToast((res && res.msg) || '配音暂时生成不了，请稍后再试');
-      }).catch(() => { inflight[blockKey] = false; if (!this._playDisposed) cyToast('网络不太好，请再试一次'); });
+      }).catch(() => { inflight[urlKey] = false; if (!this._playDisposed) cyToast('网络不太好，请再试一次'); });
     },
     /** 没开配音 / 这一句没声音:收起播放入口,不提示错误 */
     _castHideVoice(code) {
+      if (this._playDisposed) return;
       if (code !== 'CAST_VOICE_NONE') this._castVoiceOff = true;
       const key = this._castPlayingKey;
       // L02-008
@@ -503,7 +525,7 @@ function methods(req) {
     _castDur() {
       const a = this._castAudio, key = this._castPlayingKey;
       const dur = fmtDur(a && a.duration);
-      if (!dur || !key) return;
+      if (this._playDisposed || !dur || !key) return;
       const patch = {};
       (this.data.chapterParas || []).forEach((p, i) => { if (p.lineKey === key && p.dur !== dur) patch['chapterParas[' + i + '].dur'] = dur; });
       if (Object.keys(patch).length) this.setData(patch);  // L02-008

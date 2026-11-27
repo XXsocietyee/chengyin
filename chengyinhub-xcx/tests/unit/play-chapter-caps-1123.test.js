@@ -237,6 +237,39 @@ test('末章结语还没到手(块流是最后一站完成前拉的):等同页�
   } finally { global.setTimeout = realSetTimeout }
 })
 
+test('等结语的那一拍:页面藏起或卸下后不打开通关页,回到前台才放行', () => {
+  const truncated = finalBlocks.slice(0, 2)
+  const timers = []
+  const realSetTimeout = global.setTimeout
+  global.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length }
+  try {
+    const away = finishPage(truncated, [])
+    let ended = 0
+    away._endRunSession = () => { ended += 1 }
+    away._themeHidden = true
+    away.openFinish()
+    timers.filter(t => t.ms === 6000).forEach(t => t.fn())
+    assert.equal(away.finishOpened, 0, '藏在后台时不能写上完成屏')
+    assert.equal(ended, 1, '第一次 openFinish 已经收过会话;到点这一拍不能再收一次')
+    const retries = timers.filter(t => t.ms === 400)
+    assert.equal(retries.length, 1)
+    away._themeHidden = false
+    retries.forEach(t => t.fn())
+    assert.equal(away.finishOpened, 1, '回到前台仍拿不到结语就放行')
+
+    const gone = finishPage(truncated, [])
+    let goneEnded = 0
+    gone._endRunSession = () => { goneEnded += 1 }
+    gone.openFinish()
+    gone._playDisposed = true
+    const before = timers.length
+    timers.filter(t => t.ms === 6000 && timers.indexOf(t) >= before - 2).forEach(t => t.fn())
+    assert.equal(gone.finishOpened, 0, '卸下后到点的那一拍不再打开通关页')
+    assert.equal(goneEnded, 1)
+    assert.equal(timers.filter(t => t.ms === 400).length, 1, '卸下后不再续订')
+  } finally { global.setTimeout = realSetTimeout }
+})
+
 test('没有收尾的末章、试玩、自由探索:通关照旧,不多拦一步', () => {
   const plain = finishPage([{ type: 'text', content: '正文。' }, { type: 'node', nodeId: 51 }], ['51'])
   plain.openFinish()
