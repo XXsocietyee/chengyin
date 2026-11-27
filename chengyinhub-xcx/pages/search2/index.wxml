@@ -150,8 +150,8 @@
         <view class="slider-container">
           <view class="slider-track"></view>
           <view class="slider-range" style="{{sliderRangeStyle}}"></view>
-          <view class="slider-handle min-handle" style="{{minHandleStyle}}" bindtouchmove="onMinSliderMove" data-type="min"></view>
-          <view class="slider-handle max-handle" style="{{maxHandleStyle}}" bindtouchmove="onMaxSliderMove" data-type="max"></view>
+          <view class="slider-handle min-handle" style="{{minHandleStyle}}" bindtouchstart="onMinSliderStart" bindtouchmove="onMinSliderMove" data-type="min"></view>
+          <view class="slider-handle max-handle" style="{{maxHandleStyle}}" bindtouchstart="onMaxSliderStart" bindtouchmove="onMaxSliderMove" data-type="max"></view>
         </view>
 
         <view class="price-range-tip">

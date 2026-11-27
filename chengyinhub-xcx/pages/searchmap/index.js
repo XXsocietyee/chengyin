@@ -150,6 +150,7 @@ Page({
     filterConditions: {
       keyword: '',
       categoryId: null,
+      merchantCategoryId: null,
       tag: '',
       cityRole: '',
       dateType: '0',
@@ -189,11 +190,11 @@ Page({
     this.runFreshQuery();
   },
 
-  // 查询条件或空间范围变化时，旧点位不再代表当前结果；先原子清场，再拉两层新数据。
-  // 网络恢复等同查询刷新走 refreshMapResults，仍保留旧内容并明示 syncing。
+  // 查询条件或空间范围变化时作废旧请求并重置列表。地图点留到新结果写回(L05-152)，
+  // 避免刷新期间整图空白。网络恢复仍走 refreshMapResults，保留旧内容并明示 syncing。
   runFreshQuery(extra) {
-    // setData 的 callback 要等视图层确认后才执行；必须在清场调用前同步作废旧请求，
-    // 否则旧回包能钻进「数据已清空、新请求尚未启动」的窗口，把上一查询重新写回来。
+    // setData 的 callback 要等视图层确认后才执行；必须在发新请求前同步作废旧请求，
+    // 否则旧回包能钻进窗口，把上一查询重新写回来。
     this._listQueryEpoch = (this._listQueryEpoch || 0) + 1;
     this._merchantQueryEpoch = (this._merchantQueryEpoch || 0) + 1;
     const next = extra || {};
@@ -202,7 +203,6 @@ Page({
       : Object.assign({}, this.data.filterConditions, Object.prototype.hasOwnProperty.call(next, 'filterConditions.keyword')
         ? { keyword: next['filterConditions.keyword'] }
         : {});
-    this._activityMarkers = this._merchantMarkers = this._merchantNodes = []; // 只会整体替换,不原地改
     this.setData({
       pageNum: 1,
       list: [],
@@ -213,7 +213,7 @@ Page({
       popVisible: Object.prototype.hasOwnProperty.call(next, 'popVisible') ? next.popVisible : this.data.popVisible,
       filterConditions,
     }, () => {
-      this.rebuildMarkers();
+      this._beginMarkerWrite();
       this.getList();
       this.getMerchantNodes();
     });
@@ -297,10 +297,12 @@ Page({
           // 非 200 原先直接穿透 = 静默失败:页面只剩一张空地图,不说明也不能重试。
           // 仅首页失败才翻错误态 —— 翻页失败不该把已加载的结果整段换掉(与 loading 守卫对称)。
           that.setPageError((res && res.msg) || '服务返回异常', requestPage);
+          that._finishMarkerSide('activity', false);
           return;
         }
         if (!res.data || !isRecordList(res.data.rows)) {
           that.setPageError('活动列表加载失败，请重试', requestPage);
+          that._finishMarkerSide('activity', false);
           return;
         }
         const rawList = res.data.rows.map((activity) => {
@@ -314,26 +316,39 @@ Page({
         // 口径(起始日期落在区间、价格字段兜底)完全复用,不再各写一套。
         const newList = discoverSearch.filterRows('activity', rawList, requestFilters);
         // 分页卫生(P0-4):翻页只回传新增行、只给新增批次建 marker。分页判据用未过滤的原始行数:整页被筛掉时仍要能继续翻
-        const first = requestPage === 1, oldLen = first ? 0 : that.data.list.length;
-        that.setData(Object.assign({
-          hasMore: rawList.length >= requestPageSize,
-          noCoordCount: (first ? 0 : that.data.noCoordCount) + newList.filter(a => !a.latitude || !a.longitude).length,
-          pageError: '', pageErrorIsRefresh: false, lastListUpdatedText: formatUpdatedAt(new Date())
-        }, first ? { list: newList } : appendByIndex('list', oldLen, newList)));
+        const first = requestPage === 1;
+        const oldLen = first ? 0 : that.data.list.length;
+        const hasMore = rawList.length >= requestPageSize;
+        const replaceList = first || oldLen === 0;
         if (first) that._autoPages = 0;
-        that.setListState(oldLen + newList.length ? 'ready' : 'empty');
-        if (first) that.createMarkersFromActivities(newList);
-        else that.appendMarkersFromActivities(newList, oldLen);
-        // L05-154:日期/价格在本地筛,一整页都被筛掉时还没到底 —— 自动再翻,最多 3 页,别把「这页没有」说成「这一带没有」
-        if (!that.data.list.length && that.data.hasMore && (that._autoPages || 0) < 3) {
-          that._autoPages = (that._autoPages || 0) + 1;
-          that.loadMoreResults();
+        const merged = (replaceList ? 0 : oldLen) + newList.length;
+        // L05-154:日期/价格在本地筛。一整页都被筛掉且后面还有数据时继续要下一页,直到留下一行或服务端没有更多。额外最多 5 页。还在翻时保持加载,不先画出空列表。
+        const keepFilling = merged === 0 && hasMore && (that._autoPages || 0) < 5;
+        const patch = Object.assign({
+          hasMore: hasMore,
+          noCoordCount: (replaceList ? 0 : that.data.noCoordCount) + newList.filter(a => !a.latitude || !a.longitude).length,
+          pageError: '', pageErrorIsRefresh: false, lastListUpdatedText: formatUpdatedAt(new Date())
+        }, replaceList ? { list: newList } : appendByIndex('list', oldLen, newList));
+        if (keepFilling) {
+          patch.listState = 'loading';
+          patch.capsuleText = '附近活动';
+          patch.errorMsg = '';
         }
+        that.setData(patch);
+        if (keepFilling) {
+          that._autoPages += 1;
+          that.loadMoreResults();
+          return; // 还在补页,活动点没定,先不收这一侧
+        }
+        if (replaceList) that.createMarkersFromActivities(newList);
+        else that.appendMarkersFromActivities(newList, oldLen);
+        that.setListState(merged ? 'ready' : 'empty');
       },
       fail: (err) => {
         if (!isCurrentQuery()) return;
         finishPageRequest();
         that.setPageError((err && err.errMsg) || '网络异常，请重试', requestPage);
+        that._finishMarkerSide('activity', false);
       }
     });
   },
@@ -363,6 +378,12 @@ Page({
       return;
     }
     if (failedPage === 1) { this.setData({ pageErrorIsRefresh: false }); this.setListState('error', msg); return; }
+    // 自动翻页时列表还是空的:不能画成「0 个结果」,否则后面其实还有匹配也像这一带没有。
+    if (!(this.data.list || []).length) {
+      this.setData({ pageError: msg || '加载更多失败，请重试', pageErrorIsRefresh: false });
+      this.setListState('error', msg);
+      return;
+    }
     this.setData({
       listState: 'ready',
       pageError: msg || '加载更多失败，请重试',
@@ -544,7 +565,7 @@ Page({
       markers.push(this.buildActivityMarker(activity, index));
     });
     this._activityMarkers = markers;
-    this.rebuildMarkers();
+    this._finishMarkerSide('activity', true);
   },
   // P0-4:分页只给新增批次建点;下标用全局 listOffset+i,activityId 要能回查 this.data.list
   appendMarkersFromActivities(newActivities, listOffset) {
@@ -554,7 +575,8 @@ Page({
       list.push(this.buildActivityMarker(activity, listOffset + i));
     });
     this._activityMarkers = list;
-    this.rebuildMarkers();
+    // 还在等这一轮商家点时并进同一次写入;这一轮已经写完就单独再写一次。
+    this._finishMarkerSide('activity', true);
   },
 
   // 商家节点图层与活动点分开请求/建 marker。接口按 roam_poi.tags 等条件筛选并按距离排序。
@@ -563,6 +585,7 @@ Page({
     // 无定位、也还没拖过地图时不问「附近据点」:后端缺 lat/lng 只会 500,不是网络故障。
     if (!this._hasLocation && !this._regionUserChosen) {
       this.setData({ merchantNodesRefreshing: false });
+      this._finishMarkerSide('merchant', false);
       return;
     }
     const center = this.data.regionInfo || {};
@@ -571,10 +594,15 @@ Page({
     const queryEpoch = (this._merchantQueryEpoch || 0) + 1;
     this._merchantQueryEpoch = queryEpoch;
     const isCurrentQuery = () => queryEpoch === that._merchantQueryEpoch;
-    const markError = () => { if (isCurrentQuery()) that.setData({ merchantNodesRefreshing: false }); };
+    const markError = () => {
+      if (!isCurrentQuery()) return;
+      that.setData({ merchantNodesRefreshing: false });
+      that._finishMarkerSide('merchant', false);
+    };
     this.setData({ merchantNodesRefreshing: hasCachedNodes });
     app.sendRequest({
       hideLoading: true,
+      silentError: true, // 商家图层失败已静默降级;通道再 toast 会和活动层的失败提示叠成同一次刷新两声
       url: '/api/city/nodes',
       method: 'GET',
       // SecurityConfig 未匿名放行 city/nodes，使用 request-client 默认认证。
@@ -583,7 +611,8 @@ Page({
         lng: center.longitude || this.data.longitude,
         radius: 20000,
         keyword: filters.keyword || '',
-        categoryId: filters.categoryId == null ? '' : filters.categoryId,
+        // L05-155:商家节点只认商家行业 id。主题/活动类别留在 categoryId,不送去 m.category_id。
+        categoryId: filters.merchantCategoryId == null || filters.merchantCategoryId === '' ? '' : filters.merchantCategoryId,
         tag: filters.tag || '',
         cityRole: filters.cityRole || ''
       },
@@ -613,10 +642,30 @@ Page({
         });
         that._merchantNodes = nodes;
         that._merchantMarkers = markers;
-        that.setData({ merchantNodesRefreshing: false }, () => that.rebuildMarkers());
+        that.setData({ merchantNodesRefreshing: false });
+        that._finishMarkerSide('merchant', true);
       },
       fail: markError
     });
+  },
+
+  // L05-153:同一次搜索的活动点与商家点到齐后写一次 markers。只走一路时(翻页、单独重试)马上写。
+  _beginMarkerWrite() {
+    this._markerWrite = (this._markerWrite || 0) + 1;
+    this._markerReady = { id: this._markerWrite, activity: false, merchant: false, dirty: false };
+  },
+
+  _finishMarkerSide(side, dirty) {
+    const ready = this._markerReady;
+    if (!ready || ready.id !== this._markerWrite) {
+      if (dirty) this.rebuildMarkers();
+      return;
+    }
+    ready[side] = true;
+    if (dirty) ready.dirty = true;
+    if (!ready.activity || !ready.merchant) return;
+    this._markerReady = null;
+    if (ready.dirty) this.rebuildMarkers();
   },
 
   rebuildMarkers() {
@@ -634,17 +683,17 @@ Page({
   onMerchantCategoryChange(e) {
     const detail = e.detail || {};
     const category = Array.isArray(detail.selectedCategories) ? detail.selectedCategories[0] : null;
-    if (!category) {
+    // L05-155:商家半屏是行业 id(type=MERCHANT),不能写进活动/主题用的 categoryId。
+    if (!category || category.id == null) {
       this.setData({
-        'filterConditions.categoryId': null,
+        'filterConditions.merchantCategoryId': null,
         merchantCategoryLabel: '',
         merchantCategorySheetVisible: false,
       });
       return;
     }
-    if (!category || category.id == null) return;
     this.setData({
-      'filterConditions.categoryId': Number(category.id),
+      'filterConditions.merchantCategoryId': Number(category.id),
       merchantCategoryLabel: category.categoryName || '',
       merchantCategorySheetVisible: false,
     });
@@ -792,29 +841,53 @@ Page({
     else this.setData({ maxPercent, maxPrice: price, jg2: '¥' + price, sliderRangeStyle, minHandleStyle, maxHandleStyle });
   },
 
+  onMinSliderStart(e) { this._beginSliderDrag(e, 'min'); },
+  onMaxSliderStart(e) { this._beginSliderDrag(e, 'max'); },
   onMinSliderMove(e) { this.handleSliderMove(e, 'min'); },
   onMaxSliderMove(e) { this.handleSliderMove(e, 'max'); },
 
-  // L05-157:轨道位置只量一次(开筛选面板时作废),每次 touchmove 只发一次 setData。
+  // L05-157:轨道在这次拖动开始时量一次(开筛选面板时作废)。touchmove 不再量,价格没变也不 setData。
+  _beginSliderDrag(e, type) {
+    const touch = e.touches && e.touches[0];
+    if (touch) this._sliderTouch = touch;
+    this._sliderType = type;
+    if (this._sliderRect) {
+      if (touch) this._writeSliderPrice(touch, type);
+      return;
+    }
+    if (this._sliderMeasuring) return;
+    this._sliderMeasuring = true;
+    wx.createSelectorQuery().select('.slider-container').boundingClientRect().exec((res) => {
+      this._sliderMeasuring = false;
+      if (!(res && res[0] && res[0].width)) return;
+      this._sliderRect = res[0];
+      if (this._sliderTouch) this._writeSliderPrice(this._sliderTouch, this._sliderType);
+    });
+  },
+
   handleSliderMove(e, type) {
     const touch = e.touches && e.touches[0];
     if (!touch) return;
+    this._sliderTouch = touch;
+    this._sliderType = type;
     if (!this._sliderRect) {
-      if (this._sliderMeasuring) return;
-      this._sliderMeasuring = true;
-      wx.createSelectorQuery().select('.slider-container').boundingClientRect().exec((res) => {
-        this._sliderMeasuring = false;
-        if (res && res[0] && res[0].width) { this._sliderRect = res[0]; this.handleSliderMove(e, type); }
-      });
+      this._beginSliderDrag(e, type);
       return;
     }
+    this._writeSliderPrice(touch, type);
+  },
+
+  _writeSliderPrice(touch, type) {
     const { left, width } = this._sliderRect;
     const { min, max } = this.data.priceRange;
     const gap = 5;   // 两枚滑块最小间隔 5%
     let percent = Math.max(0, Math.min(100, ((touch.clientX - left) / width) * 100));
     if (type === 'min') percent = Math.min(percent, this.data.maxPercent - gap);
     else percent = Math.max(percent, this.data.minPercent + gap);
-    this._applyPrice(type, percent, Math.round((percent / 100) * (max - min) + min));
+    const price = Math.round((percent / 100) * (max - min) + min);
+    const current = type === 'min' ? this.data.minPrice : this.data.maxPrice;
+    if (price === current) return;
+    this._applyPrice(type, percent, price);
   },
 
   openDatePicker(e) {
@@ -873,6 +946,7 @@ Page({
         minPrice: 0,
         maxPrice: 1000,
         categoryId: null,
+        merchantCategoryId: null,
         tag: '',
         cityRole: '',
         startDate: '',
@@ -971,6 +1045,7 @@ Page({
   },
 
   refreshMapResults() {
+    this._beginMarkerWrite();
     this.setData({ pageNum: 1, hasMore: true, pageError: '' });
     this.getList();
     this.getMerchantNodes();
@@ -1052,6 +1127,7 @@ Page({
           filterConditions: Object.assign({}, this.data.filterConditions, {
             keyword: params.keyword || '',
             categoryId: params.categoryId || null,
+            merchantCategoryId: params.merchantCategoryId || null,
             tag: params.tag || '',
             cityRole: params.cityRole || '',
             dateType: params.dateType || '0',
@@ -1068,7 +1144,8 @@ Page({
       }
     }
     
-    // 获取初始活动列表
+    // 获取初始活动列表。两路都回来再写一次点(L05-153)。
+    this._beginMarkerWrite();
     this.getList();
     this.getMerchantNodes();
   },

@@ -36,6 +36,29 @@ test('玩家页签同名合并、条数相加,点「主题」同时出两组', (
   assert.equal(ds.tabKeyOf('topicTemplate', false), 'topicTemplate')
 })
 
+test('玩家视角的 unifiedPage 不出「模板」，商家视角仍出「主题模板」', () => {
+  const data = {
+    total: 4,
+    rows: [
+      { id: '11', type: 'topicTemplate', name: '风味巡游' },
+      { id: '12', type: 'gameTemplate', title: '暗号' },
+      { id: '13', type: 'topic', name: '外滩夜行' },
+      { id: '14', type: 'activity', title: '夜跑' },
+    ],
+  }
+  const allowed = ['topicTemplate', 'gameTemplate', 'topic', 'activity']
+  const player = ds.unifiedPage(data, allowed, true)
+  assert.deepEqual(player.items.map((item) => item.typeLabel), ['主题', '玩法', '主题', '活动'])
+  assert.equal(player.items.some((item) => String(item.typeLabel).includes('模板')), false)
+  const merchant = ds.unifiedPage(data, allowed, false)
+  assert.equal(merchant.items[0].typeLabel, '主题模板')
+  assert.equal(merchant.items[1].typeLabel, '玩法模板')
+  assert.equal(merchant.items[2].typeLabel, '主题')
+  assert.equal(merchant.items[3].typeLabel, '活动')
+  const js = fs.readFileSync(path.join(ROOT, 'pages/search2/result/index.js'), 'utf8')
+  assert.match(js, /discoverSearch\.unifiedPage\(res\.data, state\.types, !this\.data\.merchantView\)/)
+})
+
 test('搜索结果页按视角取名字与页签,不再直接读 TYPE_META 原词', () => {
   const js = fs.readFileSync(path.join(ROOT, 'pages/search2/result/index.js'), 'utf8')
   assert.doesNotMatch(js, /TYPE_META\[[^\]]+\]\.label/)

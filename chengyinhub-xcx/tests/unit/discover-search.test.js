@@ -7,9 +7,10 @@ test('六类搜索请求走现有公开接口，俱乐部与商家使用 Request
   assert.equal(requests.length, 6);
   assert.deepEqual(requests[0].data, { keyword: '外滩', pageNum: 1, pageSize: 12, category_id: 8 });
   assert.equal(requests[2].url, '/api/club/list');
-  // CU-M-62:类别必须一并进 club/merchant 的 JSON body,否则结果页只有两类被筛
+  // 俱乐部与主题共用 type=1 类别。商家行业是另一套 id,主题类别不能送去当行业筛选(L05-155)。
   assert.deepEqual(JSON.parse(requests[2].data), { name: '外滩', categoryId: 8 });
-  assert.deepEqual(JSON.parse(requests[3].data), { name: '外滩', categoryId: 8 });
+  assert.deepEqual(JSON.parse(requests[3].data), { name: '外滩' });
+  assert.equal(Object.prototype.hasOwnProperty.call(JSON.parse(requests[3].data), 'categoryId'), false);
   assert.equal(requests[3].header['Content-Type'], 'application/json');
 
   // 没选类别时不凭空塞一个 categoryId(否则会把两类都筛成空)

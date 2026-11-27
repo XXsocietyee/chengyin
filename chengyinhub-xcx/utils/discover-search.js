@@ -201,15 +201,13 @@ function decorateRows(type, data, filters) {
 function buildRequests(keyword, categoryId, filters) {
   const common = { keyword: keyword || '', pageNum: 1, pageSize: 12 };
   const categoryData = categoryId ? { category_id: categoryId } : {};
-  /* CU-M-62:类别先前只拼进 topic/activity 两路 ⇒ 结果页选「咖啡」后主题/活动筛了,
-     商家与俱乐部仍是全量 —— 同一屏四份结果各按不同条件算,看起来就像筛选失效。
-     两类后端都已支持 categoryId(ClubMapper.xml:71 / MmsMerchantMapper.xml:63),
-     JSON body 里带上即可,不新增接口。 */
+  /* 搜索入口的 categoryId 是主题/活动类别(type=1)。俱乐部用同一套类别,可以带上。
+     L05-155:商家行业是另一套 id(type=MERCHANT)。把主题类别送进 /api/merchant/list
+     会按 mms_merchant.category_id 筛错行业,所以商家请求不带这个 categoryId。 */
   const clubData = { name: keyword || '' };
   const merchantData = { name: keyword || '' };
   if (categoryData.category_id) {
     clubData.categoryId = categoryData.category_id;
-    merchantData.categoryId = categoryData.category_id;
   }
   // filters 仅客户端消费:后端 /api/topic/list 与 /api/activity/list 没有 minPrice/startDate 字段。
   // CU-M-66:筛选里只剩「最近」,它就是四类列表的默认排序(create_time desc),不需要发参数。
@@ -233,14 +231,15 @@ function unifiedCompatible(keyword, categoryId, filters) {
     && !(numericOrNull(f.maxPrice) != null && numericOrNull(f.maxPrice) < 1000);
 }
 
-function unifiedPage(data, allowedTypes) {
+// playerView 只改模板卡的 typeLabel(主题/玩法);不传则保留「主题模板 / 玩法模板」。
+function unifiedPage(data, allowedTypes, playerView) {
   if (!data || !Array.isArray(data.rows) || !(typeof data.total === 'number' || typeof data.total === 'string' && /^[0-9]+$/.test(data.total)) || !Number.isSafeInteger(Number(data.total)) || Number(data.total) < 0) return null;
   const items = [];
   for (const row of data.rows) {
     if (!row || !allowedTypes.includes(row.type)
       || !(typeof row.id === 'string' && /^[1-9][0-9]*$/.test(row.id)
         || typeof row.id === 'number' && Number.isSafeInteger(row.id) && row.id > 0)) return null;
-    items.push(decorateItem(row.type, row));
+    items.push(decorateItem(row.type, row, playerView));
   }
   return { items, total: Number(data.total), count: data.rows.length };
 }

@@ -24,6 +24,7 @@ function loadPage(modulePath, wxOverrides, userId = '9') {
   const requests = []
   const navigations = []
   global.getApp = () => ({
+    globalData: modulePath === RESULT_MODULE ? { searchUnifiedOn: true } : {},
     getUserID: () => userId,
     getRequestErrorMessage: (response, fallback) => (response && response.msg) || fallback,
     sendRequest: (options) => requests.push(options),
@@ -113,6 +114,14 @@ test('CU-M-66 结果页收下 sortType 但不把它映射成 sort_type(「最近
   plain.page.onLoad({ keyword: encodeURIComponent('外滩') })
   assert.equal(plain.page._filters.sortType, '')
   assert.equal(plain.requests.find((item) => item.url === '/api/search/unified').data.sort_type, undefined)
+})
+
+test('PG-003 结果页查询参数里坏掉的百分号不再让 onLoad 抛错', () => {
+  const { page } = loadPage(RESULT_MODULE)
+  assert.doesNotThrow(() => page.onLoad({ keyword: '%', startDate: '%E', endDate: '2026-11-26' }))
+  assert.equal(page.data.keyword, '%')
+  assert.equal(page._filters.startDate, '%E')
+  assert.equal(page._filters.endDate, '2026-11-26')
 })
 
 // L05-177:旧全局历史键只在进页时清一次;读 / 存历史不再每次同步清

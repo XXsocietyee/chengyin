@@ -6,9 +6,9 @@ const vm = require('node:vm');
 const search = require('../../utils/discover-search');
 const session = require('../../utils/session/login-reload');
 const source = fs.readFileSync(path.join(__dirname, '../../pages/search2/result/index.js'), 'utf8');
-function harness(owner = '7', community = true) {
+function harness(owner = '7', community = true, unifiedOn = true) {
   const requests = [], navigations = [];
-  const app = { globalData: {}, getUserID: () => owner, canUseCommunity: () => community,
+  const app = { globalData: unifiedOn ? { searchUnifiedOn: true } : {}, getUserID: () => owner, canUseCommunity: () => community,
     getImgUrl: v => v || '', sendRequest: r => requests.push(r) };
   let definition;
   vm.runInNewContext(source, { getApp: () => app, Page: p => { definition = p; },
@@ -60,7 +60,18 @@ test('refresh replaces deleted results and current city rather than retaining ol
   assert.equal(h.page.data.visibleResults.length, 0); assert.match(h.page.data.contentError, /未完成/);
 });
 
-// Round5 #3:合并搜索开关默认关(503)时,已登录用户退回与游客相同的主题/活动列表请求,结果照常出现。
+// L05-159:合并搜索默认关,第一次搜索也不发 /api/search/unified。
+test('unified stays uncalled when it is off, and the split topic and activity searches run instead', () => {
+  const h = harness('7', true, false);
+  h.page.onLoad({ keyword: 'city', city_code: '310100' });
+  assert.equal(h.unified().length, 0);
+  assert.ok(h.requests.some(r => r.url === '/api/topic/list'));
+  assert.ok(h.requests.some(r => r.url === '/api/activity/list'));
+  assert.ok(h.requests.some(r => r.url === '/api/club/list'));
+  assert.ok(h.requests.some(r => r.url === '/api/merchant/list'));
+});
+
+// Round5 #3:合并搜索曾被打开、回 503 时,已登录用户退回主题/活动列表,并且这次会话不再先撞一次。
 test('unified off (503) falls back to topic/activity list requests for logged-in users, and stays off for later searches', () => {
   const h = harness(); h.page.onLoad({ keyword: 'city' });
   assert.ok(!h.requests.some(r => r.url === '/api/topic/list'));
@@ -118,20 +129,50 @@ test('malformed totals and imprecise IDs fail the page without advancing, forbid
   h.page.loadMoreContent(); assert.equal(h.unified()[4].data.pageNum, 1);
 });
 
-// L05-158(业主默认项 A):回到结果页只在换账号 / 结果超过 60 秒 / 离开时没搜完才重搜;否则只重挂卡片重播入场
-test('L05-158 回到结果页:60 秒内且已搜完不重发请求,只重挂卡片;过期、没搜完或换账号才重搜', () => {
-  const h = harness(); h.page.onLoad({ keyword: 'city' }); ok(h.unified()[0], [row(1)], 1); h.settleOthers();
+function settleSearch(h) {
+  h.unified().forEach((request) => { try { ok(request, [row(1)], 1); } catch (error) { /* 已落地的回包再调一次会被序号丢掉 */ } });
+  h.settleOthers();
+}
+
+// L05-158:回到结果页时,关键词和筛选都没变就不重发整页搜索;变了、上次没搜完或换账号才重搜。
+test('L05-158 回到结果页:查询没变不重搜,关键词或筛选变了、没搜完或换账号才重搜', () => {
+  const h = harness();
+  h.page.onLoad({ keyword: 'city' });
+  settleSearch(h);
   assert.equal(h.page.data.searchLoading, false);
   const before = h.requests.length;
   h.page.onHide(); h.page.onShow();
   assert.equal(h.requests.length, before, '刚搜完回来不重搜');
   assert.equal(h.page.data.visibleResults.length, 1, '卡片重挂,入场动画照常');
   h.page._searchDoneAt -= 61000; h.page.onHide(); h.page.onShow();
-  assert.ok(h.requests.length > before, '超过 60 秒重搜');
-  const mid = h.requests.length; h.page.onHide(); h.page.onShow();
-  assert.ok(h.requests.length > mid, '离开时还没搜完,回来重搜');
-  h.settleOthers(); h.unified().forEach(r => { try { ok(r, [row(1)], 1); } catch (_) {} });
-  const settled = h.requests.length; h.owner('8'); h.page.onShow();
+  assert.equal(h.requests.length, before, '超过 60 秒且查询没变,不重搜');
+
+  h.page.setData({ keyword: 'park' });
+  h.page.onHide(); h.page.onShow();
+  assert.ok(h.requests.length > before, '关键词变了重搜');
+  settleSearch(h);
+  const afterKeyword = h.requests.length;
+  h.page.onHide(); h.page.onShow();
+  assert.equal(h.requests.length, afterKeyword, '新关键词搜完后再回来不重搜');
+
+  h.page._filters.endDate = '2026-12-31';
+  h.page.onHide(); h.page.onShow();
+  assert.ok(h.requests.length > afterKeyword, '日期筛选变了重搜');
+  settleSearch(h);
+  const afterFilter = h.requests.length;
+  h.page._filters.minPrice = 200;
+  h.page.onHide(); h.page.onShow();
+  assert.ok(h.requests.length > afterFilter, '价格筛选变了重搜');
+
+  const loading = harness();
+  loading.page.onLoad({ keyword: 'city' });
+  const loadingBefore = loading.requests.length;
+  loading.page.onHide(); loading.page.onShow();
+  assert.ok(loading.requests.length > loadingBefore, '离开时没搜完,回来重搜');
+
+  settleSearch(h);
+  const settled = h.requests.length;
+  h.owner('8'); h.page.onShow();
   assert.ok(h.requests.length > settled, '换账号重搜');
 });
 
