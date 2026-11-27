@@ -7,7 +7,7 @@ Component({
     audience: { type: String, value: 'player' },
     cta: { type: String, value: '' },
   },
-  data: { _data: '', _tags: [], _joined: false, _coverFailed: false, _logoFailed: false },
+  data: { _data: '', _tags: [], _joined: false, _coverFailed: false, _logoFailed: false, _fallbackTone: 0, _fallbackMark: '' },
   observers: {
     'club, audience': function (club, audience) {
       const c = club || {};
@@ -27,7 +27,11 @@ Component({
         if (club && !owner && !joined) tags.push('免费加入');
         if (Number(c.prioritySignupEnabled) === 1) tags.push('成员优先报名');
       }
-      this.setData({ _data: data.join(' · '), _tags: Array.from(new Set(tags)), _joined: joined, _coverFailed: false, _logoFailed: false });
+      const nameStr = typeof c.name === 'string' ? c.name.trim() : '';
+      const seed = Number(c.id) || Array.from(nameStr).reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+      const fallbackTone = Math.abs(seed) % 4;
+      const fallbackMark = nameStr ? nameStr.charAt(0) : '';
+      this.setData({ _data: data.join(' · '), _tags: Array.from(new Set(tags)), _joined: joined, _coverFailed: false, _logoFailed: false, _fallbackTone: fallbackTone, _fallbackMark: fallbackMark });
     },
   },
   methods: {

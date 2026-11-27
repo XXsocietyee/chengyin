@@ -6,4 +6,10 @@
 .cc__members { width: 26rpx; height: 26rpx; flex: 0 0 26rpx; }
 .cc__bottom { align-items: flex-end; gap: 16rpx; }
 .cc__tags { display: flex; flex: 1; flex-wrap: wrap; gap: 12rpx; min-width: 0; }
-.cc__tag { padding: 6rpx 14rpx; border-radius: var(--cy-radius-md); background: var(--cy-color-photo-card-tag-glass); color: var(--cy-comp-photo-card-muted); font-size: var(--cy-type-caption); line-height: 28rpx; }
+.cc__tag { padding: 6rpx 14rpx; border-radius: var(--cy-radius-md); background: var(--cy-color-photo-card-tag-overlay); border: 1rpx solid var(--cy-color-photo-card-tag-border); color: var(--cy-comp-photo-card-fg); font-size: var(--cy-type-caption); line-height: 28rpx; }
+.cc__fallback { display: flex; align-items: center; justify-content: flex-end; padding-right: 36rpx; box-sizing: border-box; }
+.cc__fallback--0 { background: linear-gradient(135deg, #272B33 0%, #14171D 100%); } /* ds-ok 无封面俱乐部卡中性底色 0 */
+.cc__fallback--1 { background: linear-gradient(135deg, #2D2926 0%, #181513 100%); } /* ds-ok 无封面俱乐部卡中性底色 1 */
+.cc__fallback--2 { background: linear-gradient(135deg, #222C2D 0%, #121819 100%); } /* ds-ok 无封面俱乐部卡中性底色 2 */
+.cc__fallback--3 { background: linear-gradient(135deg, #2A2630 0%, #16141A 100%); } /* ds-ok 无封面俱乐部卡中性底色 3 */
+.cc__fallback-mark { font-size: 168rpx; font-weight: 800; line-height: 1; color: rgba(255,255,255,.07); user-select: none; } /* ds-ok 装饰首字水印 */

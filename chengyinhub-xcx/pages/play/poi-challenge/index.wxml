@@ -5,7 +5,7 @@
   <cy-privacy-gate show="{{privacyGateShow}}" bind:settled="onPrivacyGateSettled" />
   <view wx:if="{{step === 'loading'}}" class="pc-page__state"><cy-skeleton /></view>
   <view wx:elif="{{step === 'error'}}" class="pc-page__state">
-    <cy-error title="挑战暂时打不开" sub="{{errorText}}" retry="重试" bind:retry="retry" />
+    <cy-error title="挑战暂时打不开" sub="{{errorText}}" retry="{{errorRetryable ? '重试' : ''}}" bind:retry="retry" />
     <view class="pc-page__exit" bindtap="exit" aria-role="button" aria-label="返回地图" hover-class="cy-pressed" hover-stay-time="80">返回地图</view>
   </view>
 

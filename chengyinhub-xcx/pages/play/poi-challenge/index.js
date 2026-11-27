@@ -24,6 +24,7 @@ Page({
   data: {
     step: 'loading',          // loading | photo | quiz | done | error
     errorText: '',
+    errorRetryable: true,
     node: null, questionTitle: '',
     options: [],
     medal: { items: [], title: '', sub: '' },
@@ -48,26 +49,26 @@ Page({
   onUnload() { this._unloaded = true; clearTimeout(this._nextTimer); },
 
   _load() {
-    if (!this._poiId) { this.setData({ step: 'error', errorText: '没有找到这个地点' }); return; }
-    this.setData({ step: 'loading' });
+    if (!this._poiId) { this.setData({ step: 'error', errorText: '没有找到这个地点', errorRetryable: false }); return; }
+    this.setData({ step: 'loading', errorRetryable: true });
     app.sendRequest({
       url: '/api/city/nodes/' + this._poiId, method: 'GET', hideLoading: true, silentError: true,
       success: (res) => {
         if (this._unloaded) return;
         const n = res && res.code == 200 && res.data;
-        if (!n || positiveId(n.poiId == null ? n.id : n.poiId) !== this._poiId) { this.setData({ step: 'error', errorText: (res && res.msg) || '地点暂时打不开' }); return; }
+        if (!n || positiveId(n.poiId == null ? n.id : n.poiId) !== this._poiId) { this.setData({ step: 'error', errorText: (res && res.msg) || '地点暂时打不开', errorRetryable: true }); return; }
         const options = KEYS.map((k) => ({ id: k, t: n['question' + k] })).filter((o) => o.t);
         this.setData({ node: n, options, questionTitle: String(n.questionName || '').replace(/\?/g, '？') });
         if (n.completed) { this._finish({ alreadyClaimed: true, badgeName: '' }); return; }
-        if (n.status !== 1) { this.setData({ step: 'error', errorText: '这个地点的挑战暂未开放' }); return; }
+        if (n.status !== 1) { this.setData({ step: 'error', errorText: '这个地点的挑战暂未开放', errorRetryable: false }); return; }
         const quiz = n.validationMethod === 3 && options.length > 0;
         if (n.photoRequired && !this._photoUrl) { this.setData({ step: 'photo' }); return; } // 没从地图拍:这里补拍
         if (quiz) { this.setData({ step: 'quiz' }); return; }
         if (this._photoUrl) { // 只拍照的地点:照片已有,直接交
-          this._submit('', (ok, msg) => { if (ok) this._finish(this._result || {}); else this.setData({ step: 'error', errorText: msg }); });
+          this._submit('', (ok, msg) => { if (ok) this._finish(this._result || {}); else this.setData({ step: 'error', errorText: msg, errorRetryable: true }); });
           return;
         }
-        this.setData({ step: 'error', errorText: '这个地点还没有配置挑战' });
+        this.setData({ step: 'error', errorText: '这个地点还没有配置挑战', errorRetryable: false });
       },
       // 2026-11-14：公开地点读取失败可直接重试，上传和完成挑战才要求登录。
       fail: (res) => {
