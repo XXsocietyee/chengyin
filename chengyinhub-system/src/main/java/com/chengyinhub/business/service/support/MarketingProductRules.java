@@ -8,8 +8,12 @@ import com.chengyinhub.business.domain.OmsTicket;
 import com.chengyinhub.business.exception.MarketingProductException;
 import com.chengyinhub.business.mapper.CmsTopicMapper;
 import com.chengyinhub.business.service.IOmsTicketService;
+import com.chengyinhub.business.service.IProductRoleService;
 import com.chengyinhub.business.mapper.MarketingProductMapper;
 import com.chengyinhub.business.mapper.MarketingProductOrderMapper;
+import com.chengyinhub.business.util.RefundPolicy;
+import com.chengyinhub.common.constant.PurchaseKind;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -31,6 +35,14 @@ public class MarketingProductRules {
     /** 纯积分多席商品的折合金额口径；非 Spring 构造时按缺省费率。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private PointsValuePolicy pointsValuePolicy;
+
+    /** 主题是否平台自营。缺失时按非自营拒绝，避免付款后才发现不能代收。 */
+    @Autowired(required = false)
+    private IProductRoleService productRoleService;
+
+    public void setProductRoleService(IProductRoleService productRoleService) {
+        this.productRoleService = productRoleService;
+    }
 
     public MarketingProductRules(MarketingProductMapper productMapper,
                                  MarketingProductOrderMapper orderMapper,
@@ -252,5 +264,88 @@ public class MarketingProductRules {
             throw MarketingProductException.conflict("ORIGINAL_ADMISSION_MISSING", "原订单尚无原注册准入");
         }
         return original.getId();
+    }
+
+    /**
+     * 成交发放前就会做的主题可售检查：主题还在、必须是平台自营、有平台费率、退款窗口能定下来。
+     * 付款参数发出之前调用，避免钱扣了才在发放时失败。判据与
+     * {@code MarketingProductFulfillmentServiceImpl} 落单时相同。
+     *
+     * @param termsVersion 成交条款版本。多人票与纯积分通票在开放式路线下允许没有履约窗，与发放侧同一例外。
+     */
+    public void requireCollectibleTopics(MarketingProduct product, List<MarketingProductItem> items,
+                                         String termsVersion) {
+        if (product == null || items == null || items.isEmpty()) {
+            throw MarketingProductException.conflict("PRODUCT_HAS_NO_CONTENT", "商品未绑定任何作品");
+        }
+        boolean explore = product.occupiesExploreCapacity();
+        boolean seatTicket = TopicSeatProducts.TERMS_VERSION.equals(termsVersion);
+        boolean purePointsPass = isPurePointsPass(product);
+        for (MarketingProductItem item : items) {
+            Long topicId = item == null ? null : item.getTopicId();
+            CmsTopic topic = topicId == null ? null : topicMapper.selectCmsTopicById(topicId);
+            if (topic == null || Integer.valueOf(2).equals(topic.getDelFlag())) {
+                throw MarketingProductException.conflict("TOPIC_NOT_SELLABLE",
+                        "商品覆盖的主题不存在或已删除");
+            }
+            if (productRoleService == null || !productRoleService.isPlatformOwned(topic.getId())) {
+                throw MarketingProductException.conflict("TOPIC_NOT_PLATFORM_OWNED",
+                        "商品覆盖的主题非平台自营,拒绝代收");
+            }
+            if (topic.getFeePlatformRate() == null) {
+                throw MarketingProductException.conflict("TOPIC_FEE_RATE_MISSING",
+                        "主题缺少平台费率快照,拒绝落单");
+            }
+            requireRefundWindow(product, topic, explore, seatTicket, purePointsPass);
+        }
+    }
+
+    /** 纯积分通票：无现金标价（null 或 ≤ 0）且配置了正数积分价，与发放侧 purePointsPass 口径对齐。 */
+    private static boolean isPurePointsPass(MarketingProduct product) {
+        if (product == null) return false;
+        boolean noCash = product.getCashPrice() == null || product.getCashPrice().signum() <= 0;
+        boolean hasPoints = product.getPointsPrice() != null && product.getPointsPrice() > 0;
+        return noCash && hasPoints;
+    }
+
+    /** 与发放侧 {@code applyRefundSnapshot} 同一口退款钟：定不下来就还不能收款。 */
+    private void requireRefundWindow(MarketingProduct product, CmsTopic topic, boolean explore,
+                                     boolean seatTicket, boolean purePointsPass) {
+        if (explore) {
+            Date anchor = exploreExpiryAnchor(product);
+            if (RefundPolicy.snapshotOnPurchase(PurchaseKind.EXPLORE_PASS, null, anchor) == null) {
+                throw MarketingProductException.conflict("REFUND_WINDOW_MISSING",
+                        "探索票缺少到期锚点,退款窗口无法确定,该商品暂不可售");
+            }
+            return;
+        }
+        try {
+            FulfillmentWindowResolver.resolve(topic, null);
+        } catch (IllegalStateException missingWindow) {
+            if ((seatTicket || purePointsPass) && FulfillmentWindowResolver.isOpenEnded(topic)) {
+                return;
+            }
+            throw MarketingProductException.conflict("REFUND_WINDOW_MISSING",
+                    "主题履约窗未配置,退款窗口无法确定,该商品暂不可售");
+        }
+    }
+
+    /** 只判断到期锚点能不能定下来，不把这个时刻写进订单。 */
+    private static Date exploreExpiryAnchor(MarketingProduct product) {
+        Integer kind = product.getValidityKind();
+        if (kind == null || kind == MarketingProduct.VALIDITY_NONE) {
+            return null;
+        }
+        if (kind == MarketingProduct.VALIDITY_RELATIVE_DAYS
+                || kind == MarketingProduct.VALIDITY_ACTIVATE_ON_FIRST_USE) {
+            if (product.getValidDays() == null || product.getValidDays() <= 0) {
+                return null;
+            }
+            return new Date();
+        }
+        if (kind == MarketingProduct.VALIDITY_FIXED_WINDOW) {
+            return product.getFixedValidTo();
+        }
+        return null;
     }
 }

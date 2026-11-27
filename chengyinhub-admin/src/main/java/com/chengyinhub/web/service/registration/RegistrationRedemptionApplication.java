@@ -1046,7 +1046,8 @@ public class RegistrationRedemptionApplication {
             if (original != null) return original;
             return new AjaxResult(e.getCode() == null ? com.chengyinhub.common.constant.HttpStatus.ERROR : e.getCode(), e.getMessage());
         } catch (Exception e) {
-            return AjaxResult.error(e.getMessage());
+            logger.error("扫码核销失败 type={} activityId={}", type, activityId, e);
+            return AjaxResult.error("核销失败，请稍后重试");
         }
     }
 

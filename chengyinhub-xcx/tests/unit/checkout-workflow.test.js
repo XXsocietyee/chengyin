@@ -199,7 +199,8 @@ test('微信支付失败不得把 requestPayment 原始诊断串透传给页面'
     {
       ok: false,
       cancelled: false,
-      errMsg: '支付失败，请重试',
+      errMsg: '支付结果未确认，请到订单查看，勿重复支付',
+      paymentLaunched: true,
     },
   ]]);
 });

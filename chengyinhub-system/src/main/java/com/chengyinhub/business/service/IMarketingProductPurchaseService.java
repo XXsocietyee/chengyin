@@ -39,7 +39,12 @@ public interface IMarketingProductPurchaseService {
      * 需 {@code marketing.product.cash-enabled=true} 且 MKO 路由已由 owner 合入；
      * JSAPI 用会员 wxOpenId，APP 不需要 openid。
      */
-    Map<String, Object> prepareCashPayment(long callerMemberId, String orderNo, String payChannel);
+    default Map<String, Object> prepareCashPayment(long callerMemberId, String orderNo, String payChannel) {
+        return prepareCashPayment(callerMemberId, orderNo, payChannel, null);
+    }
+
+    /** clientPlatform 为 ios 时，本方法只发 JSAPI，虚拟商品直接拒绝。 */
+    Map<String, Object> prepareCashPayment(long callerMemberId, String orderNo, String payChannel, String clientPlatform);
 
     Map<String, Object> cancel(long callerMemberId, String orderNo);
 

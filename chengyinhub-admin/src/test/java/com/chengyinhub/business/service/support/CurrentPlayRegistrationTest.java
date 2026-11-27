@@ -104,6 +104,14 @@ class CurrentPlayRegistrationTest {
         pass.setRegistrationStatus(2);pass.setMemberId(8L);
         assertThrows(IllegalStateException.class,()->CurrentPlayRegistration.requireToContinue(activities,registrations,7L,1L,30L,null,now));
     }
+    @Test void topicExplorePassWithoutAnActivityDoesNotEnterOrLoadAnActivity() {
+        current.setOwnerType(1L); current.setOwnerId(30L); current.setPurchaseKind(3); current.setExpiresAt(null);
+        IllegalStateException denied = assertThrows(IllegalStateException.class,
+                () -> CurrentPlayRegistration.require(activities, registrations, 7L, 1L, 30L, null, now));
+        assertEquals("活动结束时间未完善，暂不可使用", denied.getMessage());
+        verifyNoInteractions(activities);
+    }
+
     @Test void exploreTicketStillStopsAtActivityEndEvenWhenContinuing() {
         activity.setEndDate(new Date(9000L)); // 活动已结束：探索票按已定规则不再新使用
         assertThrows(IllegalStateException.class,()->CurrentPlayRegistration.requireToContinue(activities,registrations,7L,2L,9L,null,now));

@@ -107,6 +107,7 @@ public class RegistrationTicketApplication {
             String rejection = ExploreTicketUsePolicy.rejection(reg.getPurchaseKind(), activity.getEndDate(), new Date());
             if (rejection != null) return AjaxResult.error(rejection);
         } else if (Integer.valueOf(3).equals(reg.getPurchaseKind())) {
+            // 没有对上的活动就不造一场，也不出码。
             return AjaxResult.error("探索票所属活动不可用");
         }
         String type = selectedSeat == null

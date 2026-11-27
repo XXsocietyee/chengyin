@@ -1,5 +1,6 @@
 package com.chengyinhub.business.service;
 
+import com.chengyinhub.business.domain.CmsTopic;
 import com.chengyinhub.business.domain.MarketingProduct;
 import com.chengyinhub.business.domain.MarketingProductItem;
 import com.chengyinhub.business.domain.MarketingProductOrder;
@@ -28,11 +29,13 @@ import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -78,6 +81,8 @@ class MarketingProductPurchaseServiceTest {
     private MarketingProduct addOn;
     private List<MarketingProductItem> items;
     private CmsTopicMapper topics;
+    private MarketingProductRules rules;
+    private IProductRoleService productRoles;
     private final AtomicReference<MarketingProductOrder> inserted = new AtomicReference<>();
 
     @BeforeEach
@@ -99,7 +104,11 @@ class MarketingProductPurchaseServiceTest {
         com.chengyinhub.business.domain.OmsTicket ticket = new com.chengyinhub.business.domain.OmsTicket();
         ticket.setId(77L);
         when(ticketService.selectOmsTicketById(77L)).thenReturn(ticket);
-        MarketingProductRules rules = new MarketingProductRules(products, orders, topics, ticketService);
+        rules = new MarketingProductRules(products, orders, topics, ticketService);
+        productRoles = mock(IProductRoleService.class);
+        when(productRoles.isPlatformOwned(anyLong())).thenReturn(true);
+        rules.setProductRoleService(productRoles);
+        stubCollectibleTopics(topics, null);
         verifiedFacts = mock(WechatVerifiedPaymentFactService.class);
         service = new MarketingProductPurchaseServiceImpl(products, orders, gifts, members, points,
                 rules, PointsValuePolicy.codeDefaults(), signer, new MarketingCashChannel(false), giftService,
@@ -403,6 +412,148 @@ class MarketingProductPurchaseServiceTest {
     }
 
     @Test
+    void cashPurchaseRefusesBeforeOrderWhenTopicCannotBeGranted() {
+        MarketingProductOrderRequest cash = request();
+        cash.setPayMode(MarketingProductOrder.PAY_MODE_CASH);
+        signed(cash, 120);
+        when(topics.selectCmsTopicById(100L)).thenReturn(null);
+
+        MarketingProductException missing = assertThrows(MarketingProductException.class,
+                () -> service.purchase(MEMBER, cash));
+        assertEquals("TOPIC_NOT_SELLABLE", missing.getReasonCode());
+        verify(orders, never()).insert(any());
+
+        stubCollectibleTopics(topics, null);
+        CmsTopic thirdParty = collectibleTopic(100L, null);
+        when(topics.selectCmsTopicById(100L)).thenReturn(thirdParty);
+        when(productRoles.isPlatformOwned(100L)).thenReturn(false);
+        MarketingProductException owned = assertThrows(MarketingProductException.class,
+                () -> service.purchase(MEMBER, cash));
+        assertEquals("TOPIC_NOT_PLATFORM_OWNED", owned.getReasonCode());
+
+        when(productRoles.isPlatformOwned(anyLong())).thenReturn(true);
+        CmsTopic noFee = collectibleTopic(100L, null);
+        noFee.setFeePlatformRate(null);
+        when(topics.selectCmsTopicById(100L)).thenReturn(noFee);
+        MarketingProductException fee = assertThrows(MarketingProductException.class,
+                () -> service.purchase(MEMBER, cash));
+        assertEquals("TOPIC_FEE_RATE_MISSING", fee.getReasonCode());
+
+        CmsTopic noWindow = collectibleTopic(100L, null);
+        noWindow.setStartDate(null);
+        noWindow.setEndDate(null);
+        when(topics.selectCmsTopicById(100L)).thenReturn(noWindow);
+        MarketingProductException window = assertThrows(MarketingProductException.class,
+                () -> service.purchase(MEMBER, cash));
+        assertEquals("REFUND_WINDOW_MISSING", window.getReasonCode());
+        verify(orders, never()).insert(any());
+    }
+
+    @Test
+    void purePointsPassOnOpenEndedTopicPassesWhileHalfConfiguredWindowStillFails() {
+        // 复现 9919301 场景：cashPrice=null（或 <=0）+ pointsPrice=1 兑换无起止日的常驻城市路线
+        product.setCashPrice(null);
+        product.setPointsPrice(1);
+        when(members.deductPoints(MEMBER, 1)).thenReturn(1);
+        CmsTopic openEnded = collectibleTopic(100L, null);
+        openEnded.setStartDate(null);
+        openEnded.setEndDate(null);
+        when(topics.selectCmsTopicById(anyLong())).thenReturn(openEnded);
+
+        MarketingProductOrderRequest ptsNullCash = request();
+        ptsNullCash.setPayMode(MarketingProductOrder.PAY_MODE_POINTS);
+        signed(ptsNullCash, 1);
+        assertDoesNotThrow(() -> service.purchase(MEMBER, ptsNullCash));
+        verify(orders, times(1)).insert(any());
+
+        // cashPrice == 0 的纯积分通票同样放行
+        inserted.set(null);
+        product.setCashPrice(BigDecimal.ZERO);
+        MarketingProductOrderRequest ptsZeroCash = request();
+        ptsZeroCash.setRequestId("req-pure-points-zero-cash");
+        ptsZeroCash.setPayMode(MarketingProductOrder.PAY_MODE_POINTS);
+        signed(ptsZeroCash, 1);
+        assertDoesNotThrow(() -> service.purchase(MEMBER, ptsZeroCash));
+        verify(orders, times(2)).insert(any());
+
+        // 半缺履约窗（仅配 startDate 未配 endDate，或仅配 endDate 未配 startDate）即使纯积分通票仍必须拒绝
+        inserted.set(null);
+        CmsTopic halfWindowStartOnly = collectibleTopic(100L, null);
+        halfWindowStartOnly.setEndDate(null);
+        when(topics.selectCmsTopicById(100L)).thenReturn(halfWindowStartOnly);
+        MarketingProductOrderRequest halfReq = request();
+        halfReq.setRequestId("req-pure-points-half-window");
+        halfReq.setPayMode(MarketingProductOrder.PAY_MODE_POINTS);
+        signed(halfReq, 1);
+        MarketingProductException halfRejected = assertThrows(MarketingProductException.class,
+                () -> service.purchase(MEMBER, halfReq));
+        assertEquals("REFUND_WINDOW_MISSING", halfRejected.getReasonCode());
+
+        CmsTopic halfWindowEndOnly = collectibleTopic(100L, null);
+        halfWindowEndOnly.setStartDate(null);
+        when(topics.selectCmsTopicById(100L)).thenReturn(halfWindowEndOnly);
+        MarketingProductException halfEndRejected = assertThrows(MarketingProductException.class,
+                () -> service.purchase(MEMBER, halfReq));
+        assertEquals("REFUND_WINDOW_MISSING", halfEndRejected.getReasonCode());
+        verify(orders, times(2)).insert(any());
+
+        // 现金非多人票商品指向开放式路线仍必须拒绝
+        product.setCashPrice(new BigDecimal("39.99"));
+        product.setPointsPrice(120);
+        when(topics.selectCmsTopicById(100L)).thenReturn(openEnded);
+        MarketingProductOrderRequest cashNonSeat = request();
+        cashNonSeat.setRequestId("req-cash-non-seat-open");
+        cashNonSeat.setPayMode(MarketingProductOrder.PAY_MODE_CASH);
+        signed(cashNonSeat, 120);
+        MarketingProductException cashRejected = assertThrows(MarketingProductException.class,
+                () -> service.purchase(MEMBER, cashNonSeat));
+        assertEquals("REFUND_WINDOW_MISSING", cashRejected.getReasonCode());
+        verify(orders, times(2)).insert(any());
+    }
+
+    @Test
+    void prepareCashPaymentRejectsExplicitIosClientPlatform() {
+        MarketingProductOrder order = pendingCash(snapshot("城市 7 日通行证",
+                MarketingProduct.VALIDITY_ACTIVATE_ON_FIRST_USE, 7, MarketingProductOrder.FULFILLMENT_SELF, 1, 1));
+        order.setPayMode(MarketingProductOrder.PAY_MODE_CASH);
+        order.setStatus(MarketingProductOrder.STATUS_PENDING_CASH);
+        WechatPaymentOperations pay = cashPayService(order);
+
+        MarketingProductException rejected = assertThrows(MarketingProductException.class,
+                () -> cashService(pay).prepareCashPayment(MEMBER, order.getOrderNo(), null, "ios"));
+        assertEquals("IOS_VIRTUAL_PAY", rejected.getReasonCode());
+        verify(pay, never()).createGenericOrder(anyString(), any(), anyString(), anyString());
+    }
+
+    @Test
+    void prepareCashPaymentRefusesParamsWhenTopicIsNoLongerCollectible() {
+        MarketingProductOrder order = pendingCash(snapshot("城市 7 日通行证",
+                MarketingProduct.VALIDITY_ACTIVATE_ON_FIRST_USE, 7, MarketingProductOrder.FULFILLMENT_SELF, 1, 1));
+        order.setPayMode(MarketingProductOrder.PAY_MODE_CASH);
+        order.setStatus(MarketingProductOrder.STATUS_PENDING_CASH);
+        WechatPaymentOperations pay = cashPayService(order);
+        when(pay.createGenericOrder(anyString(), any(), anyString(), anyString())).thenReturn(Map.of());
+        UmsMember buyer = member(500L);
+        buyer.setWxOpenId("openid-7");
+        when(members.selectUmsMemberById(MEMBER)).thenReturn(buyer);
+        CmsTopicMapper cashTopics = mock(CmsTopicMapper.class);
+        CmsTopic noFee = collectibleTopic(100L, null);
+        noFee.setFeePlatformRate(null);
+        when(cashTopics.selectCmsTopicById(anyLong())).thenReturn(noFee);
+        MarketingProductRules cashRules = new MarketingProductRules(products, orders, cashTopics,
+                mock(IOmsTicketService.class));
+        cashRules.setProductRoleService(productRoles);
+        MarketingProductPurchaseServiceImpl cash = new MarketingProductPurchaseServiceImpl(
+                products, orders, gifts, members, points, cashRules, PointsValuePolicy.codeDefaults(), signer,
+                new MarketingCashChannel(true), giftService, fulfillment, extraSeatService, verifiedFacts, pay);
+
+        MarketingProductException rejected = assertThrows(MarketingProductException.class,
+                () -> cash.prepareCashPayment(MEMBER, order.getOrderNo(), null));
+        assertEquals("TOPIC_FEE_RATE_MISSING", rejected.getReasonCode());
+        verify(pay, never()).createGenericOrder(anyString(), any(), anyString(), anyString());
+    }
+
+    @Test
     void prepareCashPaymentStaysClosedUntilRouteEnabled() {
         MarketingProductException rejection = assertThrows(MarketingProductException.class,
                 () -> service.prepareCashPayment(MEMBER, "MKO-ANY", null));
@@ -584,12 +735,22 @@ class MarketingProductPurchaseServiceTest {
     }
 
     private void stubSinglePrice(BigDecimal price) {
-        when(topics.selectCmsTopicById(anyLong())).thenAnswer(inv -> {
-            com.chengyinhub.business.domain.CmsTopic topic = new com.chengyinhub.business.domain.CmsTopic();
-            topic.setId(inv.getArgument(0));
-            topic.setSelfPlayPrice(price);
-            return topic;
-        });
+        stubCollectibleTopics(topics, price);
+    }
+
+    private void stubCollectibleTopics(CmsTopicMapper mapper, BigDecimal price) {
+        when(mapper.selectCmsTopicById(anyLong())).thenAnswer(inv -> collectibleTopic(inv.getArgument(0), price));
+    }
+
+    private static CmsTopic collectibleTopic(Long id, BigDecimal price) {
+        CmsTopic topic = new CmsTopic();
+        topic.setId(id);
+        topic.setDelFlag(0);
+        topic.setFeePlatformRate(new BigDecimal("0.06"));
+        topic.setSelfPlayPrice(price);
+        topic.setStartDate(new Date(1_700_000_000_000L));
+        topic.setEndDate(new Date(1_800_000_000_000L));
+        return topic;
     }
 
     // ------------------------------------------------------------------ fixtures
@@ -646,11 +807,13 @@ class MarketingProductPurchaseServiceTest {
     }
 
     private MarketingProductPurchaseServiceImpl cashService(WechatPaymentOperations pay) {
-        CmsTopicMapper topics = mock(CmsTopicMapper.class);
-        MarketingProductRules rules = new MarketingProductRules(products, orders, topics,
+        CmsTopicMapper cashTopics = mock(CmsTopicMapper.class);
+        stubCollectibleTopics(cashTopics, null);
+        MarketingProductRules cashRules = new MarketingProductRules(products, orders, cashTopics,
                 mock(IOmsTicketService.class));
+        cashRules.setProductRoleService(productRoles);
         return new MarketingProductPurchaseServiceImpl(products, orders, gifts, members, points,
-                rules, PointsValuePolicy.codeDefaults(), signer, new MarketingCashChannel(true), giftService,
+                cashRules, PointsValuePolicy.codeDefaults(), signer, new MarketingCashChannel(true), giftService,
                 fulfillment, extraSeatService, verifiedFacts, pay);
     }
 

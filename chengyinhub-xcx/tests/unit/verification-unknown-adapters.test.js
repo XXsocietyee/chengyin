@@ -214,11 +214,12 @@ for (const [file, method] of entries) {
   });
 }
 
-test('真实事务后异常反例：核销事务先于发分，最外层仍返回无类型业务500', () => {
+test('真实事务后异常：核销事务先于发分，最外层不回传异常原文', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../../../chengyinhub-admin/src/main/java/com/chengyinhub/web/service/registration/RegistrationRedemptionApplication.java'), 'utf8');
   const method = source.slice(source.indexOf('public AjaxResult scanQrCode(Actor actorContext, String type, String code, Long activityId)'));
   assert.ok(method.indexOf('registrationService.verifyAndSettle(') < method.indexOf('pointsAwardService.award('));
-  assert.match(method, /catch \(Exception e\) \{\s*return AjaxResult.error\(e.getMessage\(\)\)/);
+  assert.doesNotMatch(method, /catch \(Exception e\) \{\s*return AjaxResult\.error\(e\.getMessage\(\)\)/);
+  assert.match(method, /catch \(Exception e\) \{\s*logger\.error\([\s\S]*?e\);\s*return AjaxResult\.error\("核销失败，请稍后重试"\)/);
 });
 
 for (const [file, method] of entries.filter(row => row[0] !== 'pages/merchant/index/index.js')) {

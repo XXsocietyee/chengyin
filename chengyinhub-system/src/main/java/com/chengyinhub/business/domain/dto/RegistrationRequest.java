@@ -74,6 +74,8 @@ public class RegistrationRequest {
      *  下单时携带；后端重算当前报价签名比对，不一致返回 409 促使前端重新报价。为空=兼容旧版跳过校验。 */
     @Schema(description = "报价签名(quote 接口返回)", example = "e10adc...")
     private String quoteSign;
+    /** 小程序 wx.getSystemInfoSync().platform。iOS 虚拟票在虚拟支付未开通时拒绝 JSAPI。 */
+    private String clientPlatform;
 
     public String getQuoteSign() {
         return quoteSign;
@@ -82,6 +84,10 @@ public class RegistrationRequest {
     public void setQuoteSign(String quoteSign) {
         this.quoteSign = quoteSign;
     }
+
+    public String getClientPlatform() { return clientPlatform; }
+
+    public void setClientPlatform(String clientPlatform) { this.clientPlatform = clientPlatform; }
 
     /**
      * 选择的组合包/礼品业务码（促销供给）。客户端<b>只给业务码</b>,价格与适用性全部服务端读配置判定。

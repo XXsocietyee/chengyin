@@ -218,7 +218,9 @@ function createCheckoutWorkflow(deps) {
           paymentSettled = true;
           state = 'idle'; // 取消/失败可重试
           if (payRes && payRes.cancelled) call(handlers.onPayCancel);
-          else call(handlers.onPayFail, safePaymentFailure(payRes, '支付失败，请重试'));
+          else call(handlers.onPayFail, safePaymentFailure(
+            Object.assign({}, payRes, { paymentLaunched: true }),
+            '支付结果未确认，请到订单查看，勿重复支付'));
         }
       }
       // SDK 迟迟没回调:只启动旁路核对原订单,不推断失败、不再拉起支付、也不丢弃随后到达的真回调。
