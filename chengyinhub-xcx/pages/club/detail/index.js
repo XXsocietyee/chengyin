@@ -995,6 +995,8 @@ Page({
     this._detailRequestSeq = (this._detailRequestSeq || 0) + 1;
     this._memberRequestSeq = (this._memberRequestSeq || 0) + 1;
     this.clearGroupCodeTimer();
+    // L08-130:加入动效的收尾不许在页面销毁后 setData / 重拉详情
+    if (this._joinFxTimer) { clearTimeout(this._joinFxTimer); this._joinFxTimer = null; }
   },
 
   // 隐私授权闸:app.js 优先调这里(页内真弹窗),没有这个方法的页面才回退到 /pages/privacy 路由页 ——
@@ -2777,6 +2779,9 @@ Page({
           // 群聊入口 2026-09-09 按稿从俱乐部页撤掉,这里也不再引导进群。
           that.setData({ joinFx: 'done' });
           const afterFx = function () {
+            that._joinFxTimer = null;
+            // L08-130:离开页面后这只定时器不再改视图,也不再发详情请求
+            if (that._sceneGuardDestroyed) return;
             that.openWelcome(that.data.club);
             that.setData({ joinFx: '' });
             that.loadDetail();

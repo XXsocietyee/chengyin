@@ -9,10 +9,11 @@ const vm = require('node:vm');
 const ROOT = path.resolve(__dirname, '../..');
 const REL = 'pages/club/detail/index.js';
 
-function loadClubDetail() {
+function loadClubDetail(options) {
   const requests = [];
   const requiredIds = [];
-  const timers = { live: new Set(), next: 1, fns: new Map() };
+  const deferTimeout = !!(options && options.deferTimeout);
+  const timers = { live: new Set(), next: 1, fns: new Map(), timeouts: [] };
   const app = {
     globalData: { statusBarHeight: 20, navBarHeight: 44 },
     sendRequest(o) { requests.push(o); },
@@ -38,7 +39,16 @@ function loadClubDetail() {
   vm.runInNewContext(fs.readFileSync(file, 'utf8'), {
     getApp: () => app, Page(p) { definition = p; }, Component(p) { definition = p; },
     getCurrentPages: () => [{}, {}],
-    setTimeout(fn) { if (fn) fn(); return 0; }, clearTimeout() {},
+    setTimeout(fn, ms) {
+      if (!deferTimeout) { if (fn) fn(); return 0; }
+      const id = timers.next++;
+      timers.timeouts.push({ id, fn, ms, cleared: false });
+      return id;
+    },
+    clearTimeout(id) {
+      const row = timers.timeouts.find((item) => item.id === id);
+      if (row) row.cleared = true;
+    },
     setInterval(fn) { const id = timers.next++; timers.live.add(id); timers.fns.set(id, fn); return id; },
     clearInterval(id) { timers.live.delete(id); },
     console, Set, Map, Date, JSON, Math, Object, String, Number, Array, Promise, RegExp, Error, encodeURIComponent, decodeURIComponent,
@@ -648,4 +658,24 @@ test('L08-019 回归:概览下滑收起「加入」后去别的 tab 回到顶部
   page.onPageScroll({ scrollTop: 0 });   // 在帖子 tab 回到顶部
   page.switchTab({ currentTarget: { dataset: { tab: 'overview' } } });
   assert.equal(page.data.joinHidden, false, '切回概览停在顶部:没法再往上滑,按钮不能一直收着');
+});
+
+test('L08-130 加入动效未结束就离开:不再弹欢迎层,也不再重拉详情', () => {
+  const { page, requests, timers } = loadClubDetail({ deferTimeout: true });
+  page.setData({ clubId: 36, club: { id: 36, name: '城市乐居人', joinPolicy: 0 }, reducedMotion: false });
+  page.submitJoin('');
+  const join = requests.filter((r) => r.url === '/api/club/join');
+  assert.equal(join.length, 1);
+  join[0].success({ code: '200', data: { state: 'joined' } });
+  assert.equal(page.data.joinFx, 'done');
+  assert.equal(page.data.welcomeShow, false);
+  const pending = timers.timeouts.filter((t) => !t.cleared);
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].ms, 900);
+  page.onUnload();
+  assert.equal(timers.timeouts.filter((t) => !t.cleared).length, 0, '离页清掉定时器');
+  pending[0].fn();
+  assert.equal(page.data.welcomeShow, false);
+  assert.equal(page.data.joinFx, 'done', '离页后不再收起动效');
+  assert.equal(requests.filter((r) => r.url === '/api/club/detail').length, 0);
 });

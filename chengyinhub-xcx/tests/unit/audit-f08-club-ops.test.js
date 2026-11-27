@@ -147,6 +147,72 @@ test('L08-095 客户列表:看完客户直接返回不重拉;详情保存过才�
   assert.equal(byUrl(requests, '/api/club/crm/customers/list').length, n + 1)
 })
 
+function customerRows(from, count, remarkAt) {
+  return Array.from({ length: count }, (_, i) => {
+    const memberId = from + i
+    return {
+      memberId,
+      verifiedCount: 1,
+      pendingCount: 0,
+      displayName: '客' + memberId,
+      remark: remarkAt && remarkAt[memberId] ? remarkAt[memberId] : '',
+    }
+  })
+}
+
+test('L08-129 客户列表:保存后回来按已翻到的深度重拉,后面的页还在', () => {
+  let events = null
+  const { page, requests } = mount('pages/club/customers/index.js', { wx: { navigateTo(o) { events = o.events } } })
+  page.onLoad({ clubId: '5' })
+  page.onShow()
+  const list = () => byUrl(requests, '/api/club/crm/customers/list')
+  list()[0].success({ code: '200', data: { total: 120, monthNew: 1, items: customerRows(1, 50) } })
+  page.onReachBottom()
+  list()[1].success({ code: '200', data: { total: 120, monthNew: 1, items: customerRows(51, 50) } })
+  list()[1].complete()
+  assert.equal(page.data.items.length, 100)
+  page.openCustomer({ currentTarget: { dataset: { memberId: 80 } } })
+  events.customerSaved()
+  page.onShow()
+  const body = JSON.parse(list()[2].data)
+  assert.equal(body.pageNum, 1)
+  assert.equal(body.pageSize, 100, '重拉要盖住已经翻过的两页')
+  list()[2].success({ code: '200', data: { total: 120, monthNew: 1, items: customerRows(1, 100, { 80: '周末常来' }) } })
+  assert.equal(page.data.items.length, 100, '回来后第 2 页还在')
+  assert.equal(page.data.items[79].subText, '周末常来')
+  assert.equal(page._pageNum, 2)
+  page.onReachBottom()
+  const next = JSON.parse(list()[3].data)
+  assert.equal(next.pageNum, 3)
+  assert.equal(next.pageSize, 50, '再往下仍按原来的页大小')
+})
+
+test('L08-129 已加载超过单页上限:先收回 200 行,再把后面的页续上', () => {
+  let events = null
+  const { page, requests } = mount('pages/club/customers/index.js', { wx: { navigateTo(o) { events = o.events } } })
+  page.onLoad({ clubId: '5' })
+  page.onShow()
+  page._pageNum = 5
+  page._hasMore = true
+  page.setData({ state: 'ready', items: customerRows(1, 250) })
+  page.openCustomer({ currentTarget: { dataset: { memberId: 230 } } })
+  events.customerSaved()
+  page.onShow()
+  const list = () => byUrl(requests, '/api/club/crm/customers/list')
+  const refresh = JSON.parse(list()[1].data)
+  assert.equal(refresh.pageNum, 1)
+  assert.equal(refresh.pageSize, 200)
+  list()[1].success({ code: '200', data: { total: 300, monthNew: 0, items: customerRows(1, 200) } })
+  assert.equal(page.data.items.length, 200)
+  const tail = list()[2]
+  assert.equal(JSON.parse(tail.data).pageNum, 5)
+  assert.equal(JSON.parse(tail.data).pageSize, 50)
+  tail.success({ code: '200', data: { total: 300, monthNew: 0, items: customerRows(201, 50) } })
+  tail.complete()
+  assert.equal(page.data.items.length, 250, '第 5 页续回来了')
+  assert.equal(list().length, 3, '续到原来的深度就停')
+})
+
 test('L08-096 客户名单单行坏数据只跳过该行', () => {
   const vmod = require('../../pages/club/customers/view-model.js')
   const list = vmod.shapeCustomerList({ total: 3, monthNew: 0, items: [
