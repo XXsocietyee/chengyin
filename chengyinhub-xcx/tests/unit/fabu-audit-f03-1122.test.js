@@ -678,6 +678,90 @@ test('L03-161 连续两次定位：前一次的清空不会抹掉后一次的锚
   assert.equal(page.data.scrollIntoView, 'b')
 })
 
+function startTimePage() {
+  const page = makePage()
+  page.data.dateList = [{ date: '2026-12-01', display: '12月1日' }]
+  page.data.hours = ['09']
+  page.data.minutes = ['00']
+  page.data.startDateIndex = [0]
+  page.data.startTimeIndex = [0, 0]
+  page.data.formData.startDate = '2026-12-01 09:00:00'
+  page.data.formData.endDate = '2026-12-08 18:00:00'
+  return page
+}
+
+test('L03-142 确认开始后 300ms 打开结束选择；离开后这个定时器不再写页面', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const open = startTimePage()
+  open.confirmStartTime()
+  assert.equal(open.data.endTimePicker.show, false)
+  t.mock.timers.tick(300)
+  assert.equal(open.data.endTimePicker.show, true, '人还在时结束选择照常打开')
+  const gone = startTimePage()
+  gone.confirmStartTime()
+  gone.onUnload()
+  t.mock.timers.tick(300)
+  assert.equal(gone.data.endTimePicker.show, false)
+})
+
+test('L03-142 返回键重挂守卫的定时器在离开后不再写页面', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const page = makePage()
+  page._installDraftAutosave()
+  page.setData({ topicDetailShow: true, lookSheetShow: true })
+  page.onNativeBackGuard()
+  assert.equal(page.data.backGuardOff, true)
+  assert.equal(page.data.lookSheetShow, false)
+  page.onUnload()
+  t.mock.timers.tick(50)
+  assert.equal(page.data.backGuardOff, true)
+})
+
+test('L03-142 故事块拖拽量尺寸：人还在就拿起；离开后回包不再写页面', () => {
+  const query = {}
+  query.selectAll = () => query
+  query.select = () => query
+  query.boundingClientRect = () => query
+  query.scrollOffset = () => query
+  query.exec = (cb) => { query.cb = cb }
+  const original = wx.createSelectorQuery
+  wx.createSelectorQuery = () => query
+  try {
+    const reply = () => query.cb([[{ top: 10, height: 40 }], { top: 0, bottom: 200, height: 200 }, { scrollTop: 0, scrollHeight: 400 }])
+    const arm = (page) => {
+      page.data.formData.chapters = [{ _localId: 'c', blocks: [{ type: 'image', key: 'b1' }] }]
+      page.data.storyEditor = Object.assign({}, page.data.storyEditor, { chapterIndex: 0 })
+      page.onStoryDragArm({ currentTarget: { dataset: { blockkey: 'b1', index: 0 } }, touches: [{ clientY: 20 }] })
+    }
+    const live = makePage()
+    arm(live)
+    reply()
+    assert.equal(live.data.storyDrag.key, 'b1')
+    const gone = makePage()
+    arm(gone)
+    gone.onUnload()
+    reply()
+    assert.equal(gone.data.storyDrag.key, '')
+  } finally {
+    if (original) wx.createSelectorQuery = original
+    else delete wx.createSelectorQuery
+  }
+})
+
+test('L03-142 录入地点的选点回包在离开后不再写入待编排', () => {
+  const page = makePage()
+  const calls = []
+  const original = wx.chooseLocation
+  wx.chooseLocation = (options) => { calls.push(options) }
+  try {
+    page.startClubPlaceCapture()
+    assert.equal(calls.length, 1)
+    page.onUnload()
+    calls[0].success({ name: '旧码头', address: '滨江路', longitude: 121.48, latitude: 31.23 })
+    assert.deepEqual(page.data.pendingMaterials, [])
+  } finally { wx.chooseLocation = original }
+})
+
 test('L03-154 卸载后迟到的俱乐部列表回包不写页面', () => {
   const page = makePage()
   page.loadMyClubs()

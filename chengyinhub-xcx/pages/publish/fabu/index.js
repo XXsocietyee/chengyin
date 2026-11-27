@@ -1491,7 +1491,11 @@ Page({
     if (top) top.close();
     if (this._backGuardOn()) {
       this.setData({ backGuardOff: true });
-      setTimeout(() => this.setData({ backGuardOff: false }), 50);
+      if (this._backGuardTimer) clearTimeout(this._backGuardTimer);
+      this._backGuardTimer = setTimeout(() => {
+        this._backGuardTimer = null;
+        if (!this._unloaded) this.setData({ backGuardOff: false });
+      }, 50);
     }
   },
 
@@ -2242,6 +2246,7 @@ Page({
       .exec((res) => {
         if (this._storyArming !== arming) return;
         this._storyArming = null;
+        if (this._unloaded) return; // L03-142:量尺寸是异步的,离开后不再拿起这块
         const rects = (res && res[0]) || [];
         const area = (res && res[1]) || { top: 0, bottom: 0, height: 0 };
         const offset = (res && res[2]) || {};
@@ -2735,7 +2740,7 @@ Page({
   },
 
   startClubPlaceCapture() {
-    if (this._clubPlaceCaptureActive) return;
+    if (this._unloaded || this._clubPlaceCaptureActive) return;
     this._clubPlaceCaptureActive = true;
     this._pickNextClubPlace();
   },
@@ -2744,6 +2749,7 @@ Page({
     if (!this._clubPlaceCaptureActive || this._unloaded) return;
     pickLocation({
       onPick: (poi) => {
+        if (!this._clubPlaceCaptureActive || this._unloaded) return;
         const node = this._emptyNodesForm();
         node._localId = this._genLocalId();
         node.name = poi.name || '';
@@ -3528,10 +3534,10 @@ Page({
     if (this._pendingUndoTimer) clearTimeout(this._pendingUndoTimer);
     this._pendingUndoTimer = null;
     this._pendingUndoSnapshot = null;
-    // L03-142/185:卸载后不再让地图重绘、撤销条、滚动锚点的定时器回来 setData
+    // L03-142/185:卸载后不再让地图重绘、撤销条、滚动锚点、结束时间选择和返回守卫的定时器回来 setData
     this._resetPublicTempMore();
-    [this._routeMapTimer, this._storyUndoTimer, this._pageUndoTimer, this._scrollSheetTimer].forEach(t => { if (t) clearTimeout(t); });
-    this._routeMapTimer = this._storyUndoTimer = this._pageUndoTimer = this._scrollSheetTimer = null;
+    [this._routeMapTimer, this._storyUndoTimer, this._pageUndoTimer, this._scrollSheetTimer, this._endPickerTimer, this._backGuardTimer].forEach(t => { if (t) clearTimeout(t); });
+    this._routeMapTimer = this._storyUndoTimer = this._pageUndoTimer = this._scrollSheetTimer = this._endPickerTimer = this._backGuardTimer = null;
     this._clubPlaceCaptureActive = false;
     this._precheckToken = (this._precheckToken || 0) + 1; // 让在途预检回调失效
     this._identityStatusEpoch = (this._identityStatusEpoch || 0) + 1;
@@ -3677,9 +3683,11 @@ Page({
     }, () => this.refreshPrimaryActionState());
     this.updateTicketTimes(startDateTime, this.data.formData.endDate);
 
-    // 显示结束时间选择器
-    setTimeout(() => {
-      this.showEndTimePicker();
+    // 显示结束时间选择器。离开页面要停掉,否则 300ms 后还会把选择器写回已卸载的页
+    if (this._endPickerTimer) clearTimeout(this._endPickerTimer);
+    this._endPickerTimer = setTimeout(() => {
+      this._endPickerTimer = null;
+      if (!this._unloaded) this.showEndTimePicker();
     }, 300);
   },
 
