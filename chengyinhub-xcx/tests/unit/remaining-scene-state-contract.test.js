@@ -600,20 +600,8 @@ test('活动票种:库存未知可选，只有确证的 0 才算售罄', () => {
   const tickets = harness.instance.data.tickets
   assert.deepEqual(tickets.map((t) => t._available), [true, false, true])
   assert.deepEqual(tickets.map((t) => t._inventoryText), ['—', '已售罄', '剩余 3 张'])
-
-  harness.instance.selectTicket({ currentTarget: { dataset: { id: '11' } } })
-  assert.equal(harness.instance.data.selectedTicketId, '11', '库存未知的票必须可选 —— 售罄由服务端判')
-  // utils/toast.js 走宿主全局 wx(组件依赖不在上面的 sandbox 里),所以这里只临时挂它。
-  const shown = []
-  const prevWx = global.wx
-  global.wx = { showToast: (o) => shown.push(o && o.title) }
-  try {
-    harness.instance.selectTicket({ currentTarget: { dataset: { id: '12' } } })
-  } finally {
-    global.wx = prevWx
-  }
-  assert.equal(harness.instance.data.selectedTicketId, '11', '确证售罄仍要拦在门外')
-  assert.deepEqual(shown, ['该票种已售罄'])
+  assert.equal(harness.instance.data.actionState, 'signup', '库存未知的票必须保持可报名，由服务端判售罄')
+  assert.equal(harness.instance.data.actionText, '立即报名')
 })
 
 test('活动评价提交单飞，失败后保留评分文案与正文内重试状态', () => {
