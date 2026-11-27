@@ -10,8 +10,28 @@ const { canContinue, isR5, feedbackWritable } = require('../../utils/playkit-r5-
 
 const { bundledMerchantGameAudioPath } = require('../../utils/merchant-game-assets.js');
 
+// 本地锁定到期后不再把这一局钉死。到期只解除锁定,不自动重发。
+const LOCAL_LOCK_MS = 120000;
+
 // L02-108:成功判定只有这一种写法(原先 == 200 / === '200' / Number() 混用)
 const isOk = (res) => !!res && Number(res.code) === 200;
+
+/** 网关 5xx:请求没进应用。业务 code 500 不是网关。 */
+function isGateway5xx(res) {
+  if (!res || typeof res !== 'object') return false;
+  const http = Number(res.httpStatus);
+  const code = Number(res.code);
+  if (http === 502 || http === 503 || http === 504 || code === 502 || code === 503 || code === 504) return true;
+  return http >= 500 && http <= 599 && !Number.isFinite(code);
+}
+
+function stampHttp(body, status) {
+  if (body && typeof body === 'object') {
+    if (body.httpStatus == null && status != null) body.httpStatus = Number(status);
+    return body;
+  }
+  return { httpStatus: Number(status) || 0, msg: body == null ? '' : String(body) };
+}
 
 Component({
   properties: {
@@ -33,6 +53,7 @@ Component({
     // 所有局只读原请求回执；负向查询不解除未知状态。
     unknown: false,
     photoRetryable: false,
+    originalRetryable: false,
     unknownText: '',
     readingBack: false,
     state: null,
@@ -51,10 +72,10 @@ Component({
          打开(show 由假变真)或换了节点才重开;关掉清掉记号,下次打开照旧重开。 */
       const key = show && nodeId ? String(nodeId) : '';
       if (key && this._startedFor !== key) { this._startedFor = key; this.start(); }
-      if (!show) { this._startedFor = ''; this._requestEpoch = (this._requestEpoch || 0) + 1; this.stopTimer(); this.stopDrawAudio(); this.stopBackgroundMusic(); }
+      if (!show) { this._startedFor = ''; this._requestEpoch = (this._requestEpoch || 0) + 1; this.clearLockTimer(); this.stopTimer(); this.stopDrawAudio(); this.stopBackgroundMusic(); }
     }
   },
-  lifetimes: { detached() { this._requestEpoch = (this._requestEpoch || 0) + 1; this.stopTimer(); this.destroyDrawAudio(); this.stopBackgroundMusic(); } },
+  lifetimes: { detached() { this._requestEpoch = (this._requestEpoch || 0) + 1; this.clearLockTimer(); this.stopTimer(); this.destroyDrawAudio(); this.stopBackgroundMusic(); } },
   pageLifetimes: { hide() { this.stopDrawAudio(); } },
   methods: {
     sessionRequestContext() {
@@ -92,9 +113,13 @@ Component({
         method,
         data: method === 'GET' ? data : JSON.stringify(data || {}),
         header: method === 'GET' ? undefined : { 'Content-Type': 'application/json' },
-        success: resolve,
-        successStatusAbnormal: resolve,
-        fail: reject
+        success: (body) => resolve(stampHttp(body, 200)),
+        successStatusAbnormal: (body, status) => resolve(stampHttp(body, status)),
+        fail: (err, status) => {
+          const failure = err instanceof Error ? err : new Error((err && (err.errMsg || err.msg)) || 'network');
+          if (status != null) failure.httpStatus = Number(status);
+          reject(failure);
+        }
       }));
     },
     pendingKey() {
@@ -124,11 +149,18 @@ Component({
       }
       try {
         const pending = wx.getStorageSync(this.pendingKey());
-        if (pending) {
+        const lockedAt = Number(pending && pending.lockedAt);
+        const expired = pending && (!lockedAt || Date.now() - lockedAt >= LOCAL_LOCK_MS);
+        if (expired) {
+          try { wx.removeStorageSync(this.pendingKey()); } catch (_) {}
+        } else if (pending) {
           this._unknownCommand = pending.command;
+          this._replayCommand = null;
+          this._lockStartedAt = lockedAt;
           this._unknownRequestContext = Object.assign({}, context, { sessionId: String(pending.state.sessionId || '') });
-          this.setData({ loading: false, acting: false, unknown: true, readingBack: false,
+          this.setData({ loading: false, acting: false, unknown: true, readingBack: false, originalRetryable: false,
             state: pending.state, error: '', unknownText: '正在查询原请求结果，请勿重新提交' });
+          this.armLockExpiry(lockedAt);
           return this.resolveUnknown();
         }
       } catch (_) {
@@ -140,7 +172,7 @@ Component({
       if (Object.values(scope).some(value => !value)) {
         this.setData({ loading: false, error: '玩法标识不完整，请重新进入' }); return;
       }
-      this.setData({ loading: true, acting: false, unknown: false, photoRetryable: false, readingBack: false, error: '', state: null });
+      this.setData({ loading: true, acting: false, unknown: false, photoRetryable: false, originalRetryable: false, readingBack: false, error: '', state: null });
       let restored;
       try { restored = photoPending.read(wx, context); }
       catch (error) { this.setData({ loading: false, unknown: true, error: error.message }); return; }
@@ -297,8 +329,11 @@ Component({
         ownerId: this.data.state.ownerId, ownerType: this.data.state.ownerType,
         challenge: this.data.state.challenge ? {} : null };
       const pendingKey = this.pendingKey();
-      try { if (!isPhoto) wx.setStorageSync(pendingKey, { command: original, state: originalState }); }
+      const lockedAt = Date.now();
+      this._lockStartedAt = lockedAt;
+      try { if (!isPhoto) wx.setStorageSync(pendingKey, { command: original, state: originalState, lockedAt }); }
       catch (_) { this.setData({ acting: false, error: '原请求记录无法保存，尚未提交' }); return; }
+      this._replayCommand = isPhoto ? null : command;
       this._unknownCommand = original;
       this._unknownRequestContext = context;
       return this.request('/api/play/advanced/action', 'POST', command).then(res => {
@@ -313,15 +348,19 @@ Component({
           if (!this.responseMatchesSession(res.data, context, name)) throw new Error('session response mismatch');
           wx.removeStorageSync(pendingKey);
           this._unknownCommand = null;
+          this._replayCommand = null;
+          this.clearLockTimer();
           this.hydrate(res.data);
           if (!this.currentRequestContext(context, false)) return;
-          this.setData({ acting: false });
+          this.setData({ acting: false, unknown: false, originalRetryable: false });
           return true;
         }
         if (capturedPhoto) photoPending.clear(wx, capturedPhoto);
         if (Number(res.code) === 409 && res.data && this.responseMatchesSession(res.data.view, context)) {
           wx.removeStorageSync(pendingKey);
           this._unknownCommand = null;
+          this._replayCommand = null;
+          this.clearLockTimer();
           this.hydrate(res.data.view);
           this.setData({ acting: false, error: safeUserMessage(res, '玩法状态已更新，请确认后再操作') });
           this.emitActionFail(name, sessionId, res.data && res.data.reason);
@@ -329,10 +368,12 @@ Component({
         }
         // Explicit 4xx come from ServiceException inside the @Transactional act: rolled back, nothing written.
         const status = Number(res.code);
-        if (status >= 400 && status < 500 && status !== 408) {
+        if (status >= 400 && status < 500 && status !== 408 && !isGateway5xx(res)) {
           wx.removeStorageSync(pendingKey);
           this._unknownCommand = null;
-          this.setData({ acting: false, error: res.data && res.data.reason === 'PHOTO_MODEL_CONSENT_REQUIRED'
+          this._replayCommand = null;
+          this.clearLockTimer();
+          this.setData({ acting: false, unknown: false, originalRetryable: false, error: res.data && res.data.reason === 'PHOTO_MODEL_CONSENT_REQUIRED'
             ? '' : safeUserMessage(res, '操作失败，请重试') });
           this.emitActionFail(name, sessionId, res.data && res.data.reason);
           return false;
@@ -352,11 +393,102 @@ Component({
     /** 请求没拿到响应：服务端可能已写入，只按原意图核对，不能生成新键重复提交。 */
     enterUnknown(sentVersion) {
       this.setData({
-        acting: false, unknown: true, photoRetryable: false, error: '',
+        acting: false, unknown: true, photoRetryable: false, originalRetryable: false, error: '',
         unknownText: '结果还没确认，正在确认，请勿重复提交'
       });
       this._unknownVersion = sentVersion;
+      this.armLockExpiry(this._lockStartedAt || Date.now());
       this.resolveUnknown();
+    },
+    clearLockTimer() {
+      if (this._lockTimer) { clearTimeout(this._lockTimer); this._lockTimer = null; }
+    },
+    armLockExpiry(lockedAt) {
+      this.clearLockTimer();
+      const started = Number(lockedAt) || Date.now();
+      this._lockStartedAt = started;
+      const left = LOCAL_LOCK_MS - (Date.now() - started);
+      if (left <= 0) { this.expireLocalLock(); return; }
+      const epoch = this._requestEpoch || 0;
+      this._lockTimer = setTimeout(() => {
+        if ((this._requestEpoch || 0) !== epoch) return;
+        this.expireLocalLock();
+      }, left);
+    },
+    /** 到期或确认没写入:解除本地锁。不自动重发。 */
+    expireLocalLock() {
+      this.clearLockTimer();
+      try { wx.removeStorageSync(this.pendingKey()); } catch (_) {}
+      this._unknownCommand = null;
+      this._replayCommand = null;
+      this.setData({ unknown: false, originalRetryable: false, readingBack: false, unknownText: '', acting: false });
+    },
+    canReplayOriginal() {
+      const command = this._replayCommand;
+      if (!command || command.action === 'SUBMIT_PHOTO_CHECK') return false;
+      if (!command.idempotencyKey || command.version == null || command.version === '') return false;
+      return !!command.payload && typeof command.payload === 'object';
+    },
+    markOriginalRetryable() {
+      const started = this._lockStartedAt || Date.now();
+      if (Date.now() - started >= LOCAL_LOCK_MS) { this.expireLocalLock(); return; }
+      this.setData({
+        readingBack: false, acting: false, unknown: true, originalRetryable: true,
+        unknownText: '原请求没有送达，可重新提交原请求',
+      });
+      this.armLockExpiry(started);
+    },
+    /** 回执 404、断网或网关 5xx:不再永久锁定。手里还有原请求就等玩家点一次重发。 */
+    releaseUnrecorded() {
+      if (this.canReplayOriginal()) { this.markOriginalRetryable(); return; }
+      const resume = !((this.data.state || {}).config);
+      this.expireLocalLock();
+      if (resume && !this.data.preview && !this.data.mock) this.start();
+    },
+    /** 玩家点一次,重发同一幂等键和原期望版本。失败不再自动连发。 */
+    resubmitOriginal() {
+      const command = this._replayCommand;
+      if (!this.data.originalRetryable || this.data.acting || this.data.readingBack || !this.canReplayOriginal()) return Promise.resolve(false);
+      if (this._unknownRequestContext && !this.currentRequestContext(this._unknownRequestContext)) return Promise.resolve(false);
+      const context = this.sessionRequestContext();
+      const body = {
+        sessionId: command.sessionId, version: command.version,
+        idempotencyKey: command.idempotencyKey, action: command.action, payload: command.payload,
+      };
+      this.setData({ acting: true, originalRetryable: false, error: '' });
+      return this.request('/api/play/advanced/action', 'POST', body).then((res) => {
+        if (!this.currentRequestContext(context)) return false;
+        if (isOk(res)) {
+          if (!this.responseMatchesSession(res.data, context, command.action)) throw new Error('session response mismatch');
+          try { wx.removeStorageSync(this.pendingKey()); } catch (_) {}
+          this._unknownCommand = null;
+          this._replayCommand = null;
+          this.clearLockTimer();
+          this.hydrate(res.data);
+          if (!this.currentRequestContext(context, false)) return true;
+          this.setData({ acting: false, unknown: false, originalRetryable: false, unknownText: '' });
+          return true;
+        }
+        const status = Number(res.code);
+        if (status >= 400 && status < 500 && status !== 408 && !isGateway5xx(res)) {
+          try { wx.removeStorageSync(this.pendingKey()); } catch (_) {}
+          this._unknownCommand = null;
+          this._replayCommand = null;
+          this.clearLockTimer();
+          this.setData({ acting: false, unknown: false, originalRetryable: false, error: safeUserMessage(res, '操作失败，请重试') });
+          this.emitActionFail(command.action, command.sessionId, res.data && res.data.reason);
+          return false;
+        }
+        this._replayCommand = command;
+        if (Number(res.code) === 404 || isGateway5xx(res)) { this.markOriginalRetryable(); return false; }
+        this.enterUnknown(command.version);
+        return false;
+      }).catch(() => {
+        if (!this.currentRequestContext(context)) return false;
+        this._replayCommand = command;
+        this.markOriginalRetryable();
+        return false;
+      });
     },
     resolveUnknown() {
       if (this.data.readingBack || !this._unknownCommand || !this.data.state) return Promise.resolve(false);
@@ -375,6 +507,10 @@ Component({
             unknownText: '未查到不代表未提交；可重新确认同意后重试原照片' });
           return false;
         }
+        if (!capturedPhoto && (Number(res.code) === 404 || isGateway5xx(res))) {
+          this.releaseUnrecorded();
+          return false;
+        }
         const receipt = res.data || {};
         if (!isOk(res) || String(receipt.sessionId) !== String(original.sessionId)
             || receipt.idempotencyKey !== original.idempotencyKey
@@ -385,12 +521,18 @@ Component({
         this.hydrate(receipt.view);
         if (!this.currentRequestContext(context, false)) return true;
         this._unknownCommand = null;
-        this.setData({ readingBack: false, unknown: false, photoRetryable: false, unknownText: '', error: '' });
+        this._replayCommand = null;
+        this.clearLockTimer();
+        this.setData({ readingBack: false, unknown: false, photoRetryable: false, originalRetryable: false, unknownText: '', error: '' });
         return true;
-      }).catch(() => {
+      }).catch((err) => {
         if (!this.currentRequestContext(context)) return false;
-        this.setData({ readingBack: false, unknown: true,
-          unknownText: '原请求仍待确认，未查到不代表未提交；请勿重复提交，核对原结果' });
+        if (capturedPhoto || (err && err.message === 'Original receipt unconfirmed')) {
+          this.setData({ readingBack: false, unknown: true,
+            unknownText: '原请求仍待确认，未查到不代表未提交；请勿重复提交，核对原结果' });
+          return false;
+        }
+        this.releaseUnrecorded();
         return false;
       });
     },

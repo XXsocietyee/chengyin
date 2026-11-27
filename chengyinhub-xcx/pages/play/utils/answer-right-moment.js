@@ -8,6 +8,8 @@
  * - fragment:本站碎片。探店日(mode 2)完成后另有碎片翻卡,这里不重复。
  * - hold:有揭示或碎片要读 = 等玩家点「继续」;只有「对了」= 短停后自动继续。
  */
+const { stripLeadingHandMark } = require('./playkit-questo.js');
+
 function rightMoment(input) {
   const o = input || {};
   const data = o.data || {};
@@ -15,7 +17,7 @@ function rightMoment(input) {
   if (data.themeRuntime || data.sharedRuntime || data.done === false) return null;
   if (data.firstTime === false) return null;
   const node = o.node || {};
-  const text = String(node.passText || '').trim();
+  const text = stripLeadingHandMark(String(node.passText || '').trim());
   const reveal = typeof data.answerReveal === 'string' ? data.answerReveal.trim() : '';
   const fragment = Number(o.mode) === 2 ? '' : String(node.fragmentText || '').trim();
   return { text, reveal, fragment, hold: !!(text || reveal || fragment) };

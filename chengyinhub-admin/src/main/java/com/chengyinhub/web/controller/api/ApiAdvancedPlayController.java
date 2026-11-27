@@ -100,7 +100,9 @@ public class ApiAdvancedPlayController extends BaseController {
             /* 非拍照动作整段在 act 的一个事务里判定,这里抛出的校验拒绝已整体回滚、什么都没写 ——
                是明确的「未执行」,按 4xx 下发;原来走通用 500,客户端只能当「结果待确认」并锁住这一屏,
                玩家改了输入也交不了(实走复核:作品命名被拒后整屏卡在「原请求仍待确认」)。
-               拍照动作先调外部模型再落库,仍走原来的未知态处理。 */
+               拍照动作先调外部模型再落库,仍走原来的未知态处理。
+               运行时 500 仍不能当成没写入。只有回执 404 且 intentNotExecuted 表示账本没有这一键,
+               客户端才可按同一幂等键与原期望版本重放;本接口不放宽 selectByIdempotencyKey。 */
             if ("SUBMIT_PHOTO_CHECK".equalsIgnoreCase(action.trim())) return error(e.getMessage());
             return AjaxResult.error(400, e.getMessage());
         } catch (RuntimeException e) {
@@ -121,7 +123,12 @@ public class ApiAdvancedPlayController extends BaseController {
 
     @GetMapping("/receipt")
     public AjaxResult receipt(Long sessionId, String idempotencyKey) {
-        return success(receipts.read(getAppUserId(), sessionId, idempotencyKey));
+        try {
+            return success(receipts.read(getAppUserId(), sessionId, idempotencyKey));
+        } catch (ServiceException e) {
+            if (Integer.valueOf(404).equals(e.getCode())) return new AjaxResult(404, e.getMessage(), e.getData());
+            throw e;
+        }
     }
 
     @Operation(summary = "读取高级玩法权威状态")

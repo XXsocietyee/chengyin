@@ -43,6 +43,11 @@ function hangmanSlots(seg) {
   });
 }
 
+/** 反馈句段首的一个「[手写]」加一个可选空格。故事正文的手写段不走这里。 */
+function stripLeadingHandMark(text) {
+  return String(text == null ? '' : text).replace(/^\[手写\][ \u3000]?/, '');
+}
+
 function hangmanKit(seg) {
   const s = seg || {};
   return {
@@ -212,5 +217,5 @@ function accusationKit(view, qaSeg, resolve) {
   };
 }
 
-module.exports = { displayImage, qaOptions, hangmanSlots, hangmanKit, qaLetterPool, hangmanStationText, stripOptionKey, codePoints, hangmanPayload,
+module.exports = { displayImage, qaOptions, hangmanSlots, hangmanKit, qaLetterPool, hangmanStationText, stripLeadingHandMark, stripOptionKey, codePoints, hangmanPayload,
   screenBlocks, accusationOutcome, accusationKit, OUTCOME_LABEL };

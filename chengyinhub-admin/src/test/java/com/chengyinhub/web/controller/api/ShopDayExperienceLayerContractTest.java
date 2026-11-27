@@ -334,7 +334,7 @@ class ShopDayExperienceLayerContractTest
         assertEquals(Boolean.TRUE, m.get("puzzleScoring"));
         assertFalse(m.containsKey("answerReveal"), "抓包不能绕过揭示事实再拿 100 解谜分");
         assertFalse(m.containsKey("hint1"), "提示正文只允许在 /puzzle/hint 记录事实后返回");
-        assertTrue(m.containsKey("feedbackText"));
+        assertFalse(m.containsKey("feedbackText"), "没有完成事实时不下发文字反馈");
         assertEquals("旧模板勋章", m.get("medalName"), "经典定向既有奖励展示不受谜题计分影响");
         assertEquals(88L, m.get("couponId"));
     }

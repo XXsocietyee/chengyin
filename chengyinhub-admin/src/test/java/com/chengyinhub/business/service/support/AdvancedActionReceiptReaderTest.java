@@ -6,6 +6,7 @@ import com.chengyinhub.business.mapper.GameRuntimeSessionMapper;
 import com.chengyinhub.business.mapper.PlayAttemptLogMapper;
 import com.chengyinhub.common.exception.ServiceException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -30,5 +31,19 @@ class AdvancedActionReceiptReaderTest {
         assertThrows(ServiceException.class, () -> reader.read(7L, 51L, "original"));
         log.setMemberId(7L); log.setResultJson("{\"sessionId\":99}");
         assertThrows(ServiceException.class, () -> reader.read(7L, 51L, "original"));
+    }
+
+    @Test void missingLedgerSaysIntentWasNotExecutedAndDoesNotWrite() {
+        GameRuntimeSessionMapper sessions = mock(GameRuntimeSessionMapper.class);
+        PlayAttemptLogMapper attempts = mock(PlayAttemptLogMapper.class);
+        when(sessions.selectAccessibleById(51L, 7L)).thenReturn(new GameRuntimeSession());
+        var reader = new AdvancedActionReceiptReader(sessions, attempts, new ObjectMapper());
+        ServiceException missing = assertThrows(ServiceException.class, () -> reader.read(7L, 51L, "original"));
+        assertEquals(404, missing.getCode());
+        assertEquals("尚未查到原请求回执，结果仍待确认", missing.getMessage());
+        assertEquals(Boolean.TRUE, ((Map<?, ?>) missing.getData()).get("intentNotExecuted"));
+        verify(sessions).selectAccessibleById(51L, 7L);
+        verify(attempts, times(3)).selectByIdempotencyKey(anyString());
+        verifyNoMoreInteractions(sessions, attempts);
     }
 }

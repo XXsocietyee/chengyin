@@ -11,7 +11,7 @@
 
 const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
 const motion = require('../../../../utils/motion.js');
-const { codePoints, hangmanPayload } = require('../../utils/playkit-questo.js');
+const { codePoints, hangmanPayload, stripLeadingHandMark } = require('../../utils/playkit-questo.js');
 const letterPool = require('../../utils/letter-pool.js');
 
 const POP_MS = 220;   // 每填一格弹一下:过渡来回的半程(与 --cy-motion-standard 同值)
@@ -87,9 +87,13 @@ Component({
     referenceUrl: { type: String, value: '' },   // CG-10-D-3:看不清时的资料图(内容配了才有)        // CG-01-P2-5:本站填格说明(服务端没给就用通用一句)
     failureSeq: { type: Number, value: 0 },
   },
-  data: { groups: [], active: -1, pop: -1, typedText: '', focused: false, cursor: 0, blankCount: 0, overLimit: false, submitting: false, verdict: '', canSubmit: false,
+  data: { groups: [], active: -1, pop: -1, typedText: '', focused: false, cursor: 0, blankCount: 0, overLimit: false, submitting: false, verdict: '', canSubmit: false, passShown: '',
     poolOn: false, poolRows: [], canClear: false, howtoOpen: false, DEFAULT_HOWTO: '一格填一个字或字母；拼音不写声调，ü 用 V 代替。' },
   observers: {
+    feedback(value) {
+      const passShown = stripLeadingHandMark(value);
+      if (passShown !== this.data.passShown) this.setData({ passShown });
+    },
     failureSeq: function (value) {
       if (!value || this.data.solved) return;
       this._pending = false;

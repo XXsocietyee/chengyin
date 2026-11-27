@@ -44,6 +44,17 @@ test('play 页:答对走 _answerRight,题卡有「对了」与继续键,离页�
 });
 
 // 第三轮(业主):答对 / 答错写作者在模板里配的反馈;「对了」与揭示只在作者什么都没写时兜底。
+test('完成反馈段首的手写标记不进答对那一句', () => {
+  const marked = rightMoment({ data: { firstTime: true }, node: { passText: '[手写] 恭喜你解开了' }, mode: 1 });
+  assert.equal(marked.text, '恭喜你解开了');
+  const ideographic = rightMoment({ data: { firstTime: true }, node: { passText: '[手写]\u3000下一句' }, mode: 1 });
+  assert.equal(ideographic.text, '下一句');
+  const once = rightMoment({ data: { firstTime: true }, node: { passText: '[手写][手写]再留一个' }, mode: 1 });
+  assert.equal(once.text, '[手写]再留一个');
+  const mid = rightMoment({ data: { firstTime: true }, node: { passText: '她说[手写]不算' }, mode: 1 });
+  assert.equal(mid.text, '她说[手写]不算');
+});
+
 test('作者的完成反馈与答对后揭示都保留', () => {
   const m = rightMoment({ data: { firstTime: true, answerReveal: '第 7 根。' }, node: { passText: ' 恭喜你解开了老城的第一个秘密！ ', fragmentText: '碎片' }, mode: 1 });
   assert.deepEqual(m, { text: '恭喜你解开了老城的第一个秘密！', reveal: '第 7 根。', fragment: '碎片', hold: true });
@@ -52,7 +63,8 @@ test('作者的完成反馈与答对后揭示都保留', () => {
 test('P-10:答错兜底不拿模板文字反馈(那是完成后的话)', () => {
   const js = fs.readFileSync(path.join(__dirname, '../../pages/play/index.js'), 'utf8');
   assert.doesNotMatch(js, /feedback: n\.feedbackText \|\|/);
-  assert.match(js, /feedback: '答案还没咬合，再看看四周……', passText: String\(n\.feedbackText \|\| ''\)\.trim\(\),/);
+  assert.match(js, /feedback: '答案还没咬合，再看看四周……', passText: n\.done \? String\(n\.feedbackText \|\| ''\)\.trim\(\) : '',/);
+  assert.doesNotMatch(js, /reveal: n\.feedbackText|passText: String\(n\.feedbackText \|\| ''\)\.trim\(\),/);
   assert.match(js, /'game\.feedback': r\.msg \|\| g\.feedback/);
   assert.match(js, /feedback: node\.feedback, passText: node\.passText,/);
 });
