@@ -204,6 +204,12 @@ function clearHomePageTimers(page) {
   if (!page._unloaded && page.data && page.data.refreshing) page.setData({ refreshing: false });
 }
 
+// page-motion 的计时器只在卸载时停。切走首页是 onHide，不拦的话入场计时仍会在隐藏页 setData。
+function enterHomeListMotion(page, key) {
+  if (!page || page._unloaded || page._homeLocationHidden) return;
+  pageMotion.enter(page, key, { once: true });
+}
+
 // L10-122:距离徽标只代表这次请求测出来的距离。经纬度要同时在范围内才算测过,0 也是有效坐标。
 function coordinateIncluded(value, limit) {
   if (typeof value === 'string') {
@@ -588,7 +594,10 @@ Page({
     
     // 清除已有的定时器
     if (that._countdownTimer) clearInterval(that._countdownTimer);
+    that._countdownTimer = null;
     // 每60秒更新一次倒计时(L10-120:定时器句柄是实例字段,启停不再各发一次 setData)
+    // 人已经离开首页就不要再挂。晚到的即将上线回包会从这里把计时器重新拉起来。
+    if (that._unloaded || that._homeLocationHidden) return;
     that._countdownTimer = setInterval(() => {
       that.updateUpcomingActivitiesCountdown();
     }, COUNTDOWN_INTERVAL_MS);
@@ -599,6 +608,7 @@ Page({
    */
   updateUpcomingActivitiesCountdown: function() {
     const that = this;
+    if (that._unloaded || that._homeLocationHidden) return;
     const upcomingList = that.data.upcomingActivityList;
     
     if (!upcomingList || upcomingList.length === 0) {
@@ -617,8 +627,8 @@ Page({
       return Object.assign({}, item, { remainingTime: r.remainingTime, started: r.started });
     });
     
-    // 如果有更新，则设置数据
-    if (updated) {
+    // 如果有更新，则设置数据。计算过程中人可能已经离开，离开后不再 setData。
+    if (updated && !that._unloaded && !that._homeLocationHidden) {
       that.setData({
         upcomingActivityList: updatedList
       });
@@ -630,6 +640,7 @@ Page({
    */
   ensureCountdownTimerRunning: function() {
     const that = this;
+    if (that._unloaded || that._homeLocationHidden) return;
     
     if (!that._countdownTimer) {
       that.startCountdownTimer();
@@ -1215,7 +1226,7 @@ Page({
           // 编辑精选只喂给 _buildRecoHero，模板不渲染 recommendedTopicList 本身。
           if (listName === 'recommendedTopicList') that.data.recommendedTopicList = list;
           else dataObj[listName] = list;
-          dataObj['listErr.' + listName] = false; pageMotion.enter(that, 'pm_' + listName, { once: true }); // 2026-10-23:列表到达时依次浮上来(H-02:只在首屏入场一次,下拉刷新不再藏起来重播)
+          dataObj['listErr.' + listName] = false; enterHomeListMotion(that, 'pm_' + listName); // 2026-10-23:列表到达时依次浮上来(H-02:只在首屏入场一次,下拉刷新不再藏起来重播)
           that.setData(dataObj, function () {
             // L10-118:编辑精选卡只依赖 recommendedTopicList;行动 Banner 是 data 里的冻结常量,不再重设。
             if (listName === 'recommendedTopicList') that._buildRecoHero();
@@ -1254,6 +1265,10 @@ loadBottomTopicList: function(pageNo, isRefresh = false) {
   const that = this;
   
   if (that.data.isBottomLoading && !isRefresh) return;
+  // 只认最后一次。更早的刷新回来会整表换掉已经翻出来的后面页，也会把后一次失败清成成功。
+  const requestEpoch = (that._bottomTopicEpoch || 0) + 1;
+  that._bottomTopicEpoch = requestEpoch;
+  const isCurrent = function () { return that._bottomTopicEpoch === requestEpoch; };
   
   that.setData({ isBottomLoading: true });
   
@@ -1268,6 +1283,7 @@ loadBottomTopicList: function(pageNo, isRefresh = false) {
       sort_type: 1,
     },
     success: function (res) {
+      if (!isCurrent()) return;
       if (!(res && res.code == "200" && res.data && isRecordList(res.data.rows))) {
         // A-14-2:原来只弹一次 toast,信息流底部仍是空的、用户没有任何重试入口。
         // 失败落「失败页」标记,由列表底部的 cy-inline-error 承接并可原地重试。
@@ -1287,7 +1303,7 @@ loadBottomTopicList: function(pageNo, isRefresh = false) {
         that._bottomTopicPageNo = pageNo;
         
         if (isRefresh) {
-          pageMotion.enter(that, 'pmFeed', { once: true }); // 刷新时替换数据(2026-10-23:新的一页依次浮上来;H-02 只首屏一次)
+          enterHomeListMotion(that, 'pmFeed'); // 刷新时替换数据(2026-10-23:新的一页依次浮上来;H-02 只首屏一次)
           that.setData({
             bottomTopicList: decorateImgs(list),
             hasMoreBottomTopic: totalPages > pageNo
@@ -1306,6 +1322,7 @@ loadBottomTopicList: function(pageNo, isRefresh = false) {
       that.setData({ isBottomLoading: false, bottomTopicFailedPage: 0, 'listLoaded.bottomTopicList': true });
     },
     fail: function (res) {
+      if (!isCurrent()) return;
       // A-14-2:网络失败同样落行内重试,不再只弹一次 toast。
       that.setData({ isBottomLoading: false, bottomTopicFailedPage: pageNo });
     }
@@ -1354,7 +1371,7 @@ loadBottomActivityList: function(pageNo, isRefresh = false) {
         that._bottomActivityPageNo = pageNo;
         
         if (isRefresh) {
-          pageMotion.enter(that, 'pmFeed', { once: true }); // 刷新时替换数据(2026-10-23:新的一页依次浮上来;H-02 只首屏一次)
+          enterHomeListMotion(that, 'pmFeed'); // 刷新时替换数据(2026-10-23:新的一页依次浮上来;H-02 只首屏一次)
           that.setData({
             bottomActivityList: decorateImgs(list),
             hasMoreBottomActivity: totalPages > pageNo

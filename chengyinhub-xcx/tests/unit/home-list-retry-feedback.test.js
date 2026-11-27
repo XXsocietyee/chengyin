@@ -6,10 +6,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 function setPath(target, dotted, value) {
-  const parts = dotted.split('.');
+  const parts = String(dotted).split(/\.|\[|\]/).filter((part) => part !== '');
   let cursor = target;
-  parts.slice(0, -1).forEach((part) => { cursor = cursor[part] || (cursor[part] = {}); });
-  cursor[parts.at(-1)] = value;
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    const key = parts[i];
+    const nextIsIndex = /^\d+$/.test(parts[i + 1]);
+    if (cursor[key] == null || typeof cursor[key] !== 'object') cursor[key] = nextIsIndex ? [] : {};
+    cursor = cursor[key];
+  }
+  const last = parts[parts.length - 1];
+  cursor[/^\d+$/.test(last) ? Number(last) : last] = value;
 }
 
 function loadPage(settings = {}) {
@@ -330,4 +336,62 @@ test('推荐主题切换后忽略旧 transition 尾帧，焦点卡不得重新�
   assert.doesNotMatch(page.data.recoCardStyles[1], /--reco-card-scale:1\.0000;--reco-mask-opacity:0\.0000;--reco-blur:0\.00px/,
     '负控：不拦旧尾帧时必须能复现焦点卡重新变糊');
   clearTimeout(page._recoTransitionUnlockTimer);
+});
+
+test('底部主题旧刷新回来不得清掉已加载的后面页，也不得把失败写成成功', () => {
+  const { page, requests } = loadPage();
+  page.loadBottomTopicList(1, true);
+  const stale = requests[0];
+  page.loadBottomTopicList(1, true);
+  requests[1].success({ code: 200, data: { rows: [{ id: 1, name: '第一页' }], total: 40 } });
+  page.loadBottomTopicList(2);
+  requests[2].success({ code: 200, data: { rows: [{ id: 2, name: '第二页' }], total: 40 } });
+  assert.deepEqual(page.data.bottomTopicList.map((item) => item.id), [1, 2]);
+
+  stale.success({ code: 200, data: { rows: [{ id: 9, name: '旧第一页' }], total: 40 } });
+  assert.deepEqual(page.data.bottomTopicList.map((item) => item.id), [1, 2], '迟到的刷新不得整表替换');
+  assert.equal(page._bottomTopicPageNo, 2);
+
+  page.loadBottomTopicList(3);
+  requests[3].fail({ errMsg: 'request:fail timeout' });
+  assert.equal(page.data.bottomTopicFailedPage, 3);
+  stale.success({ code: 200, data: { rows: [{ id: 8, name: '更旧' }], total: 40 } });
+  assert.equal(page.data.bottomTopicFailedPage, 3, '迟到成功不得清掉当前失败');
+  assert.deepEqual(page.data.bottomTopicList.map((item) => item.id), [1, 2]);
+});
+
+test('离开首页后倒计时和入场计时不再 setData', async () => {
+  const { page, requests } = loadPage();
+  wx.setNavigationBarColor = () => {};
+  page.data.upcomingActivityList = [{ id: 1, startDate: '2099-01-01 10:00:00', remainingTime: '', started: false }];
+  let sets = 0;
+  const original = page.setData;
+  page.setData = (patch, callback) => {
+    sets += 1;
+    return original(patch, callback);
+  };
+  page.updateUpcomingActivitiesCountdown();
+  assert.equal(sets > 0, true, '人还在首页时倒计时仍要改文案');
+  assert.notEqual(page.data.upcomingActivityList[0].remainingTime, '');
+
+  page._homeLocationHidden = true;
+  sets = 0;
+  page.updateUpcomingActivitiesCountdown();
+  page.startCountdownTimer();
+  assert.equal(sets, 0, '已经离开就不得再改即将上线');
+  assert.equal(page._countdownTimer, null);
+
+  page._homeLocationHidden = false;
+  page.getListData('upcomingActivityList', '/api/activity/list', {});
+  page.onHide();
+  const afterHide = sets;
+  requests.at(-1).success({
+    code: 200,
+    data: { rows: [{ id: 3, name: '迟到', startDate: '2099-06-01 10:00:00' }], total: 1 },
+  });
+  requests.at(-1).complete();
+  assert.equal(page._countdownTimer, null, '离页后的成功回包不得再启动倒计时');
+  assert.equal(page.data.pm_upcomingActivityList, undefined, '离页后不得把列表先藏起来等计时器揭开');
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(sets, afterHide + 2, '回包本身可以落地，入场计时器不得再 setData');
 });
