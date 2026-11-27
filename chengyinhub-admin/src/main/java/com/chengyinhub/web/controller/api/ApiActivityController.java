@@ -511,7 +511,6 @@ public class ApiActivityController extends BaseController {
             @Parameter(name = "scope", description = "MERCHANT=以商家主办身份删除(店主或持项目管理权限的员工);空=俱乐部主理人")
     })
     public AjaxResult activityDelete(String id, String scope) {
-        CmsActivity cmsActivity = new CmsActivity();
         Long cid = Convert.toLong(id, 0L);
         if (cid < 1) {
             return error("参数不合规");
@@ -549,40 +548,12 @@ public class ApiActivityController extends BaseController {
             return error(hostedRun);
         }
 
-        // [资损闸] 删除只软删 del_flag=2,不碰任何 registration、不退款、不回补库存。
-        // 若该活动还有已付款报名,删完活动就查不到了,而用户的钱还在平台 —— 钱原地悬空。
-        // 「删除」不该隐含大额资金操作,故此处拒绝并引导去走「取消活动」(那条会整单全额退)。
-        if (cmsActivityService.countPaidRegistrations(cid) > 0) {
-            return error("该活动已有用户付费报名，不能直接删除。请先「取消活动」(将全额退款给所有未核销报名)，再删除。");
+        try {
+            cmsActivityService.deleteOwnedActivityIfUnsold(cid, publisher.ownerMemberId());
+        } catch (ServiceException se) {
+            return error(se.getMessage());
         }
-
-        // [资损闸 · W9] 上面那道只看 payment_status=2 = 钱已到账,漏了「钱随时可能进来」:还没拉起支付的
-        // 待支付单是 0 ⇒ 此刻删活动会放行 ⇒ 回调到达把单置 2 = 钱收了、单成了、活动没了,
-        // 而「取消活动 → 全额退」这条补救路也随活动一起查不到了。
-        // ⚠️ 无条件拦 0,不按 pay_expire_time 放过「过期弃单」—— 该字段后端无强制力(支付口不校验它),
-        // 过期单照样付得了。弃单解堵靠 orderCloseTask 关单成 3(约 35 分钟内自愈),不靠这里放行。
-        if (cmsActivityService.countPendingRegistrations(cid) > 0) {
-            return error("该活动有用户的报名待支付，此刻删除会导致「钱收了、活动没了」。未支付的单会在支付窗口过期后由系统自动关单(约 30 分钟)，届时即可删除。");
-        }
-
-        // [资损闸 · E3-C1-01] 已拉起微信支付、回调还没落定的单是 payment_status=1。
-        // 上面两道只数 2 和 0，1 会被放行；软删之后回调把单置 2，「取消活动 → 全额退」找不到这场。
-        // 钱尚未确认到账，只拒绝删除，不引导退款。
-        // 本方法没有包住计数和软删的事务，selectCmsActivityByIdForUpdate 的行锁留不到这次删除上。
-        if (cmsActivityService.countPayingRegistrations(cid) > 0) {
-            return error("该活动有用户正在支付，暂时不能删除。请等支付结果确认后再处理。");
-        }
-
-        cmsActivity.setId(cid);
-        cmsActivity.setDelFlag(2);
-        cmsActivity.setMemberId(publisher.ownerMemberId());
-
-        int rows = cmsActivityService.updateCmsActivity(cmsActivity);
-        if (rows > 0) {
-            return success("删除成功");
-        } else {
-            return error("删除失败");
-        }
+        return success("删除成功");
     }
 
     /**

@@ -88,6 +88,7 @@ class ActivityDeletePayWindowTest {
         a.setMemberId(ME);
         a.setDelFlag(0);
         when(activityMapper.selectCmsActivityById(ACTIVITY)).thenReturn(a);
+        when(activityMapper.selectCmsActivityByIdForUpdate(ACTIVITY)).thenReturn(a);
         when(activityMapper.updateCmsActivity(ArgumentMatchers.any())).thenReturn(1);
     }
 
@@ -121,6 +122,26 @@ class ActivityDeletePayWindowTest {
         assertEquals(500, ((Integer) r.get("code")).intValue(), "有待支付单必须拒删");
         assertTrue(String.valueOf(r.get("msg")).contains("待支付"),
                 "得指明是待支付这道闸拦的。实际:" + r.get("msg"));
+        verify(activityMapper).selectCmsActivityByIdForUpdate(ACTIVITY);
+        verify(activityMapper, never()).updateCmsActivity(any());
+    }
+
+    /** 支付中(payment_status=1)锁行后拒删，不引导退款。 */
+    @Test
+    void payingOrder_cannotDelete() {
+        CmsRegistration paying = new CmsRegistration();
+        paying.setPaymentStatus(1);
+        givenRegistrationRows(1, Collections.singletonList(paying));
+
+        AjaxResult r = delete();
+
+        assertEquals(500, ((Integer) r.get("code")).intValue(), "有人正在支付必须拒删");
+        String msg = String.valueOf(r.get("msg"));
+        assertTrue(msg.contains("正在支付"), "得指明是支付中这道闸拦的。实际:" + msg);
+        assertTrue(msg.contains("不能删除"), "实际:" + msg);
+        assertTrue(!msg.contains("退款") && !msg.contains("付费报名"),
+                "支付尚未确认到账，不能引导退款，也不能误用已付闸文案。实际:" + msg);
+        verify(activityMapper).selectCmsActivityByIdForUpdate(ACTIVITY);
         verify(activityMapper, never()).updateCmsActivity(any());
     }
 
@@ -150,24 +171,6 @@ class ActivityDeletePayWindowTest {
         verify(activityMapper).updateCmsActivity(any());
     }
 
-    /** 已拉起微信支付(status=1)⇒ 拒。钱还没确认，不能删，也不能拿退款文案打发。 */
-    @Test
-    void payingOrder_cannotDelete() {
-        CmsRegistration paying = new CmsRegistration();
-        paying.setPaymentStatus(1);
-        givenRegistrationRows(1, Collections.singletonList(paying));
-
-        AjaxResult r = delete();
-
-        assertEquals(500, ((Integer) r.get("code")).intValue(), "有人正在支付必须拒删");
-        String msg = String.valueOf(r.get("msg"));
-        assertTrue(msg.contains("正在支付"), "得指明是支付中这道闸拦的。实际:" + msg);
-        assertTrue(msg.contains("不能删除"), "实际:" + msg);
-        assertTrue(!msg.contains("退款") && !msg.contains("付费报名"),
-                "支付尚未确认到账，不能引导退款，也不能误用已付闸文案。实际:" + msg);
-        verify(activityMapper, never()).updateCmsActivity(any());
-    }
-
     /** 已支付 ⇒ 拒。原有那道闸不能被我改丢。 */
     @Test
     void paidActivity_cannotDelete() {
@@ -186,6 +189,7 @@ class ActivityDeletePayWindowTest {
         AjaxResult r = delete();
 
         assertEquals(200, ((Integer) r.get("code")).intValue(), "实际:" + r.get("msg"));
+        verify(activityMapper).selectCmsActivityByIdForUpdate(ACTIVITY);
         verify(activityMapper).updateCmsActivity(any());
     }
 

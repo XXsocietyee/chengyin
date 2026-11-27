@@ -1071,6 +1071,35 @@ public class CmsActivityServiceImpl implements ICmsActivityService
         return n;
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteOwnedActivityIfUnsold(Long activityId, Long ownerMemberId)
+    {
+        CmsActivity locked = cmsActivityMapper.selectCmsActivityByIdForUpdate(activityId);
+        if (locked == null || (locked.getDelFlag() != null && locked.getDelFlag() == 2)) {
+            throw new ServiceException("活动不存在");
+        }
+        if (ownerMemberId == null || !ownerMemberId.equals(locked.getMemberId())) {
+            throw new ServiceException("无权操作该活动");
+        }
+        if (countOpenSaleRegistrations(activityId) > 0) {
+            if (countPaidRegistrations(activityId) > 0) {
+                throw new ServiceException("该活动已有用户付费报名，不能直接删除。请先「取消活动」(将全额退款给所有未核销报名)，再删除。");
+            }
+            if (countPayingRegistrations(activityId) > 0) {
+                throw new ServiceException("该活动有用户正在支付，暂时不能删除。请等支付结果确认后再处理。");
+            }
+            throw new ServiceException("该活动有用户的报名待支付，此刻删除会导致「钱收了、活动没了」。未支付的单会在支付窗口过期后由系统自动关单(约 30 分钟)，届时即可删除。");
+        }
+        CmsActivity upd = new CmsActivity();
+        upd.setId(activityId);
+        upd.setDelFlag(2);
+        upd.setMemberId(ownerMemberId);
+        if (cmsActivityMapper.updateCmsActivity(upd) <= 0) {
+            throw new ServiceException("删除失败");
+        }
+    }
+
     /**
      * 已报名 = registration_status=2(与活动详情页 registrationCount 同一判据)。
      */

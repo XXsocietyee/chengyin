@@ -176,6 +176,11 @@ public interface ICmsActivityService
     public int deleteCmsActivityById(Long id);
 
     /**
+     * 锁活动行后，按开卖口径（待支付、支付中、已支付）拒绝删除，再软删。
+     */
+    void deleteOwnedActivityIfUnsold(Long activityId, Long ownerMemberId);
+
+    /**
      * 发布活动
      * @param preReview true=先审后发(待审 + BIZ_ACTIVITY 审核单);false=先发后审(直接上架)
      */

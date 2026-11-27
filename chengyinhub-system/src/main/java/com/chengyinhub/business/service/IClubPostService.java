@@ -43,6 +43,12 @@ public interface IClubPostService
 
     public int deleteClubPostById(Long id);
 
+    /** 举报成立才打的隐藏。已删除的行不改道。 */
+    int hideByReportLane(Long id);
+
+    /** 举报无效只恢复 hide_lane=REPORT 的行。 */
+    int restoreReportLane(Long id);
+
     /** 点赞数 +delta（原子） */
     public int incrementLikeCount(Long id, int delta);
 

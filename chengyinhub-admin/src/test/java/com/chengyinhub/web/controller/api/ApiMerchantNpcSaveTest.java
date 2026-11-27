@@ -21,6 +21,8 @@ import com.chengyinhub.business.service.IMmsMerchantService;
 import com.chengyinhub.business.service.IUmsMemberService;
 import com.chengyinhub.common.core.domain.AjaxResult;
 import com.chengyinhub.business.service.IWxContentSecurityService;
+import com.chengyinhub.business.service.support.AppMediaReferenceGuard;
+import com.chengyinhub.common.exception.ServiceException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -86,6 +88,15 @@ class ApiMerchantNpcSaveTest {
         ReflectionTestUtils.setField(controller, "merchantAccessService", accessService);
         ReflectionTestUtils.setField(controller, "profileReviewService",
                 mock(com.chengyinhub.business.service.impl.ProfileReviewService.class));
+        AppMediaReferenceGuard media = mock(AppMediaReferenceGuard.class);
+        when(media.requireAttachment(anyLong(), anyString(), eq(true))).thenAnswer(invocation -> {
+            String reference = invocation.getArgument(1);
+            if (reference.startsWith("http://") || reference.startsWith("https://")) {
+                throw new ServiceException("媒体来源未经审核，请重新上传", 422);
+            }
+            return reference;
+        });
+        ReflectionTestUtils.setField(controller, "mediaReferences", media);
     }
 
     @Test
@@ -99,7 +110,7 @@ class ApiMerchantNpcSaveTest {
     @Test
     void rejectsAvatarThatIsNeitherPresetNorUrl() {
         // 这个值最终会进 img src。放行任意字符串等于把它变成垃圾场。
-        for (String bad : new String[]{"px1:invalid", "http-invalid", "javascript:alert(1)", "lego1:sk0", "p01", "data:image/png;base64,xx"}) {
+        for (String bad : new String[]{"px1:invalid", "http-invalid", "javascript:alert(1)", "lego1:sk0", "p01", "data:image/png;base64,xx", "https://cdn.example.com/a.png", "/\\evil.example/a.png", "https://evil.example/profile/upload/2024/01/01/abc.jpg"}) {
             AjaxResult r = controller.npcSave(body("小店长", bad, "欢迎"));
             assertEquals(500, r.get(AjaxResult.CODE_TAG), "应拒绝:" + bad);
         }
@@ -109,7 +120,7 @@ class ApiMerchantNpcSaveTest {
     @Test
     void acceptsPresetCodeAndUploadedUrl() {
         when(npcProfileMapper.selectMerchantNpcList(MERCHANT_ID, null)).thenReturn(new ArrayList<NpcProfile>());
-        for (String ok : new String[]{"px1:p07", "/profile/2026/a.png", "https://cdn.example.com/a.png"}) {
+        for (String ok : new String[]{"px1:p07", "/profile/2026/a.png"}) {
             AjaxResult r = controller.npcSave(body("小店长", ok, "欢迎"));
             assertEquals(200, r.get(AjaxResult.CODE_TAG), "应接受:" + ok);
         }

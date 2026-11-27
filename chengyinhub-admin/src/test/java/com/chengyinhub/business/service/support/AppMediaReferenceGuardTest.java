@@ -67,6 +67,15 @@ class AppMediaReferenceGuardTest {
         assertEquals("media-asset:7",guard.requireAttachment(22L,"https://foreign.invalid"+key,true));
     }
 
+    @Test void writeNamesTheFieldAndReadKeepsApprovedMediaWhileUnresolvedStaysBlank() {
+        ServiceException rejected = assertThrows(ServiceException.class,
+                () -> guard.requireAttachment(11L, "https://evil.example/a.jpg", true, "logo"));
+        assertTrue(rejected.getMessage().contains("logo"));
+        state("APPROVED");
+        when(assets.approvedUrl(7L)).thenThrow(new IllegalStateException("storage unavailable"));
+        assertThrows(IllegalStateException.class, () -> guard.visibleUrl("media-asset:7", 11L));
+        assertEquals("", guard.visibleUrl("https://foreign.invalid/unreviewed.mp3", 11L));
+    }
     @Test void missingRegistryAndStorageFailureNeverFallBackToOriginalUrl() {
         assertEquals("",guard.visibleUrl("media-asset:7",11L));
         state("APPROVED"); when(assets.approvedUrl(7L)).thenThrow(new IllegalStateException("storage unavailable"));

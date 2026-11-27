@@ -1732,11 +1732,23 @@ public class CoopInviteServiceImpl implements ICoopInviteService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public int attachPerks(Long inviteId, Long callerMemberId, List<Long> templateIds) {
-        CoopInvite inv = coopInviteMapper.selectCoopInviteById(inviteId);
-        if (inv == null) throw new IllegalStateException("邀约不存在");
+        // 与 cancelAcceptedInvite 同一把锁序:先定位,再锁主题,再锁邀约。
+        CoopInvite location = coopInviteMapper.selectCoopInviteById(inviteId);
+        CmsTopic lockedTopic = location == null || location.getTopicId() == null ? null
+                : cmsTopicMapper.selectCmsTopicByIdForUpdate(location.getTopicId());
+        CoopInvite inv = coopInviteMapper.selectCoopInviteByIdForUpdate(inviteId);
+        if (location == null || inv == null || !java.util.Objects.equals(location.getTopicId(), inv.getTopicId()))
+            throw new IllegalStateException("合作归属已变化");
         assertLegacyInviteReadOnly(inv);
+        if (inv.getStatus() == null || inv.getStatus() != 1)
+            throw new IllegalStateException("合作状态已变化,请刷新");
+        if (inv.getTopicId() != null && lockedTopic != null
+                && TopicLifecycleState.commercialTermsFrozen(lockedTopic.getLifecycle())) {
+            throw new IllegalStateException("阵容已锁定,联系客服协商");
+        }
         // 受邀方才可申报供给(商家承接 to_id=member;俱乐部 to_id=club_id 需解析为主理人)
-        if (!callerMemberId.equals(resolveInviteeOwner(inv))) throw new IllegalStateException("仅受邀方可申报供给");
+        if (callerMemberId == null || !callerMemberId.equals(resolveInviteeOwner(inv)))
+            throw new IllegalStateException("仅受邀方可申报供给");
         List<CoopPerkTemplate> templates = new ArrayList<>();
         if (templateIds != null) {
             for (Long tid : templateIds) {

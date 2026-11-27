@@ -1077,6 +1077,14 @@
       WHERE post_id=#{postId} AND status='ACTIVE' AND starts_at&lt;=#{now}
         AND (ends_at IS NULL OR ends_at&gt;#{now})
     </select>
+    <select id="selectActiveReportLaneRemoval" resultType="map">
+      SELECT id, previous_lifecycle, version
+      FROM community_post_enforcement
+      WHERE post_id=#{postId} AND status='ACTIVE'
+        AND enforcement_type IN ('REMOVE','HIDE_PENDING_REVIEW')
+        AND evidence_snapshot_json LIKE '%"lane":"REPORT"%'
+      ORDER BY id DESC LIMIT 1
+    </select>
     <select id="selectActiveEnforcementBaseline" resultType="string">
       SELECT previous_lifecycle FROM community_post_enforcement
       WHERE post_id=#{postId} AND enforcement_type IN ('HIDE_PENDING_REVIEW','REMOVE')

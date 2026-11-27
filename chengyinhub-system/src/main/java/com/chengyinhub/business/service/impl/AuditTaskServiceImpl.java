@@ -2125,7 +2125,14 @@ public class AuditTaskServiceImpl implements IAuditTaskService {
         }
         try {
             if (AuditTask.BIZ_COMMUNITY_POST.equals(bizType)) {
-                communityPostServiceProvider.getObject().applyAuditDecision(bizId, up);
+                boolean reportLane = SOURCE_REPORT.equals(task.getSourceType());
+                if (up && reportLane) {
+                    communityPostServiceProvider.getObject().dismissReportWithoutResurrecting(bizId);
+                } else if (reportLane) {
+                    communityPostServiceProvider.getObject().applyAuditDecision(bizId, false, true);
+                } else {
+                    communityPostServiceProvider.getObject().applyAuditDecision(bizId, up);
+                }
             } else if (AuditTask.BIZ_COMMUNITY_POST_COMMENT.equals(bizType)) {
                 communityPostServiceProvider.getObject().applyCommentAuditDecision(bizId, up);
             } else if (AuditTask.BIZ_SQUARE.equals(bizType)) {
@@ -2145,6 +2152,10 @@ public class AuditTaskServiceImpl implements IAuditTaskService {
                             bizId, cur.getStatus(), cur.getCheckStatus());
                     return;
                 }
+                if (up && cur != null && Integer.valueOf(2).equals(cur.getDelFlag())) {
+                    logger.info("举报不成立但帖子已被作者删除,保持删除 bizId={}", bizId);
+                    return;
+                }
                 s.setStatus(down ? Integer.valueOf(2) : (topicHidden ? null : Integer.valueOf(1)));
                 s.setCheckStatus(down ? 2 : 1);
                 umsCreativeSquareService.updateUmsCreativeSquare(s);
@@ -2154,8 +2165,12 @@ public class AuditTaskServiceImpl implements IAuditTaskService {
                 c.setStatus(down ? 2 : 1);
                 umsCommentService.updateUmsComment(c);
             } else if (AuditTask.BIZ_CLUB_POST.equals(bizType)) {
-                if (down) {
+                if (down && SOURCE_REPORT.equals(task.getSourceType())) {
+                    clubPostService.hideByReportLane(bizId);
+                } else if (down) {
                     clubPostService.deleteClubPostById(bizId); // del_flag=2 软下架
+                } else if (SOURCE_REPORT.equals(task.getSourceType())) {
+                    clubPostService.restoreReportLane(bizId);
                 } else {
                     ClubPost p = new ClubPost();
                     p.setId(bizId);
@@ -2268,14 +2283,19 @@ public class AuditTaskServiceImpl implements IAuditTaskService {
                     cmsTopicServiceProvider.getObject().ensureSelfHostActivityShell(bizId);
                 }
             } else if (AuditTask.BIZ_ACTIVITY.equals(bizType)) {
-                // M0-6 先审后发:过审→上架(status=1/publishStatus=1);驳回→status=2
+                // 主办上下架只翻 publish_status，status 仍为 1。已过审且主办已下架时，后续通过不能重新上架；
+                // 首次过审（status 还不是 1，含尚无活动行）仍上架。驳回一律下架。
+                CmsActivity current = cmsActivityMapper.selectCmsActivityById(bizId);
+                boolean organizerKeptOffline = !down && current != null
+                        && Long.valueOf(1L).equals(current.getStatus())
+                        && Long.valueOf(0L).equals(current.getPublishStatus());
                 CmsActivity a = new CmsActivity();
                 a.setId(bizId);
                 a.setStatus(down ? 2L : 1L);
                 a.setCheckStatus(down ? 2 : 1);
                 // 动态 SQL 仅在 reason != null 时更新；过审要显式清掉历史驳回原因。
                 a.setReason(down ? reasonText : "");
-                a.setPublishStatus(down ? 0L : 1L);
+                a.setPublishStatus(down || organizerKeptOffline ? 0L : 1L);
                 cmsActivityMapper.updateCmsActivity(a);
                 // AUDIT-INT-7:人工审过作者重新提交的版本,解除图片内容安全留置(申诉/撤销到不了这里)。
                 if (up) cmsActivityMapper.clearContentSafetyHold(bizId);

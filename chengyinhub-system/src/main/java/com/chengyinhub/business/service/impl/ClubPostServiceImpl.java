@@ -300,6 +300,18 @@ public class ClubPostServiceImpl implements IClubPostService
     }
 
     @Override
+    public int hideByReportLane(Long id)
+    {
+        return clubPostMapper.hideClubPostByReportLane(id);
+    }
+
+    @Override
+    public int restoreReportLane(Long id)
+    {
+        return clubPostMapper.restoreClubPostReportLane(id);
+    }
+
+    @Override
     public int incrementLikeCount(Long id, int delta)
     {
         return clubPostMapper.incrementLikeCount(id, delta);

@@ -65,6 +65,15 @@ public interface ICommunityPostService {
     List<Map<String, Object>> enforcements(Long postId);
     Map<String, Object> appeals(String status, Long cursor, Integer limit);
     void applyAuditDecision(Long postId, boolean approved);
+
+    /** reportLane 只在举报成立的驳回上打标，供之后的「举报无效」辨认是不是这条通道藏的。 */
+    void applyAuditDecision(Long postId, boolean approved, boolean reportLane);
+
+    /**
+     * 举报无效：作者已删、微信已隐藏的帖子保持原状。
+     * 只有本举报通道打下的 REMOVED 才收回。
+     */
+    void dismissReportWithoutResurrecting(Long postId);
     void applyCommentAuditDecision(Long commentId, boolean approved);
     /** 帖文图片异步机审命中风险:按生命周期 HIDE(隐藏待复核)并建人工复核单;已隐藏/待审/已终态视为已落地。 */
     boolean applyRiskyMediaResult(Long postId);
