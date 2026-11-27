@@ -38,11 +38,11 @@ const DOMAIN_RULES = [
     // 2026-11-11 f-merchant(M-35):商家工作台的搜索(search2)与「发现」点进的帖文详情(square/detail)进共享域,
     // 同样按 roleGuard.isMerchantView 在根节点二选一。商家可达页的暗根清单由 tests/unit/f-merchant-light-reach.test.js 守。
     // 2026-11-19 ui-sweep U10:我发布的优惠券(coupon)与建券页(couponInfo)进共享域 —— 商家(scope=MERCHANT/商家视角)浅色,玩家深色。
-    // 2026-11-19 PG-029:商家口碑页(merchant/reviews)进共享域 —— 公开态(玩家看商家)深色,管理态商家浅色。
+    // 2026-11-26 UI-B 跨页一致性:pages/merchant/reviews 与 pages/coop/finance 与兄弟商家页统一归 merchant 浅色域。
     // 2026-11-19 PG-036:资料详情(infomationdetail)随资料列表进共享域,按 policy.isMerchantView 二选一。
     // 2026-11-19 PG-092:用户协议页(agreement)进共享域 —— 商家浅色,玩家深色,按 policy.isMerchantView 二选一。
     // 2026-11-24 业主决策 L06-135:定价合作方页随定价页进共享域 —— 俱乐部主理人(club=1)深色,其余商家浅色。
-    route: /^(?:pages\/agreement\/|pages\/merchant\/reviews\/|subpackageA\/pages\/infomationdetail\/|pages\/coop\/finance\/index$|pages\/topic\/pricing\/(?:partner\/)?index$|pages\/(?:template|templatedetail|talent|shezhi|mylike|crop|searchmap|search2)\/|pages\/square\/detail\/|pages\/club\/(?:topic-story|detail)\/|pages\/activity\/(?:detail|official-(?:inbox|mine|detail|organizer))\/|subpackageMember\/(?:tixianjilu|coupon)\/|subpackageA\/pages\/(?:infomation|myproject|assetcenter\/(?:earnings|analysis|income-detail))\/|subpackageB\/pages\/im\/)/
+    route: /^(?:pages\/agreement\/|subpackageA\/pages\/infomationdetail\/|pages\/topic\/pricing\/(?:partner\/)?index$|pages\/(?:template|templatedetail|talent|shezhi|mylike|crop|searchmap|search2)\/|pages\/square\/detail\/|pages\/club\/(?:topic-story|detail)\/|pages\/activity\/(?:detail|official-(?:inbox|mine|detail|organizer))\/|subpackageMember\/(?:tixianjilu|coupon)\/|subpackageA\/pages\/(?:infomation|myproject|assetcenter\/(?:earnings|analysis|income-detail))\/|subpackageB\/pages\/im\/)/
   },
   {
     domain: 'merchant',

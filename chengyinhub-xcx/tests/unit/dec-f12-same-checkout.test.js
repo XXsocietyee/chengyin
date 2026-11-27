@@ -71,7 +71,7 @@ test('结算视图:选中项换成多人票(名称、人数、合计、人均),�
   const opt = { kind: 'product', productId: 11, name: '双人票', people: 2, price: 49.9, perPersonText: '人均 ¥24.95' };
   const loading = checkoutView({ info: INFO, option: opt, quoteState: 'loading' });
   assert.equal(loading.single.title, '双人票');
-  assert.equal(loading.single.line, '人均 ¥24.95');
+  assert.equal(loading.single.line, '人均 ¥25.0');
   assert.equal(loading.peopleText, '2 人');
   assert.equal(loading.loading, true);
   const ready = checkoutView({ info: INFO, option: opt, quoteState: 'ready', quote: Object.assign({}, QUOTE, { totalCashAmount: 52 }) });

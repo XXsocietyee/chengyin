@@ -44,10 +44,10 @@ test('在售双人票 / 小队票紧跟自玩门票;人数、价格、人均价�
   assert.equal(two.people, 2);
   assert.equal(two.icon, 'two');
   assert.equal(two.priceText, '¥49.9');
-  assert.equal(two.perPersonText, '人均 ¥24.95');
+  assert.equal(two.perPersonText, '人均 ¥25.0');
   assert.equal(opts[2].people, 4);
   assert.equal(opts[2].icon, 'team');
-  assert.equal(opts[2].perPersonText, '人均 ¥22.47');
+  assert.equal(opts[2].perPersonText, '人均 ¥22.5');
   assert.equal(opts[0].perPersonText, undefined, '单人门票不出人均价');
 });
 
@@ -57,8 +57,8 @@ test('目录按 id 倒序回来(四人票在前)时购买层仍是 单人 → �
   const opts = m.buyOptions(INFO, [four, two]);
   assert.deepEqual(opts.map((o) => [o.key, o.name, o.people, o.priceText, o.perPersonText]), [
     ['pass', '自玩门票', 1, '¥29.9', undefined],
-    ['p-11', '路线·双人票', 2, '¥49.9', '人均 ¥24.95'],
-    ['p-12', '路线·四人小队票', 4, '¥89.9', '人均 ¥22.47'],
+    ['p-11', '路线·双人票', 2, '¥49.9', '人均 ¥25.0'],
+    ['p-12', '路线·四人小队票', 4, '¥89.9', '人均 ¥22.5'],
   ]);
 });
 

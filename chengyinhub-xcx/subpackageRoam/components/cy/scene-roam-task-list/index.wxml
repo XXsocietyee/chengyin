@@ -1,7 +1,7 @@
 <view class="task-body">
   <view class="task-search"><input class="task-search__input" value="{{keyword}}" placeholder="搜索活动名称或城市" bindinput="onKeyword" /></view>
   <view class="task-tabs"><view wx:for="{{tabs}}" wx:key="*this" class="task-tab {{tab === index ? 'task-tab--on' : ''}}" hover-class="task-tab--press" hover-stay-time="60" bindtap="selectTab" data-tab="{{index}}">{{item}}</view></view>
-  <view class="task-summary">{{summary}}</view>
+  <view class="task-summary" wx:if="{{summary}}">{{summary}}</view>
   <cy-skeleton wx:if="{{state === 'loading' && !events.length}}" type="card" count="3" />
   <cy-error load-failure class="cy-fade-in" wx:elif="{{state === 'error' && !events.length}}" fill title="活动列表没能打开" retry="重试" bind:retry="retry" />
   <!-- rebase 并集时 master 的旧「列表/空态」两行和本分支的完整状态分支叠在了一起,

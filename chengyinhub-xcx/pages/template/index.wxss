@@ -55,11 +55,11 @@ page { background: var(--cy-color-bg-page) !important; }
 .tpl-bell { width: 44rpx; height: 44rpx; box-sizing: content-box; padding: 22rpx; flex-shrink: 0; }
 .tpl-page.theme-dark .tpl-bell { filter: invert(1); }
 
-/* P2-16:页尾安全占位。原 120rpx 比 tabBar(104rpx + 安全区)还矮,末条内容必被压住;
-   这里 = tabBar 占位 + 上下各一个 float-gap + 悬浮发布钮自身高度(84rpx,同 .fab),
-   保证滚到底时最后一行既不进 tabBar 也不进浮钮的覆盖带。 */
+/* P2-16 / UI-B5:页尾安全占位。= tabBar 占位 + 悬浮发布钮实高(--cy-comp-publish-trigger=104rpx) + 上下各一个 float-gap + 呼吸余量,
+   并锁 flex-shrink:0,保证滚到底时末行描述不被悬浮 + 钮压住。 */
 .tpl-bottom-safe {
-  height: calc(var(--cy-tabbar-h) + var(--cy-float-gap) * 2 + 84rpx);
+  flex-shrink: 0;
+  height: calc(var(--cy-tabbar-h) + var(--cy-comp-publish-trigger) + var(--cy-float-gap) * 2 + var(--cy-space-6));
 }
 
 /* ===== 悬浮发布按钮(C3:原 components/touch 胶囊收编进页面,弹窗换 cy-publish-sheet) ===== */

@@ -60,7 +60,7 @@ page { display: flex; flex-direction: column; min-height: 100vh; }
 .tpl-big__art { position: absolute; left: 50%; top: 40%; width: 200rpx; height: 200rpx; transform: translate(-50%, -50%); } /* ds-ok: 无封面时居中放玩法具象图标 */
 .tpl-big__shade {
   position: absolute; left: 0; right: 0; bottom: 0; height: 88%;
-  background: linear-gradient(180deg, rgba(48,48,48,0) 0%, rgba(48,48,48,.5) 45%, rgba(58,58,58,.85) 100%); /* ds-ok: 同订单卡下半段深灰渐变 */
+  background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.22) 32%, rgba(0,0,0,.74) 64%, rgba(0,0,0,.94) 100%); /* ds-ok: 同订单卡底部压深黑纱 */
 }
 .tpl-big__tag {
   position: absolute; left: var(--cy-space-3); top: var(--cy-space-3);

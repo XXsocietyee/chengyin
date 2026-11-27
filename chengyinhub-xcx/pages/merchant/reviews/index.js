@@ -137,8 +137,7 @@ Page({
 
   onShow() {
     this._hidden = false;
-    if (this.data.mode === 'public') merchantTheme.merchantPageRestore(); // PG-029:公开态保持玩家深色
-    else merchantTheme.merchantPageShow();
+    merchantTheme.merchantPageShow();
     this.syncReplyRecovery();
     if (this._replyRecovery) this._replyRecovery.resume();
     if (this._resumeReviewRead || (this._reviewOwner !== undefined && this._reviewOwner !== String(app.getUserID() || ''))) {

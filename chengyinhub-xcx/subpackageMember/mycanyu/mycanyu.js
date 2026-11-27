@@ -1,5 +1,5 @@
 const app = getApp();
-const { summarizeOrderState } = require('../../utils/order-status.js');
+const { summarizeOrderState, isSelfPlayPass, passUntilText } = require('../../utils/order-status.js');
 const { getScene } = require('../../utils/scene-registry.js');
 const { isRecordList } = require('../../utils/response-shape.js'); const pageMotion = require('../../utils/page-motion.js');
 
@@ -91,7 +91,7 @@ Page({
   formatDateRange(startDate, endDate) {
     const start = this.formatDate(startDate);
     const end = this.formatDate(endDate);
-    return start && end ? start + ' - ' + end : (start || end || '时间待定');
+    return start && end ? start + ' - ' + end : (start || end || '');
   },
 
   normalize(item) {
@@ -103,15 +103,32 @@ Page({
         : verification === 0 || verification === '0' ? 0 : undefined,
     }));
     const isFreeExplore = Number(item.purchaseKind) === 3 || Number(source.productType) === 2;
+    const isPass = isSelfPlayPass(item);
+    const isTerminal = orderState.key === 'completed' || orderState.key === 'cancelled'
+      || orderState.key === 'expired' || orderState.key === 'refunded';
+    const verificationText = item.verificationStatus === 1 || item.verificationStatus === '1' ? '已核销'
+      : item.verificationStatus === 0 || item.verificationStatus === '0' ? '未核销' : '—';
+    let dateText = this.formatDateRange(source.startDate, source.endDate);
+    if (!dateText) {
+      if (isPass && item.expiresAt && !isTerminal) {
+        dateText = passUntilText(item.expiresAt);
+      } else if (isTerminal) {
+        dateText = this.formatDate(item.firstSuccessfulScanAt || item.completedAt || item.verifyTime || item.createTime) || '';
+      } else {
+        dateText = '时间待定';
+      }
+    }
+    const showVerificationBadge = !isPass && !isTerminal
+      && (verificationText === '已核销' || verificationText === '未核销');
     return Object.assign({}, item, {
       sourceName: source.name || '活动信息待补充',
       sourceCover: source.imgUrl || source.imgArr || '',
       sourceAddress: source.address || source.addressName || '地点待定',
-      dateText: this.formatDateRange(source.startDate, source.endDate),
+      dateText: dateText,
       stateKey: orderState.key,
       stateText: orderState.text,
-      verificationText: item.verificationStatus === 1 || item.verificationStatus === '1' ? '已核销'
-        : item.verificationStatus === 0 || item.verificationStatus === '0' ? '未核销' : '—',
+      verificationText: verificationText,
+      showVerificationBadge: showVerificationBadge,
       voucherAvailable: !!registrationId(item.id),
       stateVariant: orderState.key === 'not_started' ? 'info'
         : orderState.key === 'in_progress' ? 'success' : 'neutral',

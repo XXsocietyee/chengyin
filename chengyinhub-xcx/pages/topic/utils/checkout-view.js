@@ -8,12 +8,25 @@
 //   有效期写在单次购买卡上,沿用 topic-motion.passWindow(与建单同口径),信任行不重复。
 
 const { chapterCountText } = require('./chapter-count.js');
-const { yuan, yuanTrim } = require('../../../utils/money-format.js');
+const { yuan, yuanOneDecimal, yuanTrim } = require('../../../utils/money-format.js');
 const { refundRuleText } = require('./refund-tiers.js');
 const { cashQuote } = require('../../../utils/commerce/product-order.js');
 
 // 2026-11-22 业主定稿一位小数(取代 OR-046 不补零):结算页价格 ¥29.9 / ¥30.0,与票种半屏同一入口 money-format.
 const price = yuanTrim;
+
+function perPersonLine(option) {
+  if (!option) return '';
+  if (isNum(option.perPersonCashPrice)) return '人均 ' + yuanOneDecimal(option.perPersonCashPrice);
+  const raw = typeof option.perPersonText === 'string' ? option.perPersonText.trim() : '';
+  if (!raw) return '';
+  const match = raw.match(/^(人均\s*)¥(\d+(?:\.\d+)?)$/);
+  if (match) {
+    const formatted = yuanOneDecimal(match[2]);
+    return formatted ? match[1] + formatted : raw;
+  }
+  return raw;
+}
 
 function pad2(n) { return n < 10 ? '0' + n : String(n); }
 
@@ -113,7 +126,7 @@ function productView(o) {
   if (pay !== null) trust.push({ key: 'seat', icon: 'walk', label: people + ' 人自玩' });
   return {
     pills: headPills(info),
-    single: { title: option.name || '', price: pay === null ? '—' : price(pay), strike: '', line: option.perPersonText || '' },
+    single: { title: option.name || '', price: pay === null ? '—' : price(pay), strike: '', line: perPersonLine(option) },
     purchased: false,
     notice: lines.length ? { label: '购买须知与退款规则', lines } : null,
     member: false,

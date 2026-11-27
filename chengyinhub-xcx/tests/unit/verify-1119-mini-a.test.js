@@ -197,12 +197,12 @@ test('PG-028/PG-055:定价页深色同步状态栏前景;定价页与玩法编�
   assert.match(read('pages/publish/temp/index.wxml'), /class="cg-pv-inline-scroll" enable-flex/);
 });
 
-test('PG-029/PG-036:商家口碑公开态深色、资料详情按身份切主题,两页归共享域', () => {
+test('PG-029/PG-036:商家口碑对齐兄弟商家浅色域、资料详情按身份切主题归共享域', () => {
   const lint = require('../../scripts/ui-theme-unit-lint.js');
-  assert.equal(lint.classifyPageDomain('pages/merchant/reviews/index'), 'shared');
+  assert.equal(lint.classifyPageDomain('pages/merchant/reviews/index'), 'merchant');
   assert.equal(lint.classifyPageDomain('subpackageA/pages/infomationdetail/infomationdetail'), 'shared');
-  assert.match(read('pages/merchant/reviews/index.wxml'), /class="review-page \{\{mode === 'public' \? 'theme-dark' : 'theme-merchant'\}\}"/);
-  assert.match(read('pages/merchant/reviews/index.js'), /if \(this\.data\.mode === 'public'\) merchantTheme\.merchantPageRestore\(\);/);
+  assert.match(read('pages/merchant/reviews/index.wxml'), /class="review-page theme-merchant"/);
+  assert.match(read('pages/merchant/reviews/index.js'), /merchantTheme\.merchantPageShow\(\);/);
   assert.match(read('subpackageA/pages/infomationdetail/infomationdetail.wxml'), /^<view class="\{\{isMerchantView \? 'theme-merchant' : 'theme-dark'\}\}">/);
   assert.match(read('subpackageA/pages/infomationdetail/infomationdetail.js'), /policy\.isMerchantView\(/);
 });

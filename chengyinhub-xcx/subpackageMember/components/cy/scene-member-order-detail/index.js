@@ -428,7 +428,8 @@ Component({
       if (this._invoiceRowKey !== rowKey) this.setData({ invoiceRow: { show: false } });
       this._invoiceRowKey = rowKey;
       const STATE = { NONE: 'can', SUBMITTED: 'ing', CLAIMED: 'ing', PROCESSING: 'ing', ISSUE_UNKNOWN: 'ing', ISSUED: 'issued', PAUSED: 'paused' };
-      if (Number(info.paymentStatus) !== 2 || info.isFreeOrder || !id) { this.setData({ invoiceRow: { show: false } }); return; }
+      if ((app.globalData && app.globalData.features && app.globalData.features.userInvoice === false)
+          || Number(info.paymentStatus) !== 2 || info.isFreeOrder || !id) { this.setData({ invoiceRow: { show: false } }); return; }
       const state = STATE[info.invoiceStatus];
       const applicationId = exactId(info.invoiceApplicationId);
       if (state && state !== 'can' && applicationId) {
