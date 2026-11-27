@@ -111,10 +111,12 @@ test('private history route uses safe projection, never privileged normal detail
 test('historical route revalidation hides cached names and drops older public response after private result', () => {
   const h = harness(); h.page._mergeMessages([{ id: 80, senderId: 2, msgType: 3, content: '[路线] former public', extraJson: '{"cardType":"route","topicId":8}' }]);
   h.page.refreshRouteProjections(); h.page.refreshRouteProjections();
-  assert.equal(h.page.data.topicCache[8].name, '路线已不可用');
+  assert.equal(h.page.data.topicCache[8].name, 'former public', 'a read that has not returned must not wipe the shown card');
+  assert.equal(h.page.data.msgs[0].content, '[路线] former public');
   h.requests[1].success({ code: 200, data: { list: [{ id: 80, senderId: 2, msgType: 3, content: '路线已不可用', extraJson: '{"cardType":"route","topicId":8}' }] } });
   h.requests[0].success({ code: 200, data: { list: [{ id: 80, senderId: 2, msgType: 3, content: '[路线] former public', extraJson: '{"cardType":"route","topicId":8}' }] } });
   assert.equal(h.page.data.topicCache[8].name, '路线已不可用');
+  assert.equal(h.page.data.msgs[0].content, '路线已不可用');
 });
 
 test('same-account re-login with different request credential drops old callback', () => {
@@ -148,20 +150,43 @@ test('image and location recovery storage contain only identity, never payload',
   }
 });
 
-test('route refresh uses real history cursors and masks message as well as cache on unknown result', () => {
+test('route refresh uses real history cursors and only the successful projection replaces the shown card', () => {
   const h = harness();
   h.page._mergeMessages([{ id: 80, senderId: 2, msgType: 3, content: '[路线] former public', extraJson: '{"cardType":"route","topicId":8}' }]);
   h.page.refreshRouteProjections();
   assert.equal(h.requests[0].data.cursor_id, 0);
   h.page._mergeMessages([committed(100, 'new-text')]);
-  assert.equal(h.page.data.topicCache[8].name, '路线已不可用');
-  assert.equal(h.page.data.msgs[0].content, '路线已不可用');
+  assert.equal(h.page.data.topicCache[8].name, 'former public');
+  assert.equal(h.page.data.msgs[0].content, '[路线] former public');
   h.requests[0].success({ code: 200, data: { list: [committed(90, 'newer')], hasMore: true, nextCursor: 90 } });
   assert.equal(h.requests[1].data.cursor_id, 90);
   h.requests[1].success({ code: 200, data: { list: [{ id: 80, senderId: 2, msgType: 3, content: '[路线] current public', extraJson: '{"cardType":"route","topicId":8,"locationCount":2}' }], hasMore: false } });
   assert.equal(h.page.data.topicCache[8].name, 'current public');
   assert.equal(h.page.data.topicCache[8].locationCount, 2);
   assert.equal(h.requests.some(r => r.url === '/api/topic/info-to-user'), false);
+});
+
+test('L08-117 a successful reread shows the fresh card, and a failed reread keeps the card already shown', () => {
+  const hidden = { id: 80, senderId: 2, msgType: 3, content: '路线已不可用', extraJson: '{"cardType":"route","topicId":8}' };
+  const shown = { id: 80, senderId: 2, msgType: 3, content: '[路线] former public', extraJson: '{"cardType":"route","topicId":8,"locationCount":1}' };
+  for (const miss of ['fail', 'successStatusAbnormal', 'business']) {
+    const h = harness();
+    h.page._mergeMessages([shown]);
+    h.page.refreshRouteProjections();
+    const read = h.requests[0];
+    if (miss === 'business') read.success({ code: 500, data: { list: [hidden] } });
+    else read[miss]({});
+    assert.equal(h.page.data.msgs[0].content, '[路线] former public', miss);
+    assert.equal(h.page.data.topicCache[8].name, 'former public', miss);
+  }
+  const fresh = harness();
+  fresh.page._mergeMessages([hidden]);
+  assert.equal(fresh.page.data.topicCache[8].name, '路线已不可用');
+  fresh.page.refreshRouteProjections();
+  fresh.requests[0].success({ code: 200, data: { list: [{ ...shown, content: '[路线] current public', extraJson: '{"cardType":"route","topicId":8,"locationCount":4}' }], hasMore: false } });
+  assert.equal(fresh.page.data.msgs[0].content, '[路线] current public');
+  assert.equal(fresh.page.data.topicCache[8].name, 'current public');
+  assert.equal(fresh.page.data.topicCache[8].locationCount, 4);
 });
 
 test('new private projection defeats an in-flight older public history read', () => {

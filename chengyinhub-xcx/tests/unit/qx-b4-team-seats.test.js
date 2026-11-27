@@ -34,3 +34,51 @@ test('加入按钮仍由 /join 回包裁决:阻塞提示不禁用按钮', () => 
   assert.match(wxml, /joinHint && !joined/);
   assert.doesNotMatch(wxml, /joinHint[^}]*disabled/);
 });
+
+function loadMemberCount() {
+  const src = fs.readFileSync(path.join(__dirname, '../../pages/team/utils/member-count.wxs'), 'utf8');
+  const sandbox = { module: { exports: {} } };
+  new Function('module', src)(sandbox.module);
+  return sandbox.module.exports;
+}
+
+function assertMemberHeader(wxml) {
+  assert.doesNotMatch(wxml, /joinedCount\s*\|\|\s*0/);
+  assert.doesNotMatch(wxml, /maxMembers\s*\|\|\s*0/);
+  assert.doesNotMatch(wxml, /activeCount/);
+  assert.match(wxml, /<wxs src="\.\.\/utils\/member-count\.wxs" module="memberCount" \/>/);
+  assert.match(wxml, /wx:if="\{\{memberCount\.text\(team\)\}\}"/);
+  assert.match(wxml, /\{\{memberCount\.text\(team\)\}\}/);
+  assert.match(wxml, /当前成员/);
+}
+
+test('页头当前成员只显示有限数字:真实 0 保留,缺一侧不编 0/0', () => {
+  const { text } = loadMemberCount();
+  assert.equal(text({ joinedCount: 2, maxMembers: 4 }), '2 / 4');
+  assert.equal(text({ joinedCount: 0, maxMembers: 0 }), '0 / 0');
+  assert.equal(text({ joinedCount: 0, maxMembers: 4 }), '0 / 4');
+  assert.equal(text({ joinedCount: 0 }), '0');
+  assert.equal(text({ maxMembers: 0 }), '0');
+  assert.equal(text({ joinedCount: 3 }), '3');
+  assert.equal(text({ maxMembers: 6 }), '6');
+  assert.equal(text({}), '');
+  assert.equal(text({ joinedCount: null, maxMembers: null }), '');
+  assert.equal(text({ joinedCount: undefined, maxMembers: undefined }), '');
+  assert.equal(text(null), '');
+  assert.equal(text({ joinedCount: NaN, maxMembers: 4 }), '4');
+  assert.equal(text({ joinedCount: Infinity, maxMembers: 4 }), '4');
+  assert.equal(text({ joinedCount: '2', maxMembers: '4' }), '');
+  assert.equal(text({ joinedCount: '', maxMembers: false }), '');
+});
+
+test('详情和加入页头不把缺人数编成 0,席位空位仍只认服务端', () => {
+  const detail = fs.readFileSync(path.join(__dirname, '../../pages/team/detail/index.wxml'), 'utf8');
+  const join = fs.readFileSync(path.join(__dirname, '../../pages/team/join/index.wxml'), 'utf8');
+  assertMemberHeader(detail);
+  assertMemberHeader(join);
+  assert.deepEqual(s.openSeats({ maxMembers: null, joinedCount: 2 }, {}), []);
+  assert.deepEqual(s.seatChips({}), []);
+  const broken = detail.replace(/memberCount\.text\(team\)/g, '(team.joinedCount || 0) + " / " + (team.maxMembers || 0)');
+  assert.notEqual(broken, detail, '负控必须命中页头绑定');
+  assert.throws(() => assertMemberHeader(broken), /joinedCount/);
+});

@@ -77,6 +77,9 @@ test('join mode response from old account cannot replace new team mode', async (
 
 test('board snapshot updates visible roster and role together with progress', () => {
   const h = boot();
+  h.page.data.team.joinedCount = 4;
+  h.page.data.team.maxMembers = 6;
+  h.page.data.openSeats = [0, 1];
   h.requests.at(-1).success({ code: 200, data: {
     team: { teamId: 9, ownerId: 10, ownerType: 1 },
     threshold: { activeCount: 1, required: 1, ratio: 1 },
@@ -84,7 +87,11 @@ test('board snapshot updates visible roster and role together with progress', ()
     members: [{ memberId: 71, name: 'current', role: 0, doneTaskIds: [] }]
   } });
   assert.deepEqual(copy(h.page.data.members.map(m => m.memberId)), ['71']);
-  assert.equal(h.page.data.team.joinedCount, 1); assert.equal(h.page.data.leader, false);
-  // AUDIT-1122 L08-125:board.threshold 只留模板读的 required;activeCount 仍落在 team.joinedCount(上一行)
+  assert.equal(h.page.data.leader, false);
+  // L08-126:任务板 activeCount 不是已占席位。当前成员仍是名册 4/6,空位圈不按活跃人数重算。
+  assert.equal(h.page.data.team.joinedCount, 4);
+  assert.equal(h.page.data.team.maxMembers, 6);
+  assert.deepEqual(copy(h.page.data.openSeats), [0, 1]);
   assert.equal(h.page.data.board.threshold.required, 1);
+  assert.equal(h.page.data.board.threshold.activeCount, 1);
 });

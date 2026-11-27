@@ -152,3 +152,19 @@ test('L08-127 status 以字符串 "0" 下发:开关能切,切换请求照发;缺
     assert.ok(other.requests.length >= before);
   }
 });
+
+test('页头当前成员只回放 info 的有限人数,缺字段不写成 0', () => {
+  const wxml = read('pages/team/detail/index.wxml');
+  assert.doesNotMatch(wxml, /joinedCount\s*\|\|\s*0/);
+  assert.doesNotMatch(wxml, /maxMembers\s*\|\|\s*0/);
+  assert.doesNotMatch(wxml, /activeCount/);
+  assert.match(wxml, /memberCount\.text\(team\)/);
+  assert.match(wxml, /当前成员/);
+  const missing = openWithTeam({ joinedCount: undefined, maxMembers: undefined });
+  assert.equal(missing.page.data.team.joinedCount, undefined);
+  assert.equal(missing.page.data.team.maxMembers, undefined);
+  const zero = openWithTeam({ joinedCount: 0, maxMembers: 0 });
+  assert.equal(zero.page.data.team.joinedCount, 0);
+  assert.equal(zero.page.data.team.maxMembers, 0);
+  assert.doesNotMatch(read(PAGE_REL), /joinedCount:\s*[^,\n]*activeCount|openSeats:\s*[^,\n]*activeCount/);
+});

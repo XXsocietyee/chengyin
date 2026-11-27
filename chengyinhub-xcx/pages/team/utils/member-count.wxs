@@ -1,0 +1,17 @@
+// 页头「当前成员」只回放 /api/team/info 的 joinedCount、maxMembers。
+// 有限数字才显示,真实 0 照常显示;缺一侧只显示已知的一侧,两侧都缺则整栏不画,不编 0。
+function finite(v) {
+  return typeof v === 'number' && v === v && v - v === 0;
+}
+
+function text(team) {
+  if (!team) return '';
+  var joined = finite(team.joinedCount);
+  var max = finite(team.maxMembers);
+  if (joined && max) return team.joinedCount + ' / ' + team.maxMembers;
+  if (joined) return '' + team.joinedCount;
+  if (max) return '' + team.maxMembers;
+  return '';
+}
+
+module.exports = { finite: finite, text: text };

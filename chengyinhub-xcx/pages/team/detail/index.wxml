@@ -1,4 +1,5 @@
 <view class="team-page theme-dark" style="padding-top: {{statusBarHeight + navBarHeight}}px;">
+  <wxs src="../utils/member-count.wxs" module="memberCount" />
   <cy-toast id="cy-toast" />
   <cy-loading-mask id="cy-loading" />
   <cy-modal-host id="cy-modal-host" />
@@ -28,7 +29,7 @@
       <view class="team-title">{{teamTitle || team.title || '一起出发的玩家队伍'}}</view>
       <view wx:if="{{!(leader && team.status == 0)}}" class="team-sub">{{team.joinMode == 2 ? '公开招募' : '仅邀请'}}</view>
       <view class="team-meta">
-        <view class="team-meta-item"><text class="team-meta-value">{{team.joinedCount || 0}} / {{team.maxMembers || 0}}</text><text class="team-meta-key">当前成员</text></view>
+        <view class="team-meta-item" wx:if="{{memberCount.text(team)}}"><text class="team-meta-value">{{memberCount.text(team)}}</text><text class="team-meta-key">当前成员</text></view>
         <view class="team-meta-item"><text class="team-meta-value">{{expireText || '待定'}}</text><text class="team-meta-key">场次开始</text></view>
       </view>
     </view>

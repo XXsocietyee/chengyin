@@ -136,6 +136,8 @@ Page({
     this._pendingClearReturn = null;
     this._pollWatermark = null;
     this._pollInFlight = false;
+    this._historyInFlight = false;
+    this._scrollWhenShown = false;
     this._pendingReadConversationId = 0;
     this._pendingReadMemberId = 0;
     const sb = (app.globalData && app.globalData.statusBarHeight) || 20;
@@ -221,18 +223,40 @@ Page({
   openReportMine() {
     if (this._navigating) return;
     this._navigating = true;
+    const that = this;
     wx.navigateTo({ url: '/subpackageMember/report-mine/index', complete: () => { this._navigating = false; } });
-    // 进入即标已读;回到本页 onShow 重读,未读数以服务端 read_at 为准
+    // 进入即标已读:仍按条 POST。这一条成功才从当前未读里拿掉并降角标;
+    // 失败或在途留下。列表换过之后,已经不在未读里的 id 不被迟到的成功改掉。
+    if (!this._reportReadInflight) this._reportReadInflight = {};
+    const inflight = this._reportReadInflight;
     (this._reportUnreadIds || []).forEach(function (id) {
+      if (!id || inflight[id]) return;
+      inflight[id] = 1;
+      const release = function (ok) {
+        if (that._reportReadInflight) delete that._reportReadInflight[id];
+        if (!ok) return;
+        const current = that._reportUnreadIds || [];
+        const next = [];
+        let removed = false;
+        for (let i = 0; i < current.length; i += 1) {
+          if (String(current[i]) === String(id)) { removed = true; continue; }
+          next.push(current[i]);
+        }
+        if (!removed) return;
+        that._reportUnreadIds = next;
+        that.setData({ reportUnread: next.length });
+      };
       app.sendRequest({
         url: '/api/v1/community/notifications/' + id + '/read',
         method: 'POST',
         data: JSON.stringify({ requestId: makeReadRequestId(id) }),
         header: { 'Content-Type': 'application/json' },
         hideLoading: true,
+        success(res) { release(isBizOk(res)); },
+        fail() { release(false); },
+        successStatusAbnormal() { release(false); },
       });
     });
-    this._reportUnreadIds = [];
   },
 
   // 第十二轮 k9(p1 N-10):链接直达没带 name 时,从会话列表(只读)取对方昵称,不停在通用的「对话」。
@@ -323,17 +347,21 @@ Page({
     this._pollInFlight = true;
     const requestEpoch = (this._messageRequestEpoch || 0) + 1;
     this._messageRequestEpoch = requestEpoch;
-    const current = function () {
-      return viewCurrent() && requestEpoch === that._messageRequestEpoch
-        && pollEpoch === that._pollRequestEpoch
-        && that._isReadContextCurrent(conversationId, memberId);
+    this._historyInFlight = true;
+    // 藏起页面会抬高轮询代际,但不能把这一次历史读取作废。只有更新的 loadMessages
+    // 才算「新的一次」;离开这个会话(卸载、换会话、换账号)的回包不得再画。
+    const accept = function () {
+      if (requestEpoch !== that._messageRequestEpoch) return false;
+      that._historyInFlight = false;
+      const readable = viewCurrent() && that._isReadContextCurrent(conversationId, memberId);
+      if (readable && pollEpoch === that._pollRequestEpoch) that._pollInFlight = false;
+      return readable;
     };
     app.sendRequest({
       url: '/api/im/messages', method: 'POST', hideLoading: true, silentError: true,
       data: { conversation_id: conversationId, cursor_id: 0, size: 30 },
       success(res) {
-        if (!current()) return;
-        that._pollInFlight = false;
+        if (!accept()) return;
         if (res && res.code == 200 && res.data && typeof res.data === 'object' && !Array.isArray(res.data)
             && (res.data.list == null || isRecordList(res.data.list))) {
           const list = that.decorate(Array.isArray(res.data.list) ? res.data.list : []);
@@ -348,7 +376,10 @@ Page({
           that._blockedByMe = blockedByMe;
           that.setData({ disabled: that.data.readOnly || res.data.blocked === true, disabledText: that.data.readOnly ? '城瘾小助手不接收回复' : res.data.blocked === true ? (blockedByMe ? '你已拉黑对方，无法发送消息' : '对方暂不可联系，无法发送消息') : '',
             moreSheetItems: that.data.readOnly ? ['隐藏会话'] : moreItems(blockedByMe ? '解除拉黑' : '拉黑') });
-          if (toBottom) that.scrollBottom();
+          if (toBottom) {
+            if (that._hidden) that._scrollWhenShown = true;
+            else that.scrollBottom();
+          }
           that._markReadWhenVisible(conversationId, memberId);
           that.recoverPending();
           return;
@@ -356,13 +387,11 @@ Page({
         that._setMessageLoadError(res, res && res.code != null && res.code != 200);
       },
       fail(res) {
-        if (!current()) return;
-        that._pollInFlight = false;
+        if (!accept()) return;
         that._setMessageLoadError(res);
       },
       successStatusAbnormal(res) {
-        if (!current()) return;
-        that._pollInFlight = false;
+        if (!accept()) return;
         that._setMessageLoadError(res);
       },
     });
@@ -429,10 +458,11 @@ Page({
   retryLoadMore() { this.loadMore(); },
 
   // 加时间分隔 + 解析卡片(老卡片无 cardType → generic,走现有渲染路径)
-  decorate(list) {
-    let last = 0;
+  // previousTime:上一条的 createTime 时间戳。单条补装饰时用它,避免把这条当成列表开头。
+  _decorateRows(list, previousTime) {
+    let last = previousTime || 0;
     const that = this;
-    const decorated = list.map(function (m) {
+    return list.map(function (m) {
       const t = m.createTime ? toTimestamp(String(m.createTime)) : 0;
       let divider = '';
       if (!last || (t - last) > 5 * 60 * 1000) divider = fmtAbs(t);
@@ -460,8 +490,12 @@ Page({
       // 对方气泡上方「名字·时间」一行直接用会话对方名 {{name}}(L08-137:不再逐条拷一份进消息行)。
       return Object.assign({}, m, { timeDivider: divider, noticeTime: t ? fmtAbs(t) : '', activityNotice: !!activityNotice, card: card, cardTarget, systemRecord, currentOriginalUrl, genericAction, genericButtons, displayContent: displayContent });
     });
-    if (that._reviewMessageId && !that._reviewMatches(decorated.find(row => String(row.id) === String(that._reviewMessageId)))) that.closeReviewResult();
-    that.fetchTopics(decorated);
+  },
+
+  decorate(list) {
+    const decorated = this._decorateRows(list, 0);
+    if (this._reviewMessageId && !this._reviewMatches(decorated.find(row => String(row.id) === String(this._reviewMessageId)))) this.closeReviewResult();
+    this.fetchTopics(decorated);
     return decorated;
   },
 
@@ -515,7 +549,10 @@ Page({
     const that = this;
     const conversationId = this.data.conversationId;
     const memberId = this.data.myId;
-    setTimeout(function () {
+    if (this._scrollTimer) clearTimeout(this._scrollTimer);
+    this._scrollTimer = setTimeout(function () {
+      that._scrollTimer = null;
+      if (that._hidden || that._disposed) return;
       if (that._isReadContextCurrent(conversationId, memberId)) {
         that.setData({ toView: 'bottom-anchor' });
       }
@@ -564,37 +601,33 @@ Page({
     const receipt = sendRecovery.begin(owner, conversationId, payload.client_message_id);
     if (!receipt) { app.tips && app.tips('原消息请求未能保存，请稍后重试'); return false; }
     const tmpId = retryId || 'tmp_' + payload.client_message_id;
-    let msgs = this.data.msgs.slice();
     if (retryId) {
-      const index = msgs.findIndex(m => m.id === retryId && m.failed && !m.sending);
+      const index = this.data.msgs.findIndex(m => m.id === retryId && m.failed && !m.sending);
       if (index < 0) return;
-      msgs[index] = Object.assign({}, msgs[index], { sending: true, failed: false });
+      this._putMessage(index, Object.assign({}, this.data.msgs[index], { sending: true, failed: false }), { sending: true });
     } else {
       const card = payload.msg_type === 3 ? JSON.parse(payload.extra_json) : null;
-      msgs.push({ id: tmpId, senderId: owner, msgType: payload.msg_type, content: payload.content,
+      this._putMessage(this.data.msgs.length, { id: tmpId, senderId: owner, msgType: payload.msg_type, content: payload.content,
         extraJson: payload.extra_json, card, clientMessageId: payload.client_message_id,
-        sendPayload: payload, sending: true, failed: false, timeDivider: '' });
+        sendPayload: payload, sending: true, failed: false, timeDivider: '' }, { sending: true });
     }
-    this.setData({ msgs, sending: true });
     this.scrollBottom();
     const viewCurrent = this._viewGuard();
     const current = () => viewCurrent() && sendRecovery.current(receipt);
     const finish = (res) => {
       if (!current()) return;
-      const list = this.data.msgs.slice();
-      const index = list.findIndex(m => m.id === tmpId);
+      const index = this.data.msgs.findIndex(m => m.id === tmpId);
       if (index >= 0) {
         const id = res && res.data && res.data.id;
         const validId = (typeof id === 'number' || (typeof id === 'string' && /^[1-9]\d*$/.test(id)))
           && Number.isSafeInteger(Number(id)) && Number(id) > 0;
         if (isBizOk(res) && validId) {
           sendRecovery.complete(receipt);
-          list.splice(index, 1);
-          this.setData({ msgs: list });
-          this._mergeMessages([res.data]);
+          const delivered = Object.assign({}, res.data);
+          if (!delivered.clientMessageId) delivered.clientMessageId = payload.client_message_id;
+          this._mergeMessages([delivered]);
         } else {
-          list[index] = Object.assign({}, list[index], { sending: false, failed: true });
-          this.setData({ msgs: list });
+          this._putMessage(index, Object.assign({}, this.data.msgs[index], { sending: false, failed: true }));
           // 200 但 data.id 不合法时 msg 是「操作成功」,不能当失败提示(2026-09-17 拍板)。
           if (!isBizOk(res) && res && res.msg) app.tips && app.tips(res.msg);
         }
@@ -608,14 +641,78 @@ Page({
     return true;
   },
 
+  // 只改一条消息的视图。先写入 data,再按序号 setData,这样已经在屏上的气泡不会整表重绘。
+  _putMessage(index, message, extra) {
+    if (!this.data.msgs) this.data.msgs = [];
+    if (index === this.data.msgs.length) this.data.msgs.push(message);
+    else this.data.msgs[index] = message;
+    this.setData(Object.assign({ ['msgs[' + index + ']']: message }, extra || {}));
+  },
+
+  _messageStamp(message) {
+    return message && message.createTime ? toTimestamp(String(message.createTime)) : 0;
+  },
+
+  _sameMessage(left, right) {
+    return left.id == right.id || (right.clientMessageId
+      && left.clientMessageId === right.clientMessageId && left.senderId == right.senderId);
+  },
+
+  // L08-118:新消息按序号补上或替换,只装饰变了的行。往前翻历史仍整表重排(每条的位置都变了)。
+  _patchIncomingMessages(incoming) {
+    if (!incoming || !incoming.length) return false;
+    const existing = this.data.msgs || [];
+    const list = existing.slice();
+    incoming.forEach(message => {
+      const index = list.findIndex(row => this._sameMessage(row, message));
+      if (index >= 0) list[index] = message;
+      else list.push(message);
+    });
+    list.sort(compareMessages);
+    if (list.length < existing.length) return false;
+    let changedAt = 0;
+    while (changedAt < existing.length && list[changedAt] === existing[changedAt]) changedAt += 1;
+    const known = new Set(existing);
+    // 沿用现有数组的构造，避免另起一个数组后序号补丁和整表断言对不上。
+    const output = list.slice();
+    const fresh = [];
+    for (let i = 0; i < list.length; i += 1) {
+      if (i < changedAt) { output[i] = list[i]; continue; }
+      const row = list[i];
+      const previous = i > 0 ? this._messageStamp(output[i - 1]) : 0;
+      if (known.has(row)) {
+        const [next] = this._decorateRows([row], previous);
+        output[i] = (next.timeDivider || '') === (row.timeDivider || '') ? row : next;
+      } else {
+        const [next] = this._decorateRows([row], previous);
+        output[i] = next;
+        fresh.push(next);
+      }
+    }
+    if (this._reviewMessageId) {
+      const reviewed = fresh.find(row => String(row.id) === String(this._reviewMessageId));
+      if (reviewed && !this._reviewMatches(reviewed)) this.closeReviewResult();
+    }
+    if (fresh.length) this.fetchTopics(fresh);
+    const patch = {};
+    for (let i = changedAt; i < output.length; i += 1) {
+      if (output[i] !== existing[i]) patch['msgs[' + i + ']'] = output[i];
+    }
+    const sending = output.some(row => row.sending);
+    if (sending !== this.data.sending) patch.sending = sending;
+    this.data.msgs = output;
+    if (Object.keys(patch).length) this.setData(patch);
+    return true;
+  },
+
   _mergeMessages(incoming, prepend) {
     // 新的不可见投影也使在途旧公开投影失效。
     if (incoming.some(m => m.content === '路线已不可用')) this._topicEpoch = (this._topicEpoch || 0) + 1;
+    if (!prepend && this._patchIncomingMessages(incoming)) return;
     const list = prepend ? incoming.slice() : this.data.msgs.slice();
     const additions = prepend ? this.data.msgs : incoming;
     additions.forEach(message => {
-      const index = list.findIndex(m => m.id == message.id || (message.clientMessageId
-        && m.clientMessageId === message.clientMessageId && m.senderId == message.senderId));
+      const index = list.findIndex(m => this._sameMessage(m, message));
       if (index >= 0) { if (!prepend) list[index] = message; }
       else list.push(message);
     });
@@ -694,11 +791,7 @@ Page({
     const targets = new Set(this.data.msgs.filter(m => m.card && m.card.cardType === 'route'
       && Number.isSafeInteger(Number(m.id)) && Number(m.id) > 0).map(m => String(m.id)));
     if (!targets.size) return;
-    // 先清除消息本身与缓存的旧投影，其他消息合并也不能复活旧私密名称。
-    const masked = this.data.msgs.map(m => targets.has(String(m.id)) ? Object.assign({}, m, {
-      content: '路线已不可用', extraJson: JSON.stringify({ cardType: 'route', topicId: m.card.topicId })
-    }) : m);
-    this.setData({ msgs: this.decorate(masked) });
+    // 先读再改。失败或回包不合法时保留已经显示的卡；只有这一次成功回包里写明不可用的 id 才换成「路线已不可用」。
     // 历史游标依据可见时间排序，不能用 id+1 猜一条不存在的游标行。
     let projectionEpoch = this._topicEpoch;
     const visited = new Set();
@@ -1187,6 +1280,7 @@ Page({
   // ===== 准实时:页面可见时轮询新消息 =====
   onShow() {
     this._hidden = false;
+    if (this._scrollWhenShown) { this._scrollWhenShown = false; this.scrollBottom(); }
     if (this.data.isMerchantView) merchantTheme.merchantPageShow();
     this._navigating = false;
     if (this.data.type == 2 && this._reportEntryEpoch) this.loadReportEntry();
@@ -1219,6 +1313,7 @@ Page({
     if (this.data.reviewResult) this.closeReviewResult();
     this._hidden = true;
     if (this.data.routePickerOpen) this.closeRoutePicker();
+    this._clearPageTimers();
     this._pollRequestEpoch = (this._pollRequestEpoch || 0) + 1;
     this._pollInFlight = false;
     this.stopPoll();
@@ -1234,13 +1329,18 @@ Page({
     this._hidden = true;
     this._pollWatermark = null;
     this._pollInFlight = false;
+    this._historyInFlight = false;
     this._pendingReadConversationId = 0;
     this._pendingReadMemberId = 0;
     this._messageRequestEpoch = (this._messageRequestEpoch || 0) + 1;
     this._loadMoreRequestEpoch = (this._loadMoreRequestEpoch || 0) + 1;
     this._pollRequestEpoch = (this._pollRequestEpoch || 0) + 1;
     this.stopPoll();
-    clearTimeout(this._routeTimer);
+    this._clearPageTimers();
+  },
+  _clearPageTimers() {
+    if (this._scrollTimer) { clearTimeout(this._scrollTimer); this._scrollTimer = null; }
+    if (this._routeTimer) { clearTimeout(this._routeTimer); this._routeTimer = null; }
   },
   startPoll() {
     const that = this;
@@ -1255,7 +1355,7 @@ Page({
   pollNew() {
     const conversationId = this.data.conversationId;
     const memberId = this.data.myId;
-    if (this._hidden || this._pollInFlight || !this._isReadContextCurrent(conversationId, memberId)) return;
+    if (this._hidden || this._pollInFlight || this._historyInFlight || !this._isReadContextCurrent(conversationId, memberId)) return;
     // L08-140:连续失败后退避 —— 跳过 1、3、7 跳(8s→16s→32s→64s 封顶),成功即恢复 8s
     if (this._pollSkip > 0) { this._pollSkip -= 1; return; }
     if (this._pollWatermark == null) {

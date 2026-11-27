@@ -319,9 +319,9 @@ for (const changed of [false, true]) {
     h.requests[0].success({ code: 200, data: [{ conversationId: 42, type: 1, unread: 2 }] })
     if (changed) h.setUserId(9)
     h.page.onShow()
-    // onShow:会话重读 + 合作邀请重读(收件箱/发件箱),共 2 个新请求;requests[1] 仍是会话重读。
-    // 2026-10-27 G-4:玩家视角不再查商家入口(/api/merchant/access/me),原来的第 3 个新请求按 owner 决定去掉。
-    assert.equal(h.requests.length, 3)
+    // onShow 只重读会话。玩家收不到合作邀请,返回本页不再打 /api/coop/list(L08-124);
+    // 2026-10-27 G-4:玩家视角也不查商家入口。requests[1] 仍是会话重读。
+    assert.equal(h.requests.length, 2)
     if (changed) {
       assert.deepEqual(h.page.data.list, [])
       assert.deepEqual(h.page.data.viewList, [])

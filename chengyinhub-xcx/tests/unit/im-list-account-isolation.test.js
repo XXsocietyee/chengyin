@@ -6,10 +6,11 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { createRequire } = require('node:module');
 const file = path.resolve(__dirname, '../../subpackageB/pages/im/list/index.js');
-function mount() {
+function mount(role) {
   let page, id = '71', token = 'session-a';
   const requests = [];
   const app = { globalData: {}, getUserID: () => id, getAuthorization: () => token,
+    getUserRole: () => role || '', getUserType: () => role === 'merchant' ? 2 : 1,
     sendRequest: r => requests.push(r) };
   vm.runInNewContext(fs.readFileSync(file, 'utf8'), { Page: p => { page = p; }, getApp: () => app,
     wx: {}, require: createRequire(file), console });
@@ -19,7 +20,7 @@ function mount() {
   return { page, requests, account(next, auth) { id = next; token = auth; } };
 }
 const response = { code: 200, data: { received: [{ inviteId: '9007199254740993', status: 0 }], sent: [] } };
-for (const transition of ['account', 'token', 'unload', 'hide']) {
+for (const transition of ['account', 'token', 'unload']) {
   for (const result of ['success', 'failure']) test('invitation ' + result + ' ignored after ' + transition, () => {
     const h = mount(); h.page.loadInvites(); const old = h.requests.at(-1);
     if (transition === 'account') h.account('72', 'session-b');
@@ -41,7 +42,7 @@ test('same reader accepts exact invite ID once and ignores duplicate callbacks',
   assert.equal(JSON.stringify(h.page.data), before);
 });
 test('switching while initial conversation load is pending refreshes all private sources', () => {
-  const h = mount(); h.page.onLoad(); const old = [...h.requests];
+  const h = mount('club'); h.page.onLoad(); const old = [...h.requests];
   h.account('72', 'session-b'); h.page.onShow();
   assert.equal(h.requests.filter(r => r.url === '/api/im/conversations').length, 2);
   assert.equal(h.requests.filter(r => r.url === '/api/coop/list').length, 2);
@@ -51,7 +52,7 @@ test('switching while initial conversation load is pending refreshes all private
   assert.equal(JSON.stringify(h.page.data), before);
 });
 test('account change clears old badge even while the new conversation request fails', () => {
-  const h = mount(); h.page.onLoad();
+  const h = mount('club'); h.page.onLoad();
   h.requests.find(r => r.url === '/api/coop/list').success(response);
   assert.equal(h.page.data.tabs[0].badge, 1);
   h.account('72', 'session-b'); h.page.loadConversations();
@@ -60,16 +61,16 @@ test('account change clears old badge even while the new conversation request fa
   h.requests.at(-1).fail();
   assert.equal(h.page.data.tabs[0].badge, 0);
 });
-test('hide and resume before first response restarts reads; old reply cannot overwrite', () => {
-  const h = mount(); h.page.onLoad(); const old = h.requests.find(r => r.url === '/api/coop/list');
-  h.page.onHide(); h.page.onShow();
-  assert.equal(h.requests.filter(r => r.url === '/api/coop/list').length, 2);
-  h.requests.filter(r => r.url === '/api/coop/list').at(-1).success(response);
-  const before = JSON.stringify(h.page.data); old.fail();
-  assert.equal(JSON.stringify(h.page.data), before);
+test('hide keeps the in-flight invite for the same reader and does not read again on show', () => {
+  const h = mount('club'); h.page.onLoad(); const old = h.requests.find(r => r.url === '/api/coop/list');
+  h.page.onHide();
+  old.success(response);
+  assert.equal(h.page.data.invitesIn[0].inviteId, '9007199254740993');
+  h.page.onShow();
+  assert.equal(h.requests.filter(r => r.url === '/api/coop/list').length, 1);
 });
 test('A to B to A does not revive an earlier invitation request', () => {
-  const h = mount(); h.page.onLoad(); const old = h.requests.find(r => r.url === '/api/coop/list');
+  const h = mount('club'); h.page.onLoad(); const old = h.requests.find(r => r.url === '/api/coop/list');
   h.account('72', 'session-b'); h.page.onShow();
   h.account('71', 'session-a'); h.page.onShow();
   h.requests.filter(r => r.url === '/api/coop/list').at(-1).success({ code: 200, data: { received: [], sent: [] } });
