@@ -232,7 +232,19 @@ function methods() {
         if (wait && wait.key === key) return true;
         drop();
         const next = this._finishTrailWait = { key, expired: false, timer: 0 };
-        next.timer = setTimeout(() => { if (this._finishTrailWait === next && keyOf() === key) { next.expired = true; this.openFinish(); } }, 6000);
+        // 藏到后台或已经离页时不能打开通关页:那一拍会停表并写上完成屏。回到前台再放行。
+        const fire = () => {
+          if (this._playDisposed || this._unloaded || this._detached) return;
+          if (this._finishTrailWait !== next || keyOf() !== key) return;
+          if (this._themeHidden) {
+            next.timer = setTimeout(fire, 400);
+            this._fxTimers = (this._fxTimers || []).concat(next.timer);
+            return;
+          }
+          next.expired = true;
+          this.openFinish();
+        };
+        next.timer = setTimeout(fire, 6000);
         this._fxTimers = (this._fxTimers || []).concat(next.timer);
         return true;
       }
