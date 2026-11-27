@@ -1,0 +1,10 @@
+{
+  "component": true,
+  "usingComponents": {
+    "cy-sheet": "/components/cy/sheet/index",
+    "cy-btn": "/components/cy/btn/index",
+    "cy-upload": "/components/cy/upload/index",
+    "cy-inline-error": "/components/cy/inline-error/index",
+    "cy-consent-check": "/components/cy/consent-check/index"
+  }
+}

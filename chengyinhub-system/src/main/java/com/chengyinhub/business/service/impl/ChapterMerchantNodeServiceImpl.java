@@ -16,6 +16,7 @@ import com.chengyinhub.business.service.ICmsMemberTemplateService;
 import com.chengyinhub.business.service.ICmsTopicChapterService;
 import com.chengyinhub.business.service.ICmsTopicNodeService;
 import com.chengyinhub.business.service.ICmsTopicService;
+import com.chengyinhub.common.constant.TermsMode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -130,8 +131,10 @@ public class ChapterMerchantNodeServiceImpl implements IChapterMerchantNodeServi
         // 闸②:主题一开跑就冻结。玩家已经照着当前内容买了票、到了店。
         if (!replacement && hasStarted(topic)) throw new IllegalStateException("主题已开始,不能再改点位");
 
-        // 闸③:模板必须是自己的。否则可以引用别人的玩法冒充。
-        CmsMemberTemplate tpl = requireOwnTemplate(draft.getTemplateId(), merchantMemberId);
+        // 闸③:模板必须是自己的。PERK/TRAFFIC 档（纯权益/引流合作门店）允许不绑定玩法模板，
+        // 但只要传了 templateId，仍严格校验归属，防止引用他人玩法。
+        boolean templateOptional = isTemplateOptionalMode(chapter.getTermsMode());
+        CmsMemberTemplate tpl = requireOwnTemplate(draft.getTemplateId(), merchantMemberId, templateOptional);
 
         // 闸④:玩法不得超出条款。
         // 有 offer ⇒ 用**承接时冻结的那份**(主办方事后改章节不该让已承接商家突然违规);
@@ -156,7 +159,7 @@ public class ChapterMerchantNodeServiceImpl implements IChapterMerchantNodeServi
         toSave.setLatitude(draft.getLatitude());
         toSave.setImgUrl(draft.getImgUrl());
         toSave.setBusinessTime(draft.getBusinessTime());
-        toSave.setTemplateId(draft.getTemplateId());
+        toSave.setTemplateId(tpl == null ? null : tpl.getId());
         if (draft.getXpValue() != null) {
             toSave.setXpValue(draft.getXpValue());
         }
@@ -189,7 +192,8 @@ public class ChapterMerchantNodeServiceImpl implements IChapterMerchantNodeServi
         if (merchantMemberId == null || merchantMemberId <= 0) throw new IllegalStateException("请先登录");
         if (draft == null || blank(draft.getName())) throw new IllegalStateException("请填写点位名称");
         assertLocation(draft);
-        requireOwnTemplate(draft.getTemplateId(), merchantMemberId);
+        // 零章节主题建章默认是 PERK 档，允许不绑玩法模板；若传入 templateId 仍严格校归属。
+        requireOwnTemplate(draft.getTemplateId(), merchantMemberId, true);
     }
 
     @Override
@@ -318,8 +322,10 @@ public class ChapterMerchantNodeServiceImpl implements IChapterMerchantNodeServi
                 if (blank(node.getAddress()) || !validCoordinates(node.getLatitude(), node.getLongitude())) {
                     throw new IllegalStateException("补位点位须有真实地址与有效坐标");
                 }
-                assertWithinTerms(termsOf(confirmed, chapterService.selectCmsTopicChapterById(node.getChapterId())),
-                        requireOwnTemplate(node.getTemplateId(), node.getMerchantMemberId()), node);
+                CmsTopicChapter auditChapter = chapterService.selectCmsTopicChapterById(node.getChapterId());
+                boolean auditTemplateOptional = auditChapter != null && isTemplateOptionalMode(auditChapter.getTermsMode());
+                assertWithinTerms(termsOf(confirmed, auditChapter),
+                        requireOwnTemplate(node.getTemplateId(), node.getMerchantMemberId(), auditTemplateOptional), node);
                 if (Integer.valueOf(0).equals(confirmed.getStatus())) {
                     if (offerMapper.approveReplacement(confirmed.getId(), confirmed.getMerchantId()) != 1) {
                         throw new IllegalStateException("补位供给已过期或状态变化，请重新确认");
@@ -457,8 +463,19 @@ public class ChapterMerchantNodeServiceImpl implements IChapterMerchantNodeServi
         return (list == null || list.isEmpty()) ? null : list.get(0);
     }
 
+    static boolean isTemplateOptionalMode(String termsMode) {
+        return TermsMode.PERK.equals(termsMode) || TermsMode.TRAFFIC.equals(termsMode);
+    }
+
     private CmsMemberTemplate requireOwnTemplate(Long templateId, Long merchantMemberId) {
-        if (templateId == null || templateId <= 0) throw new IllegalStateException("请选择玩法模板");
+        return requireOwnTemplate(templateId, merchantMemberId, false);
+    }
+
+    private CmsMemberTemplate requireOwnTemplate(Long templateId, Long merchantMemberId, boolean allowEmpty) {
+        if (templateId == null || templateId <= 0) {
+            if (allowEmpty) return null;
+            throw new IllegalStateException("请选择玩法模板");
+        }
         CmsMemberTemplate tpl = templateService.selectCmsMemberTemplateById(templateId);
         if (tpl == null || tpl.getMemberId() == null || !tpl.getMemberId().equals(merchantMemberId)) {
             throw new IllegalStateException("玩法模板不存在或不属于你");
@@ -495,7 +512,7 @@ public class ChapterMerchantNodeServiceImpl implements IChapterMerchantNodeServi
     private void assertWithinTerms(String[] terms, CmsMemberTemplate tpl, CmsTopicNode draft) {
         String allowed = terms[0];
         Integer cap = terms[1] == null ? null : Integer.valueOf(terms[1]);
-        if (!blank(allowed) && tpl.getValidationMethod() != null) {
+        if (!blank(allowed) && tpl != null && tpl.getValidationMethod() != null) {
             boolean hit = false;
             for (String one : allowed.split(",")) {
                 if (one.trim().equals(String.valueOf(tpl.getValidationMethod()))) { hit = true; break; }

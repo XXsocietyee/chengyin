@@ -171,6 +171,23 @@ public class PerkLedgerServiceImpl implements IPerkLedgerService {
             // 没有必选章 = 不受权益容量约束(纯内容型主题);别返 0 把票全卡死。
             return Integer.MAX_VALUE;
         }
+        Integer poolK = poolChooseK(topicId);
+        if (poolK != null) {
+            if (poolK <= 0) {
+                return 0;
+            }
+            List<Integer> quotaCaps = new ArrayList<>();
+            int nonQuotaLive = 0;
+            for (CmsTopicChapter c : required) {
+                if (!usesQuota(c)) {
+                    if (hasLiveMerchant(c)) nonQuotaLive++;
+                    continue;
+                }
+                quotaCaps.add(chapterCapacity(c.getId()));
+            }
+            return com.chengyinhub.business.service.support.FreeExplorePoolPolicy
+                    .poolSellableCapacity(quotaCaps, nonQuotaLive, poolK);
+        }
         int min = Integer.MAX_VALUE;
         for (CmsTopicChapter c : required) {
             // 非权益档不在容量链上(quota_total 由 enroll 落 0)⇒ 不参与 min。
@@ -215,8 +232,40 @@ public class PerkLedgerServiceImpl implements IPerkLedgerService {
 
     @Override
     public int topicCoverageStatus(Long topicId) {
+        List<CmsTopicChapter> required = requiredChapters(topicId);
+        Integer poolK = poolChooseK(topicId);
+        if (poolK != null) {
+            if (poolK <= 0) {
+                return COVERAGE_GAP;
+            }
+            int activeStores = 0;
+            long totalSupply = 0L;
+            int maxHeld = 0;
+            for (CmsTopicChapter c : required) {
+                int held = entitlementMapper.countUnredeemedByChapter(c.getId());
+                if (held > maxHeld) maxHeld = held;
+                if (!usesQuota(c)) {
+                    if (hasLiveMerchant(c)) activeStores++;
+                    continue;
+                }
+                int supply = nz(offerMapper.sumRemainingQuotaByChapter(c.getId()));
+                if (supply > 0) activeStores++;
+                totalSupply += Math.max(0, supply);
+            }
+            if (maxHeld <= 0) {
+                return COVERAGE_OK;
+            }
+            long needed = (long) maxHeld * poolK;
+            if (activeStores < poolK || totalSupply < needed) {
+                return COVERAGE_GAP;
+            }
+            if (totalSupply < Math.ceil(needed * COVERAGE_WARN)) {
+                return COVERAGE_WARNING;
+            }
+            return COVERAGE_OK;
+        }
         int worst = COVERAGE_OK;
-        for (CmsTopicChapter c : requiredChapters(topicId)) {
+        for (CmsTopicChapter c : required) {
             // 非权益档没有 quota 这回事:它的 ratio 恒 0(供给 0 ÷ 已售 n),那是量纲错配不是缺口。
             // 算进来会让任何开了计酬/引流档的 ③ 路线永远显示红色缺口 ⇒ 真缺口反而没人信。
             //
@@ -274,30 +323,52 @@ public class PerkLedgerServiceImpl implements IPerkLedgerService {
             throw new RuntimeException("章节数据异常,请稍后重试");
         }
 
-        // 先全量校验再全量插入:不允许只发一半权益 —— 5 必选章的通票发出去 3 份,
-        // 玩家玩到第 4 章才发现没得领,那时钱已收、体验已毁,只能整单退。
-        //
-        // ⚠️ 遍历 required(带档位)而不是 ids(裸 Long):容量闸**只对权益档成立**。
-        // 非权益档的 offer 由 enroll 落 quota_total=0(与 DDL 默认一致)⇒ 容量恒 `0 − 已售 ≤ 0`
-        // ⇒ 无条件跑闸会让计酬/引流档的 ③ 路线**一张票都卖不出去**,商家再入驻都没用。
-        // 与 redeemChapter 的 consumeQuota 档位分支是同一条纪律(TermsMode.usesQuota 是单一真源)。
-        for (CmsTopicChapter c : required) {
-            if (!usesQuota(c)) {
-                // D21 后半句:非权益档不吃容量闸,但吃**商家数**闸 —— 零商家 ⇒ 该章永远核销不了
-                // ⇒ isExploreCompleted 恒 false ⇒ 该票永不通关 ⇒ 只能整单全额退。卖出去是
-                // **确定性资损**,不是风险,所以拒在收钱之前。
-                //
-                // ⚠️ 这不是「重复的闸」:ApiTopicController 那句「硬停售只由 reserveEntitlements 承担」
-                // 的论证前提是 `coverage<1.0 ⟺ capacity<0`,而该等价对非权益档不成立(见 hasLiveMerchant)。
-                // 这里正是它指定的那道唯一闸要覆盖的新情况。
-                if (!hasLiveMerchant(c)) {
-                    throw new RuntimeException("该路线暂无商家提供服务,暂时无法购买");
-                }
-                continue;
+        // §4.3 N 选 K 权益池：单店售罄不拖停整套票，只要可用门店 ≥ K 且 sum(cap_i)/K ≥ 1 即可继续售卖。
+        Integer poolK = poolChooseK(topicId);
+        if (poolK != null) {
+            if (poolK <= 0) {
+                throw new RuntimeException("该路线权益池规则异常,暂时无法购买");
             }
-            // 必须是 ForUpdate 版(当前读)。用 chapterCapacity(普通读)就是超卖。
-            if (chapterCapacityForUpdate(c.getId()) <= 0) {
+            List<Integer> quotaCaps = new ArrayList<>();
+            int nonQuotaLive = 0;
+            for (CmsTopicChapter c : required) {
+                if (!usesQuota(c)) {
+                    if (hasLiveMerchant(c)) nonQuotaLive++;
+                    continue;
+                }
+                quotaCaps.add(chapterCapacityForUpdate(c.getId()));
+            }
+            int poolCap = com.chengyinhub.business.service.support.FreeExplorePoolPolicy
+                    .poolSellableCapacity(quotaCaps, nonQuotaLive, poolK);
+            if (poolCap <= 0) {
                 throw new RuntimeException("该路线权益名额不足,暂时无法购买");
+            }
+        } else {
+            // 先全量校验再全量插入:不允许只发一半权益 —— 5 必选章的通票发出去 3 份,
+            // 玩家玩到第 4 章才发现没得领,那时钱已收、体验已毁,只能整单退。
+            //
+            // ⚠️ 遍历 required(带档位)而不是 ids(裸 Long):容量闸**只对权益档成立**。
+            // 非权益档的 offer 由 enroll 落 quota_total=0(与 DDL 默认一致)⇒ 容量恒 `0 − 已售 ≤ 0`
+            // ⇒ 无条件跑闸会让计酬/引流档的 ③ 路线**一张票都卖不出去**,商家再入驻都没用。
+            // 与 redeemChapter 的 consumeQuota 档位分支是同一条纪律(TermsMode.usesQuota 是单一真源)。
+            for (CmsTopicChapter c : required) {
+                if (!usesQuota(c)) {
+                    // D21 后半句:非权益档不吃容量闸,但吃**商家数**闸 —— 零商家 ⇒ 该章永远核销不了
+                    // ⇒ isExploreCompleted 恒 false ⇒ 该票永不通关 ⇒ 只能整单全额退。卖出去是
+                    // **确定性资损**,不是风险,所以拒在收钱之前。
+                    //
+                    // ⚠️ 这不是「重复的闸」:ApiTopicController 那句「硬停售只由 reserveEntitlements 承担」
+                    // 的论证前提是 `coverage<1.0 ⟺ capacity<0`,而该等价对非权益档不成立(见 hasLiveMerchant)。
+                    // 这里正是它指定的那道唯一闸要覆盖的新情况。
+                    if (!hasLiveMerchant(c)) {
+                        throw new RuntimeException("该路线暂无商家提供服务,暂时无法购买");
+                    }
+                    continue;
+                }
+                // 必须是 ForUpdate 版(当前读)。用 chapterCapacity(普通读)就是超卖。
+                if (chapterCapacityForUpdate(c.getId()) <= 0) {
+                    throw new RuntimeException("该路线权益名额不足,暂时无法购买");
+                }
             }
         }
 
@@ -481,10 +552,10 @@ public class PerkLedgerServiceImpl implements IPerkLedgerService {
         if (offer == null) {
             throw new RuntimeException("该商家在本章节没有生效的权益供给");
         }
-        // ②′ 每日名额 / 开始日期(业主 2026-11-22):锁住供给行后判定并记今天这一份。
+        // ②′ 每日名额 / 开始日期 / 闲时可用时段(业主 2026-11-22 / §4.3):锁住供给行后判定并记今天这一份。
         //    ⓪ 的重放在更前面就返回了,走不到这里 ⇒ 重放既不会被拒,也不会多记一份。
         //    抛出 = ① 的 CAS 一并回滚;计数与流水同事务,只有核销成立才算数。
-        claimDailySlot(offer.getId());
+        claimDailySlot(offer);
         // ⚠️ 只有权益档走 quota:计酬/引流档不设接待上限(D21),它们的 quota_total 取 DDL 默认 0
         //    ⇒ 若无条件扣,consumeQuota 的 `quota_used < quota_total` 恒 false 返 0
         //    ⇒ 当场抛「名额已用完」整体回滚 ⇒ 非 PERK 档根本核销不了。这条与「入不入账」正交。
@@ -523,13 +594,15 @@ public class PerkLedgerServiceImpl implements IPerkLedgerService {
     }
 
     /**
-     * 每日名额与开始日期闸。selectRedeemLimitsForUpdate 对供给行上 X 锁(当前读):同一供给的并发核销
+     * 每日名额、开始日期与闲时可用时段闸。selectRedeemLimitsForUpdate 对供给行上 X 锁(当前读):同一供给的并发核销
      * 在这里排队,后到的读到的是先到者已提交的计数 ⇒ 两笔同时核销也超不过 daily_capacity。
      * 锁序沿用本路径既有的 entitlement → offer(与 consumeQuota 同一行)。
      * 未落 migration_20261122 / 20261123 的库没有这些列:按不限处理,核销与今天一致。
      */
-    private void claimDailySlot(Long offerId) {
+    private void claimDailySlot(MerchantChapterOffer offer) {
+        Long offerId = offer.getId();
         java.time.LocalDate today = OfferRedeemLimits.today();
+        String offPeakRule = resolvePerkRedeemRule(offer);
         java.util.Map<String, Object> limits;
         try {
             limits = offerMapper.selectRedeemLimitsForUpdate(offerId, today.toString());
@@ -538,19 +611,36 @@ public class PerkLedgerServiceImpl implements IPerkLedgerService {
                 throw e;   // 锁等待超时、断连等不能当成「不限」放行
             }
             logger.warn("每日名额列读取失败，按不限处理 offerId={}", offerId, e);
+            String hoursRejection = OfferRedeemLimits.outsideHours(offPeakRule, OfferRedeemLimits.now());
+            if (hoursRejection != null) {
+                throw new com.chengyinhub.common.exception.RedeemLimitRejectedException(hoursRejection);
+            }
             return;
         }
         if (limits == null) {
+            String hoursRejection = OfferRedeemLimits.outsideHours(offPeakRule, OfferRedeemLimits.now());
+            if (hoursRejection != null) {
+                throw new com.chengyinhub.common.exception.RedeemLimitRejectedException(hoursRejection);
+            }
             return;
         }
         Integer dailyCapacity = limits.get("dailyCapacity") instanceof Number n ? n.intValue() : null;
         int usedToday = limits.get("usedToday") instanceof Number n ? n.intValue() : 0;
         String rejection = OfferRedeemLimits.rejection(dailyCapacity,
-                OfferRedeemLimits.parseDate(limits.get("validStart")), usedToday, today);
+                OfferRedeemLimits.parseDate(limits.get("validStart")), usedToday, today,
+                offPeakRule, OfferRedeemLimits.now());
         if (rejection != null) {
             throw new com.chengyinhub.common.exception.RedeemLimitRejectedException(rejection);
         }
         offerMapper.addDailyUsed(offerId, today.toString());
+    }
+
+    private String resolvePerkRedeemRule(MerchantChapterOffer offer) {
+        if (offer == null || offer.getPerkId() == null || coopPerkMapper == null) {
+            return null;
+        }
+        com.chengyinhub.business.domain.CoopPerk perk = coopPerkMapper.selectById(offer.getPerkId());
+        return perk == null ? null : perk.getRedeemRule();
     }
 
     /** 撤销的是今天的核销 ⇒ 让出今天的一份名额;隔天撤销不动当天计数。未落迁移的库没有该列,跳过。 */
@@ -823,7 +913,15 @@ public class PerkLedgerServiceImpl implements IPerkLedgerService {
         if (required.isEmpty()) {
             return false;   // 没有必选章就没有「通关」可言,别误发勋章
         }
-        return redemptionMapper.countActiveRequiredChaptersRedeemed(registrationId, topicId) >= required.size();
+        Integer poolK = poolChooseK(topicId);
+        int targetCount = required.size();
+        if (poolK != null) {
+            if (poolK <= 0 || poolK > required.size()) {
+                return false;
+            }
+            targetCount = poolK;
+        }
+        return redemptionMapper.countActiveRequiredChaptersRedeemed(registrationId, topicId) >= targetCount;
     }
 
     @Override
@@ -867,6 +965,14 @@ public class PerkLedgerServiceImpl implements IPerkLedgerService {
             // ⚠️ 这条在批量版里最容易写错(顺手返 allMembers 就把没配章的主题全判成通关了)。
             return new ExploreCompletion(Collections.<Long>emptySet(), Collections.<Long>emptySet());
         }
+        Integer poolK = poolChooseK(topicId);
+        int targetCount = required.size();
+        if (poolK != null) {
+            if (poolK <= 0 || poolK > required.size()) {
+                return new ExploreCompletion(Collections.<Long>emptySet(), Collections.<Long>emptySet());
+            }
+            targetCount = poolK;
+        }
         // 一次批量查询同时喂两个集合 —— 分子分母必须同口径,分开查就给了「只更新一个」的机会。
         Set<Long> participants = new LinkedHashSet<Long>();
         Set<Long> completed = new LinkedHashSet<Long>();
@@ -876,8 +982,8 @@ public class PerkLedgerServiceImpl implements IPerkLedgerService {
                 continue;
             }
             participants.add(m);            // 有过核销就算参与
-            if (toInt(row.get("cnt")) >= required.size()) {
-                completed.add(m);           // 必选章全核销才算通关
+            if (toInt(row.get("cnt")) >= targetCount) {
+                completed.add(m);           // 必选章全核销或满 N 选 K 门槛即通关
             }
         }
         return new ExploreCompletion(participants, completed);
@@ -906,6 +1012,26 @@ public class PerkLedgerServiceImpl implements IPerkLedgerService {
     }
 
     private static final ObjectMapper COMPLETE_RULE_READER = new ObjectMapper();
+
+    /**
+     * 读取 N 选 K 权益池的 K 值。未配置返回 null（走既有木桶口径）；配置损坏返回 -1（fail-closed）。
+     */
+    private Integer poolChooseK(Long topicId) {
+        if (topicId == null || topicMapper == null) {
+            return null;
+        }
+        CmsTopic topic = topicMapper.selectCmsTopicById(topicId);
+        String raw = topic == null ? null : topic.getCompleteRuleJson();
+        if (raw == null || raw.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return com.chengyinhub.business.service.support.FreeExplorePoolPolicy.resolveChooseK(raw);
+        } catch (IllegalArgumentException e) {
+            logger.error("主题 N 选 K 权益池配置损坏，按 fail-closed 拒售 topicId={}", topicId, e);
+            return -1;
+        }
+    }
 
     /** NULL/空串/不含商家阈值键 = 存量规则；含阈值键但损坏 = fail-closed，绝不静默退回旧规则提前发奖。 */
     private CompletionRule completionRule(Long topicId) {

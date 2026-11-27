@@ -72,6 +72,30 @@ public class MerchantRegistrationDTO implements Serializable {
     @Schema(description = "微信二维码", example = "")
     private String wechat;
 
+    /** 入驻档位：LIGHT=零分成轻量合作档(4字段免执照/免实名)；FULL或空=标准入驻档 */
+    @Schema(description = "入驻档位(LIGHT/FULL)", example = "LIGHT")
+    private String partnerTier;
+
+    /** 门头照片 URL/路径（轻量入驻必填，标准入驻选填；复用 cover_image/derivatives 零 DDL） */
+    @Schema(description = "门头照片", example = "")
+    private String storefrontPhoto;
+
+    public String getPartnerTier() {
+        return partnerTier;
+    }
+
+    public void setPartnerTier(String partnerTier) {
+        this.partnerTier = partnerTier;
+    }
+
+    public String getStorefrontPhoto() {
+        return storefrontPhoto;
+    }
+
+    public void setStorefrontPhoto(String storefrontPhoto) {
+        this.storefrontPhoto = storefrontPhoto;
+    }
+
     public String getWechat() {
         return wechat;
     }

@@ -224,3 +224,5 @@ page { background: var(--cy-color-bg-page); }
 .hp-day { transition: var(--cy-tr-press); }
 .hp-time-field { transition: var(--cy-tr-press); }
 .ta-count { font-variant-numeric: tabular-nums; }
+.intro-cta--light { margin-top: var(--cy-space-2-5); }
+.light-switch { margin-top: var(--cy-space-3); min-height: 88rpx; display: flex; align-items: center; padding: 0 var(--cy-space-1); font-size: var(--cy-font-label); color: var(--cy-text-secondary); text-decoration: underline; transition: var(--cy-tr-press); }

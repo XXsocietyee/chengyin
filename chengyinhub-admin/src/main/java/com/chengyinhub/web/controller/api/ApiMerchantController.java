@@ -2166,6 +2166,15 @@ public class ApiMerchantController extends BaseController {
             return error(unsafe.getMessage());
         }
 
+        boolean lightPartner = isLightPartner(request);
+        String storefrontPhoto = resolveStorefrontPhoto(request);
+        if (lightPartner) {
+            String lightErr = validateLightPartnerRequest(request, storefrontPhoto);
+            if (lightErr != null) {
+                return error(lightErr);
+            }
+        }
+
         // 新入驻与接受员工邀请统一先锁会员行，避免并发把同一账号写成“商家 Owner + 其他店员工”。
         if (request.getId() == null) {
             if (umsMemberMapper.lockMemberById(member_id) == null) {
@@ -2175,16 +2184,18 @@ public class ApiMerchantController extends BaseController {
                 return error("您已加入商家经营团队，不能再申请自己的商家");
             }
             // 主理人可以先提交待审申请；商家正式生效前由服务端收口校验全部俱乐部移交。
-            // RUN-52 发布者实名:商家是要收钱的发布者,新入驻必须先把姓名与身份证号交给平台。
-            // 只闸 id == null 这一支:改一份已经填到一半的申请时,那个表单里没有这两个字段,
-            // 拦在那里等于把人锁在自己填过的东西外面;他真要把店开出来收钱,还是会撞上下面那道发布闸。
-            String identityErr = memberIdentityService.checkRegistered(member_id);
-            if (identityErr != null) return error(identityErr);
+            // RUN-52 发布者实名:标准收款商家新入驻须先登记姓名与身份证号；
+            // §4.3 轻量合作档(LIGHT,零分成引流/权益合作门店)免前置营业执照与18位实名，
+            // 仅在后续开通 l-payout2 直连收款结算时强制要求补齐营业执照与实名。
+            if (!lightPartner) {
+                String identityErr = memberIdentityService.checkRegistered(member_id);
+                if (identityErr != null) return error(identityErr);
+            }
         }
 
         MmsMerchant mmsMerchant = new MmsMerchant();
         mmsMerchant.setMemberId(member_id);
-        mmsMerchant.setName(request.getName());
+        mmsMerchant.setName(request.getName() == null ? null : request.getName().trim());
         mmsMerchant.setCategoryId(request.getCategoryId());
         if (request.getCategoryIds() != null) {
             // M-16:入驻时就用门店信息同一份行业类型胶囊问一次;只认在用的 type=1 记录,第一个为主行业
@@ -2196,12 +2207,20 @@ public class ApiMerchantController extends BaseController {
             }
         }
         mmsMerchant.setDescription(request.getDescription());
-        mmsMerchant.setDerivatives(request.getDerivatives());
+        mmsMerchant.setDerivatives(StringUtils.isNotEmpty(request.getDerivatives())
+                ? request.getDerivatives() : (lightPartner ? storefrontPhoto : null));
+        if (StringUtils.isNotEmpty(storefrontPhoto)) {
+            mmsMerchant.setCoverImage(storefrontPhoto);
+        }
         mmsMerchant.setPreference(request.getPreference());
-        mmsMerchant.setPhone(request.getPhone());
-        mmsMerchant.setAddress(request.getAddress());
+        mmsMerchant.setPhone(request.getPhone() == null ? null : request.getPhone().trim());
+        mmsMerchant.setAddress(request.getAddress() == null ? null : request.getAddress().trim());
         mmsMerchant.setBusinessTime(request.getBusinessTime());
-        mmsMerchant.setBusinessLicense(request.getBusinessLicense());
+        mmsMerchant.setBusinessLicense(lightPartner ? null : request.getBusinessLicense());
+        if (lightPartner) {
+            // 复用既有 charge_type=0 标记零分成轻量合作档（零 DDL）。
+            mmsMerchant.setChargeType(0);
+        }
         mmsMerchant.setWechat(request.getWechat());
         //入住审核状态0 待审核  1审核通过  2审核失败
         mmsMerchant.setStatus(0L);
@@ -2252,6 +2271,50 @@ public class ApiMerchantController extends BaseController {
                 return error("更新失败");
             }
         }
+    }
+
+    static boolean isLightPartner(MerchantRegistrationDTO request) {
+        return request != null && request.getPartnerTier() != null
+                && "LIGHT".equalsIgnoreCase(request.getPartnerTier().trim());
+    }
+
+    static String resolveStorefrontPhoto(MerchantRegistrationDTO request) {
+        if (request == null) return null;
+        if (StringUtils.isNotEmpty(request.getStorefrontPhoto()) && !request.getStorefrontPhoto().trim().isEmpty()) {
+            return request.getStorefrontPhoto().trim();
+        }
+        if (StringUtils.isNotEmpty(request.getDerivatives())) {
+            for (String part : request.getDerivatives().split(",")) {
+                String trimmed = part.trim();
+                if (!trimmed.isEmpty()) return trimmed;
+            }
+        }
+        if (StringUtils.isNotEmpty(request.getLogo()) && !request.getLogo().trim().isEmpty()) {
+            return request.getLogo().trim();
+        }
+        return null;
+    }
+
+    static String validateLightPartnerRequest(MerchantRegistrationDTO request, String storefrontPhoto) {
+        if (request == null || StringUtils.isEmpty(request.getName()) || request.getName().trim().isEmpty()) {
+            return "请填写店铺名称";
+        }
+        if (StringUtils.isEmpty(request.getAddress()) || request.getAddress().trim().isEmpty()
+                || request.getLocationLat() == null || request.getLocationLng() == null
+                || !Double.isFinite(request.getLocationLat()) || !Double.isFinite(request.getLocationLng())
+                || Math.abs(request.getLocationLat()) > 90D || Math.abs(request.getLocationLng()) > 180D
+                || (request.getLocationLat() == 0D && request.getLocationLng() == 0D)) {
+            return "请在地图选择门店位置";
+        }
+        String phone = request.getPhone() == null ? "" : request.getPhone().trim();
+        if (!phone.matches("^1[3-9]\\d{9}$")) {
+            return "请填写11位手机号";
+        }
+        if (storefrontPhoto == null || storefrontPhoto.isEmpty() || storefrontPhoto.length() > 500
+                || storefrontPhoto.chars().anyMatch(c -> Character.isWhitespace(c) || c == '<' || c == '>' || c == '"' || c == '\'')) {
+            return "请上传门头照片";
+        }
+        return null;
     }
 
     /**

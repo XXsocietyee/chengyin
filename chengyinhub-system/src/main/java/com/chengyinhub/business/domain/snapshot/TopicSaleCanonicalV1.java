@@ -413,12 +413,33 @@ public class TopicSaleCanonicalV1 {
         Set<Long> completedIds = new HashSet<Long>();
         for (JsonNode id : completed) if (!id.canConvertToLong() || !completedIds.add(id.asLong())) fail(completionCode);
         if (!completedIds.equals(requiredIds)) fail(completionCode);
+        Integer chooseK = poolChooseK();
+        if (chooseK != null) {
+            // §4.3 弹性 1-4 店与 N 选 K 权益池：须满足 1 <= K <= 门店数且 1 <= 门店数 <= 4。
+            if (storeCount == null || storeCount < 1 || storeCount > 4
+                    || chooseK < 1 || chooseK > storeCount
+                    || (!completedIds.isEmpty() && chooseK > completedIds.size())) {
+                fail(completionCode);
+            }
+        }
         validateRelationship();
         String refundCode = "SALE_SNAPSHOT_MISSING_REFUND_RESCHEDULE_POLICY";
         requireObjectFields(refundReschedulePolicy, refundCode, "rescheduleDeadline", "rescheduleLimit",
                 "cancellationPolicy", "merchantAbsencePolicy", "noShowPolicy", "crossEditionTransferAllowed");
         if (refundReschedulePolicy.path("crossEditionTransferAllowed").asBoolean(true)) fail(refundCode);
         requireArrayItems(refundReschedulePolicy.get("ticketPolicies"), refundCode, "id", "refundRule");
+    }
+
+    /** N 选 K 池的 K 值（若 completionPolicy 声明了 poolChooseK / chooseK）；格式非法 fail-closed。 */
+    public Integer poolChooseK() {
+        if (completionPolicy == null) return null;
+        JsonNode raw = completionPolicy.has("poolChooseK") ? completionPolicy.get("poolChooseK")
+                : (completionPolicy.has("chooseK") ? completionPolicy.get("chooseK") : null);
+        if (raw == null || raw.isNull()) return null;
+        if (!raw.isIntegralNumber() || !raw.canConvertToInt() || raw.asInt() < 1) {
+            fail("SALE_SNAPSHOT_MISSING_COMPLETION_POLICY");
+        }
+        return raw.asInt();
     }
 
     private static JsonNode requireArrayItems(JsonNode value, boolean allowEmpty, String code, String... fields) {

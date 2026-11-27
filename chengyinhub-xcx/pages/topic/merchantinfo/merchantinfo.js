@@ -300,6 +300,12 @@ Page({
     nodeNpcNodeName: '',
     chapterNodeSubmitting: false,
     chapterNodeFormMode: 'application',
+    quickJoinVisible: false,
+    quickJoinChapterId: 0,
+    quickJoinApplicationId: 0,
+    quickJoinChapterName: '',
+    quickJoinTermsMode: 'PERK',
+    quickJoinPerkMin: '',
     /* CU-M-58:本次要编辑的那个已有点位(后端按「商家 + 章节」唯一键原地覆盖,
        所以重开不是新申请)。没有就是 null,表单照旧当新申请。 */
     presetChapterNode: null,
@@ -1415,6 +1421,47 @@ Page({
     if (!this.data.chapterNodeSubmitting) this.setData({ chapterNodeFormVisible: false, editChapterOffer: null });
   },
 
+  openQuickJoinSheet(e) {
+    const dataset = (e && e.currentTarget && e.currentTarget.dataset) || {};
+    const chapterId = Number(dataset.chapterId) || 0;
+    const applicationId = Number(dataset.applicationId) || 0;
+    const application = (this.data.myChapterApplications || [])
+      .find(row => (applicationId > 0 ? Number(row.id) === applicationId : Number(row.chapterId) === chapterId));
+    if (!chapterId && !application) return;
+    const resolvedChapterId = chapterId || Number(application.chapterId) || 0;
+    const chapter = (this.data.allChaptersList || []).find(c => Number(c.id) === resolvedChapterId) || {};
+    const termsMode = (application && application.termsMode) || chapter.termsMode || 'PERK';
+    if (termsMode !== 'PERK' && termsMode !== 'TRAFFIC') {
+      cyToast('该位置不支持快速加入');
+      return;
+    }
+    const perkMinValue = (application && application.perkMinValue != null)
+      ? String(application.perkMinValue)
+      : String((chapter.recruitStatus && chapter.recruitStatus.perkMinValue) || '');
+    this.setData({
+      quickJoinVisible: true,
+      quickJoinChapterId: resolvedChapterId,
+      quickJoinApplicationId: application ? Number(application.id) || 0 : applicationId,
+      quickJoinChapterName: (application && application.chapterName) || chapter.name || '',
+      quickJoinTermsMode: termsMode,
+      quickJoinPerkMin: perkMinValue,
+    });
+  },
+
+  closeQuickJoinSheet() {
+    this.setData({ quickJoinVisible: false });
+  },
+
+  onQuickJoined(e) {
+    const detail = (e && e.detail) || {};
+    this.setData({ quickJoinVisible: false });
+    if (app.globalData) app.globalData.merchantWorkbenchStale = true;
+    this.loadMyChapterNodes(true);
+    this.loadMyChapterApplications(true);
+    this.loadMerchantRecruitmentChapters();
+    cyToast.success(detail.status === 'PENDING_APPROVAL' ? '已提交，等待审核' : '已快速加入路线');
+  },
+
   /** 「我的点位」行 → 节点 NPC 半屏。点位 id 从 data-* 拿,不靠当前选中态。 */
   openNodeNpcForm(e) {
     const d = (e && e.currentTarget && e.currentTarget.dataset) || {};
@@ -1441,7 +1488,8 @@ Page({
     }
     if (this._chapterApplying) return;
     const draft = (e && e.detail) || {}; const emptyTopic = !draft.chapterId && this.data.chapterEmptyTopic && this.data.chapterNodeFormMode === 'application';
-    if ((!draft.chapterId && !emptyTopic) || !draft.name || !draft.templateId) return;
+    const templateOptional = this.data.selectedChapterTermsMode === 'PERK' || this.data.selectedChapterTermsMode === 'TRAFFIC';
+    if ((!draft.chapterId && !emptyTopic) || !draft.name || (!templateOptional && !draft.templateId)) return;
     if (!emptyTopic && !this.guardChapterNodeConfiguration(draft.chapterId)) return;
     if (this.data.chapterNodeFormMode === 'node') {
       const application = this.myConfigurableChapterApplication(draft.chapterId);
@@ -1864,7 +1912,7 @@ Page({
       header: { 'Content-Type': 'application/json' },
       data: JSON.stringify({
         ...(emptyTopic ? { topicId: this.data.topicId, message: draft.message || '' } : { chapterId: draft.chapterId }),
-        templateId: draft.templateId,
+        templateId: draft.templateId || null,
         name: String(draft.name).trim(),
         address: draft.address || '',
         longitude: draft.longitude == null ? '' : String(draft.longitude),

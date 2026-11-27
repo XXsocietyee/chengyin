@@ -188,26 +188,28 @@
       <view wx:else class="cnf-note">请在地图上选择门店位置</view>
     </view>
 
-    <view class="cnf-field">
-      <view class="cnf-label"><text>玩法模板</text><text class="cnf-required" aria-hidden="true">*</text></view>
-      <cy-dropdown wx:if="{{templates.length}}" range="{{templates}}" range-key="title" disabled="{{templatesLoading || submitting}}" bind:change="onTemplatePick">
-        <view class="cnf-picker {{form.templateId ? 'cnf-picker--selected' : ''}}">
-          <text>{{templatesLoading ? '加载中…' : (form.templateName || '选择我已有的玩法')}}</text>
-          <cy-icon class="cnf-arrow" name="arrow-right" size="32" />
+    <block wx:if="{{termsMode !== 'PERK' && termsMode !== 'TRAFFIC'}}">
+      <view class="cnf-field">
+        <view class="cnf-label"><text>玩法模板</text><text class="cnf-required" aria-hidden="true">*</text></view>
+        <cy-dropdown wx:if="{{templates.length}}" range="{{templates}}" range-key="title" disabled="{{templatesLoading || submitting}}" bind:change="onTemplatePick">
+          <view class="cnf-picker {{form.templateId ? 'cnf-picker--selected' : ''}}">
+            <text>{{templatesLoading ? '加载中…' : (form.templateName || '选择我已有的玩法')}}</text>
+            <cy-icon class="cnf-arrow" name="arrow-right" size="32" />
+          </view>
+        </cy-dropdown>
+        <cy-inline-error wx:elif="{{templatesError && !templatesLoading}}" kind="data" title="{{templatesError}}" action="重试" bind:action="loadMyTemplates" />
+        <view class="cnf-perk-empty" wx:else>
+          <text>{{templatesLoading ? '正在读取玩法模板…' : '还没有可配置的玩法，先创建后再回来选择'}}</text>
+          <cy-btn wx:if="{{!templatesLoading}}" variant="ghost" size="sm" bindtap="goCreateTemplate">去创建玩法</cy-btn>
         </view>
-      </cy-dropdown>
-      <cy-inline-error wx:elif="{{templatesError && !templatesLoading}}" kind="data" title="{{templatesError}}" action="重试" bind:action="loadMyTemplates" />
-      <view class="cnf-perk-empty" wx:else>
-        <text>{{templatesLoading ? '正在读取玩法模板…' : '还没有可配置的玩法，先创建后再回来选择'}}</text>
-        <cy-btn wx:if="{{!templatesLoading}}" variant="ghost" size="sm" bindtap="goCreateTemplate">去创建玩法</cy-btn>
       </view>
-    </view>
 
-    <view class="cnf-field">
-      <view class="cnf-label"><text>探索值</text><text class="cnf-optional">选填</text></view>
-      <input class="cnf-input" type="number" value="{{form.xpValue}}" placeholder="不填=按默认" disabled="{{submitting}}"
-        placeholder-class="cnf-placeholder" data-key="xpValue" bindinput="onInput" />
-    </view>
+      <view class="cnf-field">
+        <view class="cnf-label"><text>探索值</text><text class="cnf-optional">选填</text></view>
+        <input class="cnf-input" type="number" value="{{form.xpValue}}" placeholder="不填=按默认" disabled="{{submitting}}"
+          placeholder-class="cnf-placeholder" data-key="xpValue" bindinput="onInput" />
+      </view>
+    </block>
   </block>
 
   <view slot="footer" class="cnf-actions">

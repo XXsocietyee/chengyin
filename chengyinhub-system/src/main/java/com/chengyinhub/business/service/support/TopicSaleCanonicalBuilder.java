@@ -213,6 +213,10 @@ public class TopicSaleCanonicalBuilder {
         ArrayNode requiredIds = json.createArrayNode();
         for (JsonNode chapter : chapters) if (chapter.path("required").asInt(0) == 1) requiredIds.add(chapter.path("id"));
         completion.set("requiredChapterIds", requiredIds);
+        Integer poolChooseK = FreeExplorePoolPolicy.resolveChooseK(topic.getCompleteRuleJson());
+        if (poolChooseK != null) {
+            completion.put("poolChooseK", poolChooseK);
+        }
         out.set("completionPolicy", completion);
         ObjectNode refunds = asObject(out.get("refundReschedulePolicy"));
         refunds.set("ticketPolicies", tickets);
