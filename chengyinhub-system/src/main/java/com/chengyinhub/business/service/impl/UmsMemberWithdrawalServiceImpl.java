@@ -208,9 +208,13 @@ public class UmsMemberWithdrawalServiceImpl implements IUmsMemberWithdrawalServi
         if(member == null){
             throw new RuntimeException("用户不存在");
         }
-        BigDecimal balance = member.getBalance();
+        // 结算抵扣先锁余额再锁欠款。预检若先锁欠款行，会和那条路径互相等待。
+        BigDecimal balance = umsMemberMapper.selectBalanceForUpdate(memberId);
+        if (balance == null) {
+            throw new RuntimeException("用户不存在");
+        }
 
-        // [冻结] 可用余额 = 余额 - 总冻结额(拓展人赏金 + 未到期的 PLAYER 投诉补偿冷静额)。
+        // [冻结] 可用余额 = 余额 - 总冻结额(拓展人赏金 + 未到期的 PLAYER 投诉补偿冷静额 + 未清结算欠款)。
         //
         // 为什么在这刨:赏金入账后 48h 内可能因退款被追回(MerchantReferralBountyService.onRefund);
         // 投诉补偿同样有 48h 冷静期,期内提走就追不回来了。

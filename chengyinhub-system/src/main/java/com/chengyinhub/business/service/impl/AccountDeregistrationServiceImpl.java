@@ -91,7 +91,7 @@ public class AccountDeregistrationServiceImpl implements IAccountDeregistrationS
     }
 
     /**
-     * 收集注销阻断项。apply 与 executeDue 共用:钱在动的账号(余额/在途提现/进行中订单/有效报名/商家俱乐部身份)不许注销。
+     * 收集注销阻断项。apply 与 executeDue 共用:钱在动的账号(余额/在途提现/进行中订单/通行证在途款/有效报名/商家俱乐部身份)不许注销。
      */
     private List<String> collectBlockers(UmsMember member, Long memberId) {
         List<String> blockers = new ArrayList<>();
@@ -121,6 +121,9 @@ public class AccountDeregistrationServiceImpl implements IAccountDeregistrationS
         }
         if (deregistrationMapper.countUnsettledRefunds(memberId) > 0) {
             blockers.add("存在处理中的退款，请等到账后再申请注销");
+        }
+        if (deregistrationMapper.countBlockingPlatformPassOrders(memberId) > 0) {
+            blockers.add("存在待支付或退款处理中的通行证订单，请完成后再申请注销");
         }
         if (hasActiveOrder(memberId)) {
             blockers.add("存在进行中订单或退款");
