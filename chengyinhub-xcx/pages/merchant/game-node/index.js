@@ -244,16 +244,24 @@ Page({
   },
 
   onShow() {
+    this._hidden = false
     merchantTheme.merchantPageShow()
     // L07-137:签到码弹层开着时离开再回来,重新取码并续上倒计时
     if (this._checkinPaused) { this._checkinPaused = false; if (this.data.checkinVisible) this.issueLiveCheckin() }
   },
   onHide() {
-    // L07-137:离开页面停掉每秒一次的倒计时 setData 与到期续码请求
-    if (this._checkinTimer) { this.clearCheckinTimer(); this._checkinPaused = true }
+    this._hidden = true
+    // L07-137:离开页面停掉每秒一次的倒计时 setData 与到期续码。
+    // 取码请求还在路上时也作废,晚到的回包不得再开倒计时。
+    if (this.data.checkinVisible || this._checkinTimer) {
+      this.clearCheckinTimer()
+      this._checkinPaused = true
+      this._checkinEpoch = (this._checkinEpoch || 0) + 1
+    }
     merchantTheme.merchantPageRestore()
   },
   onUnload() {
+    this._hidden = true
     merchantTheme.merchantPageRestore()
     this._loadToken = (this._loadToken || 0) + 1
     this._checkinEpoch = (this._checkinEpoch || 0) + 1
@@ -610,7 +618,7 @@ Page({
       data: { nodeId },
       hideLoading: true,
       success(res) {
-        if (epoch !== that._checkinEpoch) return
+        if (epoch !== that._checkinEpoch || that._hidden) return
         const data = res && res.data
         if (res && (res.code === 200 || res.code === '200') && data && data.code) {
           that.setData({
@@ -624,22 +632,29 @@ Page({
         that.setData({ checkinQrState: 'error', checkinErr: (res && res.msg) || '打卡码暂时没能生成' })
       },
       fail() {
-        if (epoch !== that._checkinEpoch) return
+        if (epoch !== that._checkinEpoch || that._hidden) return
         that.setData({ checkinQrState: 'error', checkinErr: '网络异常，请重试' })
       },
       successStatusAbnormal(res) {
-        if (epoch !== that._checkinEpoch) return
+        if (epoch !== that._checkinEpoch || that._hidden) return
         that.setData({ checkinQrState: 'error', checkinErr: (res && res.msg) || '打卡码暂时没能生成' })
       },
     })
   },
 
   startCheckinCountdown(seconds) {
+    if (this._hidden || !this.data.checkinVisible) return
     const that = this
+    this.clearCheckinTimer()
     this.setData({ checkinCountdown: seconds })
     this._checkinTimer = setInterval(function () {
+      if (that._hidden || !that.data.checkinVisible) {
+        that.clearCheckinTimer()
+        return
+      }
       const remaining = that.data.checkinCountdown - 1
       if (remaining <= 0) {
+        that.clearCheckinTimer()
         that.issueLiveCheckin()
         return
       }
