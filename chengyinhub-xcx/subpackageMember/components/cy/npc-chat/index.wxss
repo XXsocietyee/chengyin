@@ -1,5 +1,7 @@
 :host { display: block; }
 .npc-chat { display: flex; flex-direction: column; height: 100%; min-height: 0; color: var(--cy-color-text-primary); }
+.npc-chat__aigc { display: flex; flex-direction: column; gap: var(--cy-space-1); padding: 0 0 var(--cy-space-2); }
+.npc-chat__aigc-line { color: var(--cy-color-text-tertiary); font-size: var(--cy-type-caption); line-height: var(--cy-leading-normal); }
 .npc-chat__notice { display: flex; align-items: center; justify-content: flex-end; gap: var(--cy-space-1); padding: var(--cy-space-2) 0 var(--cy-space-3); color: var(--cy-color-text-tertiary); font-size: var(--cy-type-caption); }
 .npc-chat__clear { flex: none; padding: var(--cy-space-2); margin: calc(var(--cy-space-2) * -1) 0; color: var(--cy-color-text-secondary); text-decoration: underline; }
 .npc-chat__export-head { display: flex; align-items: center; justify-content: space-between; color: var(--cy-color-text-tertiary); font-size: var(--cy-type-caption); }

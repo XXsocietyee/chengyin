@@ -116,7 +116,8 @@ function creditText(data) {
   if (!data || typeof data !== 'object') return '';
   const parts = [];
   if (data.attribution && String(data.attribution).trim()) parts.push(String(data.attribution).trim().slice(0, 40));
-  // r2-create(b4-u02-05 业主「不显示「AI 生成」、「来源待确认」」):只留署名
+  // N1-04:creditText 在 pages/play 之外。aiGenerated 为真时补「AI 生成」。来源待确认和许可备注仍不展示。
+  if (data.aiGenerated === true) parts.push('AI 生成');
   return parts.join(' · ');
 }
 module.exports.creditText = creditText;

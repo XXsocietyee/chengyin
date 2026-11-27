@@ -8,6 +8,11 @@
      ★ 沿用漫游轨那套文案会让玩家以为 NPC 知道全城的事,然后问它别的店 —— 答不出来像是坏了。 -->
 <cy-sheet variant="full" show="{{show}}" title="{{scope === 'merchant' ? (npcName || '店铺形象') : '漫游 AI 向导'}}" bind:close="onSheetClose">
   <view class="npc-chat">
+    <!-- N1-04:标题下固定一行,门店轨和漫游轨都要。店铺轨会播克隆音色,再标合成语音。 -->
+    <view class="npc-chat__aigc" aria-role="note">
+      <text class="npc-chat__aigc-line">内容由 AI 生成，仅供参考</text>
+      <text wx:if="{{scope === 'merchant'}}" class="npc-chat__aigc-line">AI 合成语音</text>
+    </view>
     <view class="npc-chat__notice">
       <!-- 导出(只读,不落本地存储)按现有「清除」链接的样式加在它前面;「清除」位置与样式保持原状(用户决定:不改现有 UI) -->
       <text class="npc-chat__clear" bindtap="onExportData" aria-role="button" aria-label="导出我的对话记录" hover-class="cy-pressed" hover-stay-time="80">导出我的对话记录</text>
