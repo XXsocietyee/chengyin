@@ -15,6 +15,15 @@ const cyToast = require('../../../../utils/toast.js');
 const BARS = 24;
 const EDGE_MS = 500;
 
+function getAudioSession() {
+  try {
+    const app = typeof getApp === 'function' ? getApp() : null;
+    return (app && app._audioSession) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 /** 字符串 → 32 位种子(FNV-1a)。同一个 id 永远画同一条波形。 */
 function seedOf(text) {
   let h = 0x811c9dc5;
@@ -122,6 +131,7 @@ Component({
       this._seenAttempts = attempts;
       const stage = this.selectComponent('#cy-play-stage');
       if (passed) {
+        this._stopAudio();
         this.setData({ feedback: '', phase: 'stamp' });
         if (stage) stage.win('');
         return;
@@ -164,6 +174,23 @@ Component({
       // ★ 只报选了哪一轨、打开了哪些,不报对错 —— 对错在服务端
       this.triggerEvent('submit', { trackId: this.data.selectedId, unmuted: unmutedIds(this.data.rows) });
     },
+    /* 答题中实时试听 audioBefore / audioAfter 切换 */
+    onPreviewToggle(e) {
+      if (this.data.phase !== 'play') return;
+      const requested = e && e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.seg;
+      let seg;
+      if (requested === 'before' || requested === 'after') {
+        seg = requested;
+        if (seg === this.data.seg && this.data.playing) { this._stopAudio(); return; }
+      } else {
+        const next = this.data.seg === 'before' && this.data.audioAfter ? 'after' : 'before';
+        seg = next === 'after' && this.data.audioAfter ? 'after' : (this.data.audioBefore ? 'before' : 'after');
+      }
+      this._stopAudio();
+      this.setData({ seg, head: 0 });
+      const src = seg === 'after' ? this.data.audioAfter : this.data.audioBefore;
+      if (src) this._play(src);
+    },
     /* 「通过」章:点任意处收章,露出对比卡 */
     onStampTap() {
       if (this.data.phase !== 'stamp') return;
@@ -188,21 +215,32 @@ Component({
     },
     _clearEdge() { if (this._edgeT) { clearTimeout(this._edgeT); this._edgeT = null; } },
 
+    _duckMixer(on) {
+      const session = this._audioSession || getAudioSession();
+      if (session && typeof session.duck === 'function') session.duck('mixer', !!on);
+    },
     _audio() {
       if (this._ctx) return this._ctx;
       if (typeof wx === 'undefined' || typeof wx.createInnerAudioContext !== 'function') return null;
       const ctx = wx.createInnerAudioContext();
-      ctx.obeyMuteSwitch = false;
+      const session = getAudioSession();
+      this._audioSession = session;
+      if (session && typeof session.register === 'function') {
+        session.register(ctx, { kind: session.VOICE || 'voice' });
+      } else {
+        ctx.obeyMuteSwitch = false;
+      }
       ctx.onTimeUpdate(() => {
         if (this._ctx !== ctx || !this.data.playing) return;
         const d = Number(ctx.duration) || 0;
         const head = d > 0 ? Math.max(0, Math.min(100, Math.round((Number(ctx.currentTime) || 0) / d * 1000) / 10)) : 0;
         if (head !== this.data.head) this.setData({ head });
       });
-      ctx.onEnded(() => { if (this._ctx === ctx) this.setData({ playing: false, head: 0 }); });
-      ctx.onStop(() => { if (this._ctx === ctx && this.data.playing) this.setData({ playing: false, head: 0 }); });
+      ctx.onEnded(() => { if (this._ctx === ctx) { this._duckMixer(false); this.setData({ playing: false, head: 0 }); } });
+      ctx.onStop(() => { if (this._ctx === ctx && this.data.playing) { this._duckMixer(false); this.setData({ playing: false, head: 0 }); } });
       ctx.onError(() => {
         if (this._ctx !== ctx) return;
+        this._duckMixer(false);
         this.setData({ playing: false, head: 0 });
         cyToast('这段音频放不出来');
       });
@@ -214,17 +252,25 @@ Component({
       if (!ctx) return;
       if (ctx.src !== src) ctx.src = src;
       try { ctx.seek && ctx.seek(0); } catch (err) { /* 未加载时 seek 会抛,从头放即可 */ }
+      this._duckMixer(true);
       ctx.play();
       this.setData({ playing: true });
     },
     _stopAudio() {
       if (this._ctx) { try { this._ctx.stop(); } catch (err) { /* 已停 */ } }
+      this._duckMixer(false);
       if (this.data.playing || this.data.head) this.setData({ playing: false, head: 0 });
     },
     _destroyAudio() {
       const ctx = this._ctx;
+      const session = this._audioSession || getAudioSession();
       this._ctx = null;
-      if (ctx) { try { ctx.stop(); ctx.destroy(); } catch (err) { /* 已销毁 */ } }
+      this._audioSession = null;
+      if (session && typeof session.duck === 'function') session.duck('mixer', false);
+      if (ctx) {
+        if (session && typeof session.unregister === 'function') session.unregister(ctx);
+        try { ctx.stop(); ctx.destroy(); } catch (err) { /* 已销毁 */ }
+      }
     },
   },
 });

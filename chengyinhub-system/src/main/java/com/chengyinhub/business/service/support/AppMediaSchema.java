@@ -19,9 +19,9 @@ public final class AppMediaSchema {
     public static boolean isOfficialTemplateImage(String reference) {
         return reference != null && OFFICIAL_TEMPLATE_IMAGE.matcher(reference).matches();
     }
-    /** 章节正文段 / 章节卡上的旁白配音 voice(2026-11-25):与 image/audio 块的 url 同一条审核与签名口径。 */
+    /** 章节正文段 / 章节卡 / 台词上的旁白配音 voice(2026-11-25,2026-11-26 扩展 line):与 image/audio 块的 url 同一条审核与签名口径。 */
     public static boolean isBlockVoice(String key, String blockType) {
-        return "voice".equals(key) && ("text".equals(blockType) || "cap".equals(blockType));
+        return "voice".equals(key) && ("text".equals(blockType) || "cap".equals(blockType) || "line".equals(blockType));
     }
     public static final Set<String> MEDIA_FIELDS = Set.of("logo", "cover", "caseImages", "certImages", "avatar",
             "clubLogo", "images", "imgUrl", "imgArr", "medalImg", "storyImg", "audioUrl", "questionImg",

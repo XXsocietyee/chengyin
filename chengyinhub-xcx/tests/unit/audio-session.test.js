@@ -81,7 +81,8 @@ test('F06 按 kind 定静音键:背景音乐(ambient)跟随,旁白(voice)与其�
   assert.equal(s.register(fakeCtx(true), {kind:'voice'}).obeyMuteSwitch,false);
   for (const kind of ['npc','kit','chapter',undefined]) assert.equal(s.register(fakeCtx(true), kind ? {kind} : undefined).obeyMuteSwitch,false,String(kind));
   const js=require('node:fs').readFileSync(require('node:path').join(__dirname,'../../pages/play/index.js'),'utf8');
-  assert.equal((js.match(/\{ kind: audioSession\.AMBIENT \}/g)||[]).length,2,'主题配乐 + 站点配乐');
+  assert.equal((js.match(/\{ kind: audioSession\.AMBIENT \}/g)||[]).length,3,'主题配乐 + 站点配乐 + 自由探索章节配乐');
+  assert.match(js,/audioSession\.setKind\(audio, audioSession\.AMBIENT\)/,'chapter.audioUrl 走 AMBIENT 遵守静音键');
   assert.match(js,/\{ kind: audioSession\.VOICE \}\);   \/\/ F06:旁白 \/ 站点语音讲解/);
 });
 

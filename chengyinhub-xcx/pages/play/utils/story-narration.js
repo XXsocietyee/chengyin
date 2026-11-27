@@ -10,28 +10,67 @@
  *  - 开关是「旁白」:on 由页面传入(偏好见 sound-prefs.js),这里不读写存储。
  *  - 放不出来就当没有,不提示。
  */
+const defaultAudioSession = require('./audio-session.js');
+
+function validItem(it) {
+  return !!(it && it.key && typeof it.url === 'string' && /^https:\/\//.test(it.url));
+}
+
 function createStoryNarration(opts) {
   const o = opts || {};
   const api = o.wx || (typeof wx !== 'undefined' ? wx : {});
   const createAudio = o.createAudio || (() => api.createInnerAudioContext());
+  const session = o.audioSession !== undefined ? o.audioSession : defaultAudioSession;
   const duck = typeof o.duck === 'function' ? o.duck : () => {};
+  const onActiveChange = typeof o.onActiveChange === 'function' ? o.onActiveChange : () => {};
+  const autoAdvance = !!o.autoAdvance;
   let on = o.on !== false;
   let ctx = null;
   let current = null;
   let queue = [];
+  let playlist = [];
   let ducked = false;
+  let activeKey = '';
   const seen = new Set();
 
+  function notifyActive(item) {
+    const key = item ? item.key : '';
+    if (activeKey === key) return;
+    activeKey = key;
+    try { onActiveChange(key, item || null); } catch (e) {}
+  }
   function setDuck(v) {
     if (ducked === v) return;
     ducked = v;
     try { duck(v); } catch (e) {}
   }
+  function nextFromPlaylist(afterKey) {
+    if (!autoAdvance || !on || !afterKey || !playlist.length) return null;
+    const idx = playlist.findIndex((it) => it.key === afterKey);
+    if (idx < 0 || idx + 1 >= playlist.length) return null;
+    for (let i = idx + 1; i < playlist.length; i += 1) {
+      const cand = playlist[i];
+      if (!seen.has(cand.key)) {
+        seen.add(cand.key);
+        return cand;
+      }
+    }
+    return null;
+  }
   function ensure() {
     if (ctx) return ctx;
     ctx = createAudio();
-    const next = () => { if (!current) return; current = null; playNext(); };
-    try { ctx.obeyMuteSwitch = false; } catch (e) {}
+    const next = () => {
+      if (!current) return;
+      const finished = current;
+      current = null;
+      playNext(finished);
+    };
+    if (session && typeof session.register === 'function') {
+      try { session.register(ctx, { kind: session.VOICE || 'voice' }); } catch (e) {}
+    } else {
+      try { ctx.obeyMuteSwitch = false; } catch (e) {}
+    }
     if (typeof ctx.onEnded === 'function') ctx.onEnded(next);
     if (typeof ctx.onError === 'function') ctx.onError(next);
     return ctx;
@@ -41,24 +80,29 @@ function createStoryNarration(opts) {
     try { audio.stop(); } catch (e) {}
     current = item;
     setDuck(true);
-    try { audio.src = item.url; audio.play(); } catch (e) { current = null; playNext(); }
+    notifyActive(item);
+    try { audio.src = item.url; audio.play(); } catch (e) { const failed = current; current = null; playNext(failed); }
   }
-  function playNext() {
+  function playNext(finished) {
     if (on && queue.length) { start(queue.shift()); return; }
+    const follow = finished ? nextFromPlaylist(finished.key) : null;
+    if (follow) { start(follow); return; }
     queue = [];
     setDuck(false);
+    notifyActive(null);
   }
   function halt(how) {
     queue = [];
     if (current && ctx) { try { ctx[how](); } catch (e) {} }
     current = null;
     setDuck(false);
+    notifyActive(null);
   }
 
   function reveal(list) {
     const fresh = [];
     (list || []).forEach((it) => {
-      if (!it || !it.key || typeof it.url !== 'string' || !/^https:\/\//.test(it.url) || seen.has(it.key)) return;
+      if (!validItem(it) || seen.has(it.key)) return;
       seen.add(it.key);
       fresh.push(it);
     });
@@ -67,6 +111,29 @@ function createStoryNarration(opts) {
     start(fresh[0]);
     return true;
   }
+  function replay(item) {
+    if (!validItem(item)) return false;
+    seen.add(item.key);
+    queue = [];
+    start(item);
+    return true;
+  }
+  function setPlaylist(list) {
+    playlist = (Array.isArray(list) ? list : []).filter(validItem);
+  }
+  function markSeen(key) {
+    if (key) seen.add(key);
+  }
+  function remaining() {
+    if (current && playlist.length) {
+      const idx = playlist.findIndex((it) => it.key === current.key);
+      if (idx >= 0) return playlist.slice(idx);
+    }
+    const out = [];
+    if (current) out.push(current);
+    queue.forEach((it) => { if (validItem(it)) out.push(it); });
+    return out;
+  }
   function setOn(v) {
     on = !!v;
     if (!on) halt('stop');
@@ -74,22 +141,29 @@ function createStoryNarration(opts) {
   }
   function destroy() {
     halt('stop');
-    if (ctx) { try { ctx.destroy(); } catch (e) {} ctx = null; }
+    if (ctx) {
+      if (session && typeof session.unregister === 'function') {
+        try { session.unregister(ctx); } catch (e) {}
+      }
+      try { ctx.destroy(); } catch (e) {}
+      ctx = null;
+    }
   }
 
   return {
-    reveal, setOn, destroy,
+    reveal, replay, setPlaylist, markSeen, remaining, setOn, destroy,
     stop: () => halt('stop'),
     pause: () => halt('pause'),
     isOn: () => on,
     playing: () => (current ? current.key : ''),
+    currentItem: () => current,
   };
 }
 
-/** 本局章节里有没有带配音的正文段 / 章节卡(算进「旁白」开关该不该出)。 */
+/** 本局章节里有没有带配音的正文段 / 章节卡 / 台词(算进「旁白」开关该不该出)。 */
 function hasStoryVoice(chapters) {
   return (Array.isArray(chapters) ? chapters : []).some((c) => c && Array.isArray(c.blocks)
-    && c.blocks.some((b) => b && (b.type === 'text' || b.type === 'cap') && typeof b.voice === 'string' && b.voice.trim()));
+    && c.blocks.some((b) => b && (b.type === 'text' || b.type === 'cap' || b.type === 'line') && typeof b.voice === 'string' && b.voice.trim()));
 }
 
 module.exports = { createStoryNarration, hasStoryVoice };

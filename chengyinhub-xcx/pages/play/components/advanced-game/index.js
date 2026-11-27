@@ -9,6 +9,7 @@ const { buildActionKey, buildUnitId } = require('../../utils/play-action-key.js'
 const { canContinue, isR5, feedbackWritable } = require('../../utils/playkit-r5-segments.js');
 
 const { bundledMerchantGameAudioPath } = require('../../utils/merchant-game-assets.js');
+const audioSession = require('../../utils/audio-session.js');
 
 // L02-108:成功判定只有这一种写法(原先 == 200 / === '200' / Number() 混用)
 const isOk = (res) => !!res && Number(res.code) === 200;
@@ -452,14 +453,14 @@ Component({
     draw() { this.action('DRAW', {}); },
     initDrawAudio() {
       if (this._drawAudio) return;
-      const audio = wx.createInnerAudioContext();
-      audio.obeyMuteSwitch = false;
-      audio.onPlay(() => {});
-      audio.onPause(() => this.setData({ playingDrawId: '' }));
+      const audio = audioSession.register(wx.createInnerAudioContext(), { kind: audioSession.VOICE });
+      audio.onPlay(() => { audioSession.duck('drawAudio', true); });
+      audio.onPause(() => { audioSession.duck('drawAudio', false); this.setData({ playingDrawId: '' }); });
       // 切换音频时 stop 可能晚于新 play 回调 这里不能把新播放态清掉
       audio.onStop(() => {});
-      audio.onEnded(() => this.setData({ playingDrawId: '' }));
+      audio.onEnded(() => { audioSession.duck('drawAudio', false); this.setData({ playingDrawId: '' }); });
       audio.onError(() => {
+        audioSession.duck('drawAudio', false);
         this.setData({ playingDrawId: '' });
         toast('音频加载失败');
       });
@@ -479,17 +480,20 @@ Component({
       this.initDrawAudio();
       if (this.data.playingDrawId === id) {
         this._drawAudio.pause();
+        audioSession.duck('drawAudio', false);
         this.setData({ playingDrawId: '' });
         return;
       }
       this._drawAudio.stop();
       this._drawAudio.src = url;
+      audioSession.duck('drawAudio', true);
       this._drawAudio.play();
       this.setData({ playingDrawId: id });
     },
     stopDrawAudio() {
       if (!this._drawAudio) return;
       this._drawAudio.stop();
+      audioSession.duck('drawAudio', false);
       this.setData({ playingDrawId: '' });
     },
     /* 背景音乐(模板互动工具,2026-10-22):玩这一关时播放,离开 / 收起就停。
@@ -510,6 +514,8 @@ Component({
     },
     destroyDrawAudio() {
       if (!this._drawAudio) return;
+      audioSession.duck('drawAudio', false);
+      audioSession.unregister(this._drawAudio);
       this._drawAudio.destroy();
       this._drawAudio = null;
       this.setData({ playingDrawId: '' });

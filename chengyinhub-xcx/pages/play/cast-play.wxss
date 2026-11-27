@@ -6,6 +6,10 @@
 .chfull__para--who{ position:relative; }
 .chfull__who{ position:absolute; top:0; left:calc(var(--cy-space-3) - var(--cy-space-8)); width:calc(var(--cy-space-8) - var(--cy-space-3) - var(--cy-space-1)); font-size:20rpx; font-weight:400; line-height:66rpx; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; opacity:.46; letter-spacing:.04em; font-family:-apple-system, "PingFang SC", "Noto Sans SC", sans-serif; } /* ds-ok 契约 10px/400/浅灰;66rpx = 正文 34rpx × 1.95 首行行高 */
 .chfull__vrow{ display:flex; align-items:center; justify-content:flex-start; gap:var(--cy-space-1); margin:var(--cy-space-2) 0 0; padding:var(--cy-space-2) 0; font-size:22rpx; line-height:1.4; letter-spacing:.08em; text-align:left; opacity:.46; font-family:-apple-system, "PingFang SC", sans-serif; } /* ds-ok 契约 D1「▶︎ 0:08」小、浅灰;跟正文同一条左边线 */
+.chfull__vrow--narr{ opacity:.62; transition:opacity var(--cy-motion-fast, 150ms) var(--cy-ease-out, ease-out); }
+.chfull__vrow--narr.is-speaking{ opacity:1; font-weight:600; }
+.chfull__para.is-narrating{ padding-left:var(--cy-space-3); border-left:4rpx solid var(--look-a, var(--atmo-text, var(--cy-color-text-primary))); transition:border-color var(--cy-motion-fast, 150ms) var(--cy-ease-out, ease-out), padding-left var(--cy-motion-fast, 150ms) var(--cy-ease-out, ease-out); }
+.play--reduced-motion .chfull__vrow--narr, .play--reduced-motion .chfull__para.is-narrating{ transition:none; }
 .chfull__remember{ display:block; margin-top:var(--cy-space-3); font-size:24rpx; line-height:1.5; text-align:left; opacity:.46; font-family:-apple-system, "PingFang SC", sans-serif; } /* ds-ok 契约 E3 12px 浅灰,左对齐 */
 
 /* —— E2 首段首字下沉:约三行高,左浮;这一段改左对齐,首字才贴得住 —— */
