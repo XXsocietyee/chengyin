@@ -40,6 +40,7 @@ function pinsOf(clues) {
 }
 
 const { holdSubmit, releaseSubmit } = require('../../utils/submit-hold.js');
+const { stripLeadingHandMark } = require('../../utils/hand-mark.js');
 
 Component({
   behaviors: [reducedMotionBehavior],
@@ -59,8 +60,12 @@ Component({
     retryNote: { type: String, value: '' },
     screen: { type: Array, value: [] },
   },
-  data: { suspects: [], pins: [], cur: 0, outIdx: -1, inIdx: -1, confirmOpen: false, confirmText: '', cfOn: false, clueOpen: -1, illus: '', endOn: false },
+  data: { suspects: [], pins: [], cur: 0, outIdx: -1, inIdx: -1, confirmOpen: false, confirmText: '', cfOn: false, clueOpen: -1, illus: '', endOn: false, retryShown: '' },
   observers: {
+    retryNote(value) {
+      const retryShown = stripLeadingHandMark(value);
+      if (retryShown !== this.data.retryShown) this.setData({ retryShown });
+    },
     'outcome, pending, show': function (outcome, pending, show) {
       releaseSubmit(this);
       const illus = animKind(outcome, pending);

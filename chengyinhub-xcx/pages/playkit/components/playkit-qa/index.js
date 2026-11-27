@@ -22,7 +22,8 @@ const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js')
 const motion = require('../../../../utils/motion.js');
 const mediaDenied = require('../../utils/media-denied.js');
 const cyToast = require('../../../../utils/toast.js');
-const { stripOptionKey, stripLeadingHandMark } = require('../../utils/playkit-questo.js');
+const { stripOptionKey } = require('../../utils/playkit-questo.js');
+const { stripLeadingHandMark } = require('../../utils/hand-mark.js');
 function qaFeedback(text) { return stripLeadingHandMark(text); }
 const letterPool = require('../../utils/letter-pool.js');
 
@@ -154,6 +155,7 @@ Component({
     typeWrong: false,
     playing: false,
     feedback: '',
+    answerShown: '',
     shownFeedbackImages: [],
     submitted: false,
     fbHead: HEAD_NO,
@@ -173,6 +175,10 @@ Component({
   },
   observers: {
     imageUrl() { if (this.data.imgFailed) this.setData({ imgFailed: false }); },
+    answerText(value) {
+      const answerShown = qaFeedback(value);
+      if (answerShown !== this.data.answerShown) this.setData({ answerShown });
+    },
     acceptedInput(value) {
       if (value && this.data.mode === 'type' && this.data.passed) this.setData({ typed: value });
       if (value && this.data.poolOn && this.data.passed) this._syncQaPool();
@@ -265,8 +271,9 @@ Component({
         /* P-10:打字题答错时服务端常不带反馈文案,原来整块反馈不渲染 = 玩家看不出判过了。
            没有文案就写一句固定的「不对」,输入框描红,下一次输入即清。 */
         typed: passed ? (this.data.acceptedInput || (!fresh && (this._submittedText || this.data.typed)) || '')
-          : ((!fresh && (this.data.typed || this._submittedText)) || ''), feedback: qaFeedback((passed || finished || this.data.attempts > 0)
-          ? (this.data.feedbackText || (mode === 'type' && !passed && !finished && this.data.attempts > 0 && this.data.authoredOutcome !== 'FAIL' ? RETRY_TEXT : '')) : ''),
+          : ((!fresh && (this.data.typed || this._submittedText)) || ''), feedback: qaFeedback((passed || finished)
+          ? (this.data.feedbackText || '') : (this.data.attempts > 0
+          ? (this.data.feedbackText || (mode === 'type' && this.data.authoredOutcome !== 'FAIL' ? RETRY_TEXT : '')) : '')),
         typeWrong: mode === 'type' && !passed && !finished && this.data.attempts > 0,
         shownFeedbackImages: (passed || finished || this.data.attempts > 0)
           ? (this.data.feedbackImages || []).slice() : [],
@@ -635,6 +642,7 @@ Component({
          那行字会盖过刚才的反馈,人先看到的是判决,不是解释。 */
       const answerIndex = this._answerIndex();
       const reveal = this.data.judge !== false && pick && this.data.reveal && (multi ? Array.isArray(d.answerIds) : answerIndex >= 0);
+      const revealNow = (exhausted || this.data.finished || this.data.passed) && reveal;
       const kept = this.data.mode === 'type' ? String(this.data.typed || '') : '';
       // 字段写死成字面量,不拼 patch:动态 setData 门禁核不出写了哪些顶层字段
       this.setData({
@@ -648,11 +656,11 @@ Component({
         optionList: pick ? this.data.optionList.map((o, i) => {
           if (multi) {
             if (o.state === 'is-on') return Object.assign({}, o, { state: 'is-wrong' });
-            if (reveal && d.answerIds.indexOf(o.id) >= 0) return Object.assign({}, o, { state: 'is-right' });
+            if (revealNow && d.answerIds.indexOf(o.id) >= 0) return Object.assign({}, o, { state: 'is-right' });
             return o;
           }
           if (i === d.index) return Object.assign({}, o, { state: 'is-wrong' });
-          if (reveal && i === answerIndex) return Object.assign({}, o, { state: 'is-right' });
+          if (revealNow && i === answerIndex) return Object.assign({}, o, { state: 'is-right' });
           // 图片选项点选时变淡的其余几张在判错后回到原样,还能再选(原型答错 2.4s 后复位,这里随回执即复位)
           return o.state === 'is-dim' ? Object.assign({}, o, { state: '' }) : o;
         }) : this.data.optionList,

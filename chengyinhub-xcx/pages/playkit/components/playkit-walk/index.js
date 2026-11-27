@@ -75,6 +75,9 @@ Component({
       if (this.data.show) this._paint((this.data.goalLocked || this._goal == null) ? this.data.goal : this._goal, this.data.steps);
     },
   },
+  lifetimes: {
+    detached() { if (this._skipT) { clearTimeout(this._skipT); this._skipT = null; } },
+  },
   methods: {
     _group: group,            // 纯算法出口,供单测
     _remain: remain,
@@ -138,7 +141,8 @@ Component({
     onSkip() {
       if (!this.data.canSkip || this.data.skipped || this.data.syncing || this._skipping) return;
       this._skipping = true;
-      setTimeout(() => { this._skipping = false; }, 1500);
+      if (this._skipT) clearTimeout(this._skipT);
+      this._skipT = setTimeout(() => { this._skipT = null; this._skipping = false; }, 1500);
       this.triggerEvent('skip');
     },
 

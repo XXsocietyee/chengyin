@@ -123,21 +123,31 @@ Page({
           && d.total >= that.data.items.length + (validRows ? d.list.length : 0)
         if (!validRows || !validTotal) { that.setData({ loading: false, error: true }); return; }
         const rows = d.list;
-        const merged = that.data.items.concat(rows.map(function (r) { return { id: r.id, picUrl: r.picUrl }; }));
-        const pos = LAYOUT.collageLayout(merged.length, {
+        const oldLength = that.data.items.length;
+        const nextCount = oldLength + rows.length;
+        const pos = LAYOUT.collageLayout(nextCount, {
           cols: COLS, cellW: that._cellW, cellH: that._cellH, jitter: 16, maxRot: 12
         });
-        const items = merged.map(function (m, i) {
-          return { id: m.id, picUrl: m.picUrl, x: pos[i].x, y: pos[i].y, rot: pos[i].rot, z: pos[i].z };
-        });
-        pageMotion.enter(that, 'pmList', { once: true }); that.setData({ // L09-051
-          items: items,
+        const place = function (id, picUrl, index) {
+          return { id: id, picUrl: picUrl, x: pos[index].x, y: pos[index].y, rot: pos[index].rot, z: pos[index].z };
+        };
+        // 第一页整表落地。续页 collageLayout 只看下标,已在屏上的 x/y/rot/z 不变,只把新下标送过桥(L09-052)。
+        const patch = {
           total: d.total,
-          stageH: Math.ceil(merged.length / COLS) * that._cellH + 60,
+          stageH: Math.ceil(nextCount / COLS) * that._cellH + 60,
           pageNum: that.data.pageNum + 1,
-          noMore: rows.length === 0 || merged.length >= d.total,
+          noMore: rows.length === 0 || nextCount >= d.total,
           loading: false, loaded: true, error: false
-        });
+        };
+        if (that.data.pageNum === 1) {
+          const merged = that.data.items.concat(rows.map(function (r) { return { id: r.id, picUrl: r.picUrl }; }));
+          patch.items = merged.map(function (m, i) { return place(m.id, m.picUrl, i); });
+        } else {
+          for (let i = 0; i < rows.length; i++) {
+            patch['items[' + (oldLength + i) + ']'] = place(rows[i].id, rows[i].picUrl, oldLength + i);
+          }
+        }
+        pageMotion.enter(that, 'pmList', { once: true }); that.setData(patch); // L09-051
       },
       fail(res, statusCode) { if (!that._readOutcome(res, statusCode, owner, seq)) that.setData({ loading: false, error: true }); },
       // HTTP 层非 200 走的是这一条:不挂它的话 success/fail 都不会跑,

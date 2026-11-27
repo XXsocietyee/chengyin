@@ -228,7 +228,9 @@ Component({
       this._stopTick();
       const paint = () => {
         const left = Math.max(0, Math.ceil(total - (Date.now() - t0) / 1000));
-        this.setData({ limitLeft: left, limitScale: limitPercent(left, total) / 100 });
+        const limitScale = limitPercent(left, total) / 100;
+        if (left === this.data.limitLeft && limitScale === this.data.limitScale) return;
+        this.setData({ limitLeft: left, limitScale });
       };
       if (Date.now() - t0 >= 1000) paint();
       this._tick = setInterval(paint, 1000);

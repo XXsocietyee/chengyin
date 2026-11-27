@@ -31,7 +31,12 @@ Component({
   observers: {
     'show, done, mine, maxLength': function (show, done, mine, maxLength) {
       releaseSubmit(this);
-      if (!show) return;
+      // L02-040: 这一层收起时立刻落盘。只等停手的话，关掉再打开会读到少几个字的旧稿
+      if (!show) {
+        if (done) kitDraft.drop(this);
+        else kitDraft.flush(this);
+        return;
+      }
       if (done) { kitDraft.drop(this); kitDraft.clear(this.data.draftKey); }
       const text = done ? String(mine || '') : String(kitDraft.read(this.data.draftKey).text || '');
       this.setData({
@@ -88,6 +93,11 @@ Component({
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       this.triggerEvent('submit', { text: this.data.text });
     },
-    onClose() { releaseSubmit(this); this.triggerEvent('close'); },
+    onClose() {
+      releaseSubmit(this);
+      if (this.data.done) kitDraft.drop(this);
+      else kitDraft.flush(this);
+      this.triggerEvent('close');
+    },
   },
 });

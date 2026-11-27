@@ -56,7 +56,14 @@ Component({
   },
   observers: {
     'show, headsLabel, headsAction, tailsLabel, tailsAction': function (show) {
-      if (!show) { this._offShake(); return; }
+      if (!show) {
+        this._offShake();
+        this._stop();
+        this._stopFlipGuard();
+        // L02-034: 请求没落地就收起，不能把这次抛留在锁上或画面上
+        if (!normalizeFace(this.data.face)) this._dropFailedFlip();
+        return;
+      }
       this._flipping = false;
       this._result = '';
       this._onShake();
@@ -72,13 +79,13 @@ Component({
       // L02-034
       const f = normalizeFace(d.face);
       if (f) { this.setData({ idle: false, coinStyle: 'transform:rotateX(' + spinDeg(this._turns || 0, f) + 'deg)' }); this._settle(f, true); }
-      else if (d.settled) this.setData({ settled: false, hint: '摇一摇手机' });
+      else this._dropFailedFlip();
     },
     face: function (face) {
       this._flipping = false;  // L02-034
       this._stopFlipGuard();
       const f = normalizeFace(face);
-      if (!f) { this._result = ''; this.setData({ idle: true, settled: false, coinStyle: '', hint: '摇一摇手机' }); return; }
+      if (!f) { this._result = ''; this._dropFailedFlip(); return; }
       this._turns = (this._turns || 0) + 6 + Math.floor(Math.random() * 3);
       const deg = spinDeg(this._turns, f);
       // 停自转再翻:两个 transform 打架的话硬币会在半路跳一下
@@ -106,6 +113,15 @@ Component({
   },
   methods: {
     _stop() { if (this._timer) { clearTimeout(this._timer); this._timer = null; } },
+    /** 没拿到面:解开抛锁,画面回到「还没抛」,不留上一次的「翻着…」或结果字。 */
+    _dropFailedFlip() {
+      this._flipping = false;
+      this._result = '';
+      const d = this.data;
+      const lab = d.headsLabel + ' · ' + d.headsAction + '\n' + d.tailsLabel + ' · ' + d.tailsAction;
+      if (d.idle && !d.coinStyle && d.big === '正面还是反面？' && d.lab === lab && d.hint === '摇一摇手机') return;
+      this.setData({ idle: true, coinStyle: '', big: '正面还是反面？', lab, hint: '摇一摇手机' });
+    },
     _onShake() {
       if (this._hidden || !this.data.show) return;
       if (!this._shakeOn) {

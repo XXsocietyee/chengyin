@@ -37,7 +37,8 @@ Component({
       this.setData({ percent: 0 });
       this._timer = setInterval(() => {
         const k = Math.min(1, (Date.now() - t0) / total);
-        this.setData({ percent: Number(k.toFixed(3)) });
+        const percent = Number(k.toFixed(3));
+        if (percent !== this.data.percent) this.setData({ percent });
         this.triggerEvent('tick');
         if (k < 1) return;
         this._stop();

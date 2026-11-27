@@ -170,6 +170,7 @@ Component({
       try { if (wx.stopCompass) wx.stopCompass({ fail() {} }); } catch (e) { /* best effort after callback invalidation */ }
     },
     _abort() {
+      if (this._skipT) { clearTimeout(this._skipT); this._skipT = null; }
       const stage = this._attempt ? this._attempt.stage : this.selectComponent('#cy-play-stage');
       this._attempt = null;
       this._stop(); this._stopCompass();
@@ -177,7 +178,8 @@ Component({
       if (stage) stage._stopAll();
       this._retiredStage = stage;
       this.setData({
-        stageKeys: [this.data.stageKeys[0] + 1], phase: this._sent ? 'done' : 'idle',
+        // L02-035: 只有服务端记下了才停在 done。交出去但没记上，收起后仍是待命，可以再交。
+        stageKeys: [this.data.stageKeys[0] + 1], phase: this._sent && this.data.done ? 'done' : 'idle',
         aligned: false, noData: false, hasHeading: false, holdPct: 0, holdLeft: '0.0', turnHint: '', lowAccuracy: false,
       });
     },
@@ -199,7 +201,10 @@ Component({
     },
 
     onStart() {
-      if (this._hidden || this._closed || this._detached || !this.data.show || this._sent || this.data.done || this._attempt) return;
+      if (this._hidden || this._closed || this._detached || !this.data.show || this.data.done) return;
+      // L02-035: 上一发没被服务端记下（网络或冲突）。锁只挡同一次保持里的连交，不挡再来一次。
+      if (this._sent && !this._attempt) this._sent = false;
+      if (this._sent || this._attempt) return;
       const stage = this.selectComponent('#cy-play-stage');
       if (!stage || stage === this._retiredStage) return;
       const attempt = this._attempt = { stage, key: this.data.stageKeys[0], phase: 'starting',
@@ -325,7 +330,10 @@ Component({
       const holdLeft = Math.max(0, this._holdTotal() - this._held).toFixed(1);
       // L02-143: 每 100ms 只有针和刻度盘一定在转;其余几项没变就不跟着过桥
       const cur = [heading, true, aligned, holdPct, turnHint, this._lowAccuracy, holdLeft];
-      if (cur.every((v, i) => v === [d.heading, d.hasHeading, d.aligned, d.holdPct, d.turnHint, d.lowAccuracy, d.holdLeft][i])) { this.setData({ needleDeg: needle, roseDeg: rose }); return; }
+      if (cur.every((v, i) => v === [d.heading, d.hasHeading, d.aligned, d.holdPct, d.turnHint, d.lowAccuracy, d.holdLeft][i])) {
+        if (needle !== d.needleDeg || rose !== d.roseDeg) this.setData({ needleDeg: needle, roseDeg: rose });
+        return;
+      }
       this.setData({
         heading,
         needleDeg: needle,
@@ -347,21 +355,29 @@ Component({
       const bearing = normalize(this._heading);
       this._stop(); this._stopCompass();
       this._sent = true; attempt.phase = 'reporting';
-      this.setData({ phase: 'done', holdPct: 100 });
+      // 本地保持满了先报上去。服务端还没把这一站记成 done 时，不能停在 done 上让人交不了第二次。
+      const recorded = this.data.done === true;
+      this.setData({ phase: recorded ? 'done' : 'idle', holdPct: 100 });
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       const stage = attempt.stage;
       if (stage) stage.win('对准了，保持了 ' + this._holdTotal() + ' 秒');
       attempt.phase = 'done';
       if (this._current(attempt)) this.triggerEvent('submit', withAttempt({ bearing },
         { attemptId: freshAttempt(this.data.attemptId, attempt.attemptAtRun) }));
+      if (!this.data.done && this._attempt === attempt) {
+        if (stage && stage._stopAll) stage._stopAll();
+        this._attempt = null;
+      }
     },
 
     /* P-23:跳过由服务端判(次数、作者开关或队长放行都在服务端),这里只发请求 */
     onSkip() {
+      if (!this.data.done && this._sent && !this._attempt) this._sent = false;
       if (!this.data.canSkip || this.data.done || this._sent || this._skipping) return;
       if (this._attempt) this._abort();
       this._skipping = true;
-      setTimeout(() => { this._skipping = false; }, 1500);
+      if (this._skipT) clearTimeout(this._skipT);
+      this._skipT = setTimeout(() => { this._skipT = null; this._skipping = false; }, 1500);
       this.triggerEvent('skip');
     },
 

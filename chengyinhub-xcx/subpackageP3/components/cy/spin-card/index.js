@@ -12,6 +12,7 @@
 // 一律退化成一张不动的卡。铸卡是通关之后的事,这里没有任何一条路能把人挡住。
 
 const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
+const { holdAccelerometer } = require('../../../../utils/play-shake.js');
 
 const MAX_TILT_DEG = 11;   // 再大就不像「一张卡」,像玩具
 const PHOTO_SHIFT = 9;     // px,卡面在自己窗口里让位的距离
@@ -134,26 +135,23 @@ Component({
         if (!this._zero) { this._zero = { x, y }; return; }
         this._latest = { dx: x - this._zero.x, dy: y - this._zero.y };
       };
-      // 表与回调先就位,最后才开传感器:fail 可能在同一拍里就回来,
-      // 那时若定时器还没建好,关停就会漏掉它 —— 漏掉的就是一个永不停的那只表。
+      // 表先就位:开传感器失败可能在同一拍里回来,那时要把这只表清掉。
       this._tick = setInterval(() => this._render(), RENDER_MS);
-      wx.onAccelerometerChange(this._onTilt);
       this.setData({ tracking: true });
-      wx.startAccelerometer({
-        interval: 'ui',
-        fail: () => {
-          // 拿不到传感器就是没有立体感,不是报错的理由 —— 退回静态卡
-          this._stopTilt();
-        },
-      });
+      // L02-026:共用加速度计。最后一个放手的才关;开不起来就退回静态卡。
+      const release = holdAccelerometer(wx, this._onTilt, () => this._stopTilt());
+      if (!this._tiltOn) return;
+      if (!release) { this._stopTilt(); return; }
+      this._tiltRelease = release;
     },
 
     _stopTilt() {
       if (!this._tiltOn) return;
       this._tiltOn = false;
       if (this._tick) { clearInterval(this._tick); this._tick = null; }
-      wx.stopAccelerometer({ fail() {} });
-      wx.offAccelerometerChange && this._onTilt && wx.offAccelerometerChange(this._onTilt);
+      const release = this._tiltRelease;
+      this._tiltRelease = null;
+      if (release) release();
       this._onTilt = null;
       this._latest = null;
       this.setData({ tracking: false, pose: '' });

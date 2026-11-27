@@ -109,6 +109,7 @@ Component({
     _clear() {
       if (this._outTimer) { clearTimeout(this._outTimer); this._outTimer = null; }
       if (this._wipeTimer) { clearTimeout(this._wipeTimer); this._wipeTimer = null; }
+      if (this._wipeStart) { clearTimeout(this._wipeStart); this._wipeStart = null; }
     },
 
     /** 把三张可见的摆成扇形,其余的收起来。 */
@@ -131,7 +132,9 @@ Component({
       if (this.data.bg === col) return;
       if (this.data.reducedMotion) { this.setData({ bg: col }); return; }
       this.setData({ wipeCol: col, wipeOn: true, wipeP: 0, wipeTr: 'none' });
-      setTimeout(() => {
+      if (this._wipeStart) clearTimeout(this._wipeStart);
+      this._wipeStart = setTimeout(() => {
+        this._wipeStart = null;
         this.setData({ wipeP: 165, wipeTr: 'clip-path .95s cubic-bezier(.62,.02,.3,1),opacity .2s' });
       }, 20);
       if (this._wipeTimer) clearTimeout(this._wipeTimer);

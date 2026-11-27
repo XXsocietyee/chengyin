@@ -152,7 +152,8 @@ Component({
     _stop() {
       if (this._timer) clearInterval(this._timer);
       if (this._watchdog) clearTimeout(this._watchdog);
-      this._timer = null; this._watchdog = null;
+      if (this._skipT) clearTimeout(this._skipT);
+      this._timer = null; this._watchdog = null; this._skipT = null;
     },
     _offCalibrate() {
       const release = this._calRelease;
@@ -206,7 +207,8 @@ Component({
       if (!this.data.canSkip || this.data.skipped || this.data.running || this.data.awaitingResult
         || this._attempt && this._attempt.phase !== 'finished' || this._skipping) return;
       this._skipping = true;
-      setTimeout(() => { this._skipping = false; }, 1500);
+      if (this._skipT) clearTimeout(this._skipT);
+      this._skipT = setTimeout(() => { this._skipT = null; this._skipping = false; }, 1500);
       this.triggerEvent('skip');
     },
     _armWatchdog(attempt) {

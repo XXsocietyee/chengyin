@@ -134,7 +134,9 @@ Component({
         if (!this.data.hidden) this.setData({ hidden: true, cap: CAP_HID, timeText: MASK });
         return;
       }
-      this.setData({ big: secs(ms), timeText: clockText(ms) });
+      const big = secs(ms);
+      const timeText = clockText(ms);
+      if (big !== this.data.big || timeText !== this.data.timeText) this.setData({ big, timeText });
     },
 
     onPause() {
