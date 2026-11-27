@@ -411,3 +411,61 @@ test('L09-040:setData 的票只留模板和票动作要读的字段,空列表保
   page.goTicket({ currentTarget: { dataset: { index: page.data.ticketList.indexOf(seat) } } })
   assert.equal(sandbox.navigations[1].url, '/pages/play/index?topicId=41&entry=ticket&topicName=' + encodeURIComponent('老城夜游'))
 })
+
+function loadDeckPage() {
+  const timers = []
+  const writes = []
+  const app = {
+    getImgUrl: name => name,
+    getPageSize: () => 10,
+    getTotalPage: (total, size) => Math.ceil(Number(total || 0) / size),
+    getRequestErrorMessage: (response, fallback) => (response && response.msg) || fallback,
+    getUserID: () => '1001',
+    sendRequest() {},
+  }
+  const context = {
+    getApp: () => app,
+    Page(config) { context.config = config },
+    setTimeout(fn) {
+      const id = timers.length + 1
+      timers.push({ id, fn, cleared: false })
+      return id
+    },
+    clearTimeout(id) {
+      const timer = timers.find(item => item.id === id)
+      if (timer) timer.cleared = true
+    },
+    wx: { showToast() {}, navigateTo() {}, getStorageSync() { return false } },
+    console,
+  }
+  vm.createContext(context)
+  vm.runInContext(source(), context, { filename: 'subpackageMember/signup/index.js' })
+  const page = Object.assign({}, context.config)
+  page.data = JSON.parse(JSON.stringify(context.config.data))
+  page.setData = (patch) => {
+    writes.push(patch)
+    Object.entries(patch).forEach(([key, value]) => setPath(page.data, key, value))
+  }
+  page._cw = 200
+  page._walletOwner = '1001'
+  return { page, timers, writes }
+}
+
+test('离开票夹后，翻页和进场计时器不再改卡面', () => {
+  const { page, timers, writes } = loadDeckPage()
+  page.data.ticketList = [{ id: 1, wImg: 'a' }, { id: 2, wImg: 'b' }]
+  page.data.currentSwiperTicket = 0
+  page._settle()
+  assert.equal(page._throwing, true)
+  page._playEnter(false)
+  assert.equal(page._entering, true)
+  assert.ok(timers.some(timer => !timer.cleared))
+  page.onHide()
+  assert.equal(page._throwing, false)
+  assert.equal(page._entering, false)
+  assert.ok(timers.length > 0)
+  assert.ok(timers.every(timer => timer.cleared))
+  writes.length = 0
+  timers.forEach(timer => timer.fn())
+  assert.deepEqual(writes, [])
+})

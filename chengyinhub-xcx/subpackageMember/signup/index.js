@@ -139,7 +139,27 @@ Page({
     this._refreshOnShow = true;
     this._invalidateWalletRequests();
     this._clearQrTimer(); this._qrFor = ''; if (this._goTimer) clearTimeout(this._goTimer); if (this._litTimer && typeof clearTimeout === 'function') clearTimeout(this._litTimer);
+    this._clearDeckTimers();
     if (this.data.flipped || this.data.entering) this.setData({ flipped: false, entering: false, qrState: 'idle' });
+  },
+
+  // 翻页和进场的 setTimeout 在离开后不能再 setData：页还在栈里时 _unloaded 仍是 false。
+  _armDeck(fn, ms) {
+    const gen = this._deckGen || 0;
+    const id = setTimeout(() => {
+      if (this._unloaded || this._deckGen !== gen) return;
+      fn();
+    }, ms);
+    (this._deckTimers || (this._deckTimers = [])).push(id);
+    return id;
+  },
+  _clearDeckTimers() {
+    this._deckGen = (this._deckGen || 0) + 1;
+    const timers = this._deckTimers || [];
+    this._deckTimers = [];
+    if (typeof clearTimeout === 'function') timers.forEach((id) => clearTimeout(id));
+    this._throwing = false;
+    this._entering = false;
   },
 
   // 「开始游戏」每次进页扫一道光:先归位再在下一拍点亮,transition 走一次;减动效不扫
@@ -153,6 +173,7 @@ Page({
     this._unloaded = true;
     this._invalidateWalletRequests();
     this._clearQrTimer(); if (this._goTimer) clearTimeout(this._goTimer); if (this._litTimer && typeof clearTimeout === 'function') clearTimeout(this._litTimer);
+    this._clearDeckTimers();
   },
 
   // 首屏未命中时使用已有本人报名详情接口，不轮询内存或依赖分页 total。
@@ -663,11 +684,9 @@ Page({
     this._deckLay();
     const from = arrive ? 'transform: translate(40px,-720px) rotate(-12deg) scale(1.15);' : 'transform: translate(0px,560px) scale(.9);';
     this._entering = true; this.setData({ ['deckPoses[' + cur + ']']: from + 'z-index: 30; transition: none;', deckStill: true }); __end(this, 1, arrive);
-    setTimeout(() => {
-      if (this._unloaded) return;
+    this._armDeck(() => {
       this.setData({ deckStill: false });
-      setTimeout(() => {
-        if (this._unloaded) return;
+      this._armDeck(() => {
         const ease = arrive ? 'transition: transform .78s cubic-bezier(.2,.9,.25,1.08);' : 'transition: transform .7s cubic-bezier(.2,.9,.25,1.08);';
         this.setData({ ['deckPoses[' + cur + ']']: 'transform: perspective(1400px) translate3d(0px,0px,0px) rotateY(0deg) scale(1); transform-origin: 50% 50%; opacity: 1; z-index: 30; --curl: 0;' + ease });
       }, arrive ? 320 : 0);
@@ -723,12 +742,11 @@ Page({
   /* 翻页 / 弹回的过渡走完后,无过渡地归位(清掉卷页轴心),再放开下一次拖动 */
   _settle() {
     this._throwing = true;
-    setTimeout(() => {
-      if (this._unloaded) return;
+    this._armDeck(() => {
       this._origin = '';
       this.setData({ deckStill: true });
       this._deckLay();
-      setTimeout(() => { if (!this._unloaded) this.setData({ deckStill: false }); this._throwing = false; }, 50);
+      this._armDeck(() => { this.setData({ deckStill: false }); this._throwing = false; }, 50);
     }, 520);
   },
   goExplore() { wx.switchTab({ url: '/pages/index/index' }); },
@@ -865,6 +883,8 @@ function walletOrder(list) {
 }
 
 /* 入场动画最长时长(最后一张起步 + 过渡 + 余量)后放开重排 */
-function __end(page, n, arrive) { setTimeout(() => { page._entering = false; }, 40 + Math.max(arrive ? 320 : 0, (n - 1) * 90) + 900); }
+function __end(page, n, arrive) {
+  page._armDeck(() => { page._entering = false; }, 40 + Math.max(arrive ? 320 : 0, (n - 1) * 90) + 900);
+}
 
 if (typeof module !== 'undefined') module.exports = { pagePoses, pageTurn, topicTicketIndex, usableTicket, walletOrder, walletCard };
