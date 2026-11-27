@@ -71,17 +71,17 @@ Page({
       this._presenceFlight = null;
       this.setData({ submitting: false });
     }
-    // L10-044:收起时不读。换了账号才丢掉上一份;同一趟离开再回来留着已读的行,不在 onShow 重拉。
-    const held = this._mediaRowsScope;
-    const now = this.mediaScope();
-    if (held && (held.owner !== now.owner || held.token !== now.token)) {
+    // L10-044:收起时不读;同账号新鲜列表隐藏后再回来不重拉;首次、换账号、失败重试仍读。
+    const accountDiffers = this.mediaAccountDiffers();
+    if (accountDiffers) {
       this.clearMediaState();
       this._mediaHidden = false;
     }
-    if (!this.data.pendingAuthorization && this.data.mediaOpen && !this._mediaVisitLoaded) this.loadOwnMedia();
+    if (!this.data.pendingAuthorization && !this.mediaListFresh()
+        && (this.data.mediaOpen || accountDiffers)) this.loadOwnMedia();
   },
   onHide() { this.invalidateRoamRevoke(); this.retainMediaAcrossHide(); this.releasePresenceRequest(); },
-  // 离开或新一次关闭都作废在途回包。转圈在离开时解开，不留给迟到的成功/失败回调。
+  // L10-194:离开或新一次关闭都作废在途回包。转圈在离开时解开，迟到成功不能把分享重新打开。
   releasePresenceRequest() {
     this._presenceEpoch = (this._presenceEpoch || 0) + 1;
     if (this._presenceFlight == null) return;
@@ -104,21 +104,6 @@ Page({
     this._mediaBeforeId = '';
     this.setData({ mediaRows: [], mediaLoading: false, mediaHasMore: false, mediaBusyId: '', mediaError: '', mediaPreviewUrl: '', mediaPreviewType: '' });
   },
-  // 同一趟里离开页面:作废在途回包和本人预览链接,已读列表留下次回来接着看。
-  retainMediaAcrossHide() {
-    this._mediaHidden = true;
-    this._mediaEpoch = (this._mediaEpoch || 0) + 1;
-    if (this._mediaDownload && this._mediaDownload.abort) this._mediaDownload.abort();
-    this._mediaDownload = null;
-    if (this._mediaRowsScope) {
-      this._mediaRowsScope = {
-        epoch: this._mediaEpoch,
-        owner: this._mediaRowsScope.owner,
-        token: this._mediaRowsScope.token
-      };
-    }
-    this.setData({ mediaLoading: false, mediaBusyId: '', mediaPreviewUrl: '', mediaPreviewType: '' });
-  },
   mediaScope() {
     return { epoch: this._mediaEpoch || 0, owner: String(app.getUserID ? app.getUserID() || '' : ''),
       token: app.getAuthorization ? app.getAuthorization() || '' : '' };
@@ -126,6 +111,27 @@ Page({
   mediaScopeLive(scope) {
     const now = this.mediaScope();
     return !this._mediaHidden && scope.epoch === now.epoch && scope.owner === now.owner && scope.token === now.token;
+  },
+  mediaListFresh() {
+    const saved = this._mediaRowsScope;
+    if (!saved) return false;
+    const now = this.mediaScope();
+    return saved.epoch === now.epoch && saved.owner === now.owner && saved.token === now.token;
+  },
+  mediaAccountDiffers() {
+    const saved = this._mediaRowsScope;
+    if (!saved) return false;
+    const now = this.mediaScope();
+    return saved.owner !== now.owner || saved.token !== now.token;
+  },
+  retainMediaAcrossHide() {
+    const keep = this.mediaListFresh();
+    this._mediaHidden = true;
+    this._mediaEpoch = (this._mediaEpoch || 0) + 1;
+    if (keep) this._mediaRowsScope = { epoch: this._mediaEpoch, owner: this._mediaRowsScope.owner, token: this._mediaRowsScope.token };
+    if (this._mediaDownload && this._mediaDownload.abort) this._mediaDownload.abort();
+    this._mediaDownload = null;
+    this.setData({ mediaLoading: false, mediaBusyId: '', mediaPreviewUrl: '', mediaPreviewType: '' });
   },
   requestOwnMedia(url, method, scope, done) {
     let settled = false;
@@ -281,8 +287,8 @@ Page({
   closeMediaPreview() { this.setData({ mediaPreviewUrl: '', mediaPreviewType: '' }); }, toggleMediaPanel() {
     const open = !this.data.mediaOpen;
     this.setData({ mediaOpen: open });
-    // L10-044:第一次展开才读;这一趟已经读过就留着
-    if (open && !this.data.pendingAuthorization && !this._mediaVisitLoaded && !this.data.mediaLoading) this.loadOwnMedia();
+    // L10-044:展开时直接用已载入的行;没有新鲜列表(首次或上次失败)才读。
+    if (open && !this.data.pendingAuthorization && !this.data.mediaLoading && !this.mediaListFresh()) this.loadOwnMedia();
   },
   copyApprovedMedia(event) {
     const row = this.ownMediaFromEvent(event);
@@ -430,7 +436,7 @@ Page({
     const live = () => !this._mediaHidden && epoch === (this._presenceEpoch || 0);
     this.setData({ submitting: true, presenceError: '' });
     presencePrivacy.setSharing(app, null, false)
-      .then(() => { if (live()) toast('已关闭附近的人位置分享'); })
+      .then(saved => { if (live() && saved !== true) toast('已关闭附近的人位置分享'); })
       .catch(() => { if (live()) this.setData({ presenceError: '附近的人位置分享未能关闭，请重试' }); })
       .finally(() => {
         if (!live()) return;
