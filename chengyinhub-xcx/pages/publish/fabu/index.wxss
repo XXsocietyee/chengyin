@@ -432,7 +432,7 @@ page { background: var(--cy-btn-solid-bg); }
      的效果,这正是稿子(4034:14718)的样子。原来这里留 240rpx + 安全区 ≈ 308rpx,比整条
      底栏还高:内容在够到渐变之前就先被 padding 顶住,于是底部一大块死灰、没有任何渐隐,
      最后一张章节卡被整齐切掉。 */
-  padding-bottom: 120rpx; /* ds-ok: 与底栏渐变实心段等高,不套用间距量表 */
+  padding-bottom: calc(220rpx + env(safe-area-inset-bottom)); /* ds-ok: 留出底部固定操作栏与安全区高度，避免空章节卡主按钮被挡 */
 }
 
 /* 没有地图的两步(路线/设置):sheet 顶到状态栏下方,让出的 28vh 全给列表。
@@ -2087,13 +2087,13 @@ page { background: var(--cy-btn-solid-bg); }
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding: var(--cy-space-5) var(--cy-space-3);
+  padding: var(--cy-space-3) var(--cy-space-3);
 }
 
 .slopes-empty-ico {
-  width: 104rpx;
-  height: 104rpx;
-  margin-bottom: var(--cy-space-3);
+  width: 88rpx;
+  height: 88rpx;
+  margin-bottom: var(--cy-space-2);
   border-radius: var(--cy-radius-pill);
   display: flex;
   align-items: center;

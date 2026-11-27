@@ -255,11 +255,11 @@ Page({
     stopPullDownRefresh();
   },
 
-  load() {
+  load(force) {
     if (!this._requireSession()) return;
     const that = this;
     const scope = identityKey();
-    if (this._listLoading && this._listLoadingScope === scope) {
+    if (force !== true && this._listLoading && this._listLoadingScope === scope) {
       this.loadApplies();
       this.loadChapterApplications();
       this.loadOfficialInvites();

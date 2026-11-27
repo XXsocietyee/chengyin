@@ -24,6 +24,7 @@
   /* —— ② 共享页旧 alias 桥接:子选择器在此节点重新求值,避免沿用 page 的暗色快照 —— */
   --cy-bg-page:        var(--cy-color-bg-page);
   --cy-bg-card:        var(--cy-color-bg-surface);
+  --cy-comp-card-bg:   var(--cy-color-bg-elevated);
   --cy-bg-card-2:      var(--cy-color-bg-surface-subtle);
   --cy-bg-subtle:      #f8fafc; /* ds-ok: 商家日间旧 alias 保留既定字面契约,与 tokens.wxss 同值 */
   --cy-text-title:     var(--cy-color-text-primary);

@@ -177,9 +177,9 @@ test('U10 优惠券列表:玩家深色(theme-dark),商家口径才浅色;空态�
   assert.deepEqual(merchant.themes, ['light'])
 })
 
-test('U10 优惠券列表:非商家身份后端 403 → 原地无权限态「当前身份不能查看优惠券」,不再落空白加载失败态', () => {
+test('U10 优惠券列表:非商家身份后端 403 → 原地无权限态「当前身份不能查看优惠券」,引导去玩家优惠券包而不引去申请入驻', () => {
   const wxml = read('subpackageMember/coupon/coupon.wxml')
-  assert.match(wxml, /<cy-empty wx:elif="\{\{loadState === 'denied'\}\}" kind="no-permission" fill size="lg" title="当前身份不能查看优惠券" cta="\{\{isMerchant \? '返回' : '申请入驻'\}\}" bind:cta="onDenyCta"(?: class="cy-fade-in")? \/>/)
+  assert.match(wxml, /<cy-empty wx:elif="\{\{loadState === 'denied'\}\}" kind="no-permission" fill size="lg" title="当前身份不能查看优惠券" cta="\{\{isMerchant \? '返回' : '查看我的优惠券'\}\}" bind:cta="onDenyCta"(?: class="cy-fade-in")? \/>/)
   const requests = []
   const { page, navigations } = mountPage('subpackageMember/coupon/coupon.js', { sendRequest: (o) => requests.push(o) })
   page.onLoad({})
@@ -188,11 +188,13 @@ test('U10 优惠券列表:非商家身份后端 403 → 原地无权限态「当
   assert.ok(list, 'coupon list request sent')
   list.success({ code: 403, msg: '商家身份无效或权限不足' })
   assert.equal(page.data.loadState, 'denied')
-  // followDenyCta 是宿主上下文里的共享模块,读全局 wx
   const prevWx = global.wx
-  global.wx = { navigateTo: (o) => { navigations.push(o.url); if (o.complete) o.complete() } }
+  global.wx = {
+    redirectTo: (o) => { navigations.push(o.url); if (o.complete) o.complete() },
+    navigateTo: (o) => { navigations.push(o.url); if (o.complete) o.complete() },
+  }
   try { page.onDenyCta() } finally { global.wx = prevWx }
-  assert.deepEqual(navigations, ['/pages/merchant/apply/index'])
+  assert.deepEqual(navigations, ['/subpackageMember/coupon-wallet/index'])
 })
 
 // PG-040(2026-11-17 业主批准):建券页 couponInfo 整页下线,U10 关闭态用例随页移除。

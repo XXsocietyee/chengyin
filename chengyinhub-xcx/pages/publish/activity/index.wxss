@@ -10,7 +10,8 @@
 
 .publish-access-state { min-height: calc(100vh - 96rpx); display: flex; flex-direction: column; }
 .publish-access-state > cy-skeleton { margin: 0 var(--cy-page-x); }
-.publish-access-state > cy-error { flex: 1; display: flex; }
+.publish-access-state > cy-error,
+.publish-access-state > cy-empty { flex: 1; display: flex; flex-direction: column; }
 
 .fabu .form .li {
   margin-bottom: var(--cy-space-2-5);

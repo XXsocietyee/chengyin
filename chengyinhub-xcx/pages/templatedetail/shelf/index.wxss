@@ -65,9 +65,16 @@
 .sh-dot { width: 12rpx; height: 12rpx; border-radius: 6rpx; background: rgba(128, 128, 128, 0.4); transition: background 0.25s; } /* ds-ok 业主定稿原型 v21 原值 */
 .sh-dot--on { width: 32rpx; background: var(--sh-fg); opacity: 0.85; }
 
-/* ---- 标签(图标与文字隔约 4 个空格) ---- */
-.sh-tags { position: relative; z-index: 1; width: 100%; white-space: nowrap; }
-.sh-tags__in { display: inline-flex; gap: 12rpx; padding: 32rpx 32rpx 4rpx; }
+/* ---- 标签(图标与文字隔约 4 个空格;吸顶避让状态栏与顶栏安全高度) ---- */
+.sh-tags {
+  position: sticky;
+  top: var(--template-safe-top, 0px);
+  z-index: 15;
+  width: 100%;
+  white-space: nowrap;
+  background: var(--cy-color-bg-page);
+}
+.sh-tags__in { display: inline-flex; gap: 12rpx; padding: 20rpx 32rpx 16rpx; }
 .tg { flex-shrink: 0; height: 60rpx; padding: 0 26rpx; border-radius: 30rpx; display: inline-flex; align-items: center; font-size: 26rpx; font-weight: 500; color: var(--sh-fg); opacity: 0.92; background: var(--sh-fill); } /* ds-ok 业主定稿原型 v21 原值 */
 .tg--on { background: var(--sh-tag-on-bg); color: var(--sh-tag-on-fg); font-weight: 600; opacity: 1; }
 .tg__ic { width: 52rpx; height: 52rpx; margin: -8rpx 36rpx -8rpx -16rpx; flex-shrink: 0; }

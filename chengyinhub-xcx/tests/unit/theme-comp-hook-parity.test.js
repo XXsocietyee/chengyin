@@ -55,7 +55,7 @@ const EXEMPT = new Set([
   // 指向别名层，别名已在浅端块重声明，实测浅色页显示正常
   '--cy-comp-btn-primary-bg', '--cy-comp-btn-primary-fg',
   '--cy-comp-btn-secondary-bg', '--cy-comp-btn-secondary-fg',
-  '--cy-comp-card-bg', '--cy-comp-cell-press-bg', '--cy-comp-success-mark-fg',
+  '--cy-comp-cell-press-bg', '--cy-comp-success-mark-fg',
   // 同 success-mark-fg:填色徽章上的对比前景,徽章底自己是状态色,不随宿主明暗切换
   '--cy-comp-result-mark-fg',
   // 结果面板的 loading 弧:稿子两档同一个紫,不随宿主明暗翻色

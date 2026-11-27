@@ -490,8 +490,8 @@ page {
   color: var(--cy-text-secondary);
 }
 
-/* scroll-view 同时带 100vh 与 padding-top:必须 border-box,否则整页比视口高一个导航栏 */
-.rv-scroll { box-sizing: border-box; }
+/* scroll-view 让出底部 tabBar 实高(16+88+16rpx+安全区 = --cy-tabbar-h + --cy-space-2),内容不再透到底栏图标后 */
+.rv-scroll { height: calc(100vh - var(--cy-tabbar-h) - var(--cy-space-2)); box-sizing: border-box; }
 
 /* ===== 我的消息(2026-08-20 稿 3910:580):白卡列表,行=图标圈+标题/摘要+时间 ===== */
 .rv-msg-card {

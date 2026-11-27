@@ -928,7 +928,9 @@ public class MarketingProductFulfillmentServiceImpl implements IMarketingProduct
         row.setExpiresAt(expiresAtOverride == null ? expiresAtOf(line) : expiresAtOverride);
         // 退款快照:只有 ③ 探索票能由既有 RefundPolicy 生成;其它 SKU 必须由商品配置给 code/version,
         // 否则拒绝 —— 不能用 NULL 让读侧回落现取(会追溯改写已售单的退款窗口)。
-        applyRefundSnapshot(row, line, topic, shape);
+        boolean purePointsPass = command.payment.mode == PaymentFacts.MODE_POINTS
+                && (order == null || order.getTotalCashAmount() == null || order.getTotalCashAmount().signum() <= 0);
+        applyRefundSnapshot(row, line, topic, shape, purePointsPass);
         row.setPointUsed(firstRow ? pointsOf(command) : 0L);
         row.setPointDeductAmount(BigDecimal.ZERO);
         row.setPointDeductRate(pointsValuePolicyRate());
@@ -1008,7 +1010,8 @@ public class MarketingProductFulfillmentServiceImpl implements IMarketingProduct
      * 完全一致:不打快照、deadline 留空,读侧 {@code evaluateTopicFulfillmentWindow} 给"履约窗缺失,转人工"。
      * 不新造退期;只填一端/倒置的主题仍拒绝。
      */
-    private void applyRefundSnapshot(CmsRegistration row, GrantLine line, CmsTopic topic, OrderShape shape) {
+    private void applyRefundSnapshot(CmsRegistration row, GrantLine line, CmsTopic topic,
+                                     OrderShape shape, boolean pointsPayment) {
         Integer purchaseKind = row.getPurchaseKind();
         if (Integer.valueOf(PurchaseKind.EXPLORE_PASS).equals(purchaseKind)) {
             RefundPolicy.Snapshot snapshot = RefundPolicy.snapshotOnPurchase(purchaseKind, null, row.getExpiresAt());
@@ -1027,7 +1030,9 @@ public class MarketingProductFulfillmentServiceImpl implements IMarketingProduct
         try {
             window = com.chengyinhub.business.service.support.FulfillmentWindowResolver.resolve(topic, null);
         } catch (IllegalStateException missingWindow) {
-            if (shape != null && shape.seatTicket
+            // 开放式自玩路线（start/end 都为 NULL）：多人票与积分兑换通行证不涉及微信现金自动退期，
+            // 与同路线单人自玩票同口径（deadline 留空，退款转人工）；只填一端或倒置仍拒绝。
+            if ((pointsPayment || (shape != null && shape.seatTicket))
                     && com.chengyinhub.business.service.support.FulfillmentWindowResolver.isOpenEnded(topic)) {
                 return;   // 与单人自玩票同口径:无快照,退款转人工
             }

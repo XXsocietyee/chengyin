@@ -1017,6 +1017,7 @@ page.theme-light,
      ⚠️ 起层手段**二选一**(2026-07-29 复核阻塞项 3):投影与描边同时出现 = 一张卡两条外沿,
      浅底上尤其脏。本域选投影,所以描边必须同步关掉;白底细线域(theme-topic-editor)
      则相反 —— 那边零投影、留描边。两边都只有一条外沿。 */
+  --cy-comp-card-bg:            var(--cy-color-bg-elevated);
   --cy-comp-card-highlight:     transparent;
   --cy-comp-card-shadow-day:    0 2rpx 8rpx rgba(15,23,43,.48);
   --cy-comp-card-border:        transparent;
@@ -1163,6 +1164,7 @@ page.theme-topic-editor,
      ⚠️ 2026-08-10 之前 bg-page 也是 #FFFFFF:白卡压在白页上差 0 级,既没投影也没描边,
      于是整页看着是内容平铺、根本看不出有卡(用户实拍反馈)。改灰底不是配色偏好,
      是把这条「靠明度差起层」的规范真正通上电。 */
+  --cy-comp-card-bg:            var(--cy-color-bg-elevated);
   --cy-comp-card-highlight:     transparent;
   --cy-comp-card-shadow-day:    0 0 0 0 transparent;
   /* ★ 底部面板钩子:同 .theme-merchant 那一处的理由。cy-date-sheet 消费的是
@@ -1380,6 +1382,7 @@ page.theme-dark,
   --cy-comp-search-filled-fg: var(--cy-color-input-filled-fg);
   --cy-comp-search-placeholder: var(--cy-color-input-placeholder);
   --cy-color-border-subtle: rgba(255,255,255,.08);
+  --cy-comp-card-bg: var(--cy-color-bg-elevated);
   --cy-comp-card-highlight: rgba(255,255,255,.08);
   --cy-comp-card-shadow-day: 0 0 0 0 transparent;
   --cy-comp-card-border: var(--cy-color-border-subtle);

@@ -20,7 +20,20 @@
 
 .body {
   position: relative; /* 刷新胶囊 .marketing-sync 的定位参照 */
-  padding: 0 var(--cy-page-x) calc(var(--cy-tabbar-h) + var(--cy-space-2));
+  padding: 0 var(--cy-page-x) calc(var(--cy-tabbar-h) + var(--cy-space-6));
+}
+
+/* 营销页是文档流滚动,在底栏(z=222)下方垫一层同页底色托底,防止深色合作图卡透出底栏图标 */
+.page::after {
+  content: '';
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(var(--cy-tabbar-h) + var(--cy-space-2));
+  background: var(--cy-color-bg-page);
+  pointer-events: none;
+  z-index: var(--cy-z-tabbar);
 }
 
 /* 入口/身份失败的内联错误(替代原整屏闸);下面 hero 自带 padding,这里只要底距 */
