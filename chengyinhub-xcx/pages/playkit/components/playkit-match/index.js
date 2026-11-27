@@ -12,6 +12,7 @@
 
 const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
 const motion = require('../../../../utils/motion.js');
+const { holdSubmit, releaseSubmit } = require('../../utils/submit-hold.js');
 
 /** 一列条目 → 本地行。badge = 它在 pairs 里的序号 +1(0 = 还没连),渲染时按 verdict 上色。 */
 function paintSide(list, side, pairs) {
@@ -71,6 +72,7 @@ Component({
     leftRows: [],
     rightRows: [],
     selected: '',
+    selectedSide: '',
     pairedCount: 0,
     total: 0,
     verdict: '',          // '' 未判 / 'ok' 通过 / 'no' 判错
@@ -79,28 +81,31 @@ Component({
   },
   observers: {
     failureSeq: function (value) {
-      if (!value || this.data.passed || !this.data.submitting) return;
-      this.setData({ submitting: false });
+      if (!value || this.data.passed) return;
+      releaseSubmit(this);
+      if (this.data.submitting) this.setData({ submitting: false });
     },
     'show, left, right': function (show, left, right) {
-      if (!show) { this._configSignature = ''; if (this.data.submitting) this.setData({ submitting: false }); return; }
+      if (!show) { this._configSignature = ''; releaseSubmit(this); if (this.data.submitting) this.setData({ submitting: false }); return; }
       // 服务端回流会把同值的题面数组再赋一遍:题面没变就不重置台面(与停表 / typein 的签名同口径)
       const signature = JSON.stringify([left, right]);
       if (signature === this._configSignature) return;
       this._configSignature = signature;
+      releaseSubmit(this);
       if (this.data.submitting) this.setData({ submitting: false });
-      this._paintPairs([], '', left, right);
+      this._paintPairs([], '', left, right, '', '');
       const stage = this.selectComponent('#cy-play-stage');
       if (stage) stage.begin();
     },
     'attempts, passed, lastCorrect': function (attempts, passed) {
+      releaseSubmit(this);
       // L02-173: 只在次数真的涨了(刚判过)时画判定、抖台面;同值回流不把已清掉的红标再放回来
       const now = Number(attempts) || 0;
       const seen = this._seenAttempts;
       this._seenAttempts = now;
       if (!(attempts > 0)) return;
       if (passed) {
-        if (this.data.verdict !== 'ok' || this.data.submitting) this.setData({ verdict: 'ok', submitting: false });
+        if (this.data.verdict !== 'ok' || this.data.submitting) this.setData({ verdict: 'ok', selected: '', selectedSide: '', submitting: false });
         return;
       }
       if (seen != null && now <= seen) return;
@@ -110,7 +115,7 @@ Component({
       if (!passed) { const stage = this.selectComponent('#cy-play-stage'); if (stage && stage.nudge) stage.nudge(); }
     },
   },
-  lifetimes: { detached() { clearTimeout(this._drawT); } },
+  lifetimes: { detached() { clearTimeout(this._drawT); releaseSubmit(this); } },
   methods: {
     _paintSide: paintSide,      // 纯算法出口,供单测
     _pairLines: pairLines,
@@ -118,15 +123,17 @@ Component({
     _canSubmit: canSubmit,
 
     /** 重画两列与角标。任何改动都要把上一次的判定撤掉 —— 红角标跟着新连线走是误导。 */
-    _paintPairs(pairs, selected, left, right, freshKey) {
+    _paintPairs(pairs, selected, left, right, freshKey, selectedSide) {
       const l = left || this.data.left || [];
       const r = right || this.data.right || [];
       // ⚠️ pairs 只喂逻辑(拆线 / 提交)不渲染:进 data 就是死数据字段,放实例字段
       this._pairs = pairs;
       const leftRows = paintSide(l, 'l', pairs), rightRows = paintSide(r, 'r', pairs);
       const fresh = this.data.reducedMotion ? '' : (freshKey || '');
+      const side = selected ? (selectedSide || this.data.selectedSide || '') : '';
       this.setData({
         selected: selected,
+        selectedSide: side,
         leftRows, rightRows,
         pairedCount: pairs.length,
         total: l.length,
@@ -157,43 +164,68 @@ Component({
       });
     },
 
+    _locked() { return this.data.verdict === 'ok' || this.data.passed; },
     onTapLeft(e) {
+      if (this._locked()) return;
       const id = e.currentTarget.dataset.id;
       const row = this.data.leftRows.filter((r) => r.id === id)[0] || {};
       // 再点已配对的卡 = 取消(设计规格),不是「换个连法」。取消掉自己那张时把选中态一起收掉
       if (row.badge) {
-        this._unpair((p) => p[0] !== id, this.data.selected === id ? '' : this.data.selected);
+        const keepSel = this.data.selectedSide === 'l' && this.data.selected === id ? '' : this.data.selected;
+        this._unpair((p) => p[0] !== id, keepSel, keepSel ? this.data.selectedSide : '');
+        return;
+      }
+      // 先点过右边一张:现在点左边直接成对
+      if (this.data.selectedSide === 'r' && this.data.selected) {
+        const rightId = this.data.selected;
+        motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
+        const next = this._pairs
+          .filter((p) => p[0] !== id && p[1] !== rightId)
+          .concat([[id, rightId]]);
+        this._paintPairs(next, '', null, null, id + '-' + rightId, '');
         return;
       }
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'light' });
-      this.setData({ selected: this.data.selected === id ? '' : id });
+      const same = this.data.selectedSide === 'l' && this.data.selected === id;
+      this.setData({ selected: same ? '' : id, selectedSide: same ? '' : 'l' });
     },
     onTapRight(e) {
+      if (this._locked()) return;
       const id = e.currentTarget.dataset.id;
       const row = this.data.rightRows.filter((r) => r.id === id)[0] || {};
-      if (row.badge) { this._unpair((p) => p[1] !== id, this.data.selected); return; }
-      const leftId = this.data.selected;
-      if (!leftId) return;                       // 先点左边那张,右边单点没有意义
+      if (row.badge) {
+        const keepSel = this.data.selectedSide === 'r' && this.data.selected === id ? '' : this.data.selected;
+        this._unpair((p) => p[1] !== id, keepSel, keepSel ? this.data.selectedSide : '');
+        return;
+      }
+      const leftId = this.data.selectedSide === 'l' ? this.data.selected : '';
+      if (!leftId) {
+        // 先点右边也可以:高亮右边这张,再点左边成对
+        motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'light' });
+        const same = this.data.selectedSide === 'r' && this.data.selected === id;
+        this.setData({ selected: same ? '' : id, selectedSide: same ? '' : 'r' });
+        return;
+      }
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       // 左边若已连过别人、或右边被占着,先把旧线拆掉再连 —— 一一对应
       const next = this._pairs
         .filter((p) => p[0] !== leftId && p[1] !== id)
         .concat([[leftId, id]]);
-      this._paintPairs(next, '', null, null, leftId + '-' + id);
+      this._paintPairs(next, '', null, null, leftId + '-' + id, '');
     },
-    _unpair(keep, selected) {
+    _unpair(keep, selected, selectedSide) {
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'light' });
-      this._paintPairs(this._pairs.filter(keep), selected);
+      this._paintPairs(this._pairs.filter(keep), selected, null, null, '', selectedSide);
     },
 
     onSubmit() {
-      // 已通过 / 在途提交不再交:防止连点烧次数或撞「已结束」
-      if (!canSubmit(this.data.pairedCount, this.data.total) || this.data.verdict === 'ok' || this.data.passed || this.data.submitting) return;
+      // 已通过/提交中就不再交(实走 A15:再交只会撞「这一局连线已经结束了」)
+      if (!canSubmit(this.data.pairedCount, this.data.total) || this._locked() || this.data.submitting || !holdSubmit(this)) return;
       this.setData({ submitting: true });
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       // ★ 只报玩家连的那些,不报对错 —— 对错在服务端
       this.triggerEvent('submit', { pairs: (this._pairs || []).map((p) => [p[0], p[1]]) });
     },
-    onClose() { this._configSignature = ''; this.triggerEvent('close'); },
+    onClose() { this._configSignature = ''; releaseSubmit(this); this.triggerEvent('close'); },
   },
 });

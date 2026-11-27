@@ -3,10 +3,12 @@ const motion = require('../../../../utils/motion.js');
 const { readReducedMotion } = require('../../../../utils/motion-preference.js');
 const toast = require('../../../../utils/toast.js');
 const { baseline, thresholds, bandOf, pcmPeak, denied } = require('../../utils/play-audio-level.js');
+const mediaDenied = require('../../utils/media-denied.js');
 const { withAttempt, freshAttempt, rewardNote } = require('../../utils/sensor-contract.js');
 const TICK_MS = 100;
 const FIRST_FRAME_MS = 3000;
 const GAP_MS = 500;
+const DIP_GRACE_MS = 280;
 
 
 Component({
@@ -21,7 +23,7 @@ Component({
     canSkip: { type: Boolean, value: false },
     skipped: { type: Boolean, value: false },
   },
-  data: { left: '5.0', loud: false, running: false, preparing: false, stageKeys: [0], rewardNote: '', micDenied: false },
+  data: { left: '5.0', loud: false, meterScale: 0, running: false, preparing: false, stageKeys: [0], rewardNote: '', micDenied: false },
   observers: {
     rewardCeiling(value) { this.setData({ rewardNote: rewardNote(value) }); },
     'show, seconds': function (show, seconds) {
@@ -32,7 +34,7 @@ Component({
       this._configSignature = signature;
       this._abort();
       this._closed = false;
-      this.setData({ left: this._total().toFixed(1) });
+      this.setData({ left: this._total().toFixed(1), meterScale: 0 });
     },
   },
   lifetimes: {
@@ -45,6 +47,12 @@ Component({
   },
   methods: {
     _total() { const n = this.data.seconds; return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : 5; },
+    _meterOf(peak) {
+      if (typeof peak !== 'number' || !Number.isFinite(peak) || !this._hot) return 0;
+      const base = Number.isFinite(this._base) ? this._base : 0;
+      const span = Math.max(0.01, this._hot - base);
+      return Number(Math.max(0, Math.min(1, (peak - base) / span)).toFixed(2));
+    },
     _current(attempt) { return !!attempt && this._attempt === attempt && this.data.show && !this._hidden && !this._closed && !this._detached; },
     _stageAttempt(e) {
       const a = this._attempt;
@@ -74,7 +82,7 @@ Component({
       // L02-191: 台面只在真开过一局时才停掉换新(打开 / 关闭 / 切后台没开局就不白白重挂)
       if (a) { if (stage) stage._stopAll(); this._retiredStage = stage; }
       const key = this.data.stageKeys[0] + (a ? 1 : 0);
-      this.setData({ running: false, preparing: false, loud: false,
+      this.setData({ running: false, preparing: false, loud: false, meterScale: 0,
         left: this._total().toFixed(1), stageKeys: [key] }, () => {
         if (after && this.data.stageKeys[0] === key && this.data.show && !this._hidden && !this._closed && !this._detached) after();
       });
@@ -84,6 +92,16 @@ Component({
     _micDenied() {
       this.setData({ micDenied: true });
       this.triggerEvent('micdenied');
+      if (mediaDenied && typeof mediaDenied.guidePermission === 'function') mediaDenied.guidePermission('mic');
+    },
+    onOpenSetting() {
+      if (mediaDenied && typeof mediaDenied.guidePermission === 'function') {
+        mediaDenied.guidePermission('mic', {
+          onReturn: (res) => {
+            if (res && res.authSetting && res.authSetting['scope.record']) this.setData({ micDenied: false });
+          },
+        });
+      }
     },
     _failure(a, error) {
       if (!this._current(a) || a.phase === 'reporting' || a.phase === 'finished') return;
@@ -123,9 +141,9 @@ Component({
       if (!stage || stage === this._retiredStage) return;
       const a = this._attempt = { stage, key: this.data.stageKeys[0], phase: 'starting', rec: null,
         started: false, returned: false, frameAt: null, frameSeq: 0, sampledSeq: 0,
-        runAt: null, runLoud: false, samples: 0, listeners: [] };
+        runAt: null, runLoud: false, dipSince: null, smoothPeak: null, samples: 0, listeners: [] };
       this._samples = []; this._peak = null; this._held = 0;
-      this.setData({ preparing: true, running: false, loud: false });
+      this.setData({ preparing: true, running: false, loud: false, meterScale: 0 });
       this._startMic(a);
     },
     _startMic(a) {
@@ -141,8 +159,8 @@ Component({
           const peak = pcmPeak(result && result.frameBuffer);
           if (peak === null) {
             if (a.phase === 'running') {
-              a.runAt = null; a.runLoud = false; this._held = 0;
-              this.setData({ loud: false, left: this._total().toFixed(1) });
+              a.runAt = null; a.runLoud = false; a.dipSince = null; a.smoothPeak = null; this._held = 0;
+              this.setData({ loud: false, meterScale: 0, left: this._total().toFixed(1) });
             }
             return;
           }
@@ -151,12 +169,22 @@ Component({
           a.frameAt = now; a.frameSeq += 1; this._peak = peak;
           this._armWatchdog(a, GAP_MS);
           if (a.phase !== 'running') return;
+          a.smoothPeak = a.smoothPeak === null ? peak : a.smoothPeak * 0.5 + peak * 0.5;
+          const meterScale = this._meterOf(a.smoothPeak);
           const loud = bandOf(peak, this._mid, this._hot) === 'hot';
-          if (a.runAt !== null && a.runLoud && loud) this._held += Math.min(0.1, Math.max(0, (now - a.runAt) / 1000));
-          else this._held = 0; // 掉线清零，不能攒着喊。
+          if (loud) {
+            a.dipSince = null;
+            if (a.runAt !== null && a.runLoud) this._held += Math.min(0.1, Math.max(0, (now - a.runAt) / 1000));
+          } else {
+            if (a.dipSince === null) a.dipSince = now;
+            // 短暂换气或单帧抖动给 280ms 宽限，持续掉线才清零
+            if (now - a.dipSince >= DIP_GRACE_MS) this._held = 0;
+          }
           a.runAt = now; a.runLoud = loud; a.samples += 1;
           const left = Math.max(0, this._total() - this._held).toFixed(1);
-          if (loud !== this.data.loud || left !== this.data.left) this.setData({ loud, left });  // L02-048
+          if (loud !== this.data.loud || left !== this.data.left || meterScale !== this.data.meterScale) {
+            this.setData({ loud, left, meterScale });  // L02-048
+          }
           if (this._held >= this._total()) this._finish();
         };
         const onError = error => this._failure(a, error);
@@ -182,18 +210,19 @@ Component({
       const a = this._stageAttempt(e);
       if (!a || a.phase !== 'calibrating') return;
       if (a.frameAt === null || Date.now() - a.frameAt >= GAP_MS || !this._samples.length) { this._failure(a); return; }
-      const t = thresholds(baseline(this._samples));
-      this._mid = t.mid; this._hot = t.hot; a.phase = 'ready';
+      const base = baseline(this._samples);
+      const t = thresholds(base);
+      this._base = base; this._mid = t.mid; this._hot = t.hot; a.phase = 'ready';
     },
     onRun(e) {
       const a = this._stageAttempt(e);
       if (!a || a.phase !== 'ready') return;
       if (a.frameAt === null || Date.now() - a.frameAt >= GAP_MS) { this._failure(a); return; }
-      a.phase = 'running'; a.runAt = null; a.runLoud = false; a.samples = 0;
+      a.phase = 'running'; a.runAt = null; a.runLoud = false; a.dipSince = null; a.smoothPeak = null; a.samples = 0;
       // 开局那一刻手里的号是上一次的;只有这一局开表后服务端新发的号才随成绩交
       a.attemptAtRun = this.data.attemptId;
       this._held = 0; this._last = Date.now();
-      this.setData({ preparing: false, running: true, left: this._total().toFixed(1), loud: false });
+      this.setData({ preparing: false, running: true, left: this._total().toFixed(1), loud: false, meterScale: 0 });
       this.triggerEvent('start');
       if (!this._current(a)) return;
       this._timer = setInterval(() => {
@@ -210,7 +239,7 @@ Component({
       a.phase = 'reporting';
       const heldMs = Math.round(this._held * 1000);
       this._stop(); this._stopMic(a);
-      this.setData({ running: false, preparing: false });
+      this.setData({ running: false, preparing: false, meterScale: 1 });
       motion.haptic({ reducedMotion: this._rm, type: 'medium' });
       a.stage.win('连续喊满 ' + this._total() + ' 秒');
       if (!this._current(a)) return;

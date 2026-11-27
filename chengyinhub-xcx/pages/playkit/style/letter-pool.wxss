@@ -12,7 +12,7 @@
 .lp__row { display: flex; justify-content: center; gap: 10rpx; }   /* ds-ok 同上 */
 .lp__key {
   flex: none;
-  width: 88rpx;                            /* ds-ok 命中区 44px */
+  width: 84rpx;                            /* ds-ok 7×84 + 6×10 = 648rpx,含页边距 ≤ 750rpx 不裁切 */
   height: 88rpx;
   line-height: 88rpx;
   text-align: center;
@@ -67,4 +67,4 @@
 }
 .lp__slot.is-next { border-color: var(--lk-a, var(--ink)); }
 .lp__slot.is-wrong { border-color: var(--cy-color-status-danger); }
-.lp__slot.is-ok { background: var(--cy-color-status-success); border-color: var(--cy-color-status-success); color: var(--bg); }
+.lp__slot.is-ok { background: var(--cy-color-status-success); border-color: var(--cy-color-status-success); color: #fff; }  /* ds-ok 绿底白字保证可读 */

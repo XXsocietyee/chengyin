@@ -11,6 +11,7 @@ const motionPreference = require('../../../../utils/motion-preference.js');
 const motion = require('../../../../utils/motion.js');
 const cyToast = require('../../../../utils/toast.js');
 const reveal = require('../../../../utils/object-card-reveal.js');
+const mediaDenied = require('../../utils/media-denied.js');
 
 /** 等结果的上限:视觉审核 + 铸卡最坏十来秒,过了这个数还没回来就放玩家回取景,别让他对着转圈干等。 */
 const WAIT_MS = 45000;
@@ -51,6 +52,8 @@ const SPIN_STEPS = 600;  // L02-039
 Component({
   properties: {
     show: { type: Boolean, value: false },
+    title: { type: String, value: '' },
+    shotNote: { type: String, value: '' },
     tries: { type: Number, value: 0 },
     passed: { type: Boolean, value: false },
     flagged: { type: Boolean, value: false },
@@ -147,7 +150,9 @@ Component({
       this._before = null;
       this.setData({
         phase: 'cam', camOn: !this._camErr, busy: false, shot: '', shotHidden: false,
-        head: '把物品放进框里', sub: '', headOn: true, pill: '', pillReady: false, objSrc: '', formOn: false, cardView: null,
+        head: String(this.data.title || '').trim() || '把物品放进框里',
+        sub: String(this.data.shotNote || '').trim(),
+        headOn: true, pill: '', pillReady: false, objSrc: '', formOn: false, cardView: null,
       });
     },
 
@@ -181,13 +186,32 @@ Component({
           const file = (res && res.tempFiles && res.tempFiles[0]) || {};
           this._shoot(file.tempFilePath, file.size);
         },
-        fail: () => this.setData({ busy: false }),
+        fail: (err) => {
+          this.setData({ busy: false });
+          mediaDenied.guideIfDenied(err, 'album');
+        },
       });
     },
-    onCamError() {
+    onCamError(e) {
       this._camErr = true;
       this.setData({ camOn: false });
+      const detail = e && e.detail;
+      if (mediaDenied.deniedBySystem(detail)) {
+        mediaDenied.guidePermission('camera', {
+          onReturn: (res) => {
+            if (res && res.authSetting && res.authSetting['scope.camera']) {
+              this._camErr = false;
+              if (this.data.phase === 'cam') this.setData({ camOn: true });
+            }
+          },
+        });
+        return;
+      }
       cyToast('相机无法打开，可以从相册选一张');
+    },
+    onCancelProc() {
+      if (this.data.phase !== 'proc') return;
+      this._openCam();
     },
     _shoot(path, size) {
       if (!path) { this.setData({ busy: false }); cyToast('没拿到照片'); return; }

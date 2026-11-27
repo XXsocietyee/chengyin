@@ -5,7 +5,9 @@
 // ★ 存哪儿是服务端的事(优先复用 dailySign 那套跨玩家存储),客户端不挑存储。
 const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
 const motion = require('../../../../utils/motion.js');
+const cyModal = require('../../../../utils/modal.js');
 const kitDraft = require('../../utils/kit-draft.js');
+const { holdSubmit, releaseSubmit } = require('../../utils/submit-hold.js');
 
 Component({
   behaviors: [reducedMotionBehavior],
@@ -28,6 +30,7 @@ Component({
   },
   observers: {
     'show, done, mine, maxLength': function (show, done, mine, maxLength) {
+      releaseSubmit(this);
       if (!show) return;
       if (done) { kitDraft.drop(this); kitDraft.clear(this.data.draftKey); }
       const text = done ? String(mine || '') : String(kitDraft.read(this.data.draftKey).text || '');
@@ -38,9 +41,17 @@ Component({
       });
     },
   },
-  lifetimes: { detached() { kitDraft.flush(this); } },
+  lifetimes: { detached() { kitDraft.flush(this); releaseSubmit(this); } },
   pageLifetimes: { hide() { kitDraft.flush(this); } },
   methods: {
+    _applyPreset(text) {
+      this.setData({
+        text,
+        countLabel: text.length + '/' + (Number(this.data.maxLength) || 0),
+        canSubmit: !!text.trim(),
+      });
+      kitDraft.write(this.data.draftKey, { text });
+    },
     onInput(e) {
       if (this.data.done) return;
       const text = e.detail.value == null ? '' : String(e.detail.value);
@@ -54,19 +65,29 @@ Component({
     onPickPreset(e) {
       if (this.data.done) return;
       const text = String(e.currentTarget.dataset.text || '');
-      this.setData({
-        text,
-        countLabel: text.length + '/' + (Number(this.data.maxLength) || 0),
-        canSubmit: !!text.trim(),
-      });
-      kitDraft.write(this.data.draftKey, { text });
+      const cur = String(this.data.text || '');
+      const presets = this.data.presets || [];
+      // 玩家自己打过字(且不是当前选中的预设短句):套用预设前先确认,避免手滑清掉草稿
+      if (cur.trim() && cur !== text && presets.indexOf(cur) < 0) {
+        cyModal.show({
+          title: '替换当前内容？',
+          content: '使用预设短句会覆盖已写好的留言。',
+          confirmText: '替换',
+          cancelText: '取消',
+          success: (res) => {
+            if (res && res.confirm && !this.data.done) this._applyPreset(text);
+          },
+        });
+        return;
+      }
+      this._applyPreset(text);
     },
     onSubmit() {
-      if (this.data.done || !this.data.canSubmit) return;
+      if (this.data.done || !this.data.canSubmit || !holdSubmit(this)) return;
       // 留言提交不可撤销 —— 与作答同一档触感
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       this.triggerEvent('submit', { text: this.data.text });
     },
-    onClose() { this.triggerEvent('close'); },
+    onClose() { releaseSubmit(this); this.triggerEvent('close'); },
   },
 });

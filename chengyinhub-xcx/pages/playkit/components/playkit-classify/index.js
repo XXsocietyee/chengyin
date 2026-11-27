@@ -48,6 +48,7 @@ const { holdSubmit, releaseSubmit } = require('../../utils/submit-hold.js');
 Component({
   behaviors: [reducedMotionBehavior],
   properties: {
+    inline: { type: Boolean, value: false },
     show: { type: Boolean, value: false },
     prompt: { type: String, value: '' },
     bins: { type: Array, value: [] },

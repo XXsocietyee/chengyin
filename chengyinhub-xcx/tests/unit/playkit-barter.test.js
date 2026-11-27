@@ -97,7 +97,8 @@ test('图标:只认契约里的十二个名字,其余落回名字首字', () => 
 function mount(file) {
   let def;
   global.getApp = () => ({ globalData: {} });
-  global.wx = { vibrateShort() {}, getStorageSync() {}, setStorageSync() {}, getSystemInfoSync: () => ({}) };
+  const toasts = [];
+  global.wx = { vibrateShort() {}, showToast(o) { toasts.push(o && o.title); }, hideToast() {}, getStorageSync() {}, setStorageSync() {}, getSystemInfoSync: () => ({}) };
   global.Component = (d) => { def = d; };
   global.Behavior = (b) => b;
   const resolved = require.resolve(file);
@@ -107,7 +108,7 @@ function mount(file) {
   (def.behaviors || []).forEach((b) => Object.assign(data, JSON.parse(JSON.stringify((b && b.data) || {}))));
   Object.assign(data, JSON.parse(JSON.stringify(def.data || {})));
   Object.entries(def.properties || {}).forEach(([k, v]) => { data[k] = JSON.parse(JSON.stringify(v.value === undefined ? null : v.value)); });
-  const vm = { data, triggered: [], triggerEvent(name, detail) { this.triggered.push([name, detail]); }, selectComponent: () => null };
+  const vm = { data, toasts, triggered: [], triggerEvent(name, detail) { this.triggered.push([name, detail]); }, selectComponent: () => null };
   Object.entries(def.methods || {}).forEach(([k, fn]) => { vm[k] = fn.bind(vm); });
   const observers = Object.entries(def.observers || {});
   vm.setData = (patch) => { Object.assign(vm.data, patch); };
@@ -135,6 +136,7 @@ test('组件:预演 → 撤回 → 交整串;判错保留预演、软红一下;�
   assert.equal(vm.triggered.length, 0, '空计划不能交');
   vm.onPick(tap('o2'));
   assert.deepEqual(vm._order, [], '乙给的胶带不在背包里,点了没反应');
+  assert.ok(vm.toasts.some((t) => /胶带/.test(t)), '点禁用交换卡应提示缺少的物品');
   vm.onPick(tap('o3'));
   assert.equal(vm.data.v.lostKeep, '杯垫');
   vm.onUndo();
@@ -197,9 +199,9 @@ test('组件规矩:每个可点处都有 aria-label 与 hover-class;不新增 @k
   const dir = path.join(ROOT, 'pages/playkit/components/playkit-barter');
   const wxml = fs.readFileSync(path.join(dir, 'index.wxml'), 'utf8');
   const taps = wxml.match(/<view[^>]*bindtap[^>]*>/g) || [];
-  assert.equal(taps.length, 3);
+  assert.equal(taps.length, 4);
   taps.forEach((tag) => { assert.ok(/aria-label="/.test(tag), tag); assert.ok(/hover-class="/.test(tag), tag); });
-  assert.ok(wxml.includes('撤回上一步') && wxml.includes('就这样换') && wxml.includes('就不在背包里了'));
+  assert.ok(wxml.includes('撤回上一步') && wxml.includes('重置') && wxml.includes('就这样换') && wxml.includes('就不在背包里了'));
   assert.ok(!/@keyframes/.test(fs.readFileSync(path.join(dir, 'index.wxss'), 'utf8')));
 });
 

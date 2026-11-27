@@ -10,6 +10,7 @@
 
 const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
 const motion = require('../../../../utils/motion.js');
+const { holdSubmit, releaseSubmit } = require('../../utils/submit-hold.js');
 
 /** items → 本地行。就三个字段 —— 对错由 wxml 按 verdict 上色,别把答案状态混进来。 */
 function paint(items) {
@@ -62,27 +63,35 @@ Component({
     verdict: '',        // '' 未判 / 'ok' 通过 / 'no' 判错
     submitting: false,
   },
+  lifetimes: {
+    ready() { this._measureRowH(); },
+    detached() { releaseSubmit(this); },
+  },
   observers: {
     failureSeq: function (value) {
-      if (!value || this.data.passed || this.data.finished || !this.data.submitting) return;
-      this.setData({ submitting: false });
+      if (!value || this.data.passed || this.data.finished) return;
+      releaseSubmit(this);
+      if (this.data.submitting) this.setData({ submitting: false });
     },
     'show, items': function (show, items) {
-      if (!show) { this._configSignature = ''; if (this.data.submitting) this.setData({ submitting: false }); return; }
+      if (!show) { this._configSignature = ''; this._rowH = 0; releaseSubmit(this); if (this.data.submitting) this.setData({ submitting: false }); return; }
       // 服务端回流会把同值的题面数组再赋一遍:题面没变就不重置台面(与停表 / typein 的签名同口径)
       const signature = JSON.stringify(items);
       if (signature === this._configSignature) return;
       this._configSignature = signature;
+      this._rowH = 0;
+      releaseSubmit(this);
       // 排对过就按服务端的上一次提交顺序摆(重进页面也在);本机缓存只兜底同一会话里服务端还没回来的那一下
       const serverOrder = (this.data.lastOrder || []).length ? this.data.lastOrder : null;
       const kept = this.data.passed && (serverOrder || passedOrders[signature]);
       const rows = kept ? kept.map((id) => paint(items).find((r) => r.id === id)).filter(Boolean) : paint(items);
-      this.setData({ rows, dragging: -1, dragOffset: 0, picked: -1, verdict: kept ? 'ok' : '', submitting: false });
+      this.setData({ rows, dragging: -1, dragOffset: 0, picked: -1, verdict: kept ? 'ok' : '', submitting: false }, () => this._measureRowH());
       const stage = this.selectComponent('#cy-play-stage');
       if (stage) stage.begin();
     },
     // 回执来了才画对错。attempts 为 0 说明这一次是刚打开的旧视图,不是刚判完
     'attempts, passed, lastCorrect': function (attempts, passed) {
+      releaseSubmit(this);
       if (!(attempts > 0)) return;
       const verdict = passed ? 'ok' : 'no';
       if (passed && this._configSignature && this._submittedOrder) passedOrders[this._configSignature] = this._submittedOrder;
@@ -93,23 +102,29 @@ Component({
   },
   methods: {
     _moveRow: moveRow,
+    _locked() { return this.data.verdict === 'ok' || this.data.finished || this.data.passed; },
+    _measureRowH() {
+      const n = (this.data.rows || []).length;
+      if (!n || typeof wx === 'undefined' || typeof wx.createSelectorQuery !== 'function') return;
+      wx.createSelectorQuery().in(this).select('.so__list').boundingClientRect((rect) => {
+        const count = (this.data.rows || []).length;
+        if (rect && rect.height > 0 && count > 0) this._rowH = rect.height / count;
+      }).exec();
+    },
 
     /** 拖拽:按下时量一次行高(含行间距),移动时那一行跟手;越过半行就和邻居换位,
      *  换完把偏移扣掉一行,手指下面始终是同一行。 */
     onDragStart(e) {
-      if (this.data.verdict === 'ok') return;   // 过了就别再动;判错还要重排再交
+      if (this._locked()) return;   // 过了或次数用完就别再动;判错还能重排再交
       const i = Number(e.currentTarget.dataset.i);
       this._dragFrom = i;
       this._dragAt = i;
       this._dragY = (e.touches && e.touches[0]) ? e.touches[0].clientY : 0;
       this._moved = false;
-      wx.createSelectorQuery().in(this).select('.so__list').boundingClientRect((rect) => {
-        const n = this.data.rows.length;
-        this._rowH = (rect && rect.height > 0 && n > 0) ? rect.height / n : 0;
-      }).exec();
+      if (!(this._rowH > 0)) this._measureRowH();
     },
     onDragMove(e) {
-      if (this._dragFrom == null || !(this._rowH > 0)) return;
+      if (this._locked() || this._dragFrom == null || !(this._rowH > 0)) return;
       const y = (e.touches && e.touches[0]) ? e.touches[0].clientY : this._dragY;
       const dy = y - this._dragY;
       if (!this._moved) {
@@ -136,13 +151,12 @@ Component({
     onDragEnd() {
       const moved = this._moved;
       this._dragFrom = null;
-      this._rowH = 0;
       if (moved) this._releasedAt = Date.now();   // 紧跟着的那次 tap 不算点选
       if (this.data.dragging >= 0 || this.data.dragOffset) this.setData({ dragging: -1, dragOffset: 0 });
     },
     /** 点选对调:先点一行(描边),再点另一行两行对调;点同一行取消 */
     onTapRow(e) {
-      if (this.data.verdict === 'ok') return;
+      if (this._locked()) return;
       if (this._releasedAt && Date.now() - this._releasedAt < 400) return;
       const i = Number(e.currentTarget.dataset.i);
       const p = this.data.picked;
@@ -155,14 +169,14 @@ Component({
     },
 
     onSubmit() {
-      // 已通过 / 已结束 / 在途提交均不再交:防止连点烧次数或撞「已结束」
-      if (!canSubmit(this.data.rows) || this.data.verdict === 'ok' || this.data.passed || this.data.finished || this.data.submitting) return;
+      // 已通过/次数用完/提交中就不再交:再交一次服务端只会回「这一局排序已经结束了」并弹出待确认面板(实走 A15)
+      if (!canSubmit(this.data.rows) || this._locked() || this.data.submitting || !holdSubmit(this)) return;
       this.setData({ submitting: true });
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       // ★ 只报顺序,不报对错 —— 对错在服务端
       this._submittedOrder = this.data.rows.map((r) => r.id);
       this.triggerEvent('submit', { order: this._submittedOrder });
     },
-    onClose() { this._configSignature = ''; this.triggerEvent('close'); },
+    onClose() { this._configSignature = ''; releaseSubmit(this); this.triggerEvent('close'); },
   },
 });

@@ -48,6 +48,7 @@ Component({
     faceA: '', faceB: '',
     coinStyle: '',
     idle: true,
+    settled: false,
     big: '正面还是反面？',
     lab: '',
     hint: '摇一摇手机',
@@ -71,17 +72,19 @@ Component({
       // L02-034
       const f = normalizeFace(d.face);
       if (f) { this.setData({ idle: false, coinStyle: 'transform:rotateX(' + spinDeg(this._turns || 0, f) + 'deg)' }); this._settle(f, true); }
+      else if (d.settled) this.setData({ settled: false, hint: '摇一摇手机' });
     },
     face: function (face) {
       this._flipping = false;  // L02-034
       this._stopFlipGuard();
       const f = normalizeFace(face);
-      if (!f) { this._result = ''; this.setData({ idle: true, coinStyle: '' }); return; }
+      if (!f) { this._result = ''; this.setData({ idle: true, settled: false, coinStyle: '', hint: '摇一摇手机' }); return; }
       this._turns = (this._turns || 0) + 6 + Math.floor(Math.random() * 3);
       const deg = spinDeg(this._turns, f);
       // 停自转再翻:两个 transform 打架的话硬币会在半路跳一下
       this.setData({
         idle: false,
+        settled: false,
         big: '翻着…',
         lab: '',
         coinStyle: 'transform:rotateX(' + deg + 'deg)',
@@ -136,9 +139,10 @@ Component({
       const isH = f === 'HEADS';
       this._result = f;
       this.setData({
+        settled: true,
         big: isH ? d.headsLabel : d.tailsLabel,
         lab: isH ? d.headsAction : d.tailsAction,
-        hint: '再摇一次',
+        hint: '',
       });
       if (quiet) return;
       // 「做成了」落在结果落面这一刻,不在点「抛」那一下 —— 点下去只是请求发出

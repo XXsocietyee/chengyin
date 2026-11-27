@@ -16,10 +16,12 @@
 
     <view class="cf__big pe pe--blur">{{big}}</view>
     <view class="cf__lab pe pe--blur">{{lab}}</view>
-    <view class="cf__hint pe pe--up"><view class="cf__hint-i"></view><text>{{hint}}</text></view>
+    <view class="cf__hint pe pe--up" wx:if="{{!settled && hint}}"><view class="cf__hint-i"></view><text>{{hint}}</text></view>
 
     <!-- 落面那一下撒一把彩片。用仓里的 cy-celebrate,不自己写 canvas 粒子 ——
          那会是第二套平行实现,而且要自己处理减动效 -->
     <cy-celebrate event-key="{{burstKey}}" />
   </view>
+  <view wx:if="{{settled}}" class="g-btn pe pe--up" bindtap="onClose"
+        aria-role="button" aria-label="继续" hover-class="g-btn--press" hover-stay-time="80">继续</view>
 </cy-play-stage>

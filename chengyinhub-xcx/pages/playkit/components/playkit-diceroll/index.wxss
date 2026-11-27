@@ -9,7 +9,14 @@
 .d20__retry { display: inline-flex; align-items: center; min-height: 88rpx; padding: 0 var(--cy-space-3); color: var(--ink); } /* ds-ok: accessible retry touch target. */
 .d20__outcome { width: 100%; min-height: calc(var(--cy-type-data-2xl) + var(--cy-space-8)); color: var(--ink); }
 .d20__outcome--pending { visibility: hidden; }
+.d20__outcome--ok .d20__total { color: var(--cy-color-status-success); }
+.d20__outcome--no .d20__total { color: var(--cy-color-status-danger); }
 .d20__total { font-family: var(--cy-font-numeric); font-size: var(--cy-type-data-2xl); font-weight: 700; line-height: 1; }
+.d20__breakdown { margin-top: var(--cy-space-2); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--cy-space-2); }
+.d20__pill { padding: 4rpx 18rpx; border-radius: var(--cy-radius-pill); font-size: var(--cy-type-caption); font-weight: 700; }
+.d20__pill.is-ok { background: var(--cy-color-status-success-soft); color: var(--cy-color-status-success); }
+.d20__pill.is-no { background: var(--cy-color-status-danger-soft); color: var(--cy-color-status-danger); }
+.d20__calc { font-size: var(--cy-type-caption); color: var(--sub); font-variant-numeric: tabular-nums; }
 .d20__result { margin-top: var(--cy-space-4); font-size: var(--cy-type-section-title); line-height: 1.6; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .d20__error { font-size: var(--cy-type-caption); color: var(--sub); }
 

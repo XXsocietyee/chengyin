@@ -107,7 +107,7 @@ Component({
         sub: list.length === 1
           ? (taskFor(list, this.data.faces) || ('摇到 ' + list[0]))
           : (list.join(' + ') + '，两颗只比大小'),
-        hint: '再摇一次',
+        hint: '',
       };
       if (this.data.reducedMotion) { this._settle(settled); return; }
       /* 字段写死成字面量,不 Object.assign:动态 setData 门禁核不出写了哪些顶层字段。
@@ -222,9 +222,10 @@ Component({
     onRoll() {
       // L02-142
       if (this.data.rolling || this._rollPending) return;
+      if (this.data.mode !== 'd20' && this.data.sum > 0) return;
       this._rollPending = true;
       clearTimeout(this._rollGuard);
-      this._rollGuard = setTimeout(() => { this._rollPending = false; }, 8000);
+      this._rollGuard = setTimeout(() => { this._rollGuard = false; this._rollPending = false; }, 8000);
       if (this.data.mode === 'd20') {
         if (this.data.result || this.data.d20Rolling) return;
         if (this._d20) {

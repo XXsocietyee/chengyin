@@ -23,8 +23,8 @@ const OVER = 1.6;            // 条与条留一点重叠,免得接缝透光(原�
 const D2R = Math.PI / 180;
 const R = CW / (ARC * D2R);  // 弧长 = 卡宽 ⇒ 半径
 
-const TICK_MS = 16;
-const V_MIN = 0.05, V_MAX = 0.90;   // 卡位附近慢、两张之间快
+const V_MIN = 0.05, V_MAX = 0.90;   // 保留纯函数参数,供单测
+const SWIPE_PX = 36;
 
 const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
 const motion = require('../../../../utils/motion.js');
@@ -108,6 +108,7 @@ Component({
     shopAnswers: { type: Boolean, value: true },
     /* 第十一轮 g4:这一轮已经「不选，继续」过(服务端 predict.skipped)。不再邀请选,也不出「就选这个」 */
     skipped: { type: Boolean, value: false },
+    /* 提交失败后由页面递增,用来把 committed / skipping 解锁重选 */
     failureSeq: { type: Number, value: 0 },
   },
   data: {
@@ -118,12 +119,9 @@ Component({
     revealKind: '', revealHead: '', revealText: '',
   },
   observers: {
-    failureSeq: function (value) {
-      if (!value || this.data.myOptionKey || this.data.skipped) return;
-      if (this.data.skipping) { this.setData({ skipping: false }); return; }
-      if (!this.data.committed) return;
-      this.setData({ committed: false });
-      if (this.data.show && !this.data.reducedMotion) this._spin();
+    failureSeq: function (seq) {
+      if (!(Number(seq) > 0) || this.data.myOptionKey || this.data.skipped) return;
+      if (this.data.committed || this.data.skipping) this.setData({ committed: false, skipping: false });
     },
     'show, settleStatus, settledOption, won, shopAnswers': function (show) {
       if (!show) return;
@@ -138,24 +136,22 @@ Component({
     'show, options, closeAtHour, revealDays, revealHour, shopAnswers, myOptionKey': function (show) {
       if (!show) { this._stop(); return; }
       const d = this.data;
-      this._angle = 0;
       this._n = (d.options || []).length || 1;
       // 第十二轮 k7 N1:服务端已记下本人选的那一张 ⇒ 转盘停在那张上、印盖在那张上,屏上就是发出去的那个
       const mine = mineIndex(d.options, d.myOptionKey);
-      if (mine >= 0) this._angle = mine * STEP;
+      this._focus = mine >= 0 ? mine : 0;
+      this._angle = this._focus * STEP;
       this.setData({
         picked: mine, committed: mine >= 0, skipping: false,
         waitLabel: waitLabelOf(d.closeAtHour, d.revealDays, d.revealHour, d.shopAnswers),
       });
       this._paint(true);
-      if (!d.reducedMotion && mine < 0) this._spin();
     },
   },
   lifetimes: { detached() { this._stop(); } },
   pageLifetimes: {
     hide() { this._stop(); },
-    // L02-038
-    show() { if (this.data.show && !this.data.committed && !this.data.reducedMotion && !this._timer) this._spin(); },
+    show() {},
   },
   methods: {
     _speedAt: speedAt,        // 纯算法出口,供单测
@@ -167,25 +163,40 @@ Component({
 
     _stop() { if (this._timer) { clearInterval(this._timer); this._timer = null; } },
 
-    /** ⚠️ 转盘用 setInterval 不用 rAF:页面不渲染时 rAF 会整个停掉,
-     *  回来时转盘卡在半路,而卡在两张之间是没法点的。 */
-    _spin() {
-      this._stop();
-      this._timer = setInterval(() => {
-        if (this.data.committed) return;
-        // 第十二轮 k7 N1:点中一张后转盘把它转到正中停住,不再自己转走 ——
-        // 「选」印盖在正中那张上,停住才保证印下就是点中、发出去的那一张
-        if (this.data.picked >= 0) {
-          const left = parkDelta(this._angle, this.data.picked, this._n);
-          if (Math.abs(left) < 0.01) return;
-          this._angle += Math.sign(left) * Math.min(Math.abs(left), V_MAX * 4);
-        } else this._angle += speedAt(this._angle);
-        this._paint();
-      }, TICK_MS);
+    /** 手动切卡:由左右箭头或滑动触发,CSS transition 负责平滑过渡,不再每 16ms JS setData 刷桥 */
+    _stepBy(dir) {
+      if (this.data.committed || this.data.closed || this.data.skipped) return;
+      const n = (this.data.options || []).length;
+      if (n <= 1) return;
+      this._n = n;
+      this._focus = (((this._focus || 0) + (dir > 0 ? 1 : -1)) % n + n) % n;
+      this._angle = this._focus * STEP;
+      motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'light' });
+      this._paint();
     },
-    /** 停到第 i 张(降低动态时直接停到位,不转) */
-    _park(i) {
-      if (this.data.reducedMotion || !this._timer) { this._angle = i * STEP; this._paint(); }
+
+    onStep(e) {
+      const dir = Number(e && e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.dir) || 0;
+      if (!dir) return;
+      this._stepBy(dir);
+    },
+    onSwipeStart(e) {
+      const t = e && e.touches && e.touches[0];
+      if (!t) return;
+      this._swipeX = t.clientX;
+      this._swipeY = t.clientY;
+    },
+    onSwipeEnd(e) {
+      if (this._swipeX == null) return;
+      const t = e && e.changedTouches && e.changedTouches[0];
+      const x0 = this._swipeX, y0 = this._swipeY;
+      this._swipeX = null; this._swipeY = null;
+      if (!t) return;
+      const dx = t.clientX - x0, dy = t.clientY - y0;
+      if (Math.abs(dx) >= SWIPE_PX && Math.abs(dx) > Math.abs(dy)) {
+        this._swipedAt = Date.now();
+        this._stepBy(dx < 0 ? 1 : -1);
+      }
     },
 
     // L02-004
@@ -217,9 +228,18 @@ Component({
 
     onPick(e) {
       if (this.data.committed || this.data.closed || this.data.skipped) return;
+      if (this._swipedAt && Date.now() - this._swipedAt < 250) return;
       const i = Number(e.currentTarget.dataset.i);
+      motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'light' });
+      // 再点已选中的那张卡 = 取消选中
+      if (this.data.picked === i) {
+        this.setData({ picked: -1 });
+        this._paint(true);
+        return;
+      }
+      this._focus = i;
+      this._angle = i * STEP;
       this.setData({ picked: i });
-      this._park(i);
       this._paint(true);
     },
     onCommit() {
@@ -235,6 +255,7 @@ Component({
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       this._stop();
       // 印只盖在正中那张上:先把点中的那张摆正再落印(还在转向途中也一样)
+      this._focus = this.data.picked;
       this._angle = this.data.picked * STEP;
       this._paint(true);
       this.setData({ committed: true });

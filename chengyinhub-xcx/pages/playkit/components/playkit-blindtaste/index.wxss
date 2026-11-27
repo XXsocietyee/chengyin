@@ -59,6 +59,7 @@
 .bt__opt.is-on::after { background: var(--ink); }
 .bt__opt-k { width: 28rpx; font-family: var(--cy-font-numeric); font-size: var(--cy-type-body); font-style: italic; font-weight: 800; }
 .bt__press { opacity: .7; }
+.bt__wrong { margin-top: var(--cy-space-3); font-size: var(--cy-type-body); font-weight: 700; color: var(--cy-color-status-danger); }
 .bt__foot { margin-top: var(--cy-space-3); font-size: var(--cy-type-label); color: var(--cy-color-status-success); }
 
 /* 眼皮:上下两片,弧形边;合上 = 两片都归位 */

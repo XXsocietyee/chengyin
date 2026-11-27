@@ -126,16 +126,34 @@
 .bt__press { opacity: .88; }
 .g-btn--press { opacity: .88; }
 
-.bt__undo {
-  align-self: flex-start;
+.bt__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-space-4);
   margin-top: var(--cy-space-3);
-  padding: 12rpx 0;
+}
+.bt__undo {
+  min-height: 88rpx;
+  padding: 0 12rpx;
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--cy-type-label);
+  font-weight: 700;
+  color: var(--ink);
+  text-decoration: underline;
+}
+.bt__reset {
+  min-height: 88rpx;
+  padding: 0 12rpx;
+  display: inline-flex;
+  align-items: center;
   font-size: var(--cy-type-label);
   font-weight: 700;
   color: var(--ink);
   text-decoration: underline;
 }
 .bt__undo.is-off { opacity: .38; }
+.bt__reset.is-off { opacity: .38; }
 
 .bt__wrong {
   margin-top: var(--cy-space-2);

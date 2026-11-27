@@ -2,10 +2,12 @@
 const TICK_MS = 100;
 const FIRST_FRAME_MS = 3000;
 const FRAME_GAP_MS = 500;
+const HOT_GRACE_MS = 280;
 const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
 const motion = require('../../../../utils/motion.js');
 const cyToast = require('../../../../utils/toast.js');
 const { baseline, thresholds, bandOf, peakOf, pcmPeak, denied } = require('../../utils/play-audio-level.js');
+const mediaDenied = require('../../utils/media-denied.js');
 // C1:挑战身份与奖励上限只搬服务端的;阈值说的是相对振幅,不是分贝
 const { withAttempt, freshAttempt, rewardNote } = require('../../utils/sensor-contract.js');
 
@@ -96,6 +98,16 @@ Component({
     _micDenied() {
       this.setData({ micDenied: true });
       this.triggerEvent('micdenied');
+      if (mediaDenied && typeof mediaDenied.guidePermission === 'function') mediaDenied.guidePermission('mic');
+    },
+    onOpenSetting() {
+      if (mediaDenied && typeof mediaDenied.guidePermission === 'function') {
+        mediaDenied.guidePermission('mic', {
+          onReturn: (res) => {
+            if (res && res.authSetting && res.authSetting['scope.record']) this.setData({ micDenied: false });
+          },
+        });
+      }
     },
     _micFailure(attempt, error) {
       if (!this._current(attempt) || attempt.phase === 'finished') return;
@@ -133,7 +145,7 @@ Component({
       const stage = this.selectComponent('#cy-play-stage');
       if (!stage || stage === this._retiredStage) return;
       const attempt = { stage, key: this.data.stageKeys[0], phase: 'starting', lastFrame: null,
-        runFrame: null, serial: 0, sampled: 0, startReturned: false, started: false };
+        runFrame: null, hotSince: null, serial: 0, sampled: 0, startReturned: false, started: false };
       this._attempt = attempt;
       this._samples = []; this._peak = null; this._held = 0;
       this.setData({ preparing: true, running: false, band: 'ok', left: this._total().toFixed(1) });
@@ -182,7 +194,7 @@ Component({
       const peak = pcmPeak(res && res.frameBuffer);
       if (peak === null) {
         if (attempt.phase === 'running') {
-          attempt.runFrame = null; this._held = 0;
+          attempt.runFrame = null; attempt.hotSince = null; this._held = 0;
           this.setData({ left: this._total().toFixed(1) });
         }
         return;
@@ -195,7 +207,13 @@ Component({
       const previous = attempt.runFrame;
       attempt.runFrame = now;
       const band = bandOf(peak, this._mid, this._hot);
-      if (band === 'hot') { this.setData({ band }); this._finish(false); return; }
+      if (band === 'hot') {
+        if (attempt.hotSince === null) attempt.hotSince = now;
+        if (band !== this.data.band) this.setData({ band });
+        if (now - attempt.hotSince >= HOT_GRACE_MS) { this._finish(false); }
+        return;
+      }
+      attempt.hotSince = null;
       // Only consecutive real PCM frames establish a measured interval; timers never add time.
       const dt = previous === null ? 0 : Math.max(0, Math.min(TICK_MS / 1000, (now - previous) / 1000));
       this._held += dt;
@@ -223,7 +241,7 @@ Component({
       const attempt = this._eventAttempt(e);
       if (!attempt || attempt.phase !== 'ready') return;
       if (!this._fresh(attempt)) { this._micFailure(attempt); return; }
-      attempt.phase = 'running'; attempt.runFrame = null;
+      attempt.phase = 'running'; attempt.runFrame = null; attempt.hotSince = null;
       // 开局那一刻手里的号是上一次的;只有这一局开表后服务端新发的号才随成绩交
       attempt.attemptAtRun = this.data.attemptId;
       this._held = 0;

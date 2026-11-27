@@ -19,8 +19,8 @@ const motion = require('../../../../utils/motion.js');
 /* 海报底色按顺序轮转,顺序照原型逐位抄 —— 上一版把第 2 位和第 4 位调了个个儿,
    四张排在一起颜色的节奏就不一样了(红紫黑蓝 vs 红蓝黑紫)。 */
 const TINTS = ['#f0402f', '#3563e9', '#2a2a28', '#8a6bf2', '#0f7a55', '#b7791f'];   /* ds-ok 海报底色 */
-/* 深色那一格里的字要翻浅,其余都是深字 —— 与原型 index % 6 === 2 同一条判据 */
-const inkOn = (i) => (i % 6 === 2 ? '#e4ddd2' : '#111114');
+/* 六张海报底色均为深/高饱和色块，卡内角标与占位统一白字保对比 */
+const inkOn = () => '#ffffff';
 
 const paint = (list) => (list || []).map((it, i) => ({
   id: it.id || ('i' + i),
@@ -77,8 +77,8 @@ Component({
       const stage = this.selectComponent('#cy-play-stage');
       if (stage) stage.begin();
     },
-    failureSeq: function (value) {
-      if (!value || this.data.revealed || !this.data.submitted) return;
+    failureSeq: function (seq) {
+      if (!(Number(seq) > 0) || this.data.revealed || !this.data.submitted) return;
       this.setData({ submitted: false });
     },
   },

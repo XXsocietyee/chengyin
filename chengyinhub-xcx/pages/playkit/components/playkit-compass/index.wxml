@@ -44,8 +44,8 @@
     <view wx:if="{{done && !skipped}}" class="cp__done" aria-label="已经对准过">
       <cy-icon name="check" size="40" />已对准
     </view>
-    <!-- P-23:读取失败两次后,作者允许或队长放行时才出现;0 分走完这一站 -->
-    <view wx:if="{{phase === 'idle' && !done && canSkip}}" class="cp__skip" bindtap="onSkip"
+    <!-- P-23:读取失败、持续精度不稳或超 25 秒难以对准后，作者允许或队长放行时出现；0 分走完这一站 -->
+    <view wx:if="{{(phase === 'idle' || phase === 'run') && !done && canSkip}}" class="cp__skip" bindtap="onSkip"
           aria-role="button" aria-label="跳过这一站"
           hover-class="cp__skip--press" hover-stay-time="80">跳过这一站</view>
 

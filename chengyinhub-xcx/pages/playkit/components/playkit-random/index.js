@@ -17,6 +17,7 @@ const THEMES = ['var(--pk-embed-bg, #0b6adc)', 'var(--lk-card, #d99a16)', 'var(-
 const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
 const motion = require('../../../../utils/motion.js');
 const art = require('./art.js');
+const { holdSubmit, releaseSubmit } = require('../../utils/submit-hold.js');
 
 /** 第几张 → 什么底色。按顺序轮转,不按内容猜 —— 同一张卡每次抽到必须同色。 */
 function themeFor(index) {
@@ -64,6 +65,7 @@ Component({
   },
   observers: {
     'show, cards, drawn, drawCount': function (show) {
+      releaseSubmit(this);
       if (!show) return;
       this._active = 0;
       const cards = this.data.cards || [];
@@ -101,7 +103,7 @@ Component({
       this._layout();
     },
   },
-  lifetimes: { detached() { this._clear(); } },
+  lifetimes: { detached() { this._clear(); releaseSubmit(this); } },
   methods: {
 
     _clear() {
@@ -159,6 +161,7 @@ Component({
       /* 还盖着的牌:翻开这一下只是**请求**,抽到什么由服务端按权重定。
          客户端挑的是位置不是内容 —— 盲盒本来就是「挑哪个盒子不改变里面是什么」。 */
       if (card.opened === false) {
+        if (!holdSubmit(this)) return;
         motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
         this.triggerEvent('draw', { index: this._active });
         return;
@@ -229,6 +232,6 @@ Component({
     },
 
     onCloseDetail() { this.setData({ detailOn: false }); },
-    onClose() { this._clear(); this.triggerEvent('close'); },
+    onClose() { this._clear(); releaseSubmit(this); this.triggerEvent('close'); },
   },
 });

@@ -97,7 +97,6 @@ Component({
       this._closed = false;
       this.setData({ hits: 0, running: false, flash: '', trail: [] });
       this._measure();
-      this._armIdleShake();
     },
   },
   lifetimes: {
@@ -109,12 +108,12 @@ Component({
   },
   pageLifetimes: {
     hide() { this._hidden = true; this._offIdleShake(); this._interrupt(); },
-    show() { this._hidden = false; this._armIdleShake(); },
+    show() { this._hidden = false; },
   },
   methods: {
     _tiltAccel: tiltAccel,
 
-    /** 没开局时听摇一摇:只在整屏露着、没在跑、没在等结果、这一站还能玩时开传感器 */
+    /** 没开局时听摇一摇(保留句柄以维持共用传感器契约，不再自动监听或误触发开局) */
     _armIdleShake() {
       const c = this.data.challenge;
       if (this._idleOn || this._hidden || this._detached || !this.data.show || this.data.running || this.data.awaitingResult
@@ -136,9 +135,8 @@ Component({
       if (release) release();
     },
     _onIdleShake() {
-      if (!this._idleOn) return;
-      motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
-      this.onStart();
+      // 未点「开始」前禁止晃动误开局，避免刚进页面拿着手机调整姿势就意外触发
+      return;
     },
     /** 跑动中摇一下:球被踢一脚(随机方向的冲量)+ 震动。只改速度,撞击仍由撞边判定 */
     _kick(rand) {
@@ -156,6 +154,13 @@ Component({
       if (this._watchdog) clearTimeout(this._watchdog);
       this._timer = null; this._watchdog = null;
     },
+    _offCalibrate() {
+      const release = this._calRelease;
+      this._onCalTilt = null; this._calRelease = null;
+      if (!this._calOn) return;
+      this._calOn = false;
+      if (release) release();
+    },
     _offTilt() {
       // Relinquish ownership before calling platform APIs: they may fail synchronously.
       const release = this._tiltRelease;
@@ -168,7 +173,7 @@ Component({
       const interrupted = this._attempt && (this._attempt.phase === 'preparing' || this._attempt.phase === 'running');
       const stage = this._attempt ? this._attempt.stage : this.selectComponent('#cy-play-stage');
       this._attempt = null; // invalidate before cleanup or any reentrant callback
-      this._stop(); this._offTilt();
+      this._stop(); this._offCalibrate(); this._offTilt();
       this._gx = 0; this._gy = 0; this._vx = 0; this._vy = 0; this._zero = null;
       if (stage) stage._stopAll();
       this._retiredStage = stage;
@@ -236,14 +241,47 @@ Component({
       this._closed = false;
       this.setData({ localNotice: '' });
       this._zero = null;
-      this._attempt = { stage, key: this.data.stageKeys[0], phase: 'preparing', lastFrame: null };
+      this._attempt = { stage, key: this.data.stageKeys[0], phase: 'preparing', lastFrame: null, calSamples: [], lastCal: null };
       stage.begin();
+    },
+
+    /** 校准阶段采集握姿基线:每拍取加速度计读数，避免开跑首帧抖动歪斜 */
+    onCalibrateTick(e) {
+      const attempt = this._eventAttempt(e);
+      if (!attempt || attempt.phase !== 'preparing') return;
+      if (!this._calOn) {
+        if (typeof wx.startAccelerometer !== 'function' || typeof wx.onAccelerometerChange !== 'function'
+          || typeof wx.offAccelerometerChange !== 'function' || typeof wx.stopAccelerometer !== 'function') return;
+        const listener = (res) => {
+          if (!this._current(attempt) || attempt.phase !== 'preparing' || !finiteTilt(res)) return;
+          attempt.lastCal = { x: res.x, y: res.y };
+        };
+        this._onCalTilt = listener; this._calOn = true;
+        const release = holdAccelerometer(wx, listener);
+        if (!release) { this._calOn = false; this._onCalTilt = null; return; }
+        this._calRelease = release;
+      }
+      if (attempt.lastCal) attempt.calSamples.push(attempt.lastCal);
+    },
+
+    onCalibrated(e) {
+      const attempt = this._eventAttempt(e);
+      if (!attempt || attempt.phase !== 'preparing') return;
+      this._offCalibrate();
+      const list = attempt.calSamples || [];
+      if (!list.length && attempt.lastCal) list.push(attempt.lastCal);
+      if (list.length) {
+        let sx = 0, sy = 0;
+        for (const s of list) { sx += s.x; sy += s.y; }
+        this._zero = { x: sx / list.length, y: sy / list.length };
+      }
     },
 
     /** Only this keyed stage's calibration/countdown may start its sensor. */
     onRun(e) {
       const attempt = this._eventAttempt(e);
       if (!attempt || attempt.phase !== 'preparing') return;
+      this._offCalibrate();
       attempt.phase = 'running';
       attempt.startedAt = Date.now();
       this._measure();

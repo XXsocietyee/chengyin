@@ -7,6 +7,13 @@
 const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
 const motion = require('../../../../utils/motion.js');
 const kitDraft = require('../../utils/kit-draft.js');
+const submitHold = require('../../utils/submit-hold.js');
+const holdSubmit = (submitHold && typeof submitHold.holdSubmit === 'function')
+  ? submitHold.holdSubmit
+  : (c) => { if (c._submitting) return false; c._submitting = true; return true; };
+const releaseSubmit = (submitHold && typeof submitHold.releaseSubmit === 'function')
+  ? submitHold.releaseSubmit
+  : (c) => { c._submitting = false; };
 
 Component({
   behaviors: [reducedMotionBehavior],
@@ -25,7 +32,7 @@ Component({
     draftKey: { type: String, value: '' },
   },
   lifetimes: {
-    detached() { this._clearSeal(); kitDraft.flush(this); },
+    detached() { this._clearSeal(); kitDraft.flush(this); releaseSubmit(this); },
   },
   pageLifetimes: { hide() { kitDraft.flush(this); } },
   data: {
@@ -42,6 +49,7 @@ Component({
   },
   observers: {
     'show, questions, answers, done': function (show, questions, answers, done) {
+      releaseSubmit(this);
       if (!show) { this._formSignature = ''; return; }
       const signature = JSON.stringify([questions, answers, done]);
       if (signature === this._formSignature) return;
@@ -167,6 +175,7 @@ Component({
         this.setData({ step: this.data.step + 1 }, () => { this._syncCta(); this._saveDraft(); });
         return;
       }
+      if (!holdSubmit(this)) return;
       // 档案提交不可撤销 —— 与作答同一档触感
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
       this._submitted = true;
@@ -181,6 +190,6 @@ Component({
       this.setData({ step: this.data.step - 1 }, () => { this._syncCta(); this._saveDraft(); });
     },
 
-    onClose() { this.triggerEvent('close'); },
+    onClose() { releaseSubmit(this); this.triggerEvent('close'); },
   },
 });

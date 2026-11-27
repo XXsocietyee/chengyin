@@ -310,6 +310,7 @@ function fakeWx(opt) {
       if (o.downloadFail) x.fail({ errMsg: 'downloadFile:fail' })
       else x.success({ statusCode: 200, tempFilePath: '/tmp/ds-photo.jpg' })
     },
+    showModal: (x) => { rec.modals = (rec.modals || 0) + 1; if (x && x.success) x.success({ confirm: true, cancel: false }); },
     openSetting: () => { rec.openSettings += 1 },
   }
   wx.__rec = rec

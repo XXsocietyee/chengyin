@@ -73,6 +73,7 @@ Component({
     },
 
     onStart() {
+      if (this.data.finished) { this.onClose(); return; }
       if (this.data.running) return;
       this._t0 = Date.now();
       this.setData({ running: true, finished: false, oilY: 0 });

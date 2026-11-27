@@ -1,6 +1,6 @@
 <!-- 分类 · 2026-10-23 主人定稿(城瘾 排序连线分类试玩原型):一次一张卡摞在中间,点下面的分类,
      卡片飞进去;分类里多一条小标签、数字加一;点小标签拿回来重放。 -->
-<cy-play-stage id="cy-play-stage" skin="qadark" show="{{show}}" back-label="退出"
+<cy-play-stage id="cy-play-stage" skin="qadark" show="{{show}}" done-tap="{{(verdict === 'ok' || passed) && !inline}}" back-label="退出"
                bind:back="onClose">
   <view class="g-col cf {{reducedMotion ? 'cf--reduced' : ''}}">
     <view class="cf__prompt pe pe--blur">{{prompt}}</view>

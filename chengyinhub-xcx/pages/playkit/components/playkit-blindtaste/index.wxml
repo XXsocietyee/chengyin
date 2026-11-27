@@ -33,6 +33,7 @@
         <text class="bt__opt-k">{{item.key}}</text>
         <text class="bt__opt-t">{{item.label}}</text>
       </view>
+      <view class="bt__wrong" wx:if="{{wrongFeedback}}" aria-role="alert">{{wrongFeedback}}</view>
       <view class="bt__foot" wx:if="{{xpLabel}}">{{xpLabel}}</view>
     </view>
   </view>
@@ -48,7 +49,9 @@
   <view class="g-btn pe pe--up" wx:if="{{stage === 0}}" bindtap="onGot"
         aria-role="button" aria-label="小样拿到了" hover-class="g-btn--press" hover-stay-time="80">小样拿到了</view>
   <view class="g-btn" wx:elif="{{stage === 1}}" bindtouchstart="onEyesClose" bindtouchend="onEyesOpen" bindtouchcancel="onEyesOpen" bindtap="onEyesTap"
-        aria-role="button" aria-label="按住闭眼，尝完松手" hover-class="g-btn--press" hover-stay-time="80">按住，闭上眼</view>
+        aria-role="button" aria-label="按住闭眼，尝完自动睁眼" hover-class="g-btn--press" hover-stay-time="80">按住，闭上眼</view>
   <view class="g-btn {{!chosenKey || answering ? 'g-btn--disabled' : ''}}" wx:elif="{{stage === 2 && !selectedKey && !locked}}" bindtap="onConfirm"
         aria-role="button" aria-label="确认选择" aria-disabled="{{!chosenKey || answering}}" hover-class="g-btn--press" hover-stay-time="80">确认选择</view>
+  <view class="g-btn" wx:elif="{{stage === 2 && (selectedKey || locked)}}" bindtap="onClose"
+        aria-role="button" aria-label="继续" hover-class="g-btn--press" hover-stay-time="80">继续</view>
 </cy-play-stage>

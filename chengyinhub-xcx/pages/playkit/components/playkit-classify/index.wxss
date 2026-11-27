@@ -57,7 +57,11 @@
 .cf__bin-n { font-family: var(--cy-font-numeric); font-size: var(--cy-type-section-title); font-style: italic; font-weight: 800; color: var(--sub); }
 .cf__chips { display: flex; flex-wrap: wrap; gap: 12rpx; }
 .cf__chip {
-  padding: 8rpx 18rpx;
+  min-height: 64rpx;
+  padding: 10rpx 22rpx;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
   border-radius: var(--cy-radius-pill);
   background: rgba(255, 255, 255, .14);       /* ds-ok 暗台面上抬一级;--cy-color-bg-raised 在这里解析成浅色 */
   color: var(--ink);

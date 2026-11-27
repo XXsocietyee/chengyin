@@ -4,7 +4,7 @@
   <view class="pd {{reducedMotion ? 'pd--reduced' : ''}}">
     <view class="pd__q pe pe--blur">{{question}}</view>
 
-    <view class="pd__ring pe pe--up">
+    <view class="pd__ring pe pe--up" bindtouchstart="onSwipeStart" bindtouchend="onSwipeEnd">
       <view class="pd__inner">
         <!-- 一张卡 = 一个 0×0 的支架 + 若干竖条。支架只管「转到哪个角度、放多大」,
              竖条各自贴在圆柱面上拼出弯曲的卡面。
@@ -12,7 +12,7 @@
              这样文字是连续流过整张卡的,不会被切成十段各自排版。 -->
         <view class="pd__card {{item.sel ? 'is-sel' : ''}}" wx:for="{{cards}}" wx:key="key"
               data-i="{{index}}" bindtap="onPick" style="{{wraps[index]}}"
-              aria-role="button" aria-label="选 {{item.label}}"
+              aria-role="button" aria-label="{{item.sel ? '取消选择 ' + item.label : '选 ' + item.label}}"
               hover-class="pd__card--press" hover-stay-time="60">
           <view class="pd__sl" wx:for="{{slices}}" wx:for-item="sl" wx:key="i" style="{{sl.box}}">
             <view class="pd__fc" style="{{sl.face}}">
@@ -24,6 +24,13 @@
           </view>
         </view>
       </view>
+      <!-- 手动切卡箭头:配合左右滑动浏览所有选项,不靠 16ms 轮询自转 -->
+      <view wx:if="{{!committed && !closed && !skipped && cards.length > 1}}" class="pd__nav pd__nav--prev"
+            data-dir="-1" catchtap="onStep" aria-role="button" aria-label="上一张选项"
+            hover-class="pd__nav--press" hover-stay-time="60"><cy-icon name="back" size="36" /></view>
+      <view wx:if="{{!committed && !closed && !skipped && cards.length > 1}}" class="pd__nav pd__nav--next"
+            data-dir="1" catchtap="onStep" aria-role="button" aria-label="下一张选项"
+            hover-class="pd__nav--press" hover-stay-time="60"><cy-icon name="chevron-right" size="36" /></view>
       <!-- 押定的火漆印:歪着砸下去、压扁、回弹(原型 .pvseal + sealdrop)。
            正着盖看着像个标签,歪的才像章;淡入的印章像贴纸。
            第十二轮 k7 N1:印盖在转盘正中那张上(选定时转盘已把选中的那张摆正、停住),不再钉在屏幕右上角压到别的卡和题目 -->

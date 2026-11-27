@@ -38,9 +38,14 @@
       </view>
     </view>
 
-    <view class="bt__undo {{v.canUndo && !passed ? '' : 'is-off'}}" bindtap="onUndo"
-          aria-role="button" aria-label="撤回上一步" aria-disabled="{{!v.canUndo || passed}}"
-          hover-class="bt__press" hover-stay-time="80">撤回上一步</view>
+    <view class="bt__actions">
+      <view class="bt__undo {{v.canUndo && !passed ? '' : 'is-off'}}" bindtap="onUndo"
+            aria-role="button" aria-label="撤回上一步" aria-disabled="{{!v.canUndo || passed}}"
+            hover-class="bt__press" hover-stay-time="80">撤回上一步</view>
+      <view class="bt__reset {{v.canUndo && !passed ? '' : 'is-off'}}" bindtap="onReset"
+            aria-role="button" aria-label="重置全部交换" aria-disabled="{{!v.canUndo || passed}}"
+            hover-class="bt__press" hover-stay-time="80">重置</view>
+    </view>
 
     <view class="bt__wrong" wx:if="{{v.wrongLine}}" aria-role="alert">{{v.wrongLine}}</view>
   </view>

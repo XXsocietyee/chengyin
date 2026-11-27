@@ -1,6 +1,6 @@
 <!-- 排序 · 2026-10-23 主人定稿(城瘾 排序连线分类试玩原型):每行一张深色卡,左边大号斜体序号;
      按住一行上下拖,那行抬起跟手、其它行让位;也可以先点一行再点另一行直接对调(读屏同样走得通)。 -->
-<cy-play-stage id="cy-play-stage" skin="qadark" show="{{show}}" done-tap="{{verdict === 'ok' && !inline}}" back-label="退出"
+<cy-play-stage id="cy-play-stage" skin="qadark" show="{{show}}" done-tap="{{(verdict === 'ok' || finished) && !inline}}" back-label="退出"
                bind:back="onClose">
   <view class="g-col so {{reducedMotion ? 'so--reduced' : ''}}">
     <view class="so__prompt pe pe--blur">{{prompt}}</view>
@@ -11,13 +11,13 @@
       <view class="so__row {{verdict === 'ok' ? 'is-right' : ''}} {{dragging === index ? 'is-dragging' : ''}} {{picked === index ? 'is-pick' : ''}} pe pe--up"
             style="{{dragging === index ? 'transform:translateY(' + dragOffset + 'px) scale(1.03)' : ''}}"
             wx:for="{{rows}}" wx:key="id" data-i="{{index}}"
-            bindtouchstart="onDragStart" bindtouchmove="onDragMove" bindtouchend="onDragEnd" bindtouchcancel="onDragEnd" bindtap="onTapRow"
+            bindtouchstart="onDragStart" catchtouchmove="onDragMove" bindtouchend="onDragEnd" bindtouchcancel="onDragEnd" bindtap="onTapRow"
             aria-role="button" aria-label="第 {{index + 1}} 位：{{item.label}}。点一下选中，再点另一条对调"
             hover-class="so__press" hover-stay-time="80">
         <view class="so__no">{{index + 1}}</view>
         <image class="so__img" wx:if="{{item.img}}" src="{{item.img}}" mode="aspectFill" aria-role="img" aria-label="待排项配图" />
         <view class="so__label">{{item.label}}</view>
-        <view class="so__grip" wx:if="{{verdict !== 'ok'}}" aria-hidden="true"><view class="so__grip-i"></view><view class="so__grip-i"></view><view class="so__grip-i"></view></view>
+        <view class="so__grip" wx:if="{{verdict !== 'ok' && !finished}}" aria-hidden="true"><view class="so__grip-i"></view><view class="so__grip-i"></view><view class="so__grip-i"></view></view>
       </view>
     </view>
 
@@ -27,8 +27,8 @@
     </view>
   </view>
   <!-- 2026-11-24 业主:除了答题确认不留按钮 —— 过了之后整屏点一下继续(台面 done-tap),不再出「继续」钮 -->
-  <view wx:if="{{verdict !== 'ok' && !finished}}" class="g-btn {{rows.length && verdict !== 'ok' && !submitting ? '' : 'g-btn--disabled'}} pe pe--up" bindtap="onSubmit"
-        aria-role="button" aria-label="{{submitting ? '提交中' : '提交排好的顺序'}}" aria-disabled="{{!rows.length || submitting}}" hover-class="g-btn--press" hover-stay-time="80">
+  <view wx:if="{{verdict !== 'ok' && !finished}}" class="g-btn {{rows.length && verdict !== 'ok' && !finished && !submitting ? '' : 'g-btn--disabled'}} pe pe--up" bindtap="onSubmit"
+        aria-role="button" aria-label="{{submitting ? '提交中' : '提交排好的顺序'}}" aria-disabled="{{!rows.length || finished || submitting}}" hover-class="g-btn--press" hover-stay-time="80">
     {{submitting ? '提交中…' : '就这个顺序'}}
   </view>
 </cy-play-stage>

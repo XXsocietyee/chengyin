@@ -9,6 +9,7 @@
 
 const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
 const motion = require('../../../../utils/motion.js');
+const cyToast = require('../../../../utils/toast.js');
 const plan = require('../../utils/barter-plan.js');
 
 function config(data) {
@@ -84,13 +85,24 @@ Component({
       if (this._locked()) return;
       const id = e.currentTarget.dataset.id;
       const next = plan.pick(config(this.data), (this._order || []), id);
-      if (next === (this._order || [])) return;
+      if (next === (this._order || [])) {
+        const offer = ((this.data.v && this.data.v.offers) || []).find((o) => o.id === id);
+        if (offer && offer.state === 'off' && offer.giveName) {
+          cyToast('背包里还没有「' + offer.giveName + '」');
+        }
+        return;
+      }
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'light' });
       this._render(next);
     },
     onUndo() {
       if (this._locked() || !(this._order || []).length) return;
       this._render(plan.undo((this._order || [])));
+    },
+    onReset() {
+      if (this._locked() || !(this._order || []).length) return;
+      motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'light' });
+      this._render([]);
     },
     onSubmit() {
       if (this._locked() || !(this._order || []).length) return;

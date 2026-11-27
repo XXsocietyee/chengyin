@@ -26,6 +26,7 @@ Component({
     breathIn: false,
     opened: false,
     lifted: -1,
+    wrongFeedback: '',
   },
   properties: {
     show:     { type: Boolean, value: false },
@@ -45,11 +46,11 @@ Component({
   observers: {
     'show, selectedKey, locked': function (show, selectedKey, locked) {
       // L02-003
-      if (!show) { this._stopTaste(); if (this.data.answering) this.setData({ answering: false }); return; }
+      if (!show) { this._stopTaste(); if (this.data.answering || this.data.wrongFeedback) this.setData({ answering: false, wrongFeedback: '' }); return; }
       const stage = startStage(selectedKey, locked);
       if (stage === 2 || this._shownOnce !== true) {
         this._shownOnce = true;
-        this.setData({ stage, eyes: 'open', opened: stage === 2, chosenKey: '', answering: false });
+        this.setData({ stage, eyes: 'open', opened: stage === 2, chosenKey: '', answering: false, wrongFeedback: '' });
         if (stage === 0) this._liftCups();
       }
     },
@@ -58,7 +59,9 @@ Component({
       const seen = this._seenAttempts;
       this._seenAttempts = now;
       if (seen == null || now <= seen || this.data.locked || this.data.selectedKey) return;
-      if (this.data.answering) this.setData({ answering: false });
+      this.setData({ answering: false, wrongFeedback: '没猜中，再尝一口试试' });
+      const stage = typeof this.selectComponent === 'function' ? this.selectComponent('#cy-play-stage') : null;
+      if (stage && stage.nudge) stage.nudge();
     },
   },
   lifetimes: { detached() { this._stopTaste(); clearTimeout(this._liftT); clearTimeout(this._peekT); clearTimeout(this._openT); } },
@@ -80,6 +83,12 @@ Component({
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'light' });
       this.setData({ stage: 1 });
     },
+    _finishTaste() {
+      this._stopTaste();
+      this.setData({ eyes: 'open', stage: 2, opened: false });
+      clearTimeout(this._openT);
+      this._openT = setTimeout(() => this.setData({ opened: true }), 30);
+    },
     onEyesClose() {
       if (this.data.stage !== 1 || this.data.eyes === 'closed') return;
       this._closedAt = Date.now();
@@ -88,7 +97,14 @@ Component({
       this.setData({ eyes: 'closed', count: TASTE_SECONDS, breathIn: true });
       this._tick = setInterval(() => {
         const left = Math.max(0, TASTE_SECONDS - Math.floor((Date.now() - this._closedAt) / 1000));
-        if (left === 0 && !this._tasted) { this._tasted = true; motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' }); }
+        if (left === 0 && !this._tasted) {
+          this._tasted = true;
+          motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
+          // 满 3 秒自动收起闭眼黑幕并进入作答，不让玩家一直卡在黑屏里
+          this.setData({ count: 0, breathIn: false });
+          this._finishTaste();
+          return;
+        }
         // 呼吸圈一秒一涨一缩:用 transition 来回切,不另起关键帧
         this.setData({ count: left, breathIn: !this.data.breathIn });
       }, 1000);
@@ -108,11 +124,9 @@ Component({
         cyToast('偷看了？再闭一次眼');
         return;
       }
-      this.setData({ eyes: 'open', stage: 2, opened: false });
-      clearTimeout(this._openT);
-      this._openT = setTimeout(() => this.setData({ opened: true }), 30);
+      this._finishTaste();
     },
-    // 读屏 / 轻点:不按住也能走,点一下就闭眼,再点一下睁眼
+    // 读屏 / 轻点:不按住也能走,点一下就闭眼,满 3 秒自动睁眼(或提前再点退出)
     onEyesTap() {
       if (this._released && Date.now() - this._released < 500) return;
       if (this.data.eyes === 'closed') this.onEyesOpen(); else this.onEyesClose();
@@ -123,16 +137,16 @@ Component({
       const key = e.currentTarget.dataset.key;
       if (!key) return;
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'light' });
-      this.setData({ chosenKey: key });
+      this.setData({ chosenKey: key, wrongFeedback: '' });
     },
     onConfirm() {
       if (this.data.locked || this.data.selectedKey || this.data.stage !== 2 || this.data.answering) return;
       const key = this.data.chosenKey;
       if (!key) return;
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
-      this.setData({ answering: true });
+      this.setData({ answering: true, wrongFeedback: '' });
       this.triggerEvent('answer', { key });
     },
-    onClose() { this.triggerEvent('close'); },
+    onClose() { this._stopTaste(); this.triggerEvent('close'); },
   },
 });

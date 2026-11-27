@@ -24,6 +24,7 @@ const HINT = {
 const { SLIP, FONT, signPaperPath, signRoundRect, buildSignPoster, pad2, clamp, buildBars } = require('../../utils/dailysign-poster.js');
 
 const { holdSubmit, releaseSubmit } = require('../../utils/submit-hold.js');
+const mediaDenied = require('../../utils/media-denied.js');
 
 Component({
   behaviors: [reducedMotionBehavior],
@@ -217,8 +218,8 @@ Component({
           return that._saveSignCard(path).then((r) => {
             that.setData({ saving: false });
             if (r === 'saved') { toast.success('已保存到相册'); return; }
-            // 拒过一次授权的人,自己再 authorize 不会再弹,只能把他带去设置页
-            if (r === 'denied') { wx.openSetting({}); return; }
+            // 拒过一次授权的人,自己再 authorize 不会再弹,统一走 cyModal 确认后带去设置页
+            if (r === 'denied') { mediaDenied.guidePermission('album'); return; }
             if (r === 'fail') toast('没存进相册，检查存储空间后再试');
             /* r === 'cancel':玩家自己点了取消,不打扰 */
           });
