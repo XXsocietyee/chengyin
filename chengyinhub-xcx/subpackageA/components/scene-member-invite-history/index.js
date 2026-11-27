@@ -158,7 +158,7 @@ function countUp(ctx, key, from, to, ms, reduced) {
   const steps = 14
   let i = 0
   const tick = () => {
-    if (ctx._detached) return
+    if (ctx._detached || ctx._hidden) return
     i += 1
     const t = i / steps
     const eased = 1 - Math.pow(1 - t, 3)
@@ -212,7 +212,7 @@ Component({
   },
   pageLifetimes: {
     show() { this._hidden = false; if (this._readSessionChanged || this._readOwner !== undefined && this._readOwner !== memberId(app)) { this._readSessionChanged = false; this.load(true) } },
-    hide() { this._hidden = true },
+    hide() { this._hidden = true; this._haltMotion() },
   },
   methods: {
     load(reset) {
@@ -332,14 +332,32 @@ Component({
       this._earnPlayed = true
       const reduced = readReducedMotion()
       const { balance, latest } = earnFacts(this._pointRows, records)
+      this._earnTarget = earnedTotal
+      this._balanceTarget = balance ? balance.to : null
       this.setData({ latest, earnStage: latest && !reduced ? 1 : 3 })
       countUp(this, 'earnedTotalText', 0, earnedTotal, 900, reduced)
       if (balance) countUp(this, 'balanceText', balance.from, balance.to, 900, reduced || balance.from === balance.to)
       if (!latest || reduced) return
       this._earnT = [
-        setTimeout(() => !this._detached && this.setData({ earnStage: 2 }), 520),
-        setTimeout(() => !this._detached && this.setData({ earnStage: 3 }), 1000),
+        setTimeout(() => !this._detached && !this._hidden && this.setData({ earnStage: 2 }), 520),
+        setTimeout(() => !this._detached && !this._hidden && this.setData({ earnStage: 3 }), 1000),
       ]
+    },
+    _haltMotion() {
+      if (typeof clearTimeout === 'function') {
+        clearTimeout(this._pmInTimer)
+        clearTimeout(this._cu_balanceText)
+        clearTimeout(this._cu_earnedTotalText)
+        ;(this._earnT || []).forEach(clearTimeout)
+      }
+      this._earnT = []
+      const patch = {}
+      // 入场停在「先隐着」时列表会一直看不见；数字停在中途会把累计看成更小的数，0 就是最明显的那种
+      if (this.data.pmIn) patch.pmIn = 0
+      if (this._earnTarget != null) patch.earnedTotalText = pointText(this._earnTarget) || '0'
+      if (this._balanceTarget != null) patch.balanceText = pointText(this._balanceTarget)
+      if (this.data.latest && this.data.earnStage > 0 && this.data.earnStage < 3) patch.earnStage = 3
+      if (Object.keys(patch).length) this.setData(patch)
     },
     retry() { if (this.data.authRequired) retryLogin(this, app, () => this.load(true)); else this.load(true) },
     loadMore() {

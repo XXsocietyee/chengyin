@@ -27,6 +27,7 @@ function loadScene(mutate) {
     require: p => p.includes('money-format') ? require('../../utils/money-format.js') : p.includes('login-reload') ? require('../../utils/session/login-reload.js') : (p.includes('page-motion') ? require('../../utils/page-motion.js') : ({ showWithdrawCsPopup: () => popups.push(true) })),
     Component: (value) => { definition = value },
     wx: { navigateTo(o) { navigations.push(o.url) } },
+    setTimeout, clearTimeout,
   }, { filename: JS_PATH })
   const scene = Object.assign({}, definition.methods, {
     data: JSON.parse(JSON.stringify(definition.data)),
@@ -120,6 +121,22 @@ test('正常明细与联系客服入口保留，列表中不存在的旧主题�
   assert.equal(h.navigations.length, 1); assert.equal(h.popups.length, 1)
   h.scene.goSettlementDetail({ currentTarget: { dataset: { id: 8 } } })
   assert.equal(h.navigations.length, 1)
+})
+
+test('离开页面后分润金额滚动停住，已入账不再被写成 0', async () => {
+  const h = loadScene()
+  h.scene.load()
+  h.requests[0].success(contextResponse(60))
+  assert.equal(h.scene.data.pfK, 0)
+  assert.equal(h.scene.data.myIncomeTotal, '60.00')
+  h.definition.pageLifetimes.hide.call(h.scene)
+  assert.equal(h.scene.data.pfK, null)
+  const seen = []
+  const orig = h.scene.setData
+  h.scene.setData = (patch) => { seen.push(patch); orig.call(h.scene, patch) }
+  await new Promise((resolve) => setTimeout(resolve, 400))
+  assert.deepEqual(seen, [])
+  assert.equal(h.scene.data.myIncomeTotal, '60.00')
 })
 
 test('分润组件隐藏/卸载拒绝旧结果，返回重读且初次show不重复读取', () => {

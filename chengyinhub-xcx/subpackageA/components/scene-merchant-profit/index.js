@@ -73,7 +73,18 @@ Component({
       this._hidden = false;
       if (refresh) this.load();
     },
-    hide() { this._hidden = true; this._loadEpoch = (this._loadEpoch || 0) + 1; },
+    hide() {
+      this._hidden = true;
+      this._loadEpoch = (this._loadEpoch || 0) + 1;
+      // 金额滚动把 pfK 从 0 数到 1。离开后计时器还在写的话，统计卡会把已入账分润显示成 0。
+      const stop = this._pmCounters && this._pmCounters.pfK;
+      if (typeof stop === 'function') stop();
+      if (typeof clearTimeout === 'function') clearTimeout(this._pmListTimer);
+      const patch = {};
+      if (this.data.pfK != null) patch.pfK = null;
+      if (this.data.pmList) patch.pmList = 0;
+      if (Object.keys(patch).length) this.setData(patch);
+    },
   },
   methods: {
     // 去主题详情/提现这些非场景目标:先关掉本层,不在弹窗上再压页面(§8.3)
