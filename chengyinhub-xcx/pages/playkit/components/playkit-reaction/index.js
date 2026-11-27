@@ -12,6 +12,7 @@
 const WAIT_MIN_MS = 1400;
 const WAIT_MAX_MS = 4200;
 const MIN_HUMAN_MS = 120;      // 与后端 AdvancedGameRuntimeServiceImpl 同值
+const REVIEW_LOCK_MS = 400;    // 刚出单轮结果或抢跑后的防连点保护窗
 
 const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
 const motion = require('../../../../utils/motion.js');
@@ -84,7 +85,7 @@ Component({
     _abortRound() {
       this._roundEpoch = (this._roundEpoch || 0) + 1;
       this._stop();
-      this._times = []; this._armed = false; this._goAt = null; this._reporting = false;
+      this._times = []; this._armed = false; this._goAt = null; this._reporting = false; this._reviewAt = 0;
       const done = this.data.phase === 'done';
       this.setData({
         phase: done ? 'done' : 'idle', big: '—', unit: '',
@@ -97,6 +98,7 @@ Component({
       if (!this._active()) return;
       const epoch = this._roundEpoch = (this._roundEpoch || 0) + 1;
       this._goAt = null;
+      this._reviewAt = 0;
       this.setData({ phase: 'wait', big: '等', unit: '', sub: '变绿再点 —— 早点了算抢跑' });
       /* 开表要报给服务端:成绩按服务器时间复核,不先开表提交会被判成「还没开始」。
          第一轮报一次就够,服务端记的是这一局的起点。 */
@@ -116,12 +118,17 @@ Component({
       if (!this._active()) return;
       const phase = this.data.phase;
 
-      if (phase === 'idle' || phase === 'early') { this._arm(); return; }
+      if (phase === 'idle' || phase === 'early') {
+        // 防连点误开下一轮:刚落定或刚抢跑后给 400ms 看清结果
+        if (this._reviewAt && Date.now() - this._reviewAt < REVIEW_LOCK_MS) return;
+        this._arm();
+        return;
+      }
 
       if (phase === 'wait') {
         // 抢跑:这一轮作废,但不判整局输 —— 抢跑是操作失误,不是答错
         this._roundEpoch = (this._roundEpoch || 0) + 1;
-        this._stop(); this._goAt = null;
+        this._stop(); this._goAt = null; this._reviewAt = Date.now();
         motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'light' });
         this.setData({ phase: 'early', big: '抢跑', unit: '', sub: '绿了才能点。点一下重来' });
         return;
@@ -133,6 +140,7 @@ Component({
       this._goAt = null;
       // 低于人类反应下限的不收:那是提前按住不放蹭出来的,后端也会判抢跑
       if (ms < MIN_HUMAN_MS) {
+        this._reviewAt = Date.now();
         this.setData({ phase: 'early', big: '抢跑', unit: '', sub: '这个快得不像人手。点一下重来' });
         return;
       }
@@ -143,6 +151,7 @@ Component({
       motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
 
       if (doneCount < (this.data.rounds || 3)) {
+        this._reviewAt = Date.now();
         this.setData({ phase: 'idle', big: ms + '', unit: '毫秒',
           sub: doneCount + '/' + (this.data.rounds || 3) + ' 轮 · 点一下进入下一轮' });
         return;

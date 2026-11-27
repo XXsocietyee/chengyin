@@ -29,7 +29,7 @@
 
     <!-- 03 / 04 计时中 · 整个舞台就是「停」的按钮 -->
     <block wx:else>
-      <view class="sw__mid" bindtap="onStop"
+      <view class="sw__mid" bindtouchstart="onStop"
             hover-class="sw__mid--press" hover-stay-time="60"
             aria-role="button" aria-label="{{phase === 'over' ? '再来一局' : '点屏幕任意处停'}}">
         <!-- 暂停卡片放在内容区里,不和退出 / 胶囊挤导航那一行 -->
@@ -42,7 +42,7 @@
           <!-- 盲停:1 秒后只藏走动的数字,目标和容差一直挂着 -->
           <view class="sw__giant" wx:if="{{!hidden}}">{{big}}</view>
           <view class="sw__dash" wx:else>—— · ——</view>
-          <view class="sw__pill">目标 {{targetText}} 秒 · 允许差 ±{{tolText}} 秒</view>
+          <view class="sw__pill">目标 {{targetText}} 秒 · 允许差 ±{{tolText}} 秒（±{{toleranceMs}}ms）</view>
           <block wx:if="{{phase === 'over'}}">
             <view class="sw__dev">{{dev}}</view>
             <view class="sw__cap" wx:if="{{left > 0}}">还有 {{left}} 次机会</view>

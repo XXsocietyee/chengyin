@@ -164,6 +164,7 @@
 
 <cy-playkit-pricepair wx:elif="{{kit.type === 'pricepair'}}"
   attempts="{{kit.attempts}}" finished="{{kit.finished}}" passed="{{kit.passed}}" last-pick-id="{{kit.lastPickId}}" answer-id="{{kit.answerId}}"
+  failure-seq="{{kit.failureSeq}}"
   show="{{show}}" title="{{kit.title}}" items="{{kit.items}}"
   limit-seconds="{{kit.limitSeconds}}" max-tries="{{kit.maxTries}}"
   bind:submit="onSubmit" bind:verdict="onVerdict" bind:close="onClose" />
@@ -181,7 +182,7 @@
   close-at-hour="{{kit.closeAtHour}}" reveal-days="{{kit.revealDays}}" reveal-hour="{{kit.revealHour}}"
   settle-status="{{kit.settleStatus}}" settled-option="{{kit.settledOption}}"
   won="{{kit.won}}" my-option-key="{{kit.myOptionKey}}"
-  closed="{{kit.closed}}" shop-answers="{{kit.shopAnswers}}" skipped="{{kit.skipped}}"
+  closed="{{kit.closed}}" shop-answers="{{kit.shopAnswers}}" skipped="{{kit.skipped}}" failure-seq="{{kit.failureSeq}}"
   bind:submit="onSubmit" bind:skip="onSkip" bind:close="onClose" />
 
 <cy-playkit-random wx:elif="{{kit.type === 'random'}}" style="{{inline ? '--pk-stage-height:1180rpx;--pk-stage-body-pos:absolute' : ''}}"
@@ -220,7 +221,7 @@
      必须排在普通拍照前面,否则 wx:elif 链先落到旧屏。故事流里内嵌(inline)时仍走旧屏:
      那一层有 transform,固定定位的整屏面板会被圈进段落里。 -->
 <cy-playkit-objectcard wx:elif="{{kit.type === 'photocheck' && kit.mode === 'CARD' && !inline}}"
-  show="{{show}}" tries="{{kit.tries}}" passed="{{kit.passed}}"
+  show="{{show}}" title="{{kit.title}}" shot-note="{{kit.shotNote}}" tries="{{kit.tries}}" passed="{{kit.passed}}"
   flagged="{{kit.flagged}}" degraded="{{kit.degraded}}" fallback="{{kit.fallback}}"
   last-reason="{{kit.lastReason}}" card="{{kit.card}}" place="{{kit.place}}"
   photo-fail-seq="{{kit.photoFailSeq}}" preview="{{kit.preview}}"
@@ -272,7 +273,7 @@
 
 <cy-playkit-compare wx:elif="{{kit.type === 'compare'}}" inline="{{inline}}"
   show="{{show}}" prompt="{{kit.prompt}}" left="{{kit.left}}" right="{{kit.right}}"
-  attempts="{{kit.attempts}}" passed="{{kit.passed}}" finished="{{kit.finished}}"
+  max-attempts="{{kit.maxAttempts}}" attempts="{{kit.attempts}}" passed="{{kit.passed}}" finished="{{kit.finished}}"
   last-correct="{{kit.lastCorrect}}" last-marked="{{kit.lastMarked}}"
   bind:submit="onSubmit" bind:close="onClose" />
 
@@ -284,7 +285,7 @@
   last-correct="{{kit.lastCorrect}}" last-track-id="{{kit.lastTrackId}}" last-feedback="{{kit.lastFeedback}}"
   bind:submit="onSubmit" bind:close="onClose" />
 
-<cy-playkit-classify wx:elif="{{kit.type === 'classify'}}"
+<cy-playkit-classify wx:elif="{{kit.type === 'classify'}}" inline="{{inline}}"
   show="{{show}}" prompt="{{kit.prompt}}" bins="{{kit.bins}}" items="{{kit.items}}"
   attempts="{{kit.attempts}}" passed="{{kit.passed}}" last-correct="{{kit.lastCorrect}}"
   bind:submit="onSubmit" bind:close="onClose" />

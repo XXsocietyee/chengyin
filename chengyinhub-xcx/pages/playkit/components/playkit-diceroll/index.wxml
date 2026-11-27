@@ -13,7 +13,7 @@
       <view class="d20__title pe pe--blur">{{kicker || 'D20 检定'}}</view>
       <view class="d20__meta pe pe--fade">
         <text>{{rollMode === 'advantage' ? '优势 · 取高' : (rollMode === 'disadvantage' ? '劣势 · 取低' : '普通')}}</text>
-        <text>DC {{dc}}</text>
+        <text>目标难度 {{dc}}</text>
         <text>加值 {{modifier >= 0 ? '+' : ''}}{{modifier}}</text>
       </view>
       <view class="d20__meta" wx:if="{{preview}}"><text>试玩，不计成绩</text></view>
@@ -23,8 +23,12 @@
       <view class="d20__error" wx:if="{{d20Error}}">骰子暂时无法显示。
         <text class="d20__retry" bindtap="onRetryD20" aria-role="button" aria-label="重试显示 3D 骰子" hover-class="g-btn--press" hover-stay-time="80">重试显示</text>
       </view>
-      <view class="d20__outcome {{!result || d20Rolling ? 'd20__outcome--pending' : ''}}" aria-hidden="{{!result || d20Rolling}}" aria-label="{{(preview ? '试玩：' : '') + '总分 ' + result.total + '，' + (result.success ? '检定成功' : '检定失败')}}">
+      <view class="d20__outcome {{!result || d20Rolling ? 'd20__outcome--pending' : (result.success ? 'd20__outcome--ok' : 'd20__outcome--no')}}" aria-hidden="{{!result || d20Rolling}}" aria-label="{{(preview ? '试玩：' : '') + '总分 ' + result.total + '，' + (result.success ? '检定成功' : '检定失败')}}">
         <view class="d20__total">{{result.total}}</view>
+        <view class="d20__breakdown" wx:if="{{result && !d20Rolling}}">
+          <text class="d20__pill {{result.success ? 'is-ok' : 'is-no'}}">{{result.success ? '过线了' : '未过线'}}</text>
+          <text class="d20__calc">骰点 {{result.kept}} {{modifier >= 0 ? '+ ' + modifier : '- ' + (-modifier)}} = {{result.total}} · 目标难度 {{dc}}</text>
+        </view>
         <view class="d20__result">{{result.text}}</view>
       </view>
     </view>
@@ -49,7 +53,9 @@
       <text class="dzi__sub">{{sub}}</text>
     </view>
   </view>
-  <view class="g-btn {{rolling ? 'g-btn--disabled' : ''}}" bindtap="onRoll"
+  <view wx:if="{{sum && !rolling}}" class="g-btn" bindtap="onClose"
+        aria-role="button" aria-label="继续" hover-class="g-btn--press" hover-stay-time="60">继续</view>
+  <view wx:else class="g-btn {{rolling ? 'g-btn--disabled' : ''}}" bindtap="onRoll"
         aria-role="button" aria-label="摇一摇手机，或点这里掷骰子" aria-disabled="{{rolling}}" hover-class="g-btn--press" hover-stay-time="60">{{rolling ? '掷出去了…' : '掷骰子'}}</view>
 </cy-play-stage>
 
@@ -78,7 +84,9 @@
       <view class="dz__sub">{{sub}}</view>
     </view>
 
-    <view class="dz__hint"><view class="dz__hint-i"></view><text>{{hint}}</text></view>
+    <view class="dz__hint" wx:if="{{!sum && hint}}"><view class="dz__hint-i"></view><text>{{hint}}</text></view>
   </view>
+  <view wx:if="{{sum && !rolling}}" class="g-btn pe pe--up" bindtap="onClose"
+        aria-role="button" aria-label="继续" hover-class="g-btn--press" hover-stay-time="80">继续</view>
 </cy-play-stage>
 </block>

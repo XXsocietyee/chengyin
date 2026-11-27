@@ -19,6 +19,10 @@ const { withAttempt, freshAttempt, rewardNote } = require('../../utils/sensor-co
 const TICK_MS = 100;
 const FIRST_FRAME_MS = 3000;
 const FRAME_GAP_MS = 500;
+const EMA_ALPHA = 0.3;
+const OUT_GRACE_MS = 300;
+const STRUGGLE_MS = 25000;
+const LOW_ACC_SKIP_MS = 3000;
 
 /** 两方位角的最小夹角。与服务端 angleDiff 同口径:359° 与 1° 相差 2° 而不是 358°。 */
 function angleDiff(a, b) {
@@ -43,6 +47,14 @@ function continuous(target, prev) {
 /** 目标相对当前朝向的带符号夹角,落在 [-180, 180):正 = 目标在右手边(往右转朝向变大)。 */
 function signedDelta(target, heading) {
   return ((((target - heading) % 360) + 540) % 360) - 180;
+}
+
+/** 圆周 EMA 平滑:过正北走短弧，避免 359° 与 1° 之间反向甩针。 */
+function smoothHeading(prev, raw, alpha) {
+  const next = ((raw % 360) + 360) % 360;
+  if (typeof prev !== 'number' || !Number.isFinite(prev)) return next;
+  const k = typeof alpha === 'number' && alpha > 0 && alpha <= 1 ? alpha : EMA_ALPHA;
+  return (((prev + signedDelta(next, prev) * k) % 360) + 360) % 360;
 }
 
 /** 转向提示:只说往哪边、还差多少度,不另立规则。 */
@@ -130,6 +142,7 @@ Component({
     _normalize: normalize,
     _continuous: continuous,
     _signedDelta: signedDelta,
+    _smoothHeading: smoothHeading,
     _turnText: turnText,
     _isLowAccuracy: isLowAccuracy,
     _zoneBars: zoneBars,
@@ -190,7 +203,8 @@ Component({
       const stage = this.selectComponent('#cy-play-stage');
       if (!stage || stage === this._retiredStage) return;
       const attempt = this._attempt = { stage, key: this.data.stageKeys[0], phase: 'starting',
-        startedAt: Date.now(), lastFrame: null, frames: 0, lastAligned: false, startReturned: false, succeeded: false };
+        startedAt: Date.now(), runStartedAt: null, lastFrame: null, frames: 0, lastAligned: false,
+        outSince: null, lowAccSince: null, struggleReported: false, startReturned: false, succeeded: false };
       this._heading = null; this._held = 0; this._lowAccuracy = false;
       this._prevNeedle = null; this._prevRose = null;
       this.setData({ phase: 'idle', hasHeading: false, noData: false, aligned: false, holdPct: 0, turnHint: '', lowAccuracy: false });
@@ -210,18 +224,24 @@ Component({
       const cb = (res) => {
         if (!this._current(attempt) || attempt.phase !== 'run') return;
         if (!res || typeof res.direction !== 'number' || !Number.isFinite(res.direction)) {
-          attempt.lastAligned = false; this._held = 0;
+          attempt.lastAligned = false; attempt.outSince = null; this._held = 0;
           this.setData({ aligned: false, hasHeading: false, holdPct: 0, holdLeft: this._holdTotal().toFixed(1) });
           return;
         }
         const now = Date.now();
         const gap = now - (attempt.lastFrame === null ? attempt.startedAt : attempt.lastFrame);
         if (gap >= (attempt.lastFrame === null ? FIRST_FRAME_MS : FRAME_GAP_MS)) { this._failed(attempt); return; }
-        const direction = ((res.direction % 360) + 360) % 360;
+        const raw = ((res.direction % 360) + 360) % 360;
+        const direction = smoothHeading(this._heading, raw);
         const aligned = angleDiff(direction, this._target) <= this._tolerance();
-        // Only measured sample pairs earn time. Repeating a timer against one sample earns none.
-        if (attempt.lastFrame !== null && attempt.lastAligned && aligned) this._held += Math.max(0, Math.min(0.1, gap / 1000));
-        else this._held = 0;
+        // Only measured sample pairs earn time; brief <300ms wobble pauses without wiping hold progress.
+        if (aligned) {
+          attempt.outSince = null;
+          if (attempt.lastFrame !== null && attempt.lastAligned) this._held += Math.max(0, Math.min(0.1, gap / 1000));
+        } else {
+          if (attempt.outSince === null) attempt.outSince = now;
+          if (now - attempt.outSince >= OUT_GRACE_MS) this._held = 0;
+        }
         attempt.lastFrame = now; attempt.lastAligned = aligned; attempt.frames += 1;
         this._heading = direction; this._lowAccuracy = isLowAccuracy(res.accuracy);
         this._armWatchdog(attempt, FRAME_GAP_MS);
@@ -244,6 +264,10 @@ Component({
       const attempt = this._eventAttempt(e);
       if (!attempt || attempt.phase !== 'preparing' || this._sent || this.data.done) return;
       attempt.phase = 'run';
+      attempt.runStartedAt = Date.now();
+      attempt.outSince = null;
+      attempt.lowAccSince = null;
+      attempt.struggleReported = false;
       this.setData({ phase: 'run', aligned: false, noData: false, holdLeft: this._holdTotal().toFixed(1),
         hasHeading: false, roseDeg: 0, holdPct: 0, turnHint: '', lowAccuracy: false });
       this._timer = setInterval(() => { if (this._current(attempt)) this._tick(); }, TICK_MS);
@@ -278,6 +302,21 @@ Component({
       this._prevRose = rose;
 
       if (aligned && this._held >= this._holdTotal() && attempt.frames >= 2) { this._finish(); return; }
+
+      if (this._lowAccuracy) {
+        if (attempt.lowAccSince === null) attempt.lowAccSince = now;
+      } else {
+        attempt.lowAccSince = null;
+      }
+      if (!attempt.struggleReported && !this.data.canSkip) {
+        const longRun = attempt.runStartedAt !== null && now - attempt.runStartedAt >= STRUGGLE_MS;
+        const poorAcc = attempt.lowAccSince !== null && now - attempt.lowAccSince >= LOW_ACC_SKIP_MS;
+        if (longRun || poorAcc) {
+          attempt.struggleReported = true;
+          // 室内磁干扰导致长期低精度或超 25 秒仍难对准：上报宿主以按服务端规则解锁「跳过这一站」
+          this.triggerEvent('readfail', { unsupported: true });
+        }
+      }
 
       const d = this.data;
       const heading = normalize(this._heading);
@@ -319,7 +358,8 @@ Component({
 
     /* P-23:跳过由服务端判(次数、作者开关或队长放行都在服务端),这里只发请求 */
     onSkip() {
-      if (!this.data.canSkip || this.data.done || this._sent || this._attempt || this._skipping) return;
+      if (!this.data.canSkip || this.data.done || this._sent || this._skipping) return;
+      if (this._attempt) this._abort();
       this._skipping = true;
       setTimeout(() => { this._skipping = false; }, 1500);
       this.triggerEvent('skip');

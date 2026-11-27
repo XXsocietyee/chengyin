@@ -15,6 +15,7 @@ const CO2_PER_STEP = 0.00008;  // 一步约少排这么多 kg,与原型同值
 
 const reducedMotionBehavior = require('../../../../behaviors/reduced-motion.js');
 const motion = require('../../../../utils/motion.js');
+const mediaDenied = require('../../utils/media-denied.js');
 
 const { groupThousands: group } = require('../../utils/group-thousands.js');
 
@@ -119,6 +120,18 @@ Component({
       }
       // 只发「去同步」这个意图,拿数据和解密都在外面 —— 客户端读不到明文
       this.triggerEvent('sync', { goal: this._goal });
+    },
+
+    onOpenSetting() {
+      if (mediaDenied && typeof mediaDenied.guidePermission === 'function') {
+        mediaDenied.guidePermission('werun', {
+          onReturn: (res) => {
+            if (res && res.authSetting && res.authSetting['scope.werun']) {
+              this.triggerEvent('sync', { goal: this._goal });
+            }
+          },
+        });
+      }
     },
 
     /* 跳过由服务端判(拒授权、读不出两次、作者开关或队长放行都在服务端),这里只发请求 */

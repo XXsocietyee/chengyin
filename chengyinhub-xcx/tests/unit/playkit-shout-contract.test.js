@@ -160,7 +160,7 @@ test('校准:2 秒采样取 80 分位当底噪,线 = thresholds 的红档', () =
   assert.equal(vm._hot, expect.hot);
 });
 
-test('持续是真持续:过线累计,掉线清零,攒着喊不算', () => {
+test('持续是真持续:短换气(<280ms)宽限,持续掉线(≥280ms)清零,攒着喊不算', () => {
   const vm = load();
   vm.onStart();
   for (let i = 0; i < 20; i++) { vm.frame(0.05); vm.onSample(); }
@@ -168,12 +168,16 @@ test('持续是真持续:过线累计,掉线清零,攒着喊不算', () => {
   vm.onRun();
   const hot = vm._hot + 0.05;
 
-  // 过 2 秒(20 拍 × 100ms),掉线 1 拍,再过 2 秒 —— 若不清零会凑成 4 秒假胜
+  // 过 2 秒(20 拍 × 100ms),单帧(100ms < 280ms)抖动宽限不清零
   advance(vm, 20, 100, () => vm.frame(hot));
   assert.equal(vm.data.loud, true, '过线时 loud 亮，屏上「过线了，别停」');
+  const heldBeforeDip = vm._held;
   advance(vm, 1, 100, () => vm.frame(0.01));
   assert.equal(vm.data.loud, false);
-  assert.equal(vm._held, 0, '掉线那一拍必须把攒的秒数清零');
+  assert.ok(vm._held >= heldBeforeDip - 0.01, '100ms 短掉帧在 280ms 宽限窗内不应清零');
+  // 持续安静超过 280ms(再加 3 拍 = 300ms):必须把攒的秒数清零
+  advance(vm, 3, 100, () => vm.frame(0.01));
+  assert.equal(vm._held, 0, '持续掉线超过 280ms 必须把攒的秒数清零');
   advance(vm, 19, 100, () => vm.frame(hot));
   assert.ok(vm._held > 1.5 && vm._held < 2.5, '2+2 拍过线只认最近一段:实得 ' + vm._held);
 });
@@ -245,7 +249,7 @@ test('wxss:只有 transition 没有 keyframes,无 tag 选择器', () => {
 });
 
 test('负控:删掉掉线清零那一行,上一条「持续」必须真红', () => {
-  const mutated = SOURCE.replace('else this._held = 0;', 'else void 0;');
+  const mutated = SOURCE.replace('if (now - a.dipSince >= DIP_GRACE_MS) this._held = 0;', 'void 0;');
   assert.notEqual(mutated, SOURCE, '变异没打上 = 这把尺子是橡皮图章');
   const vm = load(mutated);
   vm.onStart();
@@ -254,7 +258,7 @@ test('负控:删掉掉线清零那一行,上一条「持续」必须真红', () 
   vm.onRun();
   const hot = vm._hot + 0.05;
   advance(vm, 20, 100, () => vm.frame(hot));
-  advance(vm, 1, 100, () => vm.frame(0.01));
+  advance(vm, 4, 100, () => vm.frame(0.01));
   advance(vm, 19, 100, () => vm.frame(hot));
   assert.ok(vm._held > 3.5,
     '去掉清零后 2+2 秒被攒成 4 秒 —— 所以「持续」必须靠这一行成立:实得 ' + vm._held);

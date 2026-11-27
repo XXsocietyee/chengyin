@@ -28,7 +28,7 @@
 .mx__row.is-on .mx__pick { font-weight: 700; }
 .mx__dot { flex: none; width: 16rpx; height: 16rpx; border-radius: var(--cy-radius-sm); box-shadow: inset 0 0 0 2rpx currentColor; }
 .mx__row.is-on .mx__dot { background: currentColor; }
-.mx__name { flex: none; width: 96rpx; overflow: hidden; white-space: nowrap; }
+.mx__name { flex: none; max-width: 160rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mx__wave { position: relative; flex: 1; min-width: 0; height: 72rpx; display: flex; align-items: center; gap: 4rpx; }
 .mx__bar { flex: 1; min-width: 2rpx; background: var(--ink); opacity: .82; transition: opacity .18s ease; }
 .mx__strike { position: absolute; left: 0; right: 0; top: 50%; border-top: 2rpx dashed var(--sub); opacity: 0; transition: opacity .18s ease; }
@@ -38,7 +38,7 @@
 .mx__row.is-muted .mx__sw { color: var(--sub); }
 .mx__state { padding: 2rpx var(--cy-space-2); border: 2rpx solid currentColor; border-radius: var(--cy-radius-sm); line-height: 1.5; }
 .mx__track { position: relative; width: 88rpx; height: 52rpx; border-radius: var(--cy-radius-pill); background: var(--ink); box-shadow: inset 0 0 0 3rpx var(--ink); transition: background .18s ease, box-shadow .18s ease; }
-.mx__thumb { position: absolute; left: 6rpx; top: 6rpx; width: 40rpx; height: 40rpx; border-radius: var(--cy-radius-pill); background: var(--bg); transform: translateX(36rpx); transition: transform .18s ease, background .18s ease; }
+.mx__thumb { position: absolute; left: 6rpx; top: 6rpx; width: 40rpx; height: 40rpx; border-radius: var(--cy-radius-pill); background: var(--lk-bg, #111114); transform: translateX(36rpx); transition: transform .18s ease, background .18s ease; }  /* ds-ok 暗台面滑块圆点底色 */
 .mx__row.is-muted .mx__track { background: transparent; box-shadow: inset 0 0 0 3rpx var(--sub); }
 .mx__row.is-muted .mx__thumb { transform: none; background: var(--sub); }
 .mx__press { opacity: .88; }
@@ -62,7 +62,7 @@
 .ab { width: 100%; margin-top: var(--cy-space-5); }
 .ab__seg { display: flex; border: 1rpx solid var(--soft); border-radius: var(--cy-radius-md); overflow: hidden; align-self: flex-start; }
 .ab__s { min-width: 176rpx; min-height: 88rpx; padding: 0 var(--cy-space-4); display: flex; align-items: center; justify-content: center; font-size: var(--cy-type-body); font-weight: 600; color: var(--ink); transition: background .18s ease, color .18s ease; }
-.ab__s.is-on { background: var(--ink); color: var(--bg); font-weight: 800; }
+.ab__s.is-on { background: var(--ink); color: var(--lk-bg, #111114); font-weight: 800; }  /* ds-ok 反色胶囊字色 */
 .ab__viz { position: relative; margin-top: var(--cy-space-4); height: 168rpx; display: flex; align-items: center; gap: 4rpx; }
 .ab__bar { flex: 1; min-width: 2rpx; background: var(--ink); opacity: .45; transition: opacity .18s ease; }
 .ab__viz.is-after .ab__bar { opacity: .82; }

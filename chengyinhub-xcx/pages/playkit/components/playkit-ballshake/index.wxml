@@ -4,7 +4,8 @@
 <cy-play-stage id="cy-play-stage" data-stage-key="{{stageKey}}" show="{{show}}" back-label="退出"
                limit-seconds="{{timed ? seconds : 0}}"
                calibrate-label="拿成你打算玩的姿势" calibrate-ms="1200"
-               bind:back="onClose" bind:run="onRun" bind:verdict="onVerdict">
+               bind:back="onClose" bind:calibratetick="onCalibrateTick" bind:calibrated="onCalibrated"
+               bind:run="onRun" bind:verdict="onVerdict">
   <view class="bl {{reducedMotion ? 'bl--reduced' : ''}} {{inline ? 'bl--embed' : ''}}">
     <!-- 撞边不是画一条白线。线是「那儿有个东西」,而撞击要说的是「那儿亮了一下」——
          所以是一片从边缘往里散开、越往里越淡的光，没有硬边。 -->

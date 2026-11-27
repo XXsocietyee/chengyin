@@ -39,6 +39,7 @@ Component({
     left: { type: Object, value: {} },
     right: { type: Object, value: {} },
     lastMarked: { type: Array, value: [] },
+    maxAttempts: { type: Number, value: 0 },
     attempts: { type: Number, value: 0 },
     passed: { type: Boolean, value: false },
     finished: { type: Boolean, value: false },

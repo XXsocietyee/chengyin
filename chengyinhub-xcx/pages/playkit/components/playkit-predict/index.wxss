@@ -39,7 +39,28 @@
   left: 0; top: 0;
   width: 0; height: 0;
   transform-style: preserve-3d;
+  transition: transform .32s cubic-bezier(.22, 1, .36, 1), opacity .32s ease;
 }
+.pd--reduced .pd__card { transition: none; }
+.pd__nav {
+  position: absolute;
+  top: 50%;
+  margin-top: -44rpx;
+  width: 88rpx;
+  height: 88rpx;
+  z-index: 30;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .12);   /* ds-ok 近黑台面上的左右切卡按钮 */
+  color: #f4f4f6;                          /* ds-ok */
+  font-size: var(--cy-type-section-title);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pd__nav--prev { left: 0; }
+.pd__nav--next { right: 0; }
+.pd__nav--press { opacity: .7; }
 .pd__sl { position: absolute; left: 0; top: 0; overflow: hidden; }
 .pd__fc {
   position: absolute;

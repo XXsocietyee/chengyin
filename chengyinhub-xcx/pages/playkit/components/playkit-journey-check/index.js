@@ -172,6 +172,14 @@ Component({
       this._released = Date.now();     // 紧跟着的那次 tap 不再重复掷
       this._throw();
     },
+    /** 系统手势/弹窗打断按住时只取消蓄力，不顺手把骰子掷出去 */
+    onHoldCancel() {
+      if (!this._holdAt) return;
+      this._stopHold();
+      this.setData({ holding: false });
+      this._released = Date.now();
+      if (this._die && typeof this._die.charge === 'function') this._die.charge(0, true);
+    },
 
     /** 掷 / 重掷 / 结算收口成一个事件:页面按 detail.action 分派,与 kitaction 同一手法 */
     onRoll() {

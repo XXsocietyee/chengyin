@@ -113,6 +113,7 @@ Component({
 
     onRun() {
       this._settled = false;
+      this._overAt = 0;
       this._t0 = Date.now();
       // 开局那一刻手里的号是上一局的;只有这一局开表后服务端新发的号才随成绩交
       this._attemptAtRun = this.data.attemptId;
@@ -151,8 +152,13 @@ Component({
 
     /** 整个舞台就是「停」的按钮。暂停中不接受停 —— 那等于把表停在自己挑的一刻 */
     onStop() {
-      // 停完还有次数时停在这一屏,读数留着;再点一下开下一局(原型那颗「再来一局」)
-      if (this.data.phase === 'over') { this.setData({ round: this.data.round + 1 }); this.onRun(); return; }
+      // 停完还有次数时停在这一屏,读数留着;防连点误重开给 450ms 看清偏差，再点开下一局
+      if (this.data.phase === 'over') {
+        if (this._overAt && Date.now() - this._overAt < 450) return;
+        this.setData({ round: this.data.round + 1 });
+        this.onRun();
+        return;
+      }
       if (this.data.phase !== 'run' || this._settled) return;  // L02-175
       this._stop();
       const elapsed = Date.now() - this._t0;
@@ -171,6 +177,7 @@ Component({
       const exhausted = !hit && stage ? stage.miss() : false;
 
       this._settled = !!(hit || exhausted);
+      if (!this._settled) this._overAt = Date.now();
       this.setData({
         phase: hit || exhausted ? 'run' : 'over',
         big: secs(elapsed), hidden: false, timeText: clockText(elapsed),

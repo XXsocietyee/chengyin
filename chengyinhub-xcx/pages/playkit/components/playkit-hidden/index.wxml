@@ -4,22 +4,29 @@
   <view class="g-col hd {{reducedMotion ? 'hd--reduced' : ''}}">
     <view class="hd__q pe pe--blur">{{title}}</view>
 
-    <view class="hd__scene pe pe--zoom" bindtap="onTapScene"
-          hover-class="hd__scene--press" hover-stay-time="60"
+    <view class="hd__scene pe pe--zoom"
           aria-role="button" aria-label="在图上点中藏起来的目标">
-      <!-- 画框按底图原比例收在台面里(不裁),坐标都量这个框 —— 编辑页标点量的也是原图,
-           两边才是同一把尺。以前横图塞进竖台面被裁掉一半多,标在两侧的点玩家根本看不见。 -->
-      <view class="hd__frame" style="{{frame}}">
-      <image class="hd__img" wx:if="{{imageUrl}}" src="{{imageUrl}}" mode="aspectFill" bindload="onImgLoad" />
-      <!-- 商家还没传图时画「这儿有一张图」。什么都不画的话整块是纯黑,
-           读起来像加载失败,而这一屏的全部内容就是那张图。 -->
-      <view class="hd__ph" wx:else>
-        <view class="hd__ph-frame"><view class="hd__ph-sun"></view><view class="hd__ph-hill"></view></view>
-      </view>
-      <!-- 命中的点留在图上,没命中的一圈涟漪就散了 —— 找过哪儿要看得见 -->
-      <view class="hd__dot" wx:for="{{hits}}" wx:key="id"
-            style="left:{{item.x}}%;top:{{item.y}}%"></view>
-      </view>
+      <movable-area class="hd__area">
+        <movable-view class="hd__mv" direction="all" scale="{{true}}" scale-min="{{1}}" scale-max="{{3}}"
+                      scale-value="{{zoomScale}}" bindscale="onZoomScale" bindtap="onTapScene">
+          <!-- 画框按底图原比例收在台面里(不裁),坐标都量这个框 —— 编辑页标点量的也是原图,
+               两边才是同一把尺。以前横图塞进竖台面被裁掉一半多,标在两侧的点玩家根本看不见。 -->
+          <view class="hd__frame" style="{{frame}}">
+            <image class="hd__img" wx:if="{{imageUrl}}" src="{{imageUrl}}" mode="aspectFill" bindload="onImgLoad" />
+            <!-- 商家还没传图时画「这儿有一张图」。什么都不画的话整块是纯黑,
+                 读起来像加载失败,而这一屏的全部内容就是那张图。 -->
+            <view class="hd__ph" wx:else>
+              <view class="hd__ph-frame"><view class="hd__ph-sun"></view><view class="hd__ph-hill"></view></view>
+            </view>
+            <!-- 命中的点留在图上,没命中的一圈涟漪就散了 —— 找过哪儿要看得见 -->
+            <view class="hd__dot" wx:for="{{hits}}" wx:key="id"
+                  style="left:{{item.x}}%;top:{{item.y}}%"></view>
+          </view>
+        </movable-view>
+      </movable-area>
+      <view wx:if="{{imageUrl}}" class="hd__zoom-btn" catchtap="onToggleZoom"
+            aria-role="button" aria-label="{{zoomed ? '还原图片大小' : '放大查看细节'}}"
+            hover-class="hd__zoom-btn--press" hover-stay-time="60">{{zoomed ? '1×' : '放大'}}</view>
     </view>
 
     <!-- 待找清单:玩家要知道自己在找什么。label 是有意下发的,坐标不是 -->

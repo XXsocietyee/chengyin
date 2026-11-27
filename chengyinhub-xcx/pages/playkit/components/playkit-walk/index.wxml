@@ -33,6 +33,8 @@
     </view>
 
     <cy-inline-error class="wk__err" wx:if="{{readError && !skipped}}" kind="field" title="{{readError}}" />
+    <view wx:if="{{readError && !skipped && !syncing}}" class="wk__skip" bindtap="onOpenSetting"
+          aria-role="button" aria-label="去设置开启微信运动权限" hover-class="wk__skip--press" hover-stay-time="80">去开启微信运动权限</view>
     <view wx:if="{{skipped}}" class="wk__foot">这一站已跳过</view>
     <view wx:elif="{{canSkip && !syncing}}" class="wk__skip" bindtap="onSkip"
           aria-role="button" aria-label="跳过这一站" hover-class="wk__skip--press" hover-stay-time="80">跳过这一站</view>

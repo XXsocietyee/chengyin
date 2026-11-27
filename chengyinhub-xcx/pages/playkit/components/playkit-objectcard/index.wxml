@@ -12,7 +12,7 @@
         <view class="oc__hint oc__hint--bright">明亮</view>
         <view class="oc__hint oc__hint--clear">清晰</view>
       </view>
-      <view class="oc__sub" wx:elif="{{sub}}">{{sub}}</view>
+      <view class="oc__sub" wx:if="{{sub}}">{{sub}}</view>
     </view>
 
     <view class="oc__vf" wx:if="{{phase === 'cam' || phase === 'proc' || phase === 'retry' || phase === 'note' || (phase === 'reveal' && !shotHidden)}}">
@@ -38,6 +38,8 @@
     <view class="oc__spin" wx:if="{{phase === 'proc'}}" style="{{spinStyle}}" aria-role="img" aria-label="正在处理">
       <view wx:for="{{spokes}}" wx:key="*this" class="oc__spoke" style="transform:rotate({{item * 45}}deg);opacity:{{0.25 + item * 0.1}}"></view>
     </view>
+    <view class="oc__cancel" wx:if="{{phase === 'proc'}}" bindtap="onCancelProc"
+          aria-role="button" aria-label="取消识别，返回重拍" hover-class="oc--press" hover-stay-time="80">取消</view>
 
     <view class="oc__pill {{pill ? 'is-on' : ''}} {{pillReady ? 'is-ready' : ''}}" bindtap="onPill"
           aria-role="button" aria-label="{{pill}}" hover-class="oc--press" hover-stay-time="80">{{pill}}</view>

@@ -44,6 +44,11 @@
   margin-left: -27rpx; z-index: 3; }
 .oc__spoke { position: absolute; left: 24rpx; top: 0; width: 6rpx; height: 16rpx; border-radius: 3rpx; /* ds-ok: 菊花辐条 6rpx 宽,圆角取半宽 */
   background: var(--cy-color-text-secondary); transform-origin: 3rpx 27rpx; }
+.oc__cancel { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 32rpx); transform: translateX(-50%);
+  min-width: 176rpx; min-height: 88rpx; padding: 0 var(--cy-space-5); box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center; border-radius: var(--cy-radius-pill);
+  border: 2rpx solid var(--cy-color-border-subtle); color: var(--cy-color-text-secondary);
+  font-size: var(--cy-type-body); font-weight: 600; z-index: 4; }
 
 .oc__pill { position: absolute; right: 38rpx; top: 50rpx; z-index: 5; padding: 15rpx 31rpx; border-radius: var(--cy-radius-pill);
   font-size: var(--cy-type-body); font-weight: 600; background: var(--cy-color-bg-raised); color: var(--cy-color-text-primary);

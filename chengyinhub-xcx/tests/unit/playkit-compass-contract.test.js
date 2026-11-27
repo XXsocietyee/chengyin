@@ -191,12 +191,12 @@ test('开跑后一帧读数:刻度盘反转、转向提示、读数不稳提示�
   assert.equal(vm.data.turnHint, '往右转 95°');
   assert.equal(vm.data.lowAccuracy, true);
   assert.equal(vm.data.aligned, false);
-  vm.pushHeading(130, 'high');
-  advance(vm, 10, 100);
+  // EMA 平滑后连续几帧指向 130° 收敛进容差区
+  for (let i = 0; i < 10; i++) { vm.pushHeading(130, 'high'); advance(vm, 1, 100); }
   assert.equal(vm.data.lowAccuracy, false);
   assert.equal(vm.data.aligned, true);
   assert.ok(vm.data.holdPct > 0 && vm.data.holdPct < 100, '保持进度在走:' + vm.data.holdPct);
-  advance(vm, 30, 100);
+  for (let i = 0; i < 32 && !vm._sent; i++) { vm.pushHeading(130, 'high'); advance(vm, 1, 100); }
   assert.equal(vm.data.holdPct, 100, '保持满判过时进度环要走满，不停在九成多');
 });
 
@@ -209,19 +209,25 @@ test('开局前不许订阅罗盘;开始 → stage.begin → run 才起表', () 
   assert.equal(vm.compassHandlers.length, 1);
 });
 
-test('扫过容差区不算对准:保持计时离开就归零', () => {
+test('扫过容差区不算对准:短暂抖动宽限 300ms，持续离开超过 300ms 归零', () => {
   const vm = load();
   vm.onStart();
   vm.pushHeading(140);
   advance(vm, 10, 100, true);          // 区内攒 1 秒
   assert.equal(vm.data.aligned, true);
-  vm.pushHeading(200);
-  vm._tick();
+  const heldBefore = vm._held;
+  // 单帧离区 (<300ms) 不应瞬清，避免室内磁场抖动清零进度
+  vm.pushHeading(240);
+  advance(vm, 1, 100);
   assert.equal(vm.data.aligned, false);
-  assert.equal(vm._held, 0, '离开容差区的那一刻就该归零');
-  vm.pushHeading(140);
+  assert.ok(vm._held >= heldBefore - 0.01, '300ms 宽限内暂不归零');
+  // 持续偏离 ≥ 300ms 后归零
+  for (let i = 0; i < 4; i++) { advance(vm, 1, 100); vm.pushHeading(240); }
   vm._tick();
-  assert.ok(vm._held <= 0.11, '重新攒，不能拿之前那 1 秒凑满 3 秒:' + vm._held);
+  assert.equal(vm._held, 0, '持续离开超过 300ms 必须归零');
+  for (let i = 0; i < 8; i++) { advance(vm, 1, 100); vm.pushHeading(140); }
+  vm._tick();
+  assert.ok(vm._held < 1.0, '重新攒，不能拿之前那 1 秒凑满 3 秒:' + vm._held);
   assert.equal(vm.events.filter((e) => e && e.name === 'submit').length, 0);
 });
 

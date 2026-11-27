@@ -1,6 +1,7 @@
 <!-- 时间轴对照(R16)· 照排序定稿的台面原样搭:同一块深色舞台、同一种行卡、同一条反馈条与底部大按钮。
      两条时间线逐条并排,顺序就是题面不打乱;点一行标出、再点取消,标好了交。 -->
 <cy-play-stage id="cy-play-stage" skin="qadark" show="{{show}}" back-label="退出"
+               tries="{{maxAttempts}}" used="{{passed ? 0 : attempts}}"
                bind:back="onClose">
   <view class="g-col so {{reducedMotion ? 'so--reduced' : ''}}">
     <view class="so__prompt pe pe--blur">{{prompt}}</view>

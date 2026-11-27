@@ -668,6 +668,7 @@ function pickPlayKit(view, now) {
         finished: !!seg.finished,
         passed: !!seg.passed,
         answerId: seg.answerId || '', lastPickId: seg.lastPickId || '',
+        failureSeq: 0,
       });
     }
     if (name === 'album') return Object.assign(base, albumBeforeCard
@@ -709,6 +710,7 @@ function pickPlayKit(view, now) {
         shopAnswers: seg.shopAnswers !== false,
         // 第十一轮 g4:已「不选，继续」过,卡面不再邀请选
         skipped: seg.skipped === true,
+        failureSeq: 0,
       });
     }
     if (name === 'random') {

@@ -20,8 +20,8 @@
 
   <!-- 主按钮与其它玩法同一颗 .g-btn,排在台面后面:整屏贴底,内嵌跟在油面那块下面 -->
   <view class="g-btn {{running ? 'g-btn--disabled' : ''}}" bindtap="onStart"
-        aria-role="button" aria-label="{{running ? '倒计时进行中' : '开始倒计时'}}" aria-disabled="{{running}}"
+        aria-role="button" aria-label="{{finished ? '继续' : (running ? '倒计时进行中' : '开始倒计时')}}" aria-disabled="{{running}}"
         hover-class="g-btn--press" hover-stay-time="80">
-    {{running ? '计时中' : (finished ? '再来一次' : '开始')}}
+    {{finished ? '继续' : (running ? '计时中' : '开始')}}
   </view>
 </cy-play-stage>

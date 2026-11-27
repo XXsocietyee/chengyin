@@ -44,10 +44,10 @@ Component({
     maxTries: { type: Number, value: 0 },
     used: { type: Number, value: 0 },  // L02-005
   },
-  data: { hits: [], foundCount: 0, frame: '' },
+  data: { hits: [], foundCount: 0, frame: '', zoomScale: 1, zoomed: false },
   observers: {
     'show, targets': function (show) {
-      if (!show) { this._begun = false; this._served = null; return; }
+      if (!show) { this._begun = false; this._served = null; this._lastTap = null; return; }
       /* 编辑页试玩没有服务端:命中由作者本机按自己的配置判,写回 targets(found + 点的位置)。
          带着这样的 target 就照它画点、计数,不重开一局;全找到由台面判赢。正式游玩下发的 targets 不带这些字段。 */
       const found = (this.data.targets || []).filter(t => t && t.found && Number.isFinite(t.x) && Number.isFinite(t.y));
@@ -66,16 +66,26 @@ Component({
       const stage = this.selectComponent('#cy-play-stage');
       if (!this._begun) {
         this._begun = true;
-        this.setData({ hits: [], foundCount: served });
+        this._lastTap = null;
+        this.setData({ hits: [], foundCount: served, zoomScale: 1, zoomed: false });
         if (stage) stage.begin();
         this._fitFrame();
         return;
       }
       if (served === this.data.foundCount) return;
-      this.setData({ foundCount: served });
       if (before != null && served > before) {
+        const tap = this._lastTap;
+        this._lastTap = null;
+        if (tap) {
+          const hits = (this.data.hits || []).concat([{ id: 'hit-' + served + '-' + Date.now(), x: tap.x, y: tap.y }]);
+          this.setData({ hits, foundCount: served });
+        } else {
+          this.setData({ foundCount: served });
+        }
         motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'medium' });
         if (served >= this.data.total && stage) stage.win('全找到了');
+      } else {
+        this.setData({ foundCount: served });
       }
     },
     used(value) {
@@ -84,10 +94,11 @@ Component({
       const seen = this._seenUsed;
       this._seenUsed = now;
       if (seen == null || now <= seen || !this.data.show) return;
+      this._lastTap = null;
       const stage = this.selectComponent('#cy-play-stage');
       if (stage && stage.nudge) stage.nudge();
     },
-    imageUrl() { this._imgSize = null; this.setData({ frame: '' }); },
+    imageUrl() { this._imgSize = null; this._lastTap = null; this.setData({ frame: '', zoomScale: 1, zoomed: false }); },
   },
   methods: {
     _toPercent: toPercent,      // 纯算法出口,供单测
@@ -105,26 +116,39 @@ Component({
       }).exec();
     },
 
+    onZoomScale(e) {
+      const s = Number(e && e.detail && e.detail.scale) || 1;
+      const zoomed = s > 1.05;
+      if (zoomed !== this.data.zoomed) this.setData({ zoomed });
+    },
+    onToggleZoom() {
+      const next = this.data.zoomed ? 1 : 2;
+      motion.haptic({ reducedMotion: this.data.reducedMotion, type: 'light' });
+      this.setData({ zoomScale: next, zoomed: next > 1 });
+    },
+
     onTapScene(e) {
       const q = wx.createSelectorQuery().in(this);
       q.select('.hd__frame').boundingClientRect((rect) => {
+        // 框已经量出来但点击落在图外黑边(letterbox):静默忽略,不红闪也不扣机会
+        const hasRect = !!(rect && rect.width > 0 && rect.height > 0);
         const t = (e.touches && e.touches[0]) || e.detail || {};
         const p = toPercent(t.clientX != null ? t.clientX : t.x,
                             t.clientY != null ? t.clientY : t.y, rect);
-        /* 量不到图的位置(组件还没布局完)时,这一下点击是废的。
-           以前这里直接 return:玩家连点几下没有任何反应,会以为图是死的。
-           现在抖一下 —— 「我收到了,但这一下不算」,而不是什么都不发生。 */
         if (!p) {
-          const stage = this.selectComponent('#cy-play-stage');
-          if (stage && stage.nudge) stage.nudge();
+          if (!hasRect) {
+            const stage = this.selectComponent('#cy-play-stage');
+            if (stage && stage.nudge) stage.nudge();
+          }
           return;
         }
+        this._lastTap = p;
         // 命中与否由服务端判 —— 坐标就是这个玩法的答案
         this.triggerEvent('submit', p);
       }).exec();
     },
 
     onVerdict(e) { this.triggerEvent('verdict', e.detail); },
-    onClose() { this.triggerEvent('close'); },
+    onClose() { this._lastTap = null; this.triggerEvent('close'); },
   },
 });

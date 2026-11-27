@@ -44,7 +44,7 @@ function host(props = {}) {
   }
   return {component, stage, def, tasks, history, events, tick,
     tap() {component.onTap();},
-    measure(ms=250) {component.onTap();tick(1400);tick(ms);component.onTap();},
+    measure(ms=250) {if(component._reviewAt)tick(450);component.onTap();tick(1400);tick(ms);component.onTap();},
     interrupt(kind) {
       if(kind==='hide')def.pageLifetimes.hide.call(component);
       if(kind==='close')component.onClose();
@@ -61,6 +61,7 @@ const count = (h,name) => h.events.filter(e=>e.name===name).length;
 function phaseHost(phase) {
   const h=host();
   if(phase==='idle'||phase==='early')h.measure();
+  if(phase==='early')h.tick(450);
   if(phase==='wait'||phase==='go'||phase==='early')h.tap();
   if(phase==='go')h.tick(1400);
   if(phase==='early')h.tap();
@@ -92,6 +93,7 @@ for(const kind of ['hide','close','false']) test(`${kind}: original entry restar
 for(const rounds of [1,2,3,5]) test(`normal ${rounds} round session: units, exact local result, threshold and unchanged parent mapping`,()=>{
   const h=host({rounds,goalMs:250}); const values=Array.from({length:rounds},(_,i)=>260+i*10); if(rounds>1)values[rounds-1]=240;
   for(let i=0;i<rounds;i++) {
+    if(i>0)h.tick(450);
     h.tap();assert.equal(h.component.data.unit,'');assert.equal(h.component.data.phase,'wait');
     h.tick(1400);assert.equal(h.component.data.unit,'');h.tick(values[i]);h.tap();
     assert.equal(h.component.data.unit,'毫秒');
@@ -107,11 +109,12 @@ for(const rounds of [1,2,3,5]) test(`normal ${rounds} round session: units, exac
 test('goalMs equality and strict below-human early rule retain existing decision',()=>{
   const h=host({rounds:1,goalMs:120});h.tap();h.tick(1400);h.tick(119);h.tap();
   assert.equal(h.component.data.phase,'early');assert.equal(h.component.data.unit,'');assert.equal(count(h,'submit'),0);
+  h.tap();assert.equal(h.component.data.phase,'early','review double-tap guard blocks immediate restart');
   h.measure(120);assert.equal(h.events.find(e=>e.name==='submit').detail.passed,true);assert.equal(count(h,'start'),1);
 });
 test('early tap invalidates its old green timer even after a fresh retry',()=>{
   const h=host();h.tap();const old=h.history[0].fn;h.tap();assert.equal(h.component.data.phase,'early');assert.equal(h.component.data.unit,'');
-  old();assert.equal(h.component.data.phase,'early');h.tap();old();assert.equal(h.component.data.phase,'wait');h.tick(1400);assert.equal(h.component.data.phase,'go');assert.equal(count(h,'start'),1);
+  old();assert.equal(h.component.data.phase,'early');h.tick(450);h.tap();old();assert.equal(h.component.data.phase,'wait');h.tick(1400);assert.equal(h.component.data.phase,'go');assert.equal(count(h,'start'),1);
 });
 for(const kind of ['hide','close','false','detach']) test(`completed measurement ${kind} cannot submit again and clears retained captures`,()=>{
   const h=host({rounds:1});h.measure();h.interrupt(kind);

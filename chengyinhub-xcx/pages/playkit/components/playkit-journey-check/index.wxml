@@ -89,16 +89,16 @@
   <view class="jc__hint jc__hint--foot" wx:if="{{disabledReason}}">{{disabledReason}}</view>
   <view class="g-btn" wx:if="{{unknown}}" bindtap="onRecover" aria-role="button" aria-label="查询原检定结果" hover-class="g-btn--press" hover-stay-time="80">查询原检定结果</view>
   <view class="g-btn jc__roll {{loading ? 'g-btn--disabled' : ''}} pe pe--up" wx:elif="{{!receipt && (!r5 || rollVisible)}}"
-        bindtouchstart="onHoldStart" bindtouchend="onHoldEnd" bindtouchcancel="onHoldEnd" bindtap="onRoll"
+        bindtouchstart="onHoldStart" bindtouchend="onHoldEnd" bindtouchcancel="onHoldCancel" bindtap="onRoll"
         aria-role="button" aria-label="掷骰" hover-class="g-btn--press" hover-stay-time="80">
     <view class="jc__charge {{holding ? 'is-on' : ''}}"></view>
-    <text class="jc__roll-t">{{loading ? '骰子在转' : (holding ? '摇……松手掷出' : '按住摇骰，松手掷出')}}</text>
+    <text class="jc__roll-t">{{loading ? '骰子在转…' : (holding ? '蓄力中…松手掷出' : '长按蓄力，松手掷骰')}}</text>
   </view>
   <view class="jc__acts" wx:elif="{{receipt && !receipt.settled && !receipt.pending && settleVisible && landed}}">
     <view class="jc__act jc__act--ghost" wx:if="{{rerollVisible}}" bindtap="onReroll"
-          aria-role="button" aria-label="花一点幸运重掷" hover-class="g-btn--press" hover-stay-time="80">重掷</view>
+          aria-role="button" aria-label="花一点幸运重掷" hover-class="g-btn--press" hover-stay-time="80">重掷一次</view>
     <view class="jc__act jc__act-main {{loading ? 'g-btn--disabled' : ''}}" bindtap="onSettle"
-          aria-role="button" aria-label="判定这次检定" hover-class="g-btn--press" hover-stay-time="80">判定</view>
+          aria-role="button" aria-label="确认这次检定结果" hover-class="g-btn--press" hover-stay-time="80">确认结果</view>
   </view>
   <!-- 骰子还在落:先不给按钮,免得点数没出来就被结算掉 -->
   <block wx:elif="{{receipt && !landed}}"></block>

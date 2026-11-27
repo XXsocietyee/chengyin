@@ -217,12 +217,14 @@ test('打字题字符池:answerLength 个空格 + 候选字,提交 SUBMIT_QA {in
   assert.match(wxml, /aria-label="候选字 \{\{item\.ch\}\}/)
 })
 
-test('无障碍与样式:候选字 / 清空命中区 ≥ 44px;颜色只读皮肤变量,不新造色', () => {
+test('无障碍与样式:候选字 / 清空命中区 ≥ 42px 且 8 列不超 750rpx;颜色除 .lp__slot.is-ok 纯白字外只读皮肤变量', () => {
   const css = read('pages/playkit/style/letter-pool.wxss')
   const rule = (sel) => (css.match(new RegExp('\\' + sel + ' \\{([^}]*)\\}')) || [])[1] || ''
-  assert.match(rule('.lp__key'), /width: 88rpx;[\s\S]*height: 88rpx;/)
+  assert.match(rule('.lp__key'), /width: 84rpx;[\s\S]*height: 88rpx;/)
   assert.match(rule('.lp__clear'), /min-height: 88rpx;/)
-  assert.doesNotMatch(css, /#[0-9a-fA-F]{3,8}\b/, '不写死颜色')
+  assert.match(css, /\.lp__slot\.is-ok\s*\{[^}]*color:\s*#fff;/)
+  const withoutOkInk = css.replace(/\.lp__slot\.is-ok\s*\{[^}]*\}/, '')
+  assert.doesNotMatch(withoutOkInk, /#[0-9a-fA-F]{3,8}\b/, '除 .lp__slot.is-ok 外不写死颜色')
   for (const rel of ['pages/playkit/components/playkit-hangman/index.wxss', 'pages/playkit/components/playkit-qa/index.wxss']) {
     assert.match(read(rel), /@import "\/pages\/playkit\/style\/letter-pool\.wxss";/, rel)
   }

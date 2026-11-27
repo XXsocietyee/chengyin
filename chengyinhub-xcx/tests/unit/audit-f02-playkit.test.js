@@ -81,15 +81,16 @@ test('L02-004: predict wheel ticks only send the per-card transform strings, sli
   assert.ok(JSON.stringify(patches[0]).length < 400);
 });
 
-test('L02-038: predict wheel resumes spinning when the page shows again', () => {
+test('L02-038: predict wheel uses manual arrows/swipe without a 16ms setInterval timer', () => {
   const vm = mount('../../pages/playkit/components/playkit-predict/index.js', { reducedMotion: false });
-  vm.setProps({ show: true, options: [{ key: 'A' }, { key: 'B' }] });
-  assert.ok(vm._timer);
+  vm.setProps({ show: true, options: [{ key: 'A', label: '甲' }, { key: 'B', label: '乙' }] });
+  assert.equal(vm._timer, undefined);
+  const before = vm._angle;
+  vm.onStep({ currentTarget: { dataset: { dir: '1' } } });
+  assert.notEqual(vm._angle, before);
   vm.def.pageLifetimes.hide.call(vm);
-  assert.equal(vm._timer, null);
   vm.def.pageLifetimes.show.call(vm);
-  assert.ok(vm._timer);
-  vm._stop();
+  assert.equal(vm._timer, undefined);
 });
 
 test('L02-005: pickPlayKit maps hiddenObject foundIds and missCount', () => {

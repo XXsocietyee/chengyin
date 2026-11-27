@@ -40,7 +40,7 @@ test('跳过按钮只听服务端的 canSkip;跳过过的站显示「已跳过�
   const skipped = pickPlayKit(view(Object.assign({}, base, { done: true, skipped: true })));
   assert.equal(skipped.skipped, true);
   const wxml = read('pages/playkit/components/playkit-compass/index.wxml');
-  assert.match(wxml, /wx:if="\{\{phase === 'idle' && !done && canSkip\}\}" class="cp__skip" bindtap="onSkip"/);
+  assert.match(wxml, /wx:if="\{\{\(phase === 'idle' \|\| phase === 'run'\) && !done && canSkip\}\}" class="cp__skip" bindtap="onSkip"/);
   assert.match(wxml, />跳过这一站</);
   assert.match(wxml, /wx:elif="\{\{done && skipped\}\}" class="g-sub cp__s">这一站已跳过</);
   assert.match(wxml, /wx:if="\{\{done && !skipped\}\}" class="cp__done"/);

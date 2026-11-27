@@ -60,6 +60,7 @@ Component({
     startFailureSeq(seq) {
       if (!seq || this.data.phase !== 'arming') return;
       this._firstKey = null;
+      this._keyQueue = [];
       this._t0 = 0;
       this.setData({ phase: 'intro', typed: '', canSubmit: false, submitting: false });
     },
@@ -77,7 +78,7 @@ Component({
       if (prev !== undefined && prev !== value) this.replayMotion();
     },
     'show, attempts, passed, target': function (show, attempts, passed, target) {
-      if (!show) { this._roundSignature = ''; this._firstKey = null; return; }
+      if (!show) { this._roundSignature = ''; this._firstKey = null; this._keyQueue = []; return; }
       const signature = JSON.stringify([attempts, passed, target]);
       if (signature === this._roundSignature) return;
       this._roundSignature = signature;
@@ -98,6 +99,7 @@ Component({
 
       this._t0 = 0;
       this._firstKey = null;
+      this._keyQueue = [];
       const tries = Number(this.data.tries) || 0;
       this.setData({
         extraKeys: extraKeysFor(target, this.data.caseSensitive),
@@ -152,21 +154,41 @@ Component({
     onRun() {
       this._t0 = Date.now();
       this.setData({ phase: 'run', typed: '', canSubmit: false });
-      // 服务端确认开表后才启动本地计时，网络等待不计入玩家输入时间。
+      // 服务端确认开表后才启动本地计时，同时按顺序回放连接期间缓存的按键，不吞字。
+      const queued = [];
       if (this._firstKey != null) {
-        const key = this._firstKey;
+        queued.push(this._firstKey);
         this._firstKey = null;
-        this._terminalInput(key);
+      }
+      if (this._keyQueue && this._keyQueue.length) {
+        queued.push.apply(queued, this._keyQueue);
+        this._keyQueue = [];
+      }
+      for (const k of queued) {
+        if (this.data.submitting || this.data.locked) break;
+        this._terminalInput(k);
       }
     },
 
     onKey(e) {
-      if (this.data.locked || this.data.submitting || this.data.phase === 'arming') return;
+      if (this.data.locked || this.data.submitting) return;
       const key = e.currentTarget.dataset.key;
       if (key !== 'back' && !/^[a-zA-Z ]$/.test(key || '') && (this.data.extraKeys || []).indexOf(key) < 0) return;
+      if (this.data.phase === 'arming') {
+        if (!this._keyQueue) this._keyQueue = [];
+        if (key === 'back') {
+          if (this._keyQueue.length) this._keyQueue.pop();
+          else this._firstKey = null;
+          return;
+        }
+        const limit = (this.data.target || '').length || 64;
+        if ((this._firstKey != null ? 1 : 0) + this._keyQueue.length < limit) this._keyQueue.push(key);
+        return;
+      }
       if (this.data.phase !== 'run') {
         if (key === 'back') return;
         this._firstKey = key;
+        this._keyQueue = [];
         this.onStart();
         return;
       }
@@ -179,9 +201,10 @@ Component({
       if (typed.length > target.length) return;
       const same = this.data.caseSensitive ? typed : typed.toLowerCase();
       const expected = this.data.caseSensitive ? target : target.toLowerCase();
+      const mistyped = same !== expected.slice(0, typed.length);
       this.setData({ typed, ghost: target.slice(typed.length), nextKey: target.charAt(typed.length),
-        mistyped: same !== expected.slice(0, typed.length), canSubmit: !!typed.trim() });
-      if (typed.length === target.length) this.onSubmit();
+        mistyped, canSubmit: !!typed.trim() });
+      if (typed.length === target.length && !mistyped) this.onSubmit();
     },
 
     onInput(e) {

@@ -8728,10 +8728,21 @@ Page({
         if (!login || !login.code) { cyToast('微信登录态获取失败'); return; }
         /* 第十一轮 i1:读不到微信运动(拒了授权、这台设备没有)要在屏上说清楚,不能静默;
            拒授权等同罗盘读不出数,报给服务端记到门槛,之后服务端给「跳过这一站」。 */
-        const weRunDenied = () => {
+        const weRunDenied = (err) => {
           if (!isCurrent()) return;
           this.setData({ 'playKit.kit.readError': '需要授权微信运动才能计步' });
           game.action('REPORT_SENSOR_FAILURE', { game: 'steps', denied: true });
+          if (/auth|deny|denied|authorize|permission/i.test(String((err && err.errMsg) || ''))) {
+            cyModal.show({
+              title: '打开微信运动权限',
+              content: '点「去设置」打开「微信运动步数」权限后即可同步今日步数。',
+              confirmText: '去设置',
+              cancelText: '取消',
+              success: (r) => {
+                if (r && r.confirm && typeof wx.openSetting === 'function') wx.openSetting({});
+              },
+            });
+          }
         };
         if (typeof wx.getWeRunData !== 'function') { weRunDenied(); return; }
         try {
@@ -8743,7 +8754,7 @@ Page({
             },
             fail: weRunDenied,
           });
-        } catch (error) { weRunDenied(); }
+        } catch (error) { weRunDenied(error); }
       },
       fail: () => { if (isCurrent()) cyToast('微信登录态获取失败'); },
     });

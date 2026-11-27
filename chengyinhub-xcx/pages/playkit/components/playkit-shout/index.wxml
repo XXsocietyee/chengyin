@@ -8,12 +8,18 @@
   <view class="sh {{running && loud ? 'sh--on' : ''}}">
     <view class="g-kicker sh__k pe pe--blur">{{kicker}}</view>
     <view class="sh__n g-figure pe pe--up">{{left}}</view>
+    <view wx:if="{{running}}" class="sh__meter" aria-hidden="true">
+      <view class="sh__meter-fill" style="transform: scaleX({{meterScale}})"></view>
+      <view class="sh__meter-mark"></view>
+    </view>
     <view class="sh__s pe pe--up">{{running ? (loud ? '就是这样，别停' : '再大声一点') : '连续喊满 ' + seconds + ' 秒'}}</view>
     <view class="sh__s pe pe--up" wx:if="{{rewardNote}}">{{rewardNote}}</view>
     <!-- 安全提示只留一句短话(业主:不要说明文字,安全例外) -->
     <view class="sh__s sh__safe" wx:if="{{!running}}">别对着人喊，嗓子不舒服就停</view>
 
     <view wx:if="{{micDenied && !skipped && !running}}" class="sh__s" aria-live="polite">需要授权麦克风才能开始</view>
+    <view wx:if="{{micDenied && !skipped && !running && !preparing}}" class="sh__skip" bindtap="onOpenSetting"
+          aria-role="button" aria-label="去设置开启麦克风权限" hover-class="sh__skip--press" hover-stay-time="80">去开启麦克风权限</view>
     <view wx:if="{{skipped}}" class="sh__s">这一站已跳过</view>
     <view wx:elif="{{canSkip && !running && !preparing}}" class="sh__skip" bindtap="onSkip"
           aria-role="button" aria-label="跳过这一站" hover-class="sh__skip--press" hover-stay-time="80">跳过这一站</view>
