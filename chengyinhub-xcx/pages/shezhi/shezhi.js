@@ -218,6 +218,7 @@ Page({
     wx.navigateTo({ url: '/subpackageMember/appeal-mine/index' });
   },
   goInvoice() {
+    if (app.globalData && app.globalData.features && app.globalData.features.userInvoice !== true) return;
     wx.navigateTo({ url: '/subpackageMember/invoice/index' });
   },
 

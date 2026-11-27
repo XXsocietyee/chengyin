@@ -96,7 +96,7 @@ App({
         nickname: '',
 
         // M10 灰度功能开关:启动拉取 /api/config/features 覆盖,默认全关(网络异常时容错保持关闭)
-        features: { drops: false, roamNpcEvent: false, roamNpcChat: false, roamDemoPois: false, finishNearbyRoute: false, clubMembership: false, shopNpcChat: false, merchantNpcChat: false, communityPostRead: false, communityPostWrite: false },
+        features: { drops: false, roamNpcEvent: false, roamNpcChat: false, roamDemoPois: false, finishNearbyRoute: false, clubMembership: false, shopNpcChat: false, merchantNpcChat: false, communityPostRead: false, communityPostWrite: false, userInvoice: false },
 
         // 添加胶囊按钮信息
         menuButtonInfo: {
@@ -202,14 +202,14 @@ App({
     var epoch = that._featureFlagsEpoch = (that._featureFlagsEpoch || 0) + 1;
     that._communityFeatureOwner = null;
     that.globalData.features = Object.assign({}, that.globalData.features,
-      { communityPostRead: false, communityPostWrite: false });
+      { communityPostRead: false, communityPostWrite: false, userInvoice: false });
     return new Promise(function (resolve) {
       var finish = function (res) {
         var current = epoch === that._featureFlagsEpoch
           && owner === String(that.getUserID() || '') && authorization === that.getAuthorization();
         if (current && res && res.code == 200 && res.data && typeof res.data === 'object' && !Array.isArray(res.data)) {
           that.globalData.features = Object.assign({}, that.globalData.features, res.data,
-            { communityPostRead: res.data.communityPostRead === true, communityPostWrite: res.data.communityPostWrite === true });
+            { communityPostRead: res.data.communityPostRead === true, communityPostWrite: res.data.communityPostWrite === true, userInvoice: res.data.userInvoice === true });
           that._communityFeatureOwner = owner;
           that._communityFeatureAuthorization = authorization;
         }
@@ -339,7 +339,7 @@ App({
           that._loginEpoch = (that._loginEpoch || 0) + 1;
           that._featureFlagsEpoch = (that._featureFlagsEpoch || 0) + 1;
           that._communityFeatureOwner = null;
-          that.globalData.features = Object.assign({}, that.globalData.features, { communityPostRead: false, communityPostWrite: false });
+          that.globalData.features = Object.assign({}, that.globalData.features, { communityPostRead: false, communityPostWrite: false, userInvoice: false });
           roleGuard.clear();
           try {
             wx.removeStorageSync('selectedAddress');

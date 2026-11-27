@@ -79,6 +79,10 @@ const INVOICE_METHODS = {
       waitForInitialSession(this, app, function () { this._hidden = true; this.onShow(); });
       return;
     }
+    if (app.globalData && app.globalData.features && app.globalData.features.userInvoice === false) {
+      this.off();
+      return;
+    }
     this._workflow = createVerificationWorkflow({ storage: wx, requestIdentity: true, getOwner: () => this.owner() });
     this.invoiceLoad();
   },

@@ -30,13 +30,13 @@
           </view>
           <view class="canyubox_li_right_top_name ep2">{{item.sourceName}}</view>
         </view>
-        <view class="canyubox_li_right_time">
+        <view class="canyubox_li_right_time" wx:if="{{item.dateText}}">
           <image lazy-load="true" src="/subpackageMember/images/d_cyIcon.png" mode="widthFix" />{{item.dateText}}
         </view>
         <view class="canyubox_li_right_txt ep1">
           <image lazy-load="true" src="/subpackageMember/images/d_cyIcon2.png" mode="widthFix" />{{item.typeLabel}} · {{item.sourceAddress}}
         </view>
-        <cy-badge type="status" variant="neutral" label="{{item.verificationText}}" />
+        <cy-badge wx:if="{{item.showVerificationBadge}}" type="status" variant="neutral" label="{{item.verificationText}}" />
         <cy-btn wx:if="{{item.voucherAvailable}}" variant="ghost" size="sm" catchtap="viewVoucher" data-id="{{item.id}}">查看报名凭证</cy-btn>
       </view>
     </view>

@@ -39,9 +39,20 @@ function yuan(value, options) {
   return (options && options.signed ? '+' : '') + '¥' + text
 }
 
+// 一位小数展示(人均参考价等非实付金额:24.95 → ¥25.0, 22.47 → ¥22.5, 29 → ¥29.0)
+function yuanOneDecimal(value) {
+  const n = amount(value)
+  if (n === null) return null
+  const cents = Math.round(Math.abs(n) * 100)
+  const tenths = Math.round(cents / 10)
+  if (tenths === 0) return '¥0.0'
+  const text = (tenths / 10).toFixed(1)
+  return (n < 0 ? MINUS : '') + '¥' + text
+}
+
 // 旧 OR-046「不补零」入口,已被 2026-11-22 一位小数口径取代;保留名字给既有调用方,输出同 yuan。
 function yuanTrim(value) {
   return yuan(value)
 }
 
-module.exports = { MINUS, amount, fixed2, decimalText, yuan, yuanTrim }
+module.exports = { MINUS, amount, fixed2, decimalText, yuan, yuanOneDecimal, yuanTrim }

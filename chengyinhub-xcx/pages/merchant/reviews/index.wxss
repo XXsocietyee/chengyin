@@ -1,4 +1,4 @@
-@import '../../../style/merchant-light-scope.wxss'; /* PG-029:共享页,浅色只作用于管理态根节点 */
+@import '../../../style/merchant-light.wxss';
 
 page { background: var(--cy-bg-page); }
 

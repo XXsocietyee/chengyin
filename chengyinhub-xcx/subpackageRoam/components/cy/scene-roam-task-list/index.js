@@ -99,7 +99,7 @@ Component({
       const keyword = String(raw || '').trim().toLowerCase()
       if (keyword) events = events.filter((item) => [item.title, item.subtitle, item.city].some((value) => String(value || '').toLowerCase().includes(keyword)))
       const copy = keyword ? [`「${keyword}」${events.length} 个结果`, '换个关键词试试'] : [[ '暂无进行中的活动', '' ], [ '暂无即将开始的活动', '' ], [ '还没有参与的活动', '' ]][this.data.tab]
-      this.setData({ keyword: raw || '', events, summary: keyword ? copy[0] : `${this.data.tabs[this.data.tab]} · 共 ${events.length} 个活动`, emptyTitle: keyword ? '没有找到相关活动' : copy[0], emptySub: copy[1] })
+      this.setData({ keyword: raw || '', events, summary: events.length ? (keyword ? copy[0] : `${this.data.tabs[this.data.tab]} · 共 ${events.length} 个活动`) : '', emptyTitle: keyword ? '没有找到相关活动' : copy[0], emptySub: copy[1] })
     },
     selectTab(event) {
       const tab = Number(event.currentTarget.dataset.tab)

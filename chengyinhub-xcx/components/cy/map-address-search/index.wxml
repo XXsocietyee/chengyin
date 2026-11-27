@@ -8,7 +8,7 @@
      ⚠️ 原型里还自绘了一套 iOS 浅色拼音键盘 —— 那是网页 mock 用来替代系统键盘的道具。
         小程序 <input> 聚焦时弹的就是真的系统拼音键盘,自绘一套只会更差,故不搬。
         这是本组件唯一没照搬的东西。 -->
-<view class="mas {{entry ? 'mas--entry' : ''}} {{open ? 'mas--open' : ''}}" style="top:{{top}}px">
+<view wx:if="{{!dark || open || (places && places.length) || (lat && lng)}}" class="mas {{entry ? 'mas--entry' : ''}} {{open ? 'mas--open' : ''}}" style="top:{{top}}px">
   <!-- ① 收起态 -->
   <view wx:if="{{!open}}" class="searchbar {{entry ? 'searchbar--entry' : ''}} {{dark ? 'searchbar--dark' : ''}}" bindtap="onOpen"
         aria-role="button" aria-label="输入地址" hover-class="cy-pressed" hover-stay-time="80">

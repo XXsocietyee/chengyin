@@ -326,12 +326,12 @@ Page({
 
     let summary, emptyTitle, emptySub, emptyKind;
     if (kw) {
-      summary = '「' + d.keyword.trim() + '」' + list.length + ' 个结果';
+      summary = list.length ? ('「' + d.keyword.trim() + '」' + list.length + ' 个结果') : '';
       emptyTitle = '没有找到相关活动';
       emptySub = '换个关键词，或看看其他分类';
       emptyKind = 'not-found';
     } else {
-      summary = d.tabs[d.tab] + ' · 共 ' + list.length + ' 个活动';
+      summary = list.length ? (d.tabs[d.tab] + ' · 共 ' + list.length + ' 个活动') : '';
       const c = EMPTY_COPY[d.tab];
       emptyTitle = c[0];
       emptySub = c[1];

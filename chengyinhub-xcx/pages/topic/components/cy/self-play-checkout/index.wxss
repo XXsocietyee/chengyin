@@ -70,7 +70,10 @@
 .ck__ticket::after { right: -14rpx; }
 .ck__who { margin-top: var(--cy-space-5, 32rpx); gap: var(--cy-space-3, 16rpx); }
 .ck__who .ck__k { flex: none; }
-.ck__who-main { flex: 1; min-width: 0; text-align: right; justify-content: flex-end; }
+.ck__who-main { flex: 1; min-width: 0; text-align: right; justify-content: flex-end; flex-wrap: nowrap; }
+.ck__who-n { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ck__who-p { flex-shrink: 0; white-space: nowrap; }
+.ck__more { flex-shrink: 0; }
 .ck__rows { margin-top: var(--cy-space-4, 24rpx); }
 .ck__v.is-minus { color: var(--cy-color-status-success); }
 .ck__refused { margin-top: var(--cy-space-4, 24rpx); font-size: var(--cy-font-caption, 24rpx); color: var(--cy-color-status-danger); text-align: center; }

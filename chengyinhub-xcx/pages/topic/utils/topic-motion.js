@@ -319,7 +319,7 @@ function seatProductOptions(topicId, products) {
     // 购买层分段只写「双人票 / 四人小队票」:服务端名常带「主题名·」前缀,三段并排时会被截断;票面与合计仍用全名。
     const short = name.indexOf('·') >= 0 ? name.slice(name.lastIndexOf('·') + 1).trim() || name : name;
     out.push({ key: 'p-' + p.productId, kind: 'product', productId: Number(p.productId), name, short, price: price(p.cashPrice), people: seats, from: false,
-      perPersonText: perPerson === null ? '' : '人均 ' + money.yuanTrim(perPerson) });
+      perPersonText: perPerson === null ? '' : '人均 ' + money.yuanOneDecimal(perPerson) });
   });
   // 目录按 id 倒序回来(四人票在前);购买层按人数从少到多排
   return out.sort((a, b) => a.people - b.people);

@@ -4,7 +4,7 @@
      原型没有的三样留着 —— 它是静态稿,没有接口:空/错/加载三态、分页续读、相机入口。 -->
 <view class="album-body">
   <cy-tabs plain tabs="{{tabs}}" active="{{tab}}" bind:change="onTabChange" />
-  <text class="album-sub" wx:if="{{loaded}}">{{'共 ' + (total || 0) + ' 枚'}}</text>
+  <text class="album-sub" wx:if="{{loaded && total > 0}}">{{'共 ' + total + ' 枚'}}</text>
 
   <view class="stkgrid" wx:if="{{items.length}}">
     <block wx:for="{{items}}" wx:key="id">

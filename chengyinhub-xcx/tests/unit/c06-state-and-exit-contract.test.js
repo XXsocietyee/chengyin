@@ -111,9 +111,9 @@ function rule(wxss, selector) {
 // 否则用户会以为册子被清空了 —— 而且现状连重试都没有。
 function assertAlbumStates(js, wxml) {
   // ① 计数大字必须等数据到位才渲染,否则首屏就是权威口吻的「0 枚」
-  const head = wxml.match(/<view class="al-hd"[^>]*>/)
+  const head = wxml.match(/<view class="al-hd"(?:[^>"]|"[^"]*")*>/)
   assert.ok(head, 'al-hd 计数行必须存在')
-  assert.match(head[0], /wx:if="\{\{loaded\}\}"/, '计数大字必须 gate 在 loaded 上，否则数据没回来就先说「0 枚」:' + head[0])
+  assert.match(head[0], /wx:if="\{\{loaded && total > 0\}\}"/, '计数大字必须 gate 在 loaded && total > 0 上，否则加载中或空态会重复出「0 枚」:' + head[0])
 
   // ② 失败必须有自己的态 + 一个真的走得通的下一步。整屏失败只属「一枚都没渲染出来」;
   //    已有邮票时那是续页失败,不该把看到的墙换成一张错误页。
@@ -197,7 +197,7 @@ test('negative control: 拿掉计数行的 wx:if 与空态的 wx:elif 各自判�
   const js = read(ALBUM_JS)
   const wxml = read(ALBUM_WXML)
 
-  const noGate = wxml.replace('<view class="al-hd" wx:if="{{loaded}}">', '<view class="al-hd">')
+  const noGate = wxml.replace('<view class="al-hd" wx:if="{{loaded && total > 0}}">', '<view class="al-hd">')
   assert.notEqual(noGate, wxml, '变异锚点失效(源码已改动?)')
   assert.throws(() => assertAlbumStates(js, noGate), assert.AssertionError)
 

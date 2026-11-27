@@ -9,8 +9,8 @@
 <view class="al-root" style="padding-top:{{navTop}}px;">
   <cy-nav-bar overlay />
   <view class="al-head"><album-head active="stamp" /></view>
-  <!-- 计数是权威口吻的大字:数据没回来就别先说「0 枚」(截图 057 把「0 枚」和「加载中…」同屏了) -->
-  <view class="al-hd" wx:if="{{loaded}}">
+  <!-- 计数是权威口吻的大字:数据没回来或为空时不重复出「0 枚」(空态已由 cy-empty 表达) -->
+  <view class="al-hd" wx:if="{{loaded && total > 0}}">
     <text class="al-n">{{total}}</text>
     <text class="al-u">枚</text>
   </view>
