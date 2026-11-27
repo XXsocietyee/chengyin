@@ -155,13 +155,25 @@ Page({
     this._hidden = true;
     this._loadEpoch = (this._loadEpoch || 0) + 1;
     this._loading = false;
+    this._stopMotion();
     merchantTheme.merchantPageRestore();
   },
   onUnload() {
     this._unloaded = true;
     this._loadEpoch = (this._loadEpoch || 0) + 1;
     this._loading = false;
+    this._stopMotion();
     merchantTheme.merchantPageRestore();
+  },
+
+  // countMoney 的停表函数在 _pmCounters。离页不停的话,金额滚动还会继续 setData。
+  _stopMotion() {
+    const counters = this._pmCounters;
+    if (counters) Object.keys(counters).forEach((key) => {
+      if (typeof counters[key] === 'function') counters[key]();
+      counters[key] = null;
+    });
+    if (!this._unloaded && this.data && typeof this.data.sdK === 'number') this.setData({ sdK: null });
   },
 
   onPullDownRefresh() { this.load(); },

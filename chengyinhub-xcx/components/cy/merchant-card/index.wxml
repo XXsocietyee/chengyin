@@ -10,6 +10,7 @@
     <view class="photo-card__space"></view>
     <view class="photo-card__body">
       <text class="photo-card__name">{{name}}</text>
+      <view wx:if="{{distance}}" class="photo-card__detail"><text>{{distance}}</text></view>
       <view wx:if="{{availableTime}}" class="photo-card__detail mc__hours"><image class="photo-card__icon" src="/images/cards/clock.svg" /><text>{{availableTime}}</text></view>
       <view wx:if="{{address && _geo}}" class="photo-card__detail cy-addr-tap" catchtap="onAddress" aria-role="button" aria-label="在地图中打开 {{address}}" hover-class="photo-card--pressed" hover-stay-time="80" hover-stop-propagation="true"><image class="photo-card__icon" src="/images/cards/pin.svg" /><text>{{address}}</text></view>
       <view wx:elif="{{address}}" class="photo-card__detail"><image class="photo-card__icon" src="/images/cards/pin.svg" /><text>{{address}}</text></view>

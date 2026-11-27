@@ -131,7 +131,8 @@
         <cy-icon name="arrow-right" size="24" />
       </view>
       <!-- CU-C-10:供给 = 受邀商家自己的常备权益模板(attachPerks 只认受邀方 + 模板 merchantId=本人)。
-           俱乐部/发起方没有可申报的来源,点了只会「商家身份无效」⇒ 只给「收到的 · 受邀方是商家」。 -->
+           俱乐部/发起方没有可申报的来源,点了只会「商家身份无效」⇒ 只给「收到的 · 受邀方是商家」。
+           页上已经知道条款锁定(termsFrozen)时不再给申报入口,锁价后的供给变更走服务端拒绝,这里不另开一条。 -->
       <view class="op" wx:if="{{box === 'received' && invite.toType === 'merchant' && !invite.termsFrozen}}" bindtap="openPerkPick" aria-role="button" aria-label="申报本次合作供给" hover-class="cy-pressed" hover-stay-time="80">
         <text class="op-name">申报供给</text>
         <cy-icon name="arrow-right" size="24" />
