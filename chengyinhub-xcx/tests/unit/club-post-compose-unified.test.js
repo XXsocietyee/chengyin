@@ -64,7 +64,9 @@ test('俱乐部模式发到 /api/club/post/create,请求体与原俱乐部页一
   assert.equal(h.requests.length, 1);
   const req = h.requests[0];
   assert.equal(req.url, '/api/club/post/create');
-  assert.deepEqual(JSON.parse(req.data), { clubId: 36, content: '周末一起', images: 'a.jpg', type: 2, refType: 1, refId: 9 });
+  assert.deepEqual(JSON.parse(req.data), {
+    clubId: 36, content: '周末一起', images: 'a.jpg', type: 2, refType: 1, refId: 9, requestId: 'k',
+  });
   req.success({ code: '200' });
   assert.deepEqual(h.drafts.at(-1), ['remove', 'club_post_36_member-A']);
   assert.deepEqual(h.events.map((e) => e[0]), ['published', 'close']);

@@ -50,10 +50,20 @@ test('old feed generation cannot overwrite object version used by a later delete
   h.request('/api/creativesquare/delete', { id: 77 });
   assert.equal(h.calls.at(-1).data.expectedVersion, 9);
 });
-test('duplicate write callback invalidates the feed only once', () => {
+test('duplicate in-place comment callback does not dirty the square list', () => {
   const h = harness(); h.request('/api/comment/add', { owner_id: 77, contents: 'reply' });
   const request = h.calls[0]; request.success({ code: 200, data: {} }); request.success({ code: 200, data: {} });
-  assert.equal(h.app.globalData.squareListDirtyVersion, 1); assert.equal(h.seen.length, 1);
+  assert.equal(h.app.globalData.squareListDirtyVersion, undefined); assert.equal(h.seen.length, 1);
+});
+test('duplicate delete callback invalidates the feed only once', () => {
+  const h = harness();
+  h.request('/api/creativesquare/info', { id: 77 });
+  h.calls[0].success({ code: 200, data: post() });
+  h.request('/api/creativesquare/delete', { id: 77 });
+  const request = h.calls.at(-1);
+  request.success({ code: 200, data: {} }); request.success({ code: 200, data: {} });
+  assert.equal(h.app.globalData.squareListDirtyVersion, 1);
+  assert.equal(h.seen.length, 2);
 });
 test('aborted and obsolete page requests never populate mutation caches', () => {
   for (const cancel of ['abort', 'current']) {

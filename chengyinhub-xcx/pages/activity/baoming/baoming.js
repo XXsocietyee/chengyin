@@ -218,6 +218,7 @@ Page({
     // 活动详情成功渲染过没有。只用来判 auto-back(审查C A1)。
     everLoaded: false,
     loadErrorMsg: '',
+    profileError: '',
     gateClubId: 0,
     skeletonItems: [1, 2], // 加载中两张卡:第三张会被底栏占位切掉一半(p08-baoming-loading)
     ticketList: [],
@@ -352,6 +353,16 @@ Page({
   /**
    * 获取用户信息（当没有参与人信息时预填）
    */
+  _profileLoadFailed() {
+    const info = this.data.userInfo || {};
+    const keep = !!(this.data.selectedAddress || info.realName || info.phone);
+    const patch = { profileError: '个人资料没加载出来，请核对参与人信息' };
+    if (!keep) {
+      patch.userInfo = { realName: '', phone: '', email: '', address: '', point: 0 };
+    }
+    this.setData(patch);
+  },
+
   getUserInfo() {
     const that = this;
     app.sendRequest({
@@ -363,34 +374,18 @@ Page({
       success: function (res) {
         if (res && res.code == "200" && res.data && typeof res.data === 'object' && !Array.isArray(res.data)) {
           that.setData({
-            userInfo: res.data
+            userInfo: res.data,
+            profileError: ''
           });
           // j6 F5 / r1 F3:参与人列表与资料并发,参与人先回包时资料会把已选参与人的姓名/手机冲掉,
           // 付款就误报「参与人信息需要包含姓名」。已选了参与人就以参与人为准。
           if (that.data.selectedAddress) that.updateUserInfoFromAddress(that.data.selectedAddress);
         } else {
-          // 如果获取失败，使用默认信息
-          that.setData({
-            userInfo: {
-              realName: '',
-              phone: '',
-              email: '',
-              point: 0
-            }
-          });
+          that._profileLoadFailed();
         }
       },
-      fail: function (res) {
-        // 失败时使用默认信息
-        that.setData({
-          userInfo: {
-            realName: '',
-            phone: '',
-            email: '',
-            address: '',
-            point: 0
-          }
-        });
+      fail: function () {
+        that._profileLoadFailed();
       }
     });
   },
@@ -1578,7 +1573,14 @@ Page({
           paySign: p.paySign,
           success: function () { cb({ ok: true }); },
           fail: function (res) {
-            cb({ ok: false, cancelled: res.errMsg === 'requestPayment:fail cancel', errMsg: res.errMsg });
+            var cancelled = !!(res && res.errMsg === 'requestPayment:fail cancel');
+            // 面板已经拉起。非取消的失败不能再当成「还没扣款」:微信可能已经扣了,只是回调失败。
+            cb({
+              ok: false,
+              cancelled: cancelled,
+              errMsg: res && res.errMsg,
+              paymentLaunched: !cancelled
+            });
           }
         });
       },
@@ -1975,15 +1977,19 @@ Page({
         that.cancelPendingOrder({ openOrderWhenStuck: true });
       },
       onPayFail: function (res) {
+        // 收银台已拉起且不是用户取消:玩家可能已经扣款。不要写「未扣款」,也不要把微信 errMsg 摆上屏。
+        // 建单失败、缺支付参数、拉起面板之前的网络失败没有 paymentLaunched,仍用原来的文案。
         const launched = !!(res && res.paymentLaunched);
-        const message = launched
-          ? '支付结果未确认，请到订单查看，勿重复支付'
-          : ((res && res.errMsg) || '支付失败，请重试');
+        const unconfirmed = '支付结果未确认，请到订单查看，勿重复支付';
+        const message = launched ? unconfirmed : ((res && res.errMsg) || '支付失败，请重试');
         cyLoading.hide();
         that.setData({
           isPaying: false, verifyingPayment: false, submitError: message,
+          // 面板负责「说清楚发生了什么」并自愈;重试出口是页内那条 submitError,
+          // 它一直留在页上 —— 恢复动作不能放进会自己消失的面板里。
+          // 原来这里还会再 app.tips 一次,和面板+页内错误就是同一句话说三遍,故去掉。
           resultSheet: { show: true, kind: 'fail', title: '这笔没有付成功',
-            sub: launched ? '支付结果未确认，请到订单查看，勿重复支付' : '未扣款，可重试',
+            sub: launched ? unconfirmed : '未扣款，可重试',
             meta: '', pill: '', why: launched ? '' : message, primaryText: '', secondaryText: '', duration: SUCCESS_HOLD_MS },
         }, () => that.refreshPaymentState());
         that.cancelPendingOrder({ stayOnPage: true });

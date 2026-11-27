@@ -56,10 +56,17 @@ function createClient(app, wxApi) {
       owner = current; credential = currentCredential(); ownerEpoch += 1; reporting = null;
     }
   }
-  function markFeedChanged(path, method) {
+  // Like, bookmark, and comment rewrite one cached row. Delete, create, and edit still
+  // invalidate every square list so a return replaces membership, not just a counter.
+  function keepsSquareList(path, method) {
+    return /^\/posts\/[^/]+\/actions(?:\/(?:LIKE|BOOKMARK))?$/.test(path)
+      || /^\/comments\/[^/]+\/actions(?:\/LIKE)?$/.test(path)
+      || (method === 'POST' && /^\/posts\/[^/]+\/comments$/.test(path));
+  }
+  function markFeedChanged(path, method, listDirty) {
     if (method === 'GET' || !/^\/(posts(?:\/|$)|comments\/)/.test(path)) return;
     mutationRevision += 1;
-    if (!app.globalData) return;
+    if (listDirty === false || !app.globalData) return;
     app.globalData.squareListDirty = true;
     app.globalData.squareListDirtyVersion = (app.globalData.squareListDirtyVersion || 0) + 1;
   }
@@ -317,9 +324,12 @@ function createClient(app, wxApi) {
         }
         if (commandKey && commands[commandKey] === (body.requestId || body.clientRequestId) && res && (Number(res.code) === 200 || (Number(res.code) >= 400 && Number(res.code) < 500))) delete commands[commandKey];
         if (res && Number(res.code) === 200) {
-          markFeedChanged(path, method);
-          try { res = Object.assign({}, res, { data: map(res.data) }); }
-          catch (error) { res = { code: 500, msg: error.message }; }
+          let mapped, mapError;
+          try { mapped = map(res.data); }
+          catch (error) { mapError = error; }
+          // A failed map did not update the row, so the list still needs a refresh.
+          markFeedChanged(path, method, Boolean(mapError) || !keepsSquareList(path, method));
+          res = mapError ? { code: 500, msg: mapError.message } : Object.assign({}, res, { data: mapped });
         }
         if (original.success) original.success(res);
       },

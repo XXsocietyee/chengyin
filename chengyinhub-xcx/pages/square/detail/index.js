@@ -25,7 +25,7 @@ const { buildSquareShare } = require('../utils/square-share.js');
 const GONE_POST_MSG = /^(内容不存在|已删除|审核中|数据不存在|参数不合规|帖文不存在)/;
 
 Page({
-  onHide() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1; if (this.data.merchantView) merchantTheme.merchantPageRestore(); },
+  onHide() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1; this._clearTransientTimers(); if (this.data.merchantView) merchantTheme.merchantPageRestore(); },
   /**
    * 页面的初始数据
    */
@@ -59,6 +59,7 @@ Page({
     commentsState: 'idle', // idle | loading | ready | error
     commentLoadError: false,
     commentLoadMoreError: '',
+    commentRefreshError: '',
     commentLoadingMore: false,
     commentRecoveryPending: false,
     commentContent: '',
@@ -233,7 +234,8 @@ Page({
             commentRecoveryPending: false,
             commentSubmitError: ''
           });
-          that.refreshComments();
+          // 成功只接上这一条。整表重拉会丢掉已加载的后续页,回前台还会再拉一遍帖文。
+          that._showOwnComment(content, 0);
           that.refreshCommentCount();
         } else {
           that.setData({
@@ -304,6 +306,7 @@ Page({
       success: function (res) {
         if (res.code == "200") {
           toast.success('回复成功');
+          const parentId = that.data.replyId;
           that.setData({
             replyContent: that.data.replyContent.trim() === content ? '' : that.data.replyContent,
             canReply: that.data.replyContent.trim() !== content,
@@ -312,7 +315,7 @@ Page({
             replyId: 0,
             replySubmitError: ''
           });
-          that.refreshComments();
+          that._showOwnComment(content, parentId);
           that.refreshCommentCount();
         } else {
           that.setData({
@@ -514,7 +517,8 @@ Page({
               info: newinfo
             });
             if (type == 1 && !likedBefore && newinfo['isLiked'] == 1) that.burstLike();
-            that.markListDirty();
+            that._patchListRow({ isLiked: newinfo.isLiked, likeCount: newinfo.likeCount, version: newinfo.version });
+            that._ackOwnMutation();
 
       },
       fail: function (res) {
@@ -552,7 +556,8 @@ Page({
         const reduced = readReducedMotion();
         if (this._favoriteBurstTimer) { clearTimeout(this._favoriteBurstTimer); this._favoriteBurstTimer = null; }
         this.setData({ 'info.isBookmarked': res.data.isBookmarked, favoriteBurst: !reduced && res.data.isBookmarked === 1 });
-        this.markListDirty();
+        this._patchListRow({ isBookmarked: res.data.isBookmarked });
+        this._ackOwnMutation();
         if (next === 1) {
           motion.haptic({ type: 'light', reducedMotion: reduced });
           if (reduced) return;
@@ -616,6 +621,7 @@ Page({
     let index = e.currentTarget.dataset.index;
     let item = that.data.list[index]
     if (!item || !item.id || item.deletedPlaceholder === true || item.lifecycle === 'DELETED') return;
+    if (item.pendingLocal) { toast('这条评论刚发出，请稍后再赞'); return; }
     let id = item['id']
     const requestKey = String(id);
     that._commentLikeRequests = that._commentLikeRequests || Object.create(null);
@@ -691,7 +697,11 @@ Page({
             if (!current() || Number(resp && resp.code) === 499) return;
             if (resp.code == '200') {
               toast('已提交举报');
-              setTimeout(() => { if (current()) that.goBack(); }, 800);
+              if (that._reportLeaveTimer) clearTimeout(that._reportLeaveTimer);
+              that._reportLeaveTimer = setTimeout(() => {
+                that._reportLeaveTimer = null;
+                if (current()) that.goBack();
+              }, 800);
             } else {
               toast(resp.msg || '举报失败');
             }
@@ -806,22 +816,50 @@ Page({
     this.getData();
   },
 
-  // A-05:删/改过之后给上一页(广场列表)置脏标,回列表 onShow 时刷新一次首屏 ——
-  // 不置脏标就不刷(别每次 onShow 全量重拉),脏标只影响一次。
-  // L06-056:本页自己的写操作已就地更新了状态,把社区写版本记为已消费,
-  // 回前台(看图/进主页/登录弹层)时不再整帖重拉、闪骨架。
+  // A-05:删帖、删评论、编辑或本页新发的帖给上一页置脏标,回列表时重拉一次。
+  // L06-056:点赞、收藏、评论已经改到打开的这一行上,不再把整表标脏。
+  // 返回时屏上的其它行留着;本页写版本记为已消费,回前台也不整帖重拉。
   _ackOwnMutation() {
     const version = (app.globalData && app.globalData.squareListDirtyVersion) || 0;
     if (version > (this._communityFeedVersion || 0)) this._communityFeedVersion = version;
     if (version > (this._communityCommentsVersion || 0)) this._communityCommentsVersion = version;
   },
 
+  _patchListRow(patch) {
+    const fields = {};
+    Object.keys(patch || {}).forEach((key) => {
+      if (patch[key] !== undefined) fields[key] = patch[key];
+    });
+    if (!Object.keys(fields).length || typeof getCurrentPages !== 'function') return;
+    const pages = getCurrentPages();
+    const prev = pages && pages.length > 1 ? pages[pages.length - 2] : null;
+    if (!prev) return;
+    const hosts = [prev];
+    if (typeof prev.selectComponent === 'function') {
+      const profile = prev.selectComponent('#profile');
+      if (profile) hosts.push(profile);
+    }
+    const id = String(this.data.id || '');
+    if (!id) return;
+    const samePost = (row) => row && String(row.id) === id && row.source !== 'club'
+      && (row.source === 'community' || 'isLiked' in row || 'likeCount' in row || 'isBookmarked' in row || 'commentCount' in row);
+    hosts.forEach((host) => {
+      if (!host || !host.data || typeof host.setData !== 'function') return;
+      ['list', 'feed'].forEach((key) => {
+        const rows = host.data[key];
+        if (!Array.isArray(rows)) return;
+        const index = rows.findIndex(samePost);
+        if (index < 0) return;
+        host.setData({ [key + '[' + index + ']']: Object.assign({}, rows[index], fields) });
+      });
+    });
+  },
+
   markListDirty() {
     this._ackOwnMutation();
-    // 应用级脏标:目前没有页面读这个布尔值(广场列表页已删,发现流/个人主页认 squareListDirtyVersion);
-    // 适配层 utils/community-post-api.js 也写同一标记,两处需一起退役(L06-172,见 F06 台账)。
+    // 应用级脏标:发现流/个人主页认 squareListDirtyVersion,删帖、编辑、新帖才加版本。
     if (app.globalData) app.globalData.squareListDirty = true;
-    // 通知上一页(发现流 / 个人主页)就地刷新。
+    // 通知上一页重拉列表。点赞、收藏、评论不走这里。
     if (typeof getCurrentPages !== 'function') return;
     const pages = getCurrentPages();
     const prev = pages && pages.length > 1 ? pages[pages.length - 2] : null;
@@ -889,6 +927,11 @@ Page({
     const index = e.currentTarget.dataset.index;
     const item = that.data.list[index];
     if (!item || !item.id || item.deletedPlaceholder === true || item.lifecycle === 'DELETED') return;
+    if (item.pendingLocal) {
+      const list = that.data.list.filter(function (row) { return !row || String(row.id) !== String(item.id); });
+      that.setData({ list: list, nodata: list.length < 1 });
+      return;
+    }
     if (String(item.memberId) !== String(that.data.userId)) return; // 入口只给自己的评论;后端仍会再校验一次
     const requestKey = String(item.id);
     that._commentDeleteRequests = that._commentDeleteRequests || Object.create(null);
@@ -1000,6 +1043,7 @@ Page({
             return;
           }
           that.setData({ 'info.commentCount': count });
+          that._patchListRow({ commentCount: count });
           return;
         }
         if (requestId !== that._detailRequestId) return;
@@ -1139,7 +1183,7 @@ Page({
       if (isLoadMore) {
         that.setData({ commentLoadMoreError: message });
       } else if (refresh && that.data.list.length) {
-        that.setData({  commentsState: 'ready' });
+        that.setData({ commentsState: 'ready', commentRefreshError: message });
       } else {
         that.setData({ commentLoadError: true, commentsState: 'error' });
       }
@@ -1176,6 +1220,7 @@ Page({
               commentsState: 'ready',
               commentLoadError: false,
               commentLoadMoreError: '',
+              commentRefreshError: '',
               nodata: newlist.length < 1
             })
           } else {
@@ -1188,6 +1233,7 @@ Page({
                 commentsState: 'ready',
                 commentLoadError: false,
                 commentLoadMoreError: '',
+                commentRefreshError: '',
                 nodata: oldLen + newlist.length < 1
               },
               appendByIndex('list', oldLen, newlist)
@@ -1223,6 +1269,38 @@ Page({
     return this.getData(true);
   },
 
+  // 自己刚发出的评论接到已加载列表末尾,不重拉第一页。计数仍只信随后的服务端回读。
+  _showOwnComment(content, replyId) {
+    this._ackOwnMutation();
+    const row = {
+      id: 'local-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+      pendingLocal: true,
+      contents: content,
+      memberId: app.getUserID(),
+      memberNickname: typeof app.getNickname === 'function' ? app.getNickname() : '',
+      memberAvatar: typeof app.getAvatar === 'function' ? app.getAvatar() : '',
+      isLiked: 0,
+      likeCount: 0,
+      isFollowTheUser: 0,
+      parentId: replyId || 0,
+      formattedCreateTime: '刚刚',
+    };
+    const oldLen = (this.data.list || []).length;
+    this.setData(Object.assign({
+      commentsState: 'ready',
+      commentLoadError: false,
+      commentRefreshError: '',
+      nodata: false,
+    }, appendByIndex('list', oldLen, [row])));
+  },
+
+  _clearTransientTimers() {
+    if (this._autoFocusTimer) { clearTimeout(this._autoFocusTimer); this._autoFocusTimer = null; }
+    if (this._likeBurstTimer) { clearTimeout(this._likeBurstTimer); this._likeBurstTimer = null; }
+    if (this._favoriteBurstTimer) { clearTimeout(this._favoriteBurstTimer); this._favoriteBurstTimer = null; }
+    if (this._reportLeaveTimer) { clearTimeout(this._reportLeaveTimer); this._reportLeaveTimer = null; }
+  },
+
   retryCommentLoadMore: function () {
     if (!this.data.hasMore || this.data.commentLoadingMore) return;
     this.getList(this.data.page_no + 1);
@@ -1231,16 +1309,8 @@ Page({
   onUnload() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1;
     if (this.data.merchantView) merchantTheme.merchantPageRestore();
     this._unloaded = true;
-    if (this._autoFocusTimer) { clearTimeout(this._autoFocusTimer); this._autoFocusTimer = null; }
+    this._clearTransientTimers();
     reportSheet.cancel(this);
-    if (this._likeBurstTimer) {
-      clearTimeout(this._likeBurstTimer);
-      this._likeBurstTimer = null;
-    }
-    if (this._favoriteBurstTimer) {
-      clearTimeout(this._favoriteBurstTimer);
-      this._favoriteBurstTimer = null;
-    }
     this._detailRequestId = (this._detailRequestId || 0) + 1;
     this._commentsRequestId = (this._commentsRequestId || 0) + 1;
     if (this._detailRequestTask && typeof this._detailRequestTask.abort === 'function') {
@@ -1279,7 +1349,7 @@ Page({
         composeShow: false, composeEdit: null, postActionShow: false, popShow: false, avatarPopShow: false,
         avatarPopItems: [], commentContent: '', replyContent: '', replyId: 0, canComment: false, canReply: false,
         commentSubmitting: false, replySubmitting: false, commentRecoveryPending: false, commentSubmitError: '', replySubmitError: '',
-        page_no: 1, hasMore: false, nodata: false, commentLoadError: false, commentLoadMoreError: '',
+        page_no: 1, hasMore: false, nodata: false, commentLoadError: false, commentLoadMoreError: '', commentRefreshError: '',
         commentLoadingMore: false, detailError: '', commentsState: 'idle' });
       // Reapply the existing feature gate for the new reader before loading any private projection.
       this.onLoad({ id: this.data.id });

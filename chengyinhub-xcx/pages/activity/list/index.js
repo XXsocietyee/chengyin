@@ -99,6 +99,7 @@ Page({
   },
   onHide() {
     this._hidden = true;
+    if (this._searchTimer) { clearTimeout(this._searchTimer); this._searchTimer = null; }
     this._readEpoch = (this._readEpoch || 0) + 1;
     this._allSeq = (this._allSeq || 0) + 1;
     this._mineSeq = (this._mineSeq || 0) + 1;
@@ -301,7 +302,7 @@ Page({
     clearTimeout(this._searchTimer);
     this._searchTimer = setTimeout(() => {
       this._searchTimer = null;
-      if (!this._unloaded) this.applyFilter({ keyword });
+      if (!this._unloaded && !this._hidden) this.applyFilter({ keyword });
     }, 200);
   },
 

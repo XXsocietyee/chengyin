@@ -130,7 +130,8 @@ test('switch account: preserve the original draft, reject old input/prefill and 
   h.instance.onInput({ detail: { value: 'original private draft' } });
   h.member.value = 'member-B';
   h.instance.onInput({ detail: { value: 'new actor input' } });
-  assert.equal(h.instance.data.content, 'original private draft');
+  assert.equal(h.instance.composerText(), 'original private draft');
+  assert.equal(h.instance.data.content, 'draft-member-A');
   h.instance.data.prefill = 'old inline text';
   h.open();
   assert.ok(h.drafts.some(call => call[0] === 'save' && call[1] === 'member-A' && call[2] === 'original private draft'));

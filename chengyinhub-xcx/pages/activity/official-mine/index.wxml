@@ -28,6 +28,7 @@
         <text class="om-sub">{{item._mode}} · 发给 {{item._aud}} · {{item._city}}</text>
         <view class="om-stat"><text class="om-reach">{{item._statsText || item._reach}}</text></view>
         <cy-btn wx:if="{{item._canRecover}}" class="om-recover" size="sm" variant="secondary" data-index="{{index}}" catchtap="recoverBroadcast">安全恢复原投递</cy-btn>
+        <cy-inline-error wx:if="{{recoverError && recoverErrorIndex === index}}" kind="data" title="这次恢复没有完成" sub="{{recoverError}}" />
       </view>
       <view class="om-bottom cy-fade-in"></view>
     </block>
