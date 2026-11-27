@@ -120,7 +120,7 @@ test('L08-001 重载回包失败照旧收回权限;换账号先收回', () => {
   assert.equal(page.data.activeTab, 'overview');
 });
 
-test('L08-002 看大图回来不整页重拉;之后真的从子页回来照旧重拉', () => {
+test('L08-002 看大图回来不整页重拉;没标脏不重拉;标脏才重拉', () => {
   const { page } = loadClubDetail();
   let loads = 0;
   page.loadAll = () => { loads += 1; };
@@ -130,10 +130,46 @@ test('L08-002 看大图回来不整页重拉;之后真的从子页回来照旧�
   page.onHide(); page.onShow();
   assert.equal(loads, 0, '系统浮层返回不重拉');
   page.onHide(); page.onShow();
-  assert.equal(loads, 1, '普通返回照旧重拉');
+  assert.equal(loads, 0, '没标脏不重拉');
+  page._clubDetailDirty = true;
+  page.onHide(); page.onShow();
+  assert.equal(loads, 1, '标脏后重拉');
   page.onPreviewImage({ detail: { picList: [], picIndex: 0 }, currentTarget: { dataset: {} } });
   page.onHide(); page.onShow();
-  assert.equal(loads, 2, '没打开浮层不许吞掉下一次刷新');
+  assert.equal(loads, 1, '没打开浮层也不把没标脏的返回当成要重拉');
+});
+
+test('L08-004 评论与置顶成功只改这条帖,不重拉帖子列表', () => {
+  const { page, requests } = loadClubDetail();
+  page.setData({
+    clubId: 7, canModerateContent: true, openCommentPost: 11, commentText: '到了',
+    posts: [
+      { id: 11, feedKey: '11', type: 2, isPinned: 0, commentCount: 2, version: 1, content: '公告' },
+      { id: 12, feedKey: '12', type: 0, commentCount: 0, content: '别的' },
+      { id: 11, feedKey: 'r5', isRepostItem: true, commentCount: 2, content: '转发' },
+    ],
+  });
+  page.onCommentSubmit();
+  const create = requests.find((r) => r.url === '/api/club/post/comment/create');
+  requests.length = 0;
+  create.success({ code: '200' });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0, '发评论不整页重拉');
+  assert.deepEqual(page.data.posts.map((p) => p.commentCount), [3, 0, 3]);
+  page._doDeleteComment(4, 11);
+  const del = requests.find((r) => r.url === '/api/club/post/comment/delete');
+  requests.length = 0;
+  del.success({ code: '200' });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0, '删评论不整页重拉');
+  assert.deepEqual(page.data.posts.map((p) => p.commentCount), [2, 0, 2]);
+  page.onTogglePin({ currentTarget: { dataset: { id: 11 } } });
+  const pin = requests.find((r) => r.url === '/api/club/post/pin');
+  requests.length = 0;
+  pin.success({ code: '200', data: { isPinned: 1, version: 4 } });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0, '置顶不整页重拉');
+  assert.equal(page.data.posts[0].isPinned, true);
+  assert.equal(page.data.posts[0].noticeBadge, '公告 · 置顶');
+  assert.equal(page.data.posts[0].version, 4);
+  assert.equal(page.data.posts[2].isPinned, undefined, '转发条目不跟着置顶');
 });
 
 test('L08-004 点赞成功只改这条帖(含转发条目),不重拉帖子列表', () => {

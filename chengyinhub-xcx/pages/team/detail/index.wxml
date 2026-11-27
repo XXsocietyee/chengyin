@@ -140,7 +140,7 @@
         <view class="team-member" wx:for="{{boardRanks}}" wx:key="teamId">
           <text class="tm-rank">{{item.rank}}</text>
           <view class="team-member-main"><view class="team-member-name">{{item.title}}{{item.mine ? ' · 我的队伍' : ''}}</view></view>
-          <text class="tm-val">{{item.teamDoneCount}} / {{item.totalTasks || 0}}</text>
+          <text class="tm-val" wx:if="{{item.teamDoneCount != null && item.totalTasks != null}}">{{item.teamDoneCount}} / {{item.totalTasks}}</text>
         </view>
       </view>
     </block>

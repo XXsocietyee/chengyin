@@ -207,10 +207,11 @@ test('通行证礼品:领取链接只出现一次 —— 没发出去就关面�
   b.page.data.card = { name: '城瘾30天通行证' }
   const share = b.page.onShareAppMessage()
   assert.match(share.path, /market\/gift\/index\?token=tok$/)
-  assert.equal(b.page.data.giftShared, true)
+  assert.equal(b.page.data.giftShared, false, '打开分享菜单还不是成功分享')
   b.page.closeGiftSheet()
-  assert.equal(b.calls.modals.length, 0)
-  assert.equal(b.calls.redirects[0].url, '/subpackageMember/market/passes/index?tab=gifts')
+  assert.equal(b.calls.modals.length, 1, '没成功分享不能提前清掉离开确认')
+  assert.equal(b.calls.modals[0].title, '礼品还没发给好友')
+  assert.equal(b.calls.redirects.length, 0)
 })
 
 test('通行证列表:加座不进「可购买」;礼品行写出送的是哪张', () => {

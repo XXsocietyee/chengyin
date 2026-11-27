@@ -13,6 +13,7 @@ const community = require('../../../utils/community-post-api.js').createClient(a
 const FEED_PAGE_SIZE = 20;
 const { isRecord, isRecordList } = require('../../../utils/response-shape.js');
 const { followDenyCta } = require('../../../utils/merchant-no-permission.js');
+const { safeDecode } = require('../../../utils/safe-decode.js');
 
 function textOrDash(value, fallback) {
   if (value === null || value === undefined || value === '') return fallback || '—';
@@ -143,7 +144,7 @@ Page({
       myAvatar: (app.getAvatar && app.getAvatar()) || '',
       myNickname: (app.getNickname && app.getNickname()) || '',
       topicId: (options && options.topicId) || '',
-      topicName: (options && options.topicName) ? decodeURIComponent(options.topicName) : '',
+      topicName: (options && options.topicName) ? safeDecode(options.topicName) : '',
     });
     this.enterRelation(false);
   },

@@ -791,7 +791,7 @@ Page({
     const targets = new Set(this.data.msgs.filter(m => m.card && m.card.cardType === 'route'
       && Number.isSafeInteger(Number(m.id)) && Number(m.id) > 0).map(m => String(m.id)));
     if (!targets.size) return;
-    // 先读再改。失败或回包不合法时保留已经显示的卡；只有这一次成功回包里写明不可用的 id 才换成「路线已不可用」。
+    // L08-117:先读再改。失败或回包不合法时保留已经显示的卡；只有这一次成功回包里写明不可用的 id 才换成「路线已不可用」。
     // 历史游标依据可见时间排序，不能用 id+1 猜一条不存在的游标行。
     let projectionEpoch = this._topicEpoch;
     const visited = new Set();

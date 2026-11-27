@@ -190,7 +190,7 @@ Page({
       presetTarget: presetTarget,
       originApplyId: invalidLegacyType ? null : (options.originApplyId || null),
       topicId: options.topicId || null,
-      topicName: options.topicName ? decodeURIComponent(options.topicName) : '',
+      topicName: options.topicName ? routeText(options.topicName) : '',
       operationScope: options.scope === 'MERCHANT' ? 'MERCHANT' : '',
       topicsState: options.topicId ? 'ready' : 'loading',
       targetsState: presetTarget ? 'ready' : 'loading',
