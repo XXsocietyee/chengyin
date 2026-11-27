@@ -79,17 +79,21 @@ test('站点配乐:同一首只是重签名(Expires/Signature 变了)不从头�
   page._stopStationBgm()
 })
 
-test('旁白讲话时配乐压低,讲完抬回;两路旁白交替时不被先停的那路提前抬回', () => {
+test('旁白讲话时配乐压低,讲完抬回;两路旁白交替时不被先停的那路提前抬回', async () => {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms))
   const { page, audios } = loadPlay()
   page._syncStationBgm({ audioUrl: 'https://x.test/upload/bgm.mp3' })
   const bgm = audios[0]
   assert.equal(bgm.volume, 0.35)
   page._duckBgm('guide', true)
+  await wait(360)
   assert.equal(bgm.volume, 0.14)
   page._duckBgm('chap', true)
   page._duckBgm('guide', false)
+  await wait(360)
   assert.equal(bgm.volume, 0.14, '还有一路在讲')
   page._duckBgm('chap', false)
+  await wait(360)
   assert.equal(bgm.volume, 0.35)
   // 旁白讲着时才起的配乐,一上来就是压低的音量
   page._stopStationBgm()
@@ -400,7 +404,8 @@ function narrate(page, audios) {
   return audios[audios.length - 1]
 }
 
-test('旁白 + 音乐都开:配音念时主题配乐与章节配乐片段压低音量(不暂停),念完抬回', () => {
+test('旁白 + 音乐都开:配音念时主题配乐与章节配乐片段压低音量(不暂停),念完抬回', async () => {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms))
   const { page, audios } = loadPlay()
   page._topicAudioUrl = 'https://x.test/upload/theme.mp3'
   page._startThemeBgm()
@@ -414,9 +419,11 @@ test('旁白 + 音乐都开:配音念时主题配乐与章节配乐片段压低�
   assert.equal(voice.plays, 1, '配音照常念')
   assert.equal(clip.paused, false, '章节配乐片段不暂停')
   assert.equal(theme.paused, false, '主题配乐不暂停')
+  await wait(360)
   assert.ok(clip.volume < 1, '章节配乐片段压低')
   assert.ok(theme.volume < 0.25, '主题配乐压低')
   voice.end()
+  await wait(360)
   assert.equal(clip.volume, 1, '念完抬回')
   assert.equal(page._duckSources.has('storyVoice'), false)
   assert.equal(clip.paused, false)

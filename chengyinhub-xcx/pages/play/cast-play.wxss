@@ -7,6 +7,10 @@
 .chfull__who{ position:absolute; top:0; left:calc(var(--cy-space-3) - var(--cy-space-8)); width:calc(var(--cy-space-8) - var(--cy-space-3) - var(--cy-space-1)); padding-left:16rpx; box-sizing:border-box; font-size:24rpx; font-weight:500; line-height:66rpx; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; opacity:.82; letter-spacing:.04em; font-family:-apple-system, "PingFang SC", "Noto Sans SC", sans-serif; } /* ds-ok 户外可读 24rpx/500/0.82;66rpx = 正文 34rpx × 1.95 首行行高 */
 .chfull__who::before{ content:""; position:absolute; left:0; top:50%; width:10rpx; height:10rpx; margin-top:-5rpx; border-radius:50%; background:var(--who-dot, var(--lk-a, currentColor)); } /* ds-ok 角色强调色圆点 */
 .chfull__vrow{ display:inline-flex; align-items:center; justify-content:center; gap:var(--cy-space-1); margin:var(--cy-space-2) 0 0; padding:8rpx 20rpx; min-height:48rpx; box-sizing:border-box; border-radius:var(--cy-radius-pill); background:rgba(var(--lk-ink-rgb, 255,255,255), .1); border:1rpx solid rgba(var(--lk-ink-rgb, 255,255,255), .18); font-size:22rpx; font-weight:500; line-height:1.4; letter-spacing:.06em; text-align:left; opacity:.86; font-family:-apple-system, "PingFang SC", sans-serif; } /* ds-ok 配音触发胶囊 */
+.chfull__vrow--narr{ opacity:.62; transition:opacity var(--cy-motion-fast, 150ms) var(--cy-ease-out, ease-out); }
+.chfull__vrow--narr.is-speaking{ opacity:1; font-weight:600; }
+.chfull__para.is-narrating{ padding-left:var(--cy-space-3); border-left:4rpx solid var(--look-a, var(--atmo-text, var(--cy-color-text-primary))); transition:border-color var(--cy-motion-fast, 150ms) var(--cy-ease-out, ease-out), padding-left var(--cy-motion-fast, 150ms) var(--cy-ease-out, ease-out); }
+.play--reduced-motion .chfull__vrow--narr, .play--reduced-motion .chfull__para.is-narrating{ transition:none; }
 .chfull__remember{ display:block; margin-top:var(--cy-space-3); font-size:24rpx; line-height:1.5; text-align:left; opacity:.46; font-family:-apple-system, "PingFang SC", sans-serif; } /* ds-ok 契约 E3 12px 浅灰,左对齐 */
 
 /* —— E2 首段首字下沉:约三行高,左浮;这一段改左对齐,首字才贴得住 —— */

@@ -200,9 +200,9 @@ final class ChapterFlowCompiler
                 {
                     throw invalid(chapterNumber, "只有台词块可以带说话人、配音或台词条件");
                 }
-                if (block.getVoice() != null && !TYPE_TEXT.equals(block.getType()) && !TYPE_CAP.equals(block.getType()))
+                if (block.getVoice() != null && !TYPE_TEXT.equals(block.getType()) && !TYPE_CAP.equals(block.getType()) && !TYPE_LINE.equals(block.getType()))
                 {
-                    throw invalid(chapterNumber, "只有正文段和章节卡可以带旁白配音");
+                    throw invalid(chapterNumber, "只有正文段、章节卡和台词可以带旁白配音");
                 }
                 if (block.getVoice() != null && !com.chengyinhub.business.service.support.CastConfigSupport.isMediaRef(block.getVoice().trim(), true))
                 {
@@ -935,6 +935,7 @@ final class ChapterFlowCompiler
                     row.put("speaker", block.getSpeaker().trim());
                     row.put("content", block.getContent().trim());
                     row.put("audioUrl", block.getAudioUrl() == null ? "" : block.getAudioUrl().trim());
+                    putVoice(block, row);
                     if (block.getCond() != null && !block.getCond().isNull()) row.put("cond", block.getCond());
                 }
                 else if (TYPE_CAP.equals(block.getType()))

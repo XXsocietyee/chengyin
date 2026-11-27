@@ -6,6 +6,18 @@
   <view class="g-col mx {{reducedMotion ? 'mx--reduced' : ''}}">
     <view class="mx__title pe pe--blur">{{title}}</view>
 
+    <view class="mx__preview" wx:if="{{phase === 'play' && (audioBefore || audioAfter)}}">
+      <view class="mx__pv-seg">
+        <view class="mx__pv-btn {{seg === 'before' && playing ? 'is-on' : ''}}" wx:if="{{audioBefore}}" data-seg="before" bindtap="onPreviewToggle"
+              aria-role="button" aria-label="试听原音，{{seg === 'before' && playing ? '点一下停' : '点一下播放'}}"
+              hover-class="mx__press" hover-stay-time="80">{{seg === 'before' && playing ? '停止原音' : '听原音'}}</view>
+        <view class="mx__pv-btn {{seg === 'after' && playing ? 'is-on' : ''}}" wx:if="{{audioAfter}}" data-seg="after" bindtap="onPreviewToggle"
+              aria-role="button" aria-label="试听复原音，{{seg === 'after' && playing ? '点一下停' : '点一下播放'}}"
+              hover-class="mx__press" hover-stay-time="80">{{seg === 'after' && playing ? '停止复原' : '听复原'}}</view>
+      </view>
+      <view class="mx__pv-track" aria-hidden="true"><view class="mx__pv-fill" style="width:{{head}}%"></view></view>
+    </view>
+
     <view class="mx__list" wx:if="{{phase === 'play'}}">
       <view class="mx__row {{item.on ? '' : 'is-muted'}} {{selectedId === item.id ? 'is-on' : ''}} pe pe--up"
             wx:for="{{rows}}" wx:key="id">

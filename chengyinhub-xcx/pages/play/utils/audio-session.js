@@ -18,6 +18,7 @@ function createAudioSession(wxApi) {
   let desiredKeepOn = false;
   let confirmedKeepOn = false;
   let keepRequest = null;
+  let duckHandler = null;
 
   const isPlaying = (ctx) => ctx.paused === false;
 
@@ -55,13 +56,31 @@ function createAudioSession(wxApi) {
     hook();
     const kind = (opts && opts.kind) || 'audio';
     ctx.obeyMuteSwitch = kind === AMBIENT;
-    // L02-068: kind 只决定 obeyMuteSwitch,不再另存
-    entries.set(ctx, { wasPlaying: false, interrupted: false });
+    entries.set(ctx, { kind, wasPlaying: false, interrupted: false });
     return ctx;
+  }
+  function setKind(ctx, kind) {
+    if (!ctx) return ctx;
+    const next = kind || 'audio';
+    ctx.obeyMuteSwitch = next === AMBIENT;
+    const ent = entries.get(ctx);
+    if (ent) ent.kind = next;
+    return ctx;
+  }
+  function getKind(ctx) {
+    const ent = entries.get(ctx);
+    return ent ? ent.kind : '';
   }
   function unregister(ctx) { entries.delete(ctx); }
   function pauseAll(resumable = true) { entries.forEach((ent, ctx) => { pauseEntry(ctx, ent, false); if (!resumable) ent.wasPlaying = false; }); }
   function resumeAll() { entries.forEach((ent, ctx) => { if (ent.wasPlaying) resumeEntry(ctx, ent); }); }
+
+  function setDuckHandler(fn) { duckHandler = typeof fn === 'function' ? fn : null; }
+  function clearDuckHandler(fn) { if (!fn || duckHandler === fn) duckHandler = null; }
+  function duck(source, on) {
+    if (typeof duckHandler !== 'function' || !source) return;
+    try { duckHandler(source, !!on); } catch (e) {}
+  }
 
   function apply(on) {
     desiredKeepOn = on;
@@ -92,12 +111,20 @@ function createAudioSession(wxApi) {
   function releaseAwake() { awake.clear(); apply(false); }
 
   return {
-    register, unregister, pauseAll, resumeAll, keepAwake, releaseAwake,
+    register, setKind, getKind, unregister, pauseAll, resumeAll,
+    keepAwake, releaseAwake, setDuckHandler, clearDuckHandler, duck,
+    AMBIENT, VOICE,
     _size: () => entries.size,
   };
 }
 
-module.exports = createAudioSession();
+const defaultSession = createAudioSession();
+try {
+  const app = typeof getApp === 'function' ? getApp() : null;
+  if (app && !app._audioSession) app._audioSession = defaultSession;
+} catch (e) {}
+
+module.exports = defaultSession;
 module.exports.createAudioSession = createAudioSession;
 module.exports.AMBIENT = AMBIENT;
 module.exports.VOICE = VOICE;

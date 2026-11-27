@@ -142,19 +142,20 @@ test('声音偏好迁移:音乐开关没存过时用旧 play.narrationOn 播种(
   assert.equal(soundPrefs.write('u1', 'music', false, broken), false);
 });
 
-test('hasStoryVoice 只认正文段 / 章节卡上的 voice', () => {
+test('hasStoryVoice 认正文段 / 章节卡 / 台词上的 voice', () => {
   assert.equal(hasStoryVoice(null), false);
   assert.equal(hasStoryVoice([{ blocks: [{ type: 'image', voice: 'x' }, { type: 'text', voice: ' ' }] }]), false);
   assert.equal(hasStoryVoice([{ blocks: [{ type: 'cap', cap: 'open', voice: 'https://a/1.m4a' }] }]), true);
   assert.equal(hasStoryVoice([{}, { blocks: [{ type: 'text', voice: 'media-asset:1' }] }]), true);
+  assert.equal(hasStoryVoice([{ blocks: [{ type: 'line', speaker: 'c1', voice: 'https://a/line1.m4a' }] }]), true);
 });
 
-test('游玩页接线:显形时报读到、切后台暂停、卸载销毁、离开故事流停;工具菜单只有旁白 / 背景音乐两个声音开关且同形', () => {
+test('游玩页接线:显形时报读到、切后台按边走边听保活或暂停、卸载销毁、离开故事流停;工具菜单只有旁白 / 背景音乐两个声音开关且同形', () => {
   const root = path.join(__dirname, '../../pages/play');
   const js = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
   const wxml = fs.readFileSync(path.join(root, 'index.wxml'), 'utf8');
   assert.match(js, /that\._narration\(\)\.reveal\(/);
-  assert.match(js, /onHide\(\) \{[\s\S]{0,600}if \(this\._storyNarration\) this\._storyNarration\.pause\(\);/);
+  assert.match(js, /onHide\(\) \{[\s\S]{0,1200}else if \(this\._storyNarration\) this\._storyNarration\.pause\(\);/);
   assert.match(js, /this\._storyNarration\.destroy\(\)/);
   assert.match(js, /closeChapterFull\(\) \{[\s\S]{0,600}this\._storyNarration\.stop\(\)/);
   assert.match(js, /this\._duckBgm\('storyVoice', on\)/);
