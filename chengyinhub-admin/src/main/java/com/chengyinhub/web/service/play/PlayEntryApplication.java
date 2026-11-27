@@ -79,7 +79,7 @@ public class PlayEntryApplication {
 
     /** Compatibility GET /nodes still performs original entry commands at their original points. */
     public AjaxResult nodes(Long actorMemberId, Long activityId, Long topicId) {
-        return nodes(actorMemberId, activityId, topicId, null, null, null);
+        return nodes(actorMemberId, activityId, topicId, null, null, null, false);
     }
 
     /**
@@ -88,6 +88,12 @@ public class PlayEntryApplication {
      */
     public AjaxResult nodes(Long actorMemberId, Long activityId, Long topicId,
             String clientPlatform, String clientVersion, String capabilities) {
+        return nodes(actorMemberId, activityId, topicId, clientPlatform, clientVersion, capabilities, false);
+    }
+
+    /** 支持第 1 站免费试玩（trial=true）：无通行证时放行公开可见的自玩线性主题第 1 站，剥离第 2 站+剧情与题面。 */
+    public AjaxResult nodes(Long actorMemberId, Long activityId, Long topicId,
+            String clientPlatform, String clientVersion, String capabilities, Boolean trial) {
         Long memberId = actorMemberId;
         if (memberId <= 0) return error("请先登录");
 
@@ -97,6 +103,7 @@ public class PlayEntryApplication {
         Long progActId;
         String timeErr;
         boolean registered;
+        boolean trialMode = false;
         boolean leadSpectator = false;
         Date passExpiresAt = null;
         Long clubId = null; // 升级2:俱乐部局判据,响应尾部按它发 myRole
@@ -131,13 +138,27 @@ public class PlayEntryApplication {
                         giftPlayEligibility,seatRecipientEligibility,codeGrantPlayEligibility); }
                 catch (IllegalStateException denied) { pass = null; }
             }
-            // C-26:没有(或过期的)自玩通行证不是「未报名」——自玩本来就没有报名这个动作。
-            // 回 402 让前端落 needPass 空态并给出获取通行证的出路(与 /api/play 下各写入口同一语义),
-            // 不再落到 registered=false 的「你还没有报名这个场次」+「去报名」错误指引。
-            if (pass == null) return new AjaxResult(402, "请先购买自玩通行证");
-            registered = true;
-            passExpiresAt = pass.getExpiresAt();
-            timeErr = null; // 自玩无场次时效;有效期由通行证 expires_at 管
+            if (pass == null) {
+                if (Boolean.TRUE.equals(trial)) {
+                    com.chengyinhub.business.domain.CmsTopic visibleTopic = cmsTopicService.selectCmsTopicDetailById(tId, memberId);
+                    if (visibleTopic == null) return error("活动或主题不存在");
+                    if (!com.chengyinhub.business.service.support.FirstStationTrialPolicy.isTrialEligibleTopic(visibleTopic)) {
+                        return new AjaxResult(402, "请先购买自玩通行证");
+                    }
+                    trialMode = true;
+                    registered = false;
+                    timeErr = null;
+                } else {
+                    // C-26:没有(或过期的)自玩通行证不是「未报名」——自玩本来就没有报名这个动作。
+                    // 回 402 让前端落 needPass 空态并给出获取通行证的出路(与 /api/play 下各写入口同一语义),
+                    // 不再落到 registered=false 的「你还没有报名这个场次」+「去报名」错误指引。
+                    return new AjaxResult(402, "请先购买自玩通行证");
+                }
+            } else {
+                registered = true;
+                passExpiresAt = pass.getExpiresAt();
+                timeErr = null; // 自玩无场次时效;有效期由通行证 expires_at 管
+            }
         }
 
         // 节点列表
@@ -231,6 +252,7 @@ public class PlayEntryApplication {
                 memberId, selfPlay, tId, progActId, timeErr, registered, leadSpectator, passExpiresAt,
                 nodeList, doneNodeIds, doneAtMap, progressByNode, completedNodeIds, hintCost,
                 hintUnlockedNodeIds, nodes, spoilerAccess, playMode, routeTopic, bargainOffered, routeState);
+        read.trialMode = trialMode;
         read.contentSnapshot = com.chengyinhub.business.service.support.NodeJourneySnapshot.hasContentSnapshots(contentSnapshot)
                 ? contentSnapshot : null;
         read.capabilityDeclaration = com.chengyinhub.business.service.support.ContentCapabilityRequirements.Declaration

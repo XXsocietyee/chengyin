@@ -1949,9 +1949,11 @@ button::after {
 .topic .hero-by__k { font-size: 23rpx; color: rgba(255,255,255,.6); } /* ds-ok */
 .topic .hero-title { font-size: 69rpx; line-height: 1.08; font-weight: 600; letter-spacing: -1rpx; color: #fff; } /* ds-ok */
 .hero-desc { margin-top: 27rpx; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 27rpx; line-height: 1.6; color: rgba(255,255,255,.8); } /* ds-ok: V-23c 主题配置短简介,最多 20 字一行 */
-.topic .hero-acts { display: flex; align-items: center; gap: 19rpx; margin-top: 42rpx; min-height: 96rpx; }
+.topic .hero-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 19rpx; margin-top: 42rpx; min-height: 96rpx; }
 .topic .hero-cta { height: 96rpx; min-width: 288rpx; padding: 0 50rpx; border-radius: 48rpx; background: #fff; color: #000; font-size: 29rpx; font-weight: 600; box-sizing: border-box; } /* ds-ok */
 .topic .hero-cta.is-off { background: #2C2C2E; color: #8E8E93; } /* ds-ok */
+.topic .hero-trial { flex: none; height: 96rpx; padding: 0 34rpx; border-radius: 48rpx; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, .14); border: 1rpx solid rgba(255, 255, 255, .36); color: var(--cy-color-text-primary); font-size: 27rpx; font-weight: 600; box-sizing: border-box; backdrop-filter: blur(18rpx); transition: var(--cy-tr-press); } /* ds-ok */
+.topic .hero-trial.is-away { visibility: hidden; }
 .topic .hero-fav { width: 96rpx; height: 96rpx; border-radius: 27rpx; background: rgba(255,255,255,.12); border: 1rpx solid rgba(255,255,255,.3); box-sizing: border-box; } /* ds-ok */
 .topic .hero-fav.is-on { background: #fff; } /* ds-ok */
 .bm-ic { width: 35rpx; height: 35rpx; display: block; }

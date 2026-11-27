@@ -52,11 +52,19 @@ public class ApiPlayProgressController extends BaseController {
     public AjaxResult nodes(Long activityId, Long topicId,
             @RequestParam(name = "clientPlatform", required = false) String clientPlatform,
             @RequestParam(name = "clientVersion", required = false) String clientVersion,
-            @RequestParam(name = "capabilities", required = false) String capabilities)
+            @RequestParam(name = "capabilities", required = false) String capabilities,
+            @RequestParam(name = "trial", required = false) Boolean trial,
+            @RequestParam(name = "trialMode", required = false) Boolean trialMode)
     {
-        // 三个可选参数只用于能力兼容提示;缺省即老客户端,准入与权限一律不变。
+        boolean requestTrial = Boolean.TRUE.equals(trial) || Boolean.TRUE.equals(trialMode);
         return playEntryApplication.nodes(currentMemberId(), activityId, topicId,
-                clientPlatform, clientVersion, capabilities);
+                clientPlatform, clientVersion, capabilities, requestTrial);
+    }
+
+    public AjaxResult nodes(Long activityId, Long topicId,
+            String clientPlatform, String clientVersion, String capabilities)
+    {
+        return nodes(activityId, topicId, clientPlatform, clientVersion, capabilities, null, null);
     }
 
     @Operation(summary = "内容清单(按已发布修订预取,只读不建局)")
@@ -74,8 +82,8 @@ public class ApiPlayProgressController extends BaseController {
      */
     public AjaxResult nodes(Long activityId, Long topicId)
     {
-        // 无映射注解:Spring 只把上面那个 5 参方法映射到 GET /nodes,这里纯属源码兼容入口。
-        return nodes(activityId, topicId, null, null, null);
+        // 无映射注解:Spring 只把上面那个 7 参方法映射到 GET /nodes,这里纯属源码兼容入口。
+        return nodes(activityId, topicId, null, null, null, null, null);
     }
 
     @Operation(summary = "读取主题地点路线状态")

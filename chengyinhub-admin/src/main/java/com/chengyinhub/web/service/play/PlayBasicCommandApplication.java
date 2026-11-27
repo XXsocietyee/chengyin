@@ -213,7 +213,7 @@ public class PlayBasicCommandApplication {
         // 4-5) 记录进度 + 发分 + 通关判定（与答题完成共用）
         playNodeCompletionApplication.logAttempt(memberId, node, actId, 2, 1, null); // M9 扫码打卡成功
         Map<String, Object> data = playNodeCompletionApplication.advanceProgress(memberId, node, actId, null, null, null,
-                RewardPolicy.FULL, routeActionId, expectedRouteVersion, null, null, originalRun);
+                ctx.trialMode ? RewardPolicy.XP_BADGE_ONLY : RewardPolicy.FULL, routeActionId, expectedRouteVersion, null, null, originalRun);
         recordFirstSuccessfulScan(memberId, ctx);
         if (ctx.nightWarning) data.put("nightWarning", true); // M2 自玩夜间提示(不阻断)
         boolean firstTime = Boolean.TRUE.equals(data.get("firstTime"));
@@ -239,6 +239,7 @@ public class PlayBasicCommandApplication {
     }
 
     public void recordFirstSuccessfulScan(Long memberId, PlayCtx ctx) {
+        if (ctx != null && ctx.trialMode) return;
         CmsRegistration ticket = ctx.registration;
         if (ticket == null || ticket.getId() == null) {
             throw new com.chengyinhub.common.exception.ServiceException("扫码订单资格缺失，请从票夹重新进入");
@@ -455,10 +456,11 @@ public class PlayBasicCommandApplication {
                 return PlayCommandErrorContract.retryableUncertain(e.getMessage(), PlayCommandErrorContract.PUZZLE_STATE_UNAVAILABLE);
             }
             data = playNodeCompletionApplication.advanceProgress(memberId, node, actId, null,
-                    puzzleScore, PuzzleScorePolicy.COMPLETION_SOLVED, RewardPolicy.FULL,
+                    puzzleScore, PuzzleScorePolicy.COMPLETION_SOLVED, ctx.trialMode ? RewardPolicy.XP_BADGE_ONLY : RewardPolicy.FULL,
                     routeActionId, expectedRouteVersion, null, null, originalRun);
         } else {
-            data = playNodeCompletionApplication.advanceProgress(memberId, node, actId, null, null, null, RewardPolicy.FULL,
+            data = playNodeCompletionApplication.advanceProgress(memberId, node, actId, null, null, null,
+                    ctx.trialMode ? RewardPolicy.XP_BADGE_ONLY : RewardPolicy.FULL,
                     routeActionId, expectedRouteVersion, null, null, originalRun);
         }
         if (ctx.nightWarning) data.put("nightWarning", true); // M2 自玩夜间提示(不阻断)
@@ -856,7 +858,7 @@ public class PlayBasicCommandApplication {
         }
         playNodeCompletionApplication.logAttempt(memberId, node, actId, 3, 1, null); // M9 GPS到达成功
         Map<String, Object> data = playNodeCompletionApplication.advanceProgress(memberId, node, actId, null, null, null,
-                freeCollectStore ? RewardPolicy.XP_BADGE_ONLY : RewardPolicy.FULL,
+                (freeCollectStore || ctx.trialMode) ? RewardPolicy.XP_BADGE_ONLY : RewardPolicy.FULL,
                 routeActionId, expectedRouteVersion, null, null, originalRun);
         if (arrivalReading != null) data.put("arrivalReading", arrivalReading);
         if (ctx.nightWarning) data.put("nightWarning", true); // M2 自玩夜间提示(不阻断)

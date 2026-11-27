@@ -16,3 +16,9 @@
 .rc__item-k { flex: none; color: var(--cy-color-text-tertiary); }
 .rc__item-v { flex: 1; min-width: 0; color: var(--cy-color-text-primary); word-break: break-all; }
 .rc__foot { margin-top: var(--cy-space-4); font-size: var(--cy-type-caption); color: var(--cy-color-text-tertiary); }
+.rc--bar { margin-top: 0; padding: var(--cy-space-3) var(--cy-space-4); }
+.rc--folded { padding: var(--cy-space-2-5) var(--cy-space-4); }
+.rc__bar { display: flex; align-items: center; justify-content: space-between; gap: var(--cy-space-3); }
+.rc__bar + .rc__sec { margin-top: var(--cy-space-3); padding-top: var(--cy-space-3); border-top: 1rpx solid var(--cy-color-border-subtle); }
+.rc__toggle { flex: none; font-size: var(--cy-type-caption); font-weight: 600; color: var(--cy-color-text-secondary); }
+.rc__escape { margin-top: var(--cy-space-2-5); display: inline-block; font-size: var(--cy-type-caption); color: var(--cy-color-text-secondary); text-decoration: underline; padding: var(--cy-space-1) 0; }

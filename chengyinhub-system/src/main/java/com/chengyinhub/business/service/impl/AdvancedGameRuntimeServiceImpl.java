@@ -146,6 +146,10 @@ public class AdvancedGameRuntimeServiceImpl implements IAdvancedGameRuntimeServi
     private IWxContentSecurityService wxContentSecurityService;
     @Autowired
     private CmsTopicNodeMapper nodeMapper;
+    @Autowired(required = false)
+    private com.chengyinhub.business.mapper.CmsTopicMapper cmsTopicMapper;
+    @Autowired(required = false)
+    private com.chengyinhub.business.mapper.CmsTopicChapterMapper cmsTopicChapterMapper;
     @Autowired
     private CmsMemberTemplateMapper templateMapper;
     /** UG07 成绩明细:高级玩法局会话视图里的 helpReceipt 与只读回执同源。 */
@@ -485,10 +489,13 @@ public class AdvancedGameRuntimeServiceImpl implements IAdvancedGameRuntimeServi
         }
         session=synchronizePredictSession(session,memberId);
         if(objectState(session.getStateJson()).path("predict").path("revealRecorded").asBoolean())return toView(session,memberId);
-        // 已开局：自玩通行证在开局时有效即可打完本局；活动场次/探索票仍按活动结束等原规则。
-        com.chengyinhub.business.service.support.CurrentPlayRegistration.requireToContinue(activityMapper,registrationMapper,
-                memberId,session.getActivityId()!=null && session.getActivityId()>0 ? 2L : 1L,
-                session.getActivityId()!=null && session.getActivityId()>0 ? session.getActivityId() : session.getTopicId(),null,clock.now(),giftPlayEligibility,seatRecipientEligibility,codeGrantPlayEligibility);
+        // 已开局：自玩通行证在开局时有效即可打完本局；活动场次/探索票仍按活动结束等原规则；第 1 站免费试玩放行。
+        if (session.getActivityId() != null && session.getActivityId() > 0) {
+            com.chengyinhub.business.service.support.CurrentPlayRegistration.requireToContinue(activityMapper,registrationMapper,
+                    memberId,2L,session.getActivityId(),null,clock.now(),giftPlayEligibility,seatRecipientEligibility,codeGrantPlayEligibility);
+        } else {
+            requireSelfPlayOrFirstStationTrial(memberId, session.getTopicId(), session.getNodeId(), true, true);
+        }
         requireActivityWindow(session.getActivityId(), session.getTopicId());
         if (gameSessionRuntimeService != null) gameSessionRuntimeService.assertRoutePlayable(session.getActivityId(), session.getNodeId());
         // 第十三轮 m1 P6:已结束的玩法只会回放原结果或报「已结束」,不写任何东西;这时本局可能已通关,
@@ -971,9 +978,12 @@ public class AdvancedGameRuntimeServiceImpl implements IAdvancedGameRuntimeServi
 
     private void requirePhotoEligibility(GameRuntimeSession session, Long memberId, Integer expectedVersion,
             Map<String, Object> payload) {
-        com.chengyinhub.business.service.support.CurrentPlayRegistration.requireToContinue(activityMapper, registrationMapper,
-                memberId, session.getActivityId() != null && session.getActivityId() > 0 ? 2L : 1L,
-                session.getActivityId() != null && session.getActivityId() > 0 ? session.getActivityId() : session.getTopicId(), null, clock.now(), giftPlayEligibility, seatRecipientEligibility, codeGrantPlayEligibility);
+        if (session.getActivityId() != null && session.getActivityId() > 0) {
+            com.chengyinhub.business.service.support.CurrentPlayRegistration.requireToContinue(activityMapper, registrationMapper,
+                    memberId, 2L, session.getActivityId(), null, clock.now(), giftPlayEligibility, seatRecipientEligibility, codeGrantPlayEligibility);
+        } else {
+            requireSelfPlayOrFirstStationTrial(memberId, session.getTopicId(), session.getNodeId(), true, true);
+        }
         requireActivityWindow(session.getActivityId(), session.getTopicId());
         if (gameSessionRuntimeService != null) gameSessionRuntimeService.assertRoutePlayable(session.getActivityId(), session.getNodeId());
         requireRouteNodeAccess(memberId, session.getActivityId(), session.getTopicId(), session.getNodeId());
@@ -1166,13 +1176,18 @@ public class AdvancedGameRuntimeServiceImpl implements IAdvancedGameRuntimeServi
         long actId = activityId == null ? 0L : activityId;
         GameRuntimeSession original = existingSession(memberId, actId, topicId, nodeId);
         JsonNode content = original == null ? frozenContent(memberId, topicId, activityId, nodeId) : null;
-        // 已有本局或本路线已开局 = 继续打完(自玩通行证中途到期不打断)；尚未开局按新使用校验。
-        if (original != null || routeStarted(memberId, actId, topicId)) {
-            com.chengyinhub.business.service.support.CurrentPlayRegistration.requireToContinue(activityMapper,registrationMapper,
-                    memberId,actId>0 ? 2L : 1L,actId>0 ? actId : topicId,null,clock.now(),giftPlayEligibility,seatRecipientEligibility,codeGrantPlayEligibility);
+        // 已有本局或本路线已开局 = 继续打完(自玩通行证中途到期不打断)；尚未开局按新使用校验；第 1 站免费试玩放行。
+        boolean continuing = original != null || routeStarted(memberId, actId, topicId);
+        if (actId > 0) {
+            if (continuing) {
+                com.chengyinhub.business.service.support.CurrentPlayRegistration.requireToContinue(activityMapper,registrationMapper,
+                        memberId,2L,actId,null,clock.now(),giftPlayEligibility,seatRecipientEligibility,codeGrantPlayEligibility);
+            } else {
+                com.chengyinhub.business.service.support.CurrentPlayRegistration.require(activityMapper,registrationMapper,
+                        memberId,2L,actId,null,clock.now(),false,giftPlayEligibility,seatRecipientEligibility,codeGrantPlayEligibility);
+            }
         } else {
-            com.chengyinhub.business.service.support.CurrentPlayRegistration.require(activityMapper,registrationMapper,
-                    memberId,actId>0 ? 2L : 1L,actId>0 ? actId : topicId,null,clock.now(),false,giftPlayEligibility,seatRecipientEligibility,codeGrantPlayEligibility);
+            requireSelfPlayOrFirstStationTrial(memberId, topicId, nodeId, continuing, true);
         }
         requireActivityWindow(actId, topicId);
         if (gameSessionRuntimeService != null) gameSessionRuntimeService.assertRoutePlayable(actId, nodeId);
@@ -1584,6 +1599,7 @@ public class AdvancedGameRuntimeServiceImpl implements IAdvancedGameRuntimeServi
         CmsTopicNode node = nodeMapper.selectCmsTopicNodeById(nodeId);
         if (node == null || !topicId.equals(node.getTopicId())) throw new IllegalArgumentException("节点不属于该主题");
         long actId = activityId == null ? 0L : activityId;
+        boolean trialMode = false;
         if (actId > 0) {
             if(teamMapper.hasPaidRegistration(memberId,2,actId)<=0
                     && (seatRecipientEligibility==null || seatRecipientEligibility.playFacts(memberId,2L,actId).isEmpty()))
@@ -1592,17 +1608,13 @@ public class AdvancedGameRuntimeServiceImpl implements IAdvancedGameRuntimeServi
                     activityMapper,registrationMapper,memberId,2L,actId,null,clock.now(),true,giftPlayEligibility,seatRecipientEligibility,codeGrantPlayEligibility);
             requireActivityWindow(actId, topicId);
         } else {
-            // 本路线已开局：通行证开局时有效即可打完，站内玩法同样不因中途到期被拦。
+            // 本路线已开局：通行证开局时有效即可打完，站内玩法同样不因中途到期被拦；第 1 站免费试玩放行。
             boolean started = routeStarted(memberId, 0L, topicId);
-            if(newUse && started) com.chengyinhub.business.service.support.CurrentPlayRegistration.requireToContinue(
-                    activityMapper,registrationMapper,memberId,1L,topicId,null,clock.now(),giftPlayEligibility,seatRecipientEligibility,codeGrantPlayEligibility);
-            else if(newUse) com.chengyinhub.business.service.support.CurrentPlayRegistration.require(
-                    activityMapper,registrationMapper,memberId,1L,topicId,null,clock.now(),false,giftPlayEligibility,seatRecipientEligibility,codeGrantPlayEligibility);
-            else if(!started && !hasValidSelfPlayPass(memberId,topicId)) throw new IllegalStateException("请先购买自玩通行证");
+            trialMode = requireSelfPlayOrFirstStationTrial(memberId, topicId, nodeId, started, newUse);
         }
         GameRuntimeSession existing = existingSession(memberId, actId, topicId, nodeId);
-        // 已结算 R5 只恢复权威视图；当前任务闸仅约束启动和重试。
-        if (!settledReadOnly(existing) && topicRouteRuntimeService != null) topicRouteRuntimeService.requireOpeningAccess(memberId, topicId, actId, nodeId);
+        // 已结算 R5 只恢复权威视图；当前任务闸仅约束启动和重试。试玩态无付费路线局，跳过 requireOpeningAccess。
+        if (!trialMode && !settledReadOnly(existing) && topicRouteRuntimeService != null) topicRouteRuntimeService.requireOpeningAccess(memberId, topicId, actId, nodeId);
         if (existing != null) {
             return new GameInput(actId, existing.getTemplateId(), existing.getConfigSnapshotJson(), existing);
         }
@@ -1717,6 +1729,56 @@ public class AdvancedGameRuntimeServiceImpl implements IAdvancedGameRuntimeServi
 
     private boolean routeStarted(Long memberId, long actId, Long topicId) {
         return topicRouteRuntimeService != null && topicRouteRuntimeService.hasRunningSession(memberId, topicId, actId);
+    }
+
+    /**
+     * 自玩准入：优先按既有通行证/席位/码授权校验；未持票时仅放行公开可见、支持自玩的线性主题第 1 站试玩。
+     * @return true 表示以第 1 站免费试玩态放行，false 表示凭有效通行证放行。
+     */
+    private boolean requireSelfPlayOrFirstStationTrial(Long memberId, Long topicId, Long nodeId,
+            boolean continuing, boolean newUse) {
+        try {
+            if (newUse && continuing) {
+                com.chengyinhub.business.service.support.CurrentPlayRegistration.requireToContinue(
+                        activityMapper, registrationMapper, memberId, 1L, topicId, null, clock.now(),
+                        giftPlayEligibility, seatRecipientEligibility, codeGrantPlayEligibility);
+            } else if (newUse) {
+                com.chengyinhub.business.service.support.CurrentPlayRegistration.require(
+                        activityMapper, registrationMapper, memberId, 1L, topicId, null, clock.now(),
+                        false, giftPlayEligibility, seatRecipientEligibility, codeGrantPlayEligibility);
+            } else if (!continuing && !hasValidSelfPlayPass(memberId, topicId)) {
+                throw new IllegalStateException("请先购买自玩通行证");
+            }
+            return false;
+        } catch (IllegalStateException denied) {
+            if (isFirstStationTrialAllowed(memberId, topicId, nodeId)) {
+                return true;
+            }
+            throw denied;
+        }
+    }
+
+    /** 严格校验第 1 站免费试玩资格（fail-closed：缺依赖、不可见、非自玩、自由探索或第 2 站+一律拒绝）。 */
+    private boolean isFirstStationTrialAllowed(Long memberId, Long topicId, Long nodeId) {
+        if (memberId == null || memberId <= 0L || topicId == null || topicId <= 0L || nodeId == null || nodeId <= 0L) {
+            return false;
+        }
+        if (cmsTopicMapper == null || nodeMapper == null) return false;
+        com.chengyinhub.business.domain.CmsTopic visibleTopic = cmsTopicMapper.selectCmsTopicDetailById(topicId, memberId);
+        if (!com.chengyinhub.business.service.support.FirstStationTrialPolicy.isTrialEligibleTopic(visibleTopic)) {
+            return false;
+        }
+        CmsTopicNode probe = new CmsTopicNode();
+        probe.setTopicId(topicId);
+        probe.setStatus(1L);
+        List<CmsTopicNode> allNodes = nodeMapper.selectCmsTopicNodeList(probe);
+        List<com.chengyinhub.business.domain.CmsTopicChapter> chapters = null;
+        if (cmsTopicChapterMapper != null) {
+            com.chengyinhub.business.domain.CmsTopicChapter chapterProbe = new com.chengyinhub.business.domain.CmsTopicChapter();
+            chapterProbe.setTopicId(topicId);
+            chapters = cmsTopicChapterMapper.selectCmsTopicChapterList(chapterProbe);
+        }
+        return com.chengyinhub.business.service.support.FirstStationTrialPolicy.isFirstStation(nodeId, allNodes, chapters);
     }
 
     private boolean hasValidSelfPlayPass(Long memberId, Long topicId) {

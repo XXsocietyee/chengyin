@@ -56,7 +56,12 @@ public class PlayNodeAccessService {
     public record ProgressFact(Long id, Integer status, String picUrl) {}
     public record Failure(int originalAjaxCode, String message) {}
     public record Context(Long activityId, Long topicId, boolean selfPlay, boolean nightWarning, boolean continuing,
-                          Long registrationId, Integer purchaseKind, Failure failure) {}
+                          Long registrationId, Integer purchaseKind, Failure failure, boolean trialMode) {
+        public Context(Long activityId, Long topicId, boolean selfPlay, boolean nightWarning, boolean continuing,
+                       Long registrationId, Integer purchaseKind, Failure failure) {
+            this(activityId, topicId, selfPlay, nightWarning, continuing, registrationId, purchaseKind, failure, false);
+        }
+    }
 
     public Context resolveContext(Long actor, String activityId, String topicId, NodeScope node) {
         return context(resolveCtx(actor,activityId,topicId,nodeEntity(node)));
@@ -104,12 +109,13 @@ public class PlayNodeAccessService {
     }
     private static Context context(PlayCtx c) {
         return new Context(c.actId,c.topicId,c.selfPlay,c.nightWarning,c.continuing,
-                c.registration==null?null:c.registration.getId(),c.registration==null?null:c.registration.getPurchaseKind(),c.error);
+                c.registration==null?null:c.registration.getId(),c.registration==null?null:c.registration.getPurchaseKind(),
+                c.error,c.trialMode);
     }
     private static Failure error(String message) { return new Failure(500,message); }
     private static class PlayCtx {
         Long actId; Long topicId; boolean selfPlay; boolean nightWarning; boolean continuing;
-        CmsRegistration registration; Failure error;
+        boolean trialMode; CmsRegistration registration; Failure error;
     }
 
     private boolean isDelistedNode(CmsTopicNode node)
@@ -185,6 +191,9 @@ public class PlayNodeAccessService {
         // canPlay 之前;未完成的首次提交在更早的下架闸已被拒,不会借这条路放行新完成。
         if (isDelistedNode(node) && hasCompletedNodeFact(memberId, actId, node)) return null;
         if (resolveMode(actId, topicId) == PlayMode.LINEAR_ORIENTEERING) {
+            if ((actId == null || actId == 0L) && isFirstStationTrialFallback(memberId, topicId, node)) {
+                return unlockGateError(memberId, actId, node);
+            }
             if (topicRouteRuntimeService != null) {
                 // F-13:缺上一站接待是确定拒绝,先只读预检给出原因,不让 canPlay 抛出后变成「结果待确认」。
                 String reception = gameSessionRuntimeService == null ? null : gameSessionRuntimeService.routeReceptionError(actId, node.getId());
@@ -296,7 +305,8 @@ public class PlayNodeAccessService {
         Long tId;
         try { tId = Long.valueOf(topicId); } catch (Exception e) { c.error = error("参数有误"); return c; }
         if (node.getTopicId() == null || !node.getTopicId().equals(tId)) { c.error = error("该节点不属于本主题"); return c; }
-        CmsRegistration pass;
+        CmsRegistration pass = null;
+        String deniedMessage = null;
         // 已开局的自玩路线：通行证开局时有效即可打完本局(中途到期不打断)；未开局仍需有效通行证。
         // 「已开局」由路线运行时判定：有进行中的路线局，或不建局的普通线性路线已记过节点进度。
         boolean continuing = topicRouteRuntimeService != null && topicRouteRuntimeService.hasRunningSession(memberId, tId, 0L);
@@ -307,8 +317,23 @@ public class PlayNodeAccessService {
                 : com.chengyinhub.business.service.support.CurrentPlayRegistration.require(
                         currentPlayActivityMapper,cmsRegistrationMapper,memberId,1L,tId,registrationId,new Date(),
                         false,giftPlayEligibility,seatRecipientEligibility,codeGrantPlayEligibility); }
-        catch(IllegalStateException denied) { c.error=new Failure(402,denied.getMessage());return c; }
-        if (pass == null) { c.error = new Failure(402, "请先购买自玩通行证"); return c; }
+        catch(IllegalStateException denied) { deniedMessage = denied.getMessage(); }
+        if (pass == null) {
+            // §3.2 第 1 站免费试玩：仅当未指定特定票据、未开付费局、主题公开可见且允许自玩，
+            // 且目标节点严格为路线第 1 站时放行写操作；第 2 站及之后一律继续返回 402。
+            if (registrationId == null && !continuing && isFirstStationTrialAllowed(memberId, tId, node)) {
+                c.registration = null;
+                c.actId = 0L;
+                c.topicId = tId;
+                c.selfPlay = true;
+                c.continuing = false;
+                c.trialMode = true;
+                c.nightWarning = isNightNow();
+                return c;
+            }
+            c.error = new Failure(402, deniedMessage != null ? deniedMessage : "请先购买自玩通行证");
+            return c;
+        }
         c.registration = pass;
         c.actId = 0L;
         c.topicId = tId;
@@ -316,6 +341,66 @@ public class PlayNodeAccessService {
         c.continuing = continuing;
         c.nightWarning = isNightNow();
         return c;
+    }
+
+    /** 仅未购票、未开局且目标为试玩合格主题第 1 站时，routeAccessError 跳过付费路线局 canPlay。 */
+    private boolean isFirstStationTrialFallback(Long memberId, Long topicId, CmsTopicNode node) {
+        if (memberId == null || memberId <= 0L || topicId == null || topicId <= 0L || node == null) return false;
+        if (topicRouteRuntimeService != null && topicRouteRuntimeService.hasRunningSession(memberId, topicId, 0L)) return false;
+        if (hasReadOnlySelfPlayEntitlement(memberId, topicId)) return false;
+        return isFirstStationTrialAllowed(memberId, topicId, node);
+    }
+
+    private boolean hasReadOnlySelfPlayEntitlement(Long memberId, Long topicId) {
+        Date now = new Date();
+        if (cmsRegistrationMapper != null) {
+            CmsRegistration probe = new CmsRegistration();
+            probe.setMemberId(memberId);
+            probe.setOwnerType(1L);
+            probe.setOwnerId(topicId);
+            probe.setRegistrationStatus(2);
+            List<CmsRegistration> rows = cmsRegistrationMapper.selectCmsRegistrationList(probe);
+            if (rows != null) {
+                for (CmsRegistration r : rows) {
+                    if (r != null && (r.getExpiresAt() == null || r.getExpiresAt().after(now))) return true;
+                }
+            }
+        }
+        if (seatRecipientEligibility != null) {
+            List<SeatRecipientFact> facts = seatRecipientEligibility.playFacts(memberId, 1L, topicId);
+            if (facts != null && !facts.isEmpty()) return true;
+        }
+        if (codeGrantPlayEligibility != null) {
+            List<MarketingCodeGrant> grants = codeGrantPlayEligibility.playFacts(memberId, 1L, topicId);
+            if (grants != null) {
+                for (MarketingCodeGrant grant : grants) {
+                    if (grant != null && grant.activeFor(memberId, topicId) && grant.validAt(now)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** 严格校验：已登录、主题对当前玩家可见、支持自玩且非自由探索、且 node 严格为第 1 站。 */
+    public boolean isFirstStationTrialAllowed(Long memberId, Long topicId, CmsTopicNode node) {
+        if (memberId == null || memberId <= 0L || topicId == null || topicId <= 0L
+                || node == null || node.getId() == null || !topicId.equals(node.getTopicId())) {
+            return false;
+        }
+        if (cmsTopicService == null || cmsTopicNodeService == null) return false;
+        CmsTopic visibleTopic = cmsTopicService.selectCmsTopicDetailById(topicId, memberId);
+        if (!FirstStationTrialPolicy.isTrialEligibleTopic(visibleTopic)) return false;
+        CmsTopicNode allProbe = new CmsTopicNode();
+        allProbe.setTopicId(topicId);
+        allProbe.setStatus(1L);
+        List<CmsTopicNode> allNodes = cmsTopicNodeService.selectCmsTopicNodeList(allProbe);
+        List<CmsTopicChapter> chapters = null;
+        if (cmsTopicChapterService != null) {
+            CmsTopicChapter chapterProbe = new CmsTopicChapter();
+            chapterProbe.setTopicId(topicId);
+            chapters = cmsTopicChapterService.selectCmsTopicChapterList(chapterProbe);
+        }
+        return FirstStationTrialPolicy.isFirstStation(node.getId(), allNodes, chapters);
     }
 
     private String leadGateError(Long actId, CmsTopicNode node) {

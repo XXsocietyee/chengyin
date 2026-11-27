@@ -82,7 +82,7 @@ function fixture(image = 'https://assets.example.test/original-question.jpg') {
       callback?.();
     };
     // Exclude unrelated modules and visual effects, as in the existing cursor harness.
-    for (const name of ['_probeCasebook', '_ensureSessionClock', '_syncIdleStats', '_syncRunState',
+    for (const name of ['_probeCasebook', '_ensureStationRole', '_ensureSessionClock', '_syncIdleStats', '_syncRunState',
       '_restoreRunSession', 'loadTeamProgress', '_loadPlayerGameModule', 'refreshThemeBackpack',
       '_startThemeBgm', 'loadHudCharacter', 'loadSessionStats', '_refreshNavRim', '_measureDeal',
       'measureChapter', '_stopStoryDust', '_triggerCelebration', '_animateCompletedSegment']) p[name] = () => {};

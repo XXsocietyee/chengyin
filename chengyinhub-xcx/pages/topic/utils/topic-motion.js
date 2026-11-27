@@ -63,6 +63,16 @@ function buildHeroCta(info, opts) {
   return { kind: 'signup', text: '立即报名' };
 }
 
+/* §3.2 第 1 站免费试玩入口：仅未购、可自玩的线性故事主题（非自由探索、非闭店、非截止、非未开售）展示。 */
+function canOfferFirstStationTrial(info, opts) {
+  const d = info || {};
+  const o = opts || {};
+  if (Number(o.isJoin) === 1 || o.merchantClosed) return false;
+  if (Number(d.selfPlay) !== 1 || Number(d.productType) === 2) return false;
+  const cta = o.heroCta || buildHeroCta(d, o);
+  return !!(cta && cta.kind === 'selfplay');
+}
+
 /* 章节候选图,优先级:章节自己的图 → 本章各站照片 → 站点玩法图。主题封面不在此列(由调用方最后兜底)。 */
 function chapterImages(chapter, cover) {
   const out = [];
@@ -423,4 +433,4 @@ function buildTeams(rows, topicId) {
   return { rows: out, need };
 }
 
-module.exports = { buyOptions, buyChips, routeNote, buildChars, chapterLabel, chapterHeading, isEndingChapter, chapterCountText, buildCoverImages, buildPublisher, buildHeroCta, topicSaleClosed, buildStoryCards, chapterGuide, pickChapterImages, progressFallback, storyMeta, buildMerchantCards, passWindow, buildTeams, explorePerkLine, mergeExploreCatalog, mergeExploreCards };
+module.exports = { buyOptions, buyChips, routeNote, buildChars, chapterLabel, chapterHeading, isEndingChapter, chapterCountText, buildCoverImages, buildPublisher, buildHeroCta, canOfferFirstStationTrial, topicSaleClosed, buildStoryCards, chapterGuide, pickChapterImages, progressFallback, storyMeta, buildMerchantCards, passWindow, buildTeams, explorePerkLine, mergeExploreCatalog, mergeExploreCards };

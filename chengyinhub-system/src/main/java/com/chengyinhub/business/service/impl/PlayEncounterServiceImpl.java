@@ -73,6 +73,10 @@ public class PlayEncounterServiceImpl implements IPlayEncounterService {
     @Autowired
     private PlayTeamMapper playTeamMapper;
 
+    /** §3.2 自玩双人/多人票受让人席位事实（可选；测试未注入时按无席位处理）。 */
+    @Autowired(required = false)
+    private com.chengyinhub.business.service.IRegistrationSeatRecipientEligibility seatRecipientEligibility;
+
     @Autowired
     private IShopDayProofService shopDayProofService;
 
@@ -90,6 +94,11 @@ public class PlayEncounterServiceImpl implements IPlayEncounterService {
 
     @Override
     public Map<String, Object> resolve(Long memberId, Long topicId, Long activityId, Long nodeId) {
+        return resolve(memberId, topicId, activityId, nodeId, null);
+    }
+
+    @Override
+    public Map<String, Object> resolve(Long memberId, Long topicId, Long activityId, Long nodeId, String roleHint) {
         if (memberId == null || memberId <= 0L || topicId == null || topicId <= 0L || nodeId == null || nodeId <= 0L) {
             throw new ServiceException("参数有误");
         }
@@ -159,7 +168,7 @@ public class PlayEncounterServiceImpl implements IPlayEncounterService {
         view.put("beat", beat(journey, state, node.getId(), arrived,
                 Boolean.TRUE.equals(presentation.get("revisit"))));
         appendNarrative(view, journey, state, node, run, memberId, topicId, activityId);
-        appendRoleView(view, journey, run, memberId);
+        appendRoleView(view, journey, run, memberId, roleHint);
         return view;
     }
 
@@ -759,7 +768,7 @@ public class PlayEncounterServiceImpl implements IPlayEncounterService {
     //   一律按 SOLO 给全部视图(以前后两种情况返回 roleMissing,一个视图都不给)。
 
     /** 角色视角段:配了且 enabled 才出;老配置(没这一段)响应形状一字不变。 */
-    private void appendRoleView(Map<String, Object> view, JsonNode config, TopicRouteSession run, Long memberId) {
+    private void appendRoleView(Map<String, Object> view, JsonNode config, TopicRouteSession run, Long memberId, String roleHint) {
         JsonNode raw = config == null ? null : config.get("roleViews");
         if (!enabled(raw)) return;
         List<JsonNode> roles = new ArrayList<JsonNode>();
@@ -768,36 +777,83 @@ public class PlayEncounterServiceImpl implements IPlayEncounterService {
         }
         // 形状由发布期校验器保证;冻结快照万一不自洽,宁可不演也不给半份错的
         if (roles.size() < 2) return;
-        Long activityId = run.getActivityId();
-        if (activityId == null || activityId <= 0L || playTeamMapper == null) {
+
+        // §3.2 逃生舱：主动传 roleHint=SOLO 时立即返回全量视图，确保搭档走散永不软锁
+        String normalizedHint = normalizeRoleHint(roleHint);
+        if ("SOLO".equals(normalizedHint)) {
             view.put("roleView", soloRoleView(raw, roles));
             return;
         }
-        List<PlayTeam> teams = playTeamMapper.selectMyTeams(memberId);
-        PlayTeam team = null;
-        for (PlayTeam row : teams == null ? Collections.<PlayTeam>emptyList() : teams) {
-            if (row == null || !Integer.valueOf(2).equals(row.getOwnerType())
-                    || !activityId.equals(row.getOwnerId())
-                    || row.getStatus() == null || row.getStatus() > PlayTeam.STATUS_STARTED) continue;
-            if (team != null && !team.getId().equals(row.getId())) {
-                // 同一场次多队:分不清该按哪支队算 —— 按单人给全量,不卡人
+
+        Long activityId = run.getActivityId();
+        boolean selfPlay = (activityId == null || activityId <= 0L);
+        Long topicId = run.getTopicId();
+        int hintIndex = roleIndexById(roles, normalizedHint);
+
+        // §3.2 自玩轻量视角选择（免重型建队）：显式传入合法 roleHint=A/B 时直接按所选视角下发不对称视图
+        if (selfPlay && hintIndex >= 0) {
+            assignRoleView(view, raw, roles, hintIndex);
+            return;
+        }
+
+        // 放开 activityId > 0 硬限制：活动场次认 ownerType=2/ownerId=activityId，自玩局认 ownerType=1/ownerId=topicId
+        Integer expectedOwnerType = selfPlay ? Integer.valueOf(1) : Integer.valueOf(2);
+        Long expectedOwnerId = selfPlay ? topicId : activityId;
+        if (playTeamMapper != null && expectedOwnerId != null && expectedOwnerId > 0L) {
+            List<PlayTeam> teams = playTeamMapper.selectMyTeams(memberId);
+            PlayTeam team = null;
+            boolean ambiguous = false;
+            for (PlayTeam row : teams == null ? Collections.<PlayTeam>emptyList() : teams) {
+                if (row == null || !expectedOwnerType.equals(row.getOwnerType())
+                        || !expectedOwnerId.equals(row.getOwnerId())
+                        || row.getStatus() == null || row.getStatus() > PlayTeam.STATUS_STARTED) continue;
+                if (team != null && !team.getId().equals(row.getId())) {
+                    ambiguous = true;
+                    break;
+                }
+                team = row;
+            }
+            if (ambiguous) {
+                // 同一场次/主题多队:分不清该按哪支队算 —— 按单人给全量,不卡人
                 view.put("roleView", soloRoleView(raw, roles));
                 return;
             }
-            team = row;
+            if (team != null) {
+                List<PlayTeamMember> members = playTeamMapper.selectActiveMembers(team.getId());
+                int index = memberIndex(members, memberId);
+                // 只剩自己(或查不到本人)= 单人:按 SOLO 给全部视图,单人必须能独立通关
+                if (index >= 0 && members.size() > 1) {
+                    assignRoleView(view, raw, roles, index % roles.size());
+                    return;
+                }
+                view.put("roleView", soloRoleView(raw, roles));
+                return;
+            }
         }
-        if (team == null) {
-            view.put("roleView", soloRoleView(raw, roles));
+
+        // §3.2 自玩多人/双人票受让人席位：按 seatNo(第 2..N 席) 自动分配对应角色视角
+        if (selfPlay && seatRecipientEligibility != null && topicId != null && topicId > 0L) {
+            List<com.chengyinhub.business.domain.SeatRecipientFact> facts = seatRecipientEligibility.playFacts(memberId, 1L, topicId);
+            if (facts != null) {
+                for (com.chengyinhub.business.domain.SeatRecipientFact fact : facts) {
+                    if (fact != null && fact.getSeatNo() != null && fact.getSeatNo() >= 2) {
+                        assignRoleView(view, raw, roles, (fact.getSeatNo() - 1) % roles.size());
+                        return;
+                    }
+                }
+            }
+        }
+
+        // 活动无队但主动指定合法 roleHint 时也允许轻量分角；其余一律 SOLO 全量兜底
+        if (hintIndex >= 0) {
+            assignRoleView(view, raw, roles, hintIndex);
             return;
         }
-        List<PlayTeamMember> members = playTeamMapper.selectActiveMembers(team.getId());
-        int index = memberIndex(members, memberId);
-        // 只剩自己(或查不到本人)= 单人:按 SOLO 给全部视图,单人必须能独立通关
-        if (index < 0 || members.size() <= 1) {
-            view.put("roleView", soloRoleView(raw, roles));
-            return;
-        }
-        JsonNode ownRole = roles.get(index % roles.size());
+        view.put("roleView", soloRoleView(raw, roles));
+    }
+
+    private void assignRoleView(Map<String, Object> view, JsonNode raw, List<JsonNode> roles, int roleIndex) {
+        JsonNode ownRole = roles.get(roleIndex % roles.size());
         String roleId = ownRole.path("id").asText("");
         Map<String, Object> own = roleViewOf(raw, roleId, textOrNull(ownRole, "label"));
         if (own == null) {
@@ -808,15 +864,28 @@ public class PlayEncounterServiceImpl implements IPlayEncounterService {
         mine.put("role", roleId);
         mine.put("roleLabel", textOrNull(ownRole, "label"));
         mine.put("views", Collections.singletonList(own));
-        JsonNode other = roles.get((index + 1) % roles.size());
+        JsonNode other = roles.get((roleIndex + 1) % roles.size());
         mine.put("otherRoleLabel", textOrNull(other, "label"));
         List<String> others = new ArrayList<String>();
         for (int i = 1; i < roles.size(); i++) {
-            String label = textOrNull(roles.get((index + i) % roles.size()), "label");
+            String label = textOrNull(roles.get((roleIndex + i) % roles.size()), "label");
             if (label != null) others.add(label);
         }
         mine.put("otherRoleLabels", others);
         view.put("roleView", mine);
+    }
+
+    private static String normalizeRoleHint(String raw) {
+        if (StringUtils.isBlank(raw)) return null;
+        return raw.trim().toUpperCase(java.util.Locale.ROOT);
+    }
+
+    private static int roleIndexById(List<JsonNode> roles, String roleId) {
+        if (roleId == null || roles == null) return -1;
+        for (int i = 0; i < roles.size(); i++) {
+            if (roleId.equalsIgnoreCase(roles.get(i).path("id").asText(""))) return i;
+        }
+        return -1;
     }
 
     /** 单人版:全部角色视图都下发,同一条 roleView 形状(views 是数组,role=SOLO),每段带角色名。 */

@@ -17,7 +17,12 @@ public interface IPlayEncounterService {
      * @return 契约形状见 R2-B7;node/topic 不匹配、无局、无权访问时抛 ServiceException(业务错误)。
      */
     default Map<String, Object> resolve(Long memberId, Long topicId, Long nodeId) {
-        return resolve(memberId, topicId, null, nodeId);
+        return resolve(memberId, topicId, null, nodeId, null);
     }
     Map<String, Object> resolve(Long memberId, Long topicId, Long activityId, Long nodeId);
+
+    /** 支持轻量视角提示 roleHint（A/B/C/D 或 SOLO 逃生舱），缺省沿用既有队伍/席位判定。 */
+    default Map<String, Object> resolve(Long memberId, Long topicId, Long activityId, Long nodeId, String roleHint) {
+        return resolve(memberId, topicId, activityId, nodeId);
+    }
 }
