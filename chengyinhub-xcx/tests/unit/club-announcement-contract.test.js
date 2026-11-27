@@ -28,12 +28,12 @@ test('帖子流原位展示置顶公告并提供编辑、置顶和历史入口',
   assert.match(view, /catchtap="onViewPostHistory"/)
 })
 
-test('编辑、置顶和历史都调用独立真接口;编辑回读列表,置顶只改本地行', () => {
+test('编辑和历史调用独立真接口；编辑写后回读，置顶成功只改屏幕上的帖', () => {
   assert.match(script, /url:\s*'\/api\/club\/post\/update'/)
   assert.match(script, /url:\s*'\/api\/club\/post\/pin'/)
   assert.match(script, /url:\s*'\/api\/club\/post\/history'/)
   assert.match(script, /onEditPost[\s\S]*?that\.loadPosts\(\)/)
-  const pin = script.slice(script.indexOf('onTogglePin(e, forcePinned)'), script.indexOf('onViewPostHistory(e)'))
-  assert.match(pin, /_applyPostPin\(/)
-  assert.doesNotMatch(pin, /loadPosts\(/)
+  const pin = script.slice(script.indexOf('  onTogglePin(e, forcePinned) {'), script.indexOf('  onViewPostHistory('))
+  assert.equal(pin.includes('loadPosts('), false, '置顶成功不能整页回读')
+  assert.match(pin, /placeClubPostPin\(/)
 })

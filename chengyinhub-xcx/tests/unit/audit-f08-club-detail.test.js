@@ -9,10 +9,11 @@ const vm = require('node:vm');
 const ROOT = path.resolve(__dirname, '../..');
 const REL = 'pages/club/detail/index.js';
 
-function loadClubDetail() {
+function loadClubDetail(options) {
   const requests = [];
   const requiredIds = [];
-  const timers = { live: new Set(), next: 1, fns: new Map() };
+  const deferTimeout = !!(options && options.deferTimeout);
+  const timers = { live: new Set(), next: 1, fns: new Map(), timeouts: [] };
   const app = {
     globalData: { statusBarHeight: 20, navBarHeight: 44 },
     sendRequest(o) { requests.push(o); },
@@ -38,7 +39,16 @@ function loadClubDetail() {
   vm.runInNewContext(fs.readFileSync(file, 'utf8'), {
     getApp: () => app, Page(p) { definition = p; }, Component(p) { definition = p; },
     getCurrentPages: () => [{}, {}],
-    setTimeout(fn) { if (fn) fn(); return 0; }, clearTimeout() {},
+    setTimeout(fn, ms) {
+      if (!deferTimeout) { if (fn) fn(); return 0; }
+      const id = timers.next++;
+      timers.timeouts.push({ id, fn, ms, cleared: false });
+      return id;
+    },
+    clearTimeout(id) {
+      const row = timers.timeouts.find((item) => item.id === id);
+      if (row) row.cleared = true;
+    },
     setInterval(fn) { const id = timers.next++; timers.live.add(id); timers.fns.set(id, fn); return id; },
     clearInterval(id) { timers.live.delete(id); },
     console, Set, Map, Date, JSON, Math, Object, String, Number, Array, Promise, RegExp, Error, encodeURIComponent, decodeURIComponent,
@@ -120,56 +130,96 @@ test('L08-001 重载回包失败照旧收回权限;换账号先收回', () => {
   assert.equal(page.data.activeTab, 'overview');
 });
 
-test('L08-002 看大图回来不整页重拉;没标脏不重拉;标脏才重拉', () => {
+test('L08-002 已加载后再出现不整页重拉;从主办视图返回才重拉;看大图不重拉', () => {
   const { page } = loadClubDetail();
   let loads = 0;
   page.loadAll = () => { loads += 1; };
   page._hasShown = true;
   page.setData({ clubId: 7, club: { id: 7, isJoined: true, viewerCanGovern: true }, canUseManageTab: true });
+  page.onHide(); page.onShow();
+  assert.equal(loads, 0, '已加载的页面再次出现不重拉');
   page.onPreviewImage({ detail: { picList: ['https://a/1.png'], picIndex: 0 }, currentTarget: { dataset: {} } });
   page.onHide(); page.onShow();
   assert.equal(loads, 0, '系统浮层返回不重拉');
-  page.onHide(); page.onShow();
-  assert.equal(loads, 0, '没标脏不重拉');
-  page._clubDetailDirty = true;
-  page.onHide(); page.onShow();
-  assert.equal(loads, 1, '标脏后重拉');
   page.onPreviewImage({ detail: { picList: [], picIndex: 0 }, currentTarget: { dataset: {} } });
   page.onHide(); page.onShow();
-  assert.equal(loads, 1, '没打开浮层也不把没标脏的返回当成要重拉');
+  assert.equal(loads, 0, '没打开浮层也不整页重拉');
+  page.goEventOps();
+  page.onHide(); page.onShow();
+  assert.equal(loads, 1, '从主办视图返回照旧重拉');
 });
 
-test('L08-004 评论与置顶成功只改这条帖,不重拉帖子列表', () => {
+test('L08-004 发出一条评论只改这条帖的评论数,不重拉帖子列表', () => {
   const { page, requests } = loadClubDetail();
   page.setData({
-    clubId: 7, canModerateContent: true, openCommentPost: 11, commentText: '到了',
+    clubId: 7,
+    openCommentPost: 11,
+    commentText: '好看',
     posts: [
-      { id: 11, feedKey: '11', type: 2, isPinned: 0, commentCount: 2, version: 1, content: '公告' },
-      { id: 12, feedKey: '12', type: 0, commentCount: 0, content: '别的' },
-      { id: 11, feedKey: 'r5', isRepostItem: true, commentCount: 2, content: '转发' },
+      { id: 11, feedKey: '11', commentCount: 2 },
+      { id: 12, feedKey: '12', commentCount: 0 },
+      { id: 11, feedKey: 'r5', isRepostItem: true, commentCount: 2 },
     ],
   });
   page.onCommentSubmit();
   const create = requests.find((r) => r.url === '/api/club/post/comment/create');
+  assert.ok(create);
   requests.length = 0;
-  create.success({ code: '200' });
-  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0, '发评论不整页重拉');
+  create.success({ code: '200', data: {} });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0, '不整页重拉帖子');
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/comment/list').length, 1);
   assert.deepEqual(page.data.posts.map((p) => p.commentCount), [3, 0, 3]);
-  page._doDeleteComment(4, 11);
+  assert.equal(page.data.commentText, '');
+});
+
+test('委派角色从主办返回重拉详情仍留在管理 tab', () => {
+  const { page, requests } = loadClubDetail();
+  page.setData({
+    clubId: 7,
+    club: { id: 7, isJoined: true, viewerCanGovern: false },
+    activeTab: 'manage',
+    canUseManageTab: true,
+    canOperateEvents: true,
+  });
+  page._tabInitialized = true;
+  page._clubAccessState = 'ready';
+  page._clubAccessReadyFor = '1001:7';
+  page._hasShown = true;
+  page._returnRefresh = true;
+  page.onShow();
+  const detail = requests.find((r) => r.url === '/api/club/detail');
+  assert.ok(detail);
+  detail.success({ code: '200', data: { id: 7, isJoined: true, isOwner: false, viewerCanGovern: false } });
+  assert.equal(page.data.activeTab, 'manage', '详情回包不许把委派角色踢回概览');
+  assert.equal(page.data.canUseManageTab, true);
+  const access = requests.filter((r) => r.url === '/api/club/access/me');
+  assert.equal(access.length, 1);
+  assert.equal(page.data.activeTab, 'manage', 'access 在途也不许踢回概览');
+  access[0].success(accessOk(7, ['club:event:operate']));
+  assert.equal(page.data.activeTab, 'manage');
+  assert.equal(page.data.canOperateEvents, true);
+});
+
+test('删除一条评论只改这条帖的评论数并重读评论,不重拉帖子列表', () => {
+  const { page, requests } = loadClubDetail();
+  page.setData({
+    clubId: 7,
+    openCommentPost: 11,
+    posts: [
+      { id: 11, feedKey: '11', commentCount: 2 },
+      { id: 12, feedKey: '12', commentCount: 0 },
+      { id: 11, feedKey: 'r5', isRepostItem: true, commentCount: 2 },
+    ],
+  });
+  page._doDeleteComment(9, 11);
   const del = requests.find((r) => r.url === '/api/club/post/comment/delete');
+  assert.ok(del);
   requests.length = 0;
-  del.success({ code: '200' });
-  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0, '删评论不整页重拉');
-  assert.deepEqual(page.data.posts.map((p) => p.commentCount), [2, 0, 2]);
-  page.onTogglePin({ currentTarget: { dataset: { id: 11 } } });
-  const pin = requests.find((r) => r.url === '/api/club/post/pin');
-  requests.length = 0;
-  pin.success({ code: '200', data: { isPinned: 1, version: 4 } });
-  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0, '置顶不整页重拉');
-  assert.equal(page.data.posts[0].isPinned, true);
-  assert.equal(page.data.posts[0].noticeBadge, '公告 · 置顶');
-  assert.equal(page.data.posts[0].version, 4);
-  assert.equal(page.data.posts[2].isPinned, undefined, '转发条目不跟着置顶');
+  del.success({ code: '200', data: {} });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0, '不整页重拉帖子');
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/comment/list').length, 1);
+  assert.equal(JSON.parse(requests.find((r) => r.url === '/api/club/post/comment/list').data).postId, 11);
+  assert.deepEqual(page.data.posts.map((p) => p.commentCount), [1, 0, 1]);
 });
 
 test('L08-004 点赞成功只改这条帖(含转发条目),不重拉帖子列表', () => {
@@ -187,6 +237,108 @@ test('L08-004 点赞成功只改这条帖(含转发条目),不重拉帖子列表
   like[0].success({ code: '200', data: { liked: true } });
   assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0, '不整页重拉');
   assert.deepEqual(page.data.posts.map((p) => [p.isLiked, p.likeCount]), [[true, 3], [false, 0], [true, 3]]);
+});
+
+function pinFeed() {
+  return [
+    { id: 50, feedKey: '50', type: 2, isPinned: true, version: 2, content: '旧置顶', contents: '旧置顶', noticeBadge: '公告 · 置顶', createTime: '2026-11-01 10:00:00' },
+    { id: 40, feedKey: '40', type: 0, isPinned: false, version: 1, content: '普通', createTime: '2026-11-04 10:00:00' },
+    { id: 30, feedKey: 'r9', type: 2, isPinned: false, isRepostItem: true, version: 1, content: '转发公告', createTime: '2026-11-03 12:00:00' },
+    { id: 30, feedKey: '30', type: 2, isPinned: false, version: 4, content: '待置顶', contents: '待置顶', noticeBadge: '公告', createTime: '2026-11-03 10:00:00' },
+    { id: 20, feedKey: '20', type: 0, isPinned: false, version: 1, content: '更早', createTime: '2026-11-02 10:00:00' },
+  ];
+}
+
+function watchToasts() {
+  const toasts = [];
+  global.wx.showToast = (opts) => { toasts.push(opts && opts.title); };
+  return toasts;
+}
+
+// 页面跑在 vm 里,成功路径换上的数组不是本测试域的 Array,先拷出来再比。
+function feedKeys(posts) {
+  return Array.from(posts, (p) => p.feedKey);
+}
+
+test('L08-004 置顶成功只改屏幕上的这条帖并归到置顶区,不重拉列表', () => {
+  const { page, requests } = loadClubDetail();
+  const toasts = watchToasts();
+  page.setData({ clubId: 7, canModerateContent: true, posts: pinFeed() });
+  page.loadPosts();
+  const stale = requests.find((r) => r.url === '/api/club/post/list');
+  page.onTogglePin({ currentTarget: { dataset: { id: 30 } } });
+  const pin = requests.find((r) => r.url === '/api/club/post/pin');
+  assert.ok(pin);
+  assert.equal(JSON.parse(pin.data).pinned, true);
+  assert.equal(JSON.parse(pin.data).version, 4, '置顶打在原帖上,不打在前面的转发条目');
+  pin.success({ code: '200', msg: '已置顶', data: { id: 30, isPinned: 1, version: 5 } });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 1, '成功不再发列表请求');
+  assert.deepEqual(feedKeys(page.data.posts), ['30', '50', '40', 'r9', '20']);
+  assert.equal(page.data.posts[0].isPinned, true);
+  assert.equal(page.data.posts[0].noticeBadge, '公告 · 置顶');
+  assert.equal(page.data.posts[0].version, 5);
+  assert.equal(page.data.posts[0].content, '待置顶');
+  assert.equal(page.data.posts[3].isRepostItem, true);
+  assert.equal(page.data.posts[3].isPinned, false);
+  assert.deepEqual(Array.from(page.data.pinnedNotices, (n) => n.id), [30, 50]);
+  assert.equal(toasts.pop(), '已置顶');
+  stale.success({ code: '200', data: [{ id: 1, type: 0, content: '过期列表', isPinned: 0 }] });
+  assert.deepEqual(feedKeys(page.data.posts), ['30', '50', '40', 'r9', '20'], '迟到的整页回读不盖住置顶');
+
+  page.onTogglePin({ currentTarget: { dataset: { id: 30 } } });
+  const unpin = requests.filter((r) => r.url === '/api/club/post/pin').pop();
+  assert.equal(JSON.parse(unpin.data).pinned, false);
+  assert.equal(JSON.parse(unpin.data).version, 5);
+  const listsBeforeUndo = requests.filter((r) => r.url === '/api/club/post/list').length;
+  unpin.success({ code: '200', msg: '已取消置顶', data: { id: 30, isPinned: 0, version: 6 } });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, listsBeforeUndo);
+  assert.deepEqual(feedKeys(page.data.posts), ['50', '40', 'r9', '30', '20']);
+  assert.equal(page.data.posts[3].isPinned, false);
+  assert.equal(page.data.posts[3].noticeBadge, '公告');
+  assert.equal(page.data.posts[3].version, 6);
+  assert.deepEqual(Array.from(page.data.pinnedNotices, (n) => n.id), [50]);
+  assert.equal(toasts.pop(), '已取消置顶');
+
+  page.onTogglePin({ currentTarget: { dataset: { id: 30 } } }, true);
+  const undo = requests.filter((r) => r.url === '/api/club/post/pin').pop();
+  assert.equal(JSON.parse(undo.data).pinned, true, '撤销按原样置顶回去');
+  assert.equal(JSON.parse(undo.data).version, 6);
+  undo.success({ code: '200', msg: '已置顶', data: { id: 30, isPinned: 1, version: 7 } });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, listsBeforeUndo);
+  assert.deepEqual(feedKeys(page.data.posts), ['30', '50', '40', 'r9', '20']);
+  assert.equal(page.data.posts[0].version, 7);
+  assert.equal(page.data.posts[0].isPinned, true);
+});
+
+test('L08-004 置顶回包对不上屏幕上的帖或版本冲突时不改列表', () => {
+  const { page, requests } = loadClubDetail();
+  const toasts = watchToasts();
+  page.setData({ clubId: 7, canModerateContent: true, posts: pinFeed() });
+  const before = page.data.posts.map((p) => [p.feedKey, p.isPinned, p.version]);
+  page.onTogglePin({ currentTarget: { dataset: { id: 30 } } });
+  const pin = requests.find((r) => r.url === '/api/club/post/pin');
+  pin.success({ code: 409, msg: '公告已被修改，请刷新后重试' });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0);
+  assert.deepEqual(page.data.posts.map((p) => [p.feedKey, p.isPinned, p.version]), before);
+  assert.equal(toasts.pop(), '公告已被修改，请刷新后重试');
+
+  page.onTogglePin({ currentTarget: { dataset: { id: 30 } } });
+  const missing = requests.filter((r) => r.url === '/api/club/post/pin').pop();
+  page.setData({ posts: page.data.posts.filter((p) => p.feedKey !== '30') });
+  const gone = page.data.posts.map((p) => p.feedKey);
+  missing.success({ code: '200', msg: '已置顶', data: { id: 30, isPinned: 1, version: 5 } });
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0);
+  assert.deepEqual(page.data.posts.map((p) => p.feedKey), gone);
+  assert.equal(toasts.pop(), '操作失败');
+
+  page.setData({ posts: pinFeed() });
+  page.onTogglePin({ currentTarget: { dataset: { id: 30 } } });
+  const mismatch = requests.filter((r) => r.url === '/api/club/post/pin').pop();
+  const again = page.data.posts.map((p) => [p.feedKey, p.isPinned, p.version]);
+  mismatch.success({ code: '200', msg: '已置顶', data: { id: 99, isPinned: 1, version: 5 } });
+  assert.deepEqual(page.data.posts.map((p) => [p.feedKey, p.isPinned, p.version]), again);
+  assert.equal(requests.filter((r) => r.url === '/api/club/post/list').length, 0);
+  assert.equal(toasts.pop(), '操作失败');
 });
 
 test('L08-006 只有日期的 endDate:最后一天仍算未结束', () => {
@@ -216,6 +368,147 @@ test('L08-005 快速切排序:旧排序迟到回包不覆盖新榜单', () => {
   a.success({ code: '200', data: [{ memberId: 1, nickname: 'A' }] });
   assert.equal(page._leaderboardSortBy, 'mileage');
   assert.deepEqual(page._leaderboardRows.map((r) => r.memberId), [2]);
+});
+
+function finishRequest(req, body) {
+  req.success(body);
+  if (req.complete) req.complete();
+}
+
+function topicRow(id, name) {
+  return { id: id, name: name, startDate: '2026-11-01', endDate: '2026-12-01' };
+}
+
+function poolBody(topicId, name) {
+  return { code: 200, data: { hasClub: true, rows: [{ topicId: topicId, name: name, state: 'open' }] } };
+}
+
+test('L08-005 下拉刷新叠上返回刷新:旧回包不盖住当前俱乐部', () => {
+  const { page, requests } = loadClubDetail();
+  page.setData({ clubId: 7, club: { id: 7, isOwner: true, name: '当前' }, coopPoolState: 'ready' });
+  page._hasShown = true;
+  page._returnRefresh = true;
+  page.onShow();
+  page.onPullDownRefresh();
+  const of = (url) => requests.filter((r) => r.url === url);
+  const detail = of('/api/club/detail');
+  const topics = of('/api/club/topics');
+  const board = of('/api/club/leaderboard');
+  assert.equal(detail.length, 2);
+  assert.equal(topics.length, 2);
+  assert.equal(board.length, 2);
+  finishRequest(detail[1], { code: '200', data: { id: 7, isOwner: true, isJoined: true, name: '新俱乐部' } });
+  finishRequest(topics[1], { code: 200, data: [topicRow(2, '新主题')] });
+  board[1].success({ code: '200', data: [{ memberId: 2, nickname: '新' }] });
+  finishRequest(detail[0], { code: '200', data: { id: 7, isOwner: true, isJoined: true, name: '旧俱乐部' } });
+  finishRequest(topics[0], { code: 200, data: [topicRow(1, '旧主题')] });
+  board[0].success({ code: '200', data: [{ memberId: 1, nickname: '旧' }] });
+  assert.equal(page.data.club.name, '新俱乐部');
+  assert.deepEqual(page._topics.map((t) => t.id), [2]);
+  assert.deepEqual((page._leaderboardRows || []).map((r) => r.memberId), [2]);
+  assert.equal(of('/api/club/merchants').length, 1, '过期的那轮刷新不再另拉商家');
+  const merchants = of('/api/club/merchants')[0];
+  page.loadMerchants();
+  const again = of('/api/club/merchants');
+  assert.equal(again.length, 2);
+  again[1].success({ code: '200', data: [{ name: '新商家' }] });
+  merchants.success({ code: '200', data: [{ name: '旧商家' }] });
+  assert.deepEqual(page.data.merchants.map((m) => m.name), ['新商家']);
+});
+
+test('L08-005 换俱乐部后,上一团的主题/榜/商家/合作池回包作废', () => {
+  const { page, requests } = loadClubDetail();
+  const owner = { isOwner: true, isJoined: true };
+  page.setData({ clubId: 7, club: Object.assign({ id: 7, name: '甲' }, owner) });
+  page.loadTopics();
+  page.loadLeaderboard();
+  page.loadMerchants();
+  page.loadCoopPool();
+  page.setData({ clubId: 8, club: Object.assign({ id: 8, name: '乙' }, owner) });
+  page.loadTopics();
+  page.loadLeaderboard();
+  page.loadMerchants();
+  page.loadCoopPool();
+  const of = (url) => requests.filter((r) => r.url === url);
+  const topics = of('/api/club/topics');
+  const board = of('/api/club/leaderboard');
+  const merchants = of('/api/club/merchants');
+  const pool = of('/api/coop/pool/list');
+  assert.equal(JSON.parse(topics[0].data).id, 7);
+  assert.equal(JSON.parse(topics[1].data).id, 8);
+  topics[1].success({ code: 200, data: [topicRow(8, '乙的主题')] });
+  topics[0].success({ code: 200, data: [topicRow(7, '甲的主题')] });
+  board[1].success({ code: '200', data: [{ memberId: 8, nickname: '乙' }] });
+  board[0].success({ code: '200', data: [{ memberId: 7, nickname: '甲' }] });
+  merchants[1].success({ code: '200', data: [{ name: '乙的商家' }] });
+  merchants[0].success({ code: '200', data: [{ name: '甲的商家' }] });
+  pool[1].success(poolBody(8, '乙的池'));
+  pool[0].success(poolBody(7, '甲的池'));
+  assert.deepEqual(page._topics.map((t) => t.id), [8]);
+  assert.deepEqual(page._leaderboardRows.map((r) => r.memberId), [8]);
+  assert.deepEqual(page.data.merchants.map((m) => m.name), ['乙的商家']);
+  assert.deepEqual(page.data.coopPool.map((row) => row.topicId), [8]);
+});
+
+test('L08-007 移出成员成功后只拉一次成员名单', () => {
+  const { page, requests } = loadClubDetail();
+  page.setData({
+    clubId: 7,
+    club: { id: 7, isOwner: true, isJoined: true, name: '团' },
+    members: [{ memberId: 3, nickname: '甲' }, { memberId: 4, nickname: '乙' }],
+    membersState: 'ready',
+  });
+  page._doRemoveMember(4);
+  const remove = requests.find((r) => r.url === '/api/club/remove-member');
+  assert.ok(remove);
+  requests.length = 0;
+  remove.success({ code: '200', data: {} });
+  const detail = requests.find((r) => r.url === '/api/club/detail');
+  assert.ok(detail);
+  detail.success({ code: '200', data: { id: 7, isOwner: true, isJoined: true, name: '团' } });
+  if (detail.complete) detail.complete();
+  assert.equal(requests.filter((r) => r.url === '/api/club/members').length, 1);
+});
+
+test('L08-008 设置人数或金额读失败后,下次打开要重试;读成功才记住', () => {
+  const { page, requests } = loadClubDetail();
+  page.setData({ clubId: 7, club: { id: 7, isOwner: true } });
+  page.onSettings();
+  const of = (url) => requests.filter((r) => r.url === url);
+  of('/api/club/crm/customers/count')[0].success({ code: 500, msg: '客户数没读到' });
+  of('/api/club/settlement/summary')[0].success({ code: 500, msg: '金额没读到' });
+  assert.equal(page.data.customerCountText, '暂时读不到');
+  assert.equal(page.data.settledAmountText, '暂时读不到');
+  requests.length = 0;
+  page.onSettings();
+  assert.equal(of('/api/club/crm/customers/count').length, 1);
+  assert.equal(of('/api/club/settlement/summary').length, 1);
+  of('/api/club/crm/customers/count')[0].fail();
+  of('/api/club/settlement/summary')[0].fail();
+  requests.length = 0;
+  page.onSettings();
+  assert.equal(of('/api/club/crm/customers/count').length, 1, '网络失败也不许记一整次访问');
+  of('/api/club/crm/customers/count')[0].success({ code: 200, data: { total: 3 } });
+  of('/api/club/settlement/summary')[0].success({ code: 200, data: { settledAmountText: '¥12.00' } });
+  assert.equal(page.data.customerCountText, '3 人');
+  assert.equal(page.data.settledAmountText, '¥12.00');
+  requests.length = 0;
+  page.onSettings();
+  assert.equal(requests.length, 0, '两次都读到之后,这次访问不再重复取');
+});
+
+test('L08-008 金额尚未核实是读到了,不当失败反复重试', () => {
+  const { page, requests } = loadClubDetail();
+  page.setData({ clubId: 7, club: { id: 7, isOwner: true }, settledAmountText: '' });
+  page.onSettings();
+  const of = (url) => requests.filter((r) => r.url === url);
+  of('/api/club/crm/customers/count')[0].success({ code: 200, data: { total: 0 } });
+  of('/api/club/settlement/summary')[0].success({ code: 200, data: { settledAmountText: null } });
+  assert.equal(page.data.customerCountText, '');
+  assert.equal(page.data.settledAmountText, '');
+  requests.length = 0;
+  page.onSettings();
+  assert.equal(requests.length, 0);
 });
 
 test('L08-022 带队进度的最近邀请时间跨年也取最新', () => {
@@ -317,6 +610,31 @@ test('L08-011 关注作者 / 点赞回读只按路径改相关帖子行', () => 
   assert.deepEqual(page.data.posts.map((p) => [p.id, p.likeCount]), [[1, 1], [2, 1], [3, 2]]);
 });
 
+test('L08-012 场次工具失败在页面上说明原因,已打开的工具留着', () => {
+  const { page, requests } = loadClubDetail();
+  const tools = [{ key: '/pages/club/event-ops/index?clubId=7&activityId=3', label: '现场名册与核销' }];
+  page.setData({
+    clubId: 7,
+    club: { id: 7, isOwner: true },
+    choiceSheetShow: true,
+    choiceSheetTitle: '本场工具',
+    choiceSheetItems: tools,
+  });
+  page.openActivityTools({ currentTarget: { dataset: { id: 31 } } });
+  const biz = requests.find((r) => r.url === '/api/topic/info-to-user');
+  biz.success({ code: 500, msg: '主题服务不可用' });
+  if (biz.complete) biz.complete();
+  assert.equal(page.data.activityToolsError, '主题服务不可用');
+  assert.equal(page.data.choiceSheetShow, true);
+  assert.deepEqual(page.data.choiceSheetItems, tools);
+  page.openActivityTools({ currentTarget: { dataset: { id: 31 } } });
+  const net = requests.filter((r) => r.url === '/api/topic/info-to-user').pop();
+  net.fail();
+  assert.equal(page.data.activityToolsError, '场次没能加载，请重试');
+  assert.deepEqual(page.data.choiceSheetItems, tools);
+  assert.equal(page.data.choiceSheetShow, true);
+});
+
 test('L08-013 取场次列表共用一条读取:团码选场与场次工具同口径', () => {
   const { page, requests } = loadClubDetail();
   page.setData({ clubId: 7, club: { id: 7, viewerCanGovern: true }, groupCodeVisible: true });
@@ -340,4 +658,24 @@ test('L08-019 回归:概览下滑收起「加入」后去别的 tab 回到顶部
   page.onPageScroll({ scrollTop: 0 });   // 在帖子 tab 回到顶部
   page.switchTab({ currentTarget: { dataset: { tab: 'overview' } } });
   assert.equal(page.data.joinHidden, false, '切回概览停在顶部:没法再往上滑,按钮不能一直收着');
+});
+
+test('L08-130 加入动效未结束就离开:不再弹欢迎层,也不再重拉详情', () => {
+  const { page, requests, timers } = loadClubDetail({ deferTimeout: true });
+  page.setData({ clubId: 36, club: { id: 36, name: '城市乐居人', joinPolicy: 0 }, reducedMotion: false });
+  page.submitJoin('');
+  const join = requests.filter((r) => r.url === '/api/club/join');
+  assert.equal(join.length, 1);
+  join[0].success({ code: '200', data: { state: 'joined' } });
+  assert.equal(page.data.joinFx, 'done');
+  assert.equal(page.data.welcomeShow, false);
+  const pending = timers.timeouts.filter((t) => !t.cleared);
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].ms, 900);
+  page.onUnload();
+  assert.equal(timers.timeouts.filter((t) => !t.cleared).length, 0, '离页清掉定时器');
+  pending[0].fn();
+  assert.equal(page.data.welcomeShow, false);
+  assert.equal(page.data.joinFx, 'done', '离页后不再收起动效');
+  assert.equal(requests.filter((r) => r.url === '/api/club/detail').length, 0);
 });

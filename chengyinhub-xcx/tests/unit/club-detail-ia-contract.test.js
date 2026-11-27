@@ -458,10 +458,19 @@ test('从发布/邀请/主办视图返回会重拉 owner 数据，首展不与 o
   page.onShow()
   assert.equal(reloads, 0, '首次 onShow 应交给 onLoad 请求')
   page.onShow()
-  assert.equal(reloads, 0, '没标脏不重拉')
-  page._clubDetailDirty = true
+  assert.equal(reloads, 0, '已加载后再出现不整页重拉')
+  page.onCreateTeam()
+  page.onChoiceSheetSelect({ currentTarget: { dataset: { key: '1' } } })
   page.onShow()
-  assert.equal(reloads, 1, '从会改数据的子页返回才重拉 loadAll')
+  assert.equal(reloads, 1, '从发布视图返回重拉 loadAll')
+  page.goCoopList()
+  page.onShow()
+  assert.equal(reloads, 2, '从邀请视图返回重拉 loadAll')
+  page.goEventOps()
+  page.onShow()
+  assert.equal(reloads, 3, '从主办视图返回重拉 loadAll')
+  page.onShow()
+  assert.equal(reloads, 3, '没有新的发布/邀请/主办返回就不再重拉')
 })
 
 test('普通成员首展仍由 onLoad 单飞，返页只先回读详情关系，失权后清掉旧名单', () => {

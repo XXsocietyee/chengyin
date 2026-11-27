@@ -9,6 +9,8 @@ const { shapeCustomerList, isAuthFailure, isForbidden } = require('./view-model.
 
 // MC-057:按页读,触底续读;服务端不认分页(一次全给)时按 memberId 去重,没有新行就停。
 const PAGE_SIZE = 50;
+// 服务端单页最多 200。回来重拉时一次尽量盖住已经翻过的行,超出的部分再按原页大小续上。
+const PAGE_SIZE_MAX = 200;
 
 const FILTERS = Object.freeze([
   { key: 'all', label: '全部' },
@@ -56,11 +58,12 @@ Page({
 
   // E-13(2026-09-16):去客户详情改完备注/标签返回后,列表的「有备注」筛选与标记还是旧的。
   // 返回即重拉;首屏由 onLoad 负责(与 club/detail 同款 _hasShown 首展闸),错误态不覆盖。
+  // L08-129:重拉按已经翻到的深度取,不把后面的页收回第一页。
   onShow() {
     if (!this._hasShown) { this._hasShown = true; return; }
     if (!this._customerSaved) return;
     this._customerSaved = false;
-    if (this.data.state === 'ready' || this.data.state === 'empty') this.load();
+    if (this.data.state === 'ready' || this.data.state === 'empty') this.load(false, true);
   },
 
   onPullDownRefresh() { this.load(); },
@@ -111,12 +114,16 @@ Page({
     });
   },
 
-  load(append) {
+  load(append, keepLoaded) {
     if (!this._clubId) {
       this.setData({ state: 'missing-param' });
       return;
     }
     const more = append === true;
+    const keep = keepLoaded === true && !more;
+    if (!more) this._restoreUntil = 0;
+    const loadedCount = keep ? (this.data.items || []).length : 0;
+    const pageSize = more ? PAGE_SIZE : Math.min(PAGE_SIZE_MAX, Math.max(PAGE_SIZE, loadedCount));
     const epoch = more ? (this._epoch || 0) : (this._epoch || 0) + 1;
     this._epoch = epoch;
     const that = this;
@@ -129,8 +136,12 @@ Page({
       autoErrorToast: false, // 失败由整页 auto-back fail 半屏讲原因,不再叠 toast
       method: 'POST',
       header: jsonHeader(),
-      data: jsonBody({ clubId: this._clubId, filter: this.data.filterKey, keyword: this.data.keyword, pageNum, pageSize: PAGE_SIZE }),
-      complete() { if (more) that._loadingMore = false; wx.stopPullDownRefresh(); },
+      data: jsonBody({ clubId: this._clubId, filter: this.data.filterKey, keyword: this.data.keyword, pageNum, pageSize }),
+      complete() {
+        if (more) that._loadingMore = false;
+        wx.stopPullDownRefresh();
+        if (more && epoch === that._epoch) that.restoreTail();
+      },
       success(res) {
         if (epoch !== that._epoch) return;
         if (more) { that.appendPage(res, pageNum); return; }
@@ -144,8 +155,9 @@ Page({
           that.setData({ state: 'error', errorText: '客户名单加载失败' });
           return;
         }
-        that._pageNum = 1;
+        that._pageNum = Math.max(1, Math.floor(shaped.items.length / PAGE_SIZE) || 1);
         that._hasMore = shaped.items.length >= PAGE_SIZE && shaped.items.length < shaped.total;
+        that._restoreUntil = keep ? loadedCount : 0;
         pageMotion.enter(that, 'pmList'); that.setData({
           state: shaped.items.length ? 'ready' : 'empty',
           everLoaded: true,
@@ -153,25 +165,37 @@ Page({
           items: shaped.items,
           errorText: '',
         });
+        if (keep) that.restoreTail();
       },
       successStatusAbnormal(res, statusCode) {
         if (epoch !== that._epoch) return;
-        if (more) { that._hasMore = false; return; }
+        if (more) { that._hasMore = false; that._restoreUntil = 0; return; }
         if (isAuthFailure(res, statusCode)) { that.deny(res, statusCode); return; }
         that.setData({ state: 'error', errorText: (res && res.msg) || '客户名单暂时不可用' });
       },
       fail(value, statusCode) {
         if (epoch !== that._epoch) return;
-        if (more) return;
+        if (more) { that._restoreUntil = 0; return; }
         if (isAuthFailure(value, statusCode)) { that.deny(value, statusCode); return; }
         that.setData({ state: 'network-error', errorText: '检查网络后重新加载客户名单' });
       },
     });
   },
 
+  // L08-129:单页封顶 200,已经翻过更多时,把多出来的页按原页大小续回来。
+  restoreTail() {
+    if (!this._restoreUntil || this._loadingMore) return;
+    if (this.data.items.length >= this._restoreUntil || !this._hasMore) {
+      this._restoreUntil = 0;
+      return;
+    }
+    this.load(true);
+  },
+
   appendPage(res, pageNum) {
     const shaped = res && res.code == '200' ? shapeCustomerList(res.data) : null;
     if (!shaped) {
+      this._restoreUntil = 0;
       if (isAuthFailure(res)) this.deny(res);
       return;
     }

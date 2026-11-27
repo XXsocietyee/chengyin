@@ -31,14 +31,21 @@ test('2026-11-26:玩法详情提供举报', () => {
   assert.match(read('pages/templatedetail/templatedetail.js'), /reportTemplate\(\) \{/)
 })
 
-test('2026-11-26:俱乐部主题活动恢复举报,仍不能举报自己的活动', () => {
+test('2026-11-26 业主:俱乐部主题活动可举报,本人活动仍不可报', () => {
   const js = read('pages/club/detail/index.js')
   assert.match(js, /\n    topicReportExposed: true,\n/)
   const wxml = read('pages/club/detail/index.wxml')
   assert.match(wxml, /canReport: topicReportExposed && canSeeMembers && item\.memberId != myMemberId/)
-  assert.match(wxml, /wx:if="\{\{canReport\}\}" class="ev-more" catchtap="onEventMore"/)
-  assert.match(js, /reportTopicActivity\(e\) \{/)
-  assert.ok(fs.existsSync(path.join(ROOT, 'pages/topic/utils/content-report.js')))
+  assert.match(wxml, /wx:if="\{\{canReport\}\}" class="ev-more ugc-report" catchtap="onEventMore"/)
+  const cardCover = wxml.match(/<view class="ev-coverslot">[\s\S]*?<\/view>\s*<view class="ev-body">/)
+  assert.ok(cardCover, '活动封面槽仍在')
+  assert.doesNotMatch(cardCover[0], /ugc-report|onEventMore|举报/)
+  const heroStart = wxml.indexOf('<view class="cover-wrap">')
+  const heroEnd = wxml.indexOf('<view class="profile', heroStart)
+  assert.ok(heroStart >= 0 && heroEnd > heroStart, '俱乐部封面 hero 仍在')
+  assert.doesNotMatch(wxml.slice(heroStart, heroEnd), /ugc-report|onEventMore|举报/)
+  assert.match(js, /reportTopicActivity\(e\) \{/, '处理器保留,不删')
+  assert.ok(fs.existsSync(path.join(ROOT, 'pages/topic/utils/content-report.js')), '主题举报写链保留')
 })
 
 test('PG-086 复核:商家「输入核验编号」手工流程保持原样', () => {

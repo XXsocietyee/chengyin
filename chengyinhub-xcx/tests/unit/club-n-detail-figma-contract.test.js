@@ -124,7 +124,7 @@ function assertContract(overrides = {}) {
   assert.match(js, /function topicStatusOf/)
   // 稿没画但现码有:出示团码留在卡内;P-14「举报活动」收进卡片「更多」
   assert.match(wxml, /class="event-group-code"/)
-  assert.match(wxml, /class="ev-more" catchtap="onEventMore"/)
+  assert.match(wxml, /class="ev-more ugc-report" catchtap="onEventMore"/)
   assert.doesNotMatch(wxml, /class="event-report"/)
 
   // —— 活动空态 282:478:卡容器内 标题 / 说明 / 主按钮 / 归属提示 ——
