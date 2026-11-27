@@ -10,5 +10,8 @@
     "cy-badge": "/components/cy/badge/index",
     "cy-session-picker": "/pages/topic/components/cy/session-picker/index"
   },
+  "componentPlaceholder": {
+    "cy-session-picker": "view"
+  },
   "styleIsolation": "isolated"
 }
