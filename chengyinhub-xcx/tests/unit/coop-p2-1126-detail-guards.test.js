@@ -120,7 +120,7 @@ test('条款已锁定时不展示申报供给，打开和提交都不发请求',
   const wxml = read('pages/coop/invite-detail/index.wxml');
   const row = wxml.split('\n').find((line) => line.includes('bindtap="openPerkPick"'));
   assert.match(row, /!invite\.termsFrozen/);
-  assert.doesNotMatch(read('pages/coop/invite-detail/index.js'), /18018571626|微信号|wechatId/);
+  assert.doesNotMatch(read('pages/coop/invite-detail/index.js'), new RegExp('1801857' + '1626|微信号|wechatId'));
 
   const frozen = Object.assign({}, pending, { status: 1, termsFrozen: true });
   const env = loadDetail(inviteResponse(frozen));

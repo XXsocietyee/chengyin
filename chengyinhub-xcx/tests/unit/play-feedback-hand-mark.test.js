@@ -2,11 +2,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
 
-const play = require('../../pages/play/utils/playkit-questo.js');
-const kit = require('../../pages/playkit/utils/playkit-questo.js');
+const { stripLeadingHandMark } = require('../../pages/playkit/utils/hand-mark.js');
 
 test('反馈句只去掉段首一个手写标记', () => {
-  for (const strip of [play.stripLeadingHandMark, kit.stripLeadingHandMark]) {
+  for (const strip of [stripLeadingHandMark]) {
     assert.equal(strip('[手写] 恭喜你解开了'), '恭喜你解开了');
     assert.equal(strip('[手写]恭喜你解开了'), '恭喜你解开了');
     assert.equal(strip('[手写]\u3000下一句'), '下一句');

@@ -1470,8 +1470,8 @@ Page({
     c = this._player || c;
     const scope = this._roamReadScope(), seq = this._roamPoiSeq = (this._roamPoiSeq || 0) + 1, current = () => scope() && seq === this._roamPoiSeq; // 连续重拉只认最后一次,旧回包晚到不覆盖新结果
     // L05-043(业主默认项 A):筛选面板早已没有入口,不再读旧的本机筛选设置,统一用默认 3 公里
-    const radiusM = ROAM_POI_RADIUS_M;
     const live = () => current() && !this._unloaded;
+    const radiusM = ROAM_POI_RADIUS_M;
     return req('/api/roam/pois', 'GET', { lat: String(c.lat), lng: String(c.lng), radius: String(radiusM) }, { silentError: !!(opts && opts.silent) }).then((res) => {
       if (!live()) return;
       // 网络故障 / 非 200 / 形态不对:地图上这些点既没被证实也没被证伪,一律不说「这一带没有」

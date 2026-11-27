@@ -169,7 +169,7 @@ test('欠款时详情页标记可见,不欠款时不标记', () => {
 
   // 负控:把可见性判据写死为 false,欠款用例必须真红
   const broken = loadPage('pages/coop/invite-detail/index.js', inviteResponse(row({ depositOwed: true })), (source) => source.replace(
-    /depositActionVisible:\s*status === 1/,
+    /depositActionVisible:\s*status === 1/g,
     'depositActionVisible: false && status === 1',
   ));
   broken.page.onLoad({ inviteId: '7', box: 'received' });

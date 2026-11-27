@@ -15,7 +15,7 @@ Component({
   },
   lifetimes: {
     ready() { this._dead = false; this._theta = 0; this._vel = 0; this._init(); },
-    detached() { this._dead = true; this.pause(); },
+    detached() { this._dead = true; if (this._flipT) { clearTimeout(this._flipT); this._flipT = 0; } this._stop(); },
   },
   methods: {
     _init() {

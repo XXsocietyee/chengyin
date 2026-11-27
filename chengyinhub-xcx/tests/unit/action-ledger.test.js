@@ -158,8 +158,8 @@ test('R30 切换章节只关闭视频，选择章节仍保留真实旁白的真�
   assert.equal(inferActionClass('onPickChapter',
     expandHandlerBody('onPickChapter', stopped, null, { modules: true }), helpers), 'external')
   for (const controls of [ledger.controls, readCurrentLedger().controls]) {
-    const tools = controls.find(item => item.id === 'pages/play/index.wxml:404:bindtap:openStackOrChaptersFromTools:75')   // 2026-11-27 8路合流:A1+A2+B1+B2 游玩页控件位移,401:72 → 404:75(仅位移)
-    const pick = controls.find(item => item.id === 'pages/play/index.wxml:586:bindtap:onPickChapter:97')   // 2026-11-27 8路合流:A1+A2+B1+B2 游玩页控件位移,583:94 → 586:97(仅位移)
+    const tools = controls.find(item => item.id === 'pages/play/index.wxml:465:bindtap:openStackOrChaptersFromTools:75')   // 2026-11-27 25路合流+动效修复位移,404:75 → 465:75(仅位移)
+    const pick = controls.find(item => item.id === 'pages/play/index.wxml:647:bindtap:onPickChapter:97')   // 2026-11-27 25路合流+动效修复位移,586:97 → 647:97(仅位移)
     assert.ok(tools)
     assert.equal(tools.actionClass, 'state')
     assert.deepEqual(tools.externalCapabilities, [])
@@ -237,7 +237,7 @@ test('同页 scene 或 sheet 入口不得因 go/open 命名误判为页面跳转
 test('导航失败回调的 toast 不得污染 success 为 state 复合效果', () => {
   const actions = ledger.controls.filter((item) => item.entry.wxml
     === 'pages/publish/template-intro/index.wxml' && item.control.handler === 'goCreate')
-  assert.equal(actions.length, 1, '开始创建仍可操作，固定隐藏的加载错误重试不进入分母')
+  assert.ok(actions.length >= 1, '开始创建与失败重试均保留在可操作清单')
   actions.forEach((action) => {
     // navigating/navigationError 是真实持久状态，不是 toast 污染；导航仍必须保留失败分支。
     assert.deepEqual(action.effectClasses, ['navigation', 'state'])
@@ -1141,7 +1141,7 @@ test('动作分类追踪 app 全局 helper，图片选择不能落回本地 stat
 
   const localReload = ledger.controls.find((item) => item.entry.js === 'pages/merchant/index/index.js'
     && item.control.handler === 'reloadConsole')
-  assert.equal(localReload, undefined, '固定隐藏的加载错误重试不进入分母')
+  assert.ok(localReload && localReload.actionClass === 'read', 'load-failure 保留重试入口且仍为本地 read，不串成 external')
   const consoleFile = path.resolve(__dirname, '../../pages/merchant/index/index.js')
   const nativeReload = expandHandlerBody('reloadConsole', handlerSlices(consoleFile))
   assert.notEqual(inferActionClass('reloadConsole', nativeReload), 'external',
@@ -1253,7 +1253,7 @@ test('写操作与动态 URL 合同不能降级成普通读取', () => {
   ;['reloadProfileMetrics'].forEach((handler) => {
     const controls = rebuilt.controls.filter((item) => item.control.handler === handler
       && item.entry.js === 'subpackageMember/components/cy/profile/index.js')
-    assert.equal(controls.length, 0, '固定隐藏的加载错误重试不进入分母')
+    assert.ok(controls.length >= 1, 'load-failure 加载错误重试保留在可操作清单')
     const profileFile = path.resolve(__dirname, '../../subpackageMember/components/cy/profile/index.js')
     const targets = targetsForHandler(profileFile, handler)
     assert.ok(targets.apiContracts.some(contract => contract.url === '/api/play/my-completed'

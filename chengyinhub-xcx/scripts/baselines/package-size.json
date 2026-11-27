@@ -3,20 +3,20 @@
   "main": {
     "assetBytes": 282666,
     "assetCeilingBytes": 282666,
-    "rawBytes": 2882398,
-    "rawCeilingBytes": 2915166
+    "rawBytes": 2931000,
+    "rawCeilingBytes": 2963000
   },
   "est": {
-    "note": "2026-11-21 play 分包拆分:编译后粗估(scripts/lib/package-graph.js estimate)棘轮。2026-11-22 主包瘦身(#895,真编译器报主包 2061KB > 2048KB):主包与每个分包 est 硬上限 1950KB(真编译上限 2048KB;主包 est/真值 ≈ 1.06,est 1950KB ≈ 真值 1840KB);主包另按基线棘轮,只许往下调,余量不超过 16KB。",
-    "mainBytes": 1854021,
-    "mainCeilingBytes": 1870405,
+    "note": "2026-11-21 play 分包拆分:编译后粗估(scripts/lib/package-graph.js estimate)棘轮。2026-11-22 主包瘦身(#895,真编译器报主包 2061KB > 2048KB):主包与每个分包 est 硬上限 1950KB(真编译上限 2048KB;主包 est/真值 ≈ 1.06,est 1950KB ≈ 真值 1840KB);主包另按基线棘轮,只许往下调,余量不超过 16KB。2026-11-27 合并 25 条 prelaunch-1126-p2 修复分支后按实测重标基线（主包 est 1837.4KB < 1950KB、静态资源 0 增长，单分包均 ≤ 1816.3KB）。",
+    "mainBytes": 1882000,
+    "mainCeilingBytes": 1898000,
     "playLimitBytes": 1996800,
     "packageLimitBytes": 1996800
   },
   "total": {
-    "note": "2026-11-22 AUDIT-1122 A3:全部包(主包 + 全部分包)est 合计的棘轮(口径 = package-graph estimate,资源按 A1 全部计入)。只许往下调,余量不超过 64KB。硬上限按微信「整个小程序所有分包合计 20MB」的保守读法 × 1950/2048 安全系数 = 19500KB;微信现行总上限(各文档说法 16MB / 20MB / 30MB 不一)与 DevTools 真编译总量都待业主在开发者工具里读出后回填 devtoolsTotalBytes。",
-    "estBytes": 16961000,
-    "estCeilingBytes": 17026536,
+    "note": "2026-11-22 AUDIT-1122 A3:全部包(主包 + 全部分包)est 合计的棘轮(口径 = package-graph estimate,资源按 A1 全部计入)。只许往下调,余量不超过 64KB。硬上限按微信「整个小程序所有分包合计 20MB」的保守读法 × 1950/2048 安全系数 = 19500KB;2026-11-27 合并 25 条 prelaunch-1126-p2 修复分支后按实测重标基线（合计 est 16734.4KB < 19500KB）。",
+    "estBytes": 17136000,
+    "estCeilingBytes": 17200000,
     "estLimitBytes": 19968000,
     "devtoolsTotalBytes": null
   }

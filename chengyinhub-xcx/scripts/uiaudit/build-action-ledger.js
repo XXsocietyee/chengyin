@@ -2020,6 +2020,9 @@ function expandHandlerBody(handlerName, slices, seen, opts) {
   const callRe = /\b(?:this|that|self)\.([A-Za-z_$][\w$]*)\s*\(/g
   let match
   while ((match = callRe.exec(body))) {
+    // _boundPlayOwner() 里的 _reloadAfterGuestLogin 仅在访客首次登录态切换时触发一次整页重读，
+    // 不是调用 _isPlayAccountCurrent() 的每个按钮(如切换章节、查提示)自身的写入/外部能力。
+    if (match[1] === '_reloadAfterGuestLogin') continue
     if (slices.has(match[1])) nested.push(expandHandlerBody(match[1], slices, seen, opts))
   }
   if (opts && opts.modules) {

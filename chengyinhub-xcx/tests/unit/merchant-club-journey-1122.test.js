@@ -190,7 +190,7 @@ test('J2-4 AI 店铺角色:保存失败不空白、不露英文', () => {
   const js = read('pages/merchant/decor/ai-npc/index.js');
   assert.doesNotMatch(js, /canvas not found|image load fail/);
   assert.doesNotMatch(js, /fail: reject,/);
-  assert.equal((js.match(/saveError: \(e && e\.message\) \|\| '保存没有完成，请重试'/g) || []).length, 2);
+  assert.equal((js.match(/saveError: staffErrorText\(e, '保存没有完成，请重试'\)/g) || []).length, 2);
 });
 
 test('J2-5 选点失败:取消静默,拒权给去设置,其余如实说明', () => {

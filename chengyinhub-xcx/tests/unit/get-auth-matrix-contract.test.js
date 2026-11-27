@@ -383,6 +383,8 @@ const MATRIX = [
   ['pages/templatedetail/topic-detail/index.js', "url: '/api/media/asset/attribution'", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
   // 2026-11-14 合 master #840：封面署名与节点图署名复用同一公开只读接口。
   ['pages/templatedetail/topic-detail/index.js', "data: { reference: g.img }", 'optional', 'visitor/member', 'public-detail+viewer-personalization'],
+  // 2026-11-27 p2-topic: node-npc-form 试听作者自有语音素材读签名预览地址 GET /api/media/asset/{id}/preview（ApiMediaAssetController 按 getAppUserId() 校验本人归属）。
+  ['pages/topic/components/cy/node-npc-form/index.js', "url: '/api/media/asset/' + assetId + '/preview'", 'required', 'author', 'owned-media-asset'],
 ];
 
 const VALID_SCOPES = new Set([
@@ -578,7 +580,8 @@ test('全部 GET 调用点都有 URL + method + auth/角色/scope 分类，新�
   // 2026-11-24 DEC-F12:主题页多人票付款回查本人一单 + 票夹读本人已领同伴席位(均已入 MATRIX),151 → 153。
   // 2026-11-27 N1-03:玩法详情页同包内直接读举报原因字典 GET /api/v1/community/capabilities(同端点同权限档,已入 MATRIX),153 → 154。
   // 2026-11-27 Cloud B1:游玩页剧内解锁读目录/本人订单 + 自玩双人读 encounter 共三处直接 GET(均已入 MATRIX),154 → 157。
-  assert.equal(directCount, 157, '直接 GET 数量变化时必须逐条复核权限并更新矩阵');
+  // 2026-11-27 prelaunch-1126-p2-topic: node-npc-form 试听本人语音素材读 GET /api/media/asset/{id}/preview（已入 MATRIX）,157 → 158。
+  assert.equal(directCount, 158, '直接 GET 数量变化时必须逐条复核权限并更新矩阵');
   // 2026-10-09 U04 只读主题请求增加6处，22 → 28。
   // 2026-10-19 Claude 小程序线移植到 master(用户批准冻结数值更新):漫游 BL-41 可参与官方活动 req 包装 GET +1(已入 MATRIX),28 → 29。
   // 2026-10-22 L21 BL-186:pages/play 本章结算 GET /api/play/journey/stage-end(与 /ending 同档),29 → 30。

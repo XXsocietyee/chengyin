@@ -57,5 +57,5 @@ test('pin-spin 只用勋章墙验证过的接口,并尊重减弱动态效果', (
   assert.match(src, /wx\.canvasToTempFilePath\(/)
   assert.match(src, /canvas\.createImage\(\)/)
   assert.match(src, /if \(!this\.data\.reduced\) this\._spinTo\(1\)/, '减弱动态效果时进页不自动转')
-  assert.match(src, /detached\(\) \{ this\._dead = true; this\._stop\(\); \}/)
+  assert.match(src, /detached\(\) \{ this\._dead = true; (?:if \(this\._flipT\) \{ clearTimeout\(this\._flipT\); this\._flipT = 0; \} )?this\._stop\(\); \}/)
 })

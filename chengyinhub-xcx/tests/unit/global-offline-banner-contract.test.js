@@ -29,8 +29,8 @@ test('app 装一次网络状态;cy-nav-bar 订阅/退订并在标题栏下挂 cy
   assert.match(read('app.js'), /this\.networkStatus = createNetworkStatus\(wx\)/);
   const js = read('components/cy/nav-bar/index.js');
   // L10-165:订阅立即回放当前值,与已渲染值相同不 setData
-  assert.match(js, /app\.networkStatus\.subscribe\(\(offline\) => \{ if \(!!offline !== this\.data\.offline\) this\.setData\(\{ offline: !!offline \}\); \}\)/);
-  assert.match(js, /detached\(\) \{\s*if \(this\._offNetwork\) this\._offNetwork\(\);/);
+  assert.match(js, /app\.networkStatus\.subscribe\(\(offline\) => \{ (?:if \(this\._dead\) return; )?if \(!!offline !== this\.data\.offline\) this\.setData\(\{ offline: !!offline \}\); \}\)/);
+  assert.match(js, /detached\(\) \{\s*(?:this\._dead = true;\s*)?if \(this\._offNetwork\) this\._offNetwork\(\);/);
   const wxml = read('components/cy/nav-bar/index.wxml');
   assert.match(wxml, /wx:if="\{\{offline\}\}"[^>]*>\s*<cy-offline-banner \/>/);
   const json = JSON.parse(read('components/cy/nav-bar/index.json'));

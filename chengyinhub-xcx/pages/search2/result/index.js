@@ -8,7 +8,6 @@ const app = getApp();
 const discoverSearch = require('../../../utils/discover-search.js');
 const { openScene } = require('../../../utils/scene-entry.js');
 const { memberId, failureStatus, recoverReadSession } = require('../../../utils/session/login-reload.js');
-const { safeDecode } = require('../../../utils/safe-decode.js');
 const DEFAULT_RESULT_TABS = [{ key: 'all', label: '全部' }];
 // L05-159:合并搜索服务端默认关闭(503)。没打开就不发 /api/search/unified,只用拆开的列表。
 function unifiedAvailable() {
@@ -57,12 +56,12 @@ Page({
   },
 
   onLoad(options) { if (isMerchantView()) this.setData({ merchantView: true });
-    const keyword = options.keyword ? safeDecode(options.keyword) : '';
+    const keyword = options.keyword ? decodeQuery(options.keyword) : '';
     const categoryId = options.categoryId || null;
     this._filters = {
       cityCode: options.city_code || options.cityCode || '',
-      startDate: options.startDate ? safeDecode(options.startDate) : '',
-      endDate: options.endDate ? safeDecode(options.endDate) : '',
+      startDate: options.startDate ? decodeQuery(options.startDate) : '',
+      endDate: options.endDate ? decodeQuery(options.endDate) : '',
       minPrice: options.minPrice != null && options.minPrice !== '' ? Number(options.minPrice) : null,
       maxPrice: options.maxPrice != null && options.maxPrice !== '' ? Number(options.maxPrice) : null,
       // CU-M-66:入口页的排序选择必须活到请求里。四类里只有 /api/activity/list 有 sort_type,

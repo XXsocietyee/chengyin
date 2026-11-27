@@ -80,10 +80,9 @@ Component({
       const stop = this._pmCounters && this._pmCounters.pfK;
       if (typeof stop === 'function') stop();
       if (typeof clearTimeout === 'function') clearTimeout(this._pmListTimer);
-      const patch = {};
-      if (this.data.pfK != null) patch.pfK = null;
-      if (this.data.pmList) patch.pmList = 0;
-      if (Object.keys(patch).length) this.setData(patch);
+      if (this.data.pfK != null && this.data.pmList) this.setData({ pfK: null, pmList: 0 });
+      else if (this.data.pfK != null) this.setData({ pfK: null });
+      else if (this.data.pmList) this.setData({ pmList: 0 });
     },
   },
   methods: {

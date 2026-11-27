@@ -356,11 +356,14 @@ Page({
   _profileLoadFailed() {
     const info = this.data.userInfo || {};
     const keep = !!(this.data.selectedAddress || info.realName || info.phone);
-    const patch = { profileError: '个人资料没加载出来，请核对参与人信息' };
-    if (!keep) {
-      patch.userInfo = { realName: '', phone: '', email: '', address: '', point: 0 };
+    if (keep) {
+      this.setData({ profileError: '个人资料没加载出来，请核对参与人信息' });
+    } else {
+      this.setData({
+        profileError: '个人资料没加载出来，请核对参与人信息',
+        userInfo: { realName: '', phone: '', email: '', address: '', point: 0 },
+      });
     }
-    this.setData(patch);
   },
 
   getUserInfo() {

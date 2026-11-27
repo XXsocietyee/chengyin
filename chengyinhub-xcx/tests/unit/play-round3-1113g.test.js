@@ -45,7 +45,7 @@ test('结算「继续」不去空故事页:只回看有正文的已完成章', (
 })
 
 test('逐字猜词没有题面时用站名', () => {
-  assert.match(read('pages/play/index.js'), /picked\.type === 'hangman' && placeNode\) Object\.assign\(picked, hangmanStationText\(picked, placeNode, stationLabel\(/)
+  assert.match(read('pages/play/index.js'), /picked\.type === 'hangman' && placeNode\) Object\.assign\(picked, hangmanStationText\(picked, (?:placeNode|this\._solvedPassNode\(placeNode[^)]*\)), stationLabel\(/)
 })
 
 test('章节门:说明超长补省略号;章节印已去掉(2026-11-22 业主)', () => {

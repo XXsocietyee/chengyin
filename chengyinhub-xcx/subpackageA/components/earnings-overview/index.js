@@ -176,9 +176,11 @@ Component({
           if (!this._current(epoch)) { this._clearOtherMember(); return; }
           const stages = res && res.code == 200 ? buildFundsStages(res.data) : null;
           if (!stages) {
-            const patch = { assetsError: true };
-            if (!this._keepsShown(identityKey())) patch.assets = [];
-            this.setData(patch);
+            if (!this._keepsShown(identityKey())) {
+              this.setData({ assetsError: true, assets: [] });
+            } else {
+              this.setData({ assetsError: true });
+            }
             this._mark(epoch, 'assets', false);
             return;
           }

@@ -867,7 +867,7 @@ Page({
     const stale = !!(app.globalData && app.globalData.merchantWorkbenchStale === true);
     if (stale) app.globalData.merchantWorkbenchStale = false;
     const pullRefresh = !!(options && options.preserveVerification === true);
-    if (!pullRefresh && this._staticHomeReady(memberId)) {
+    if (!pullRefresh && this._staticHomeReady && this._staticHomeReady(memberId)) {
       this._resumeLoadedHome(stale);
       return;
     }
@@ -1169,7 +1169,7 @@ Page({
 
   // 累计收入从「屏上当前显示值」滚到新值(慢-快-慢);减少动态效果时直接落定。
   countRevenueTo(target) {
-    this.stopRevenueCount();
+    if (this.stopRevenueCount) this.stopRevenueCount();
     const from = Number(this.data.revenueShown) || 0;
     const to = Number(target) || 0;
     this._revenueCountStop = motion.countUp(from, to, (value) => {
@@ -1887,7 +1887,7 @@ Page({
       merchantTheme.merchantPageRestore();
       return;
     }
-    this._noteLoginLeave();
+    if (this._noteLoginLeave) this._noteLoginLeave();
     const sceneId = this.data && this.data.sceneCurrent && this.data.sceneCurrent.id;
     if (this._systemPickerOpen
         || sceneId === 'merchant-chapter-picker'
@@ -1897,7 +1897,7 @@ Page({
       this._pickerMember = String(app.getUserID() || '');
     }
     this._businessActionEpoch = (this._businessActionEpoch || 0) + 1;
-    this.stopRevenueCount();
+    if (this.stopRevenueCount) this.stopRevenueCount();
     if (this._refreshEndTimer) {
       clearTimeout(this._refreshEndTimer);
       this._refreshEndTimer = null;
@@ -1910,7 +1910,7 @@ Page({
   onUnload() {
     this._unloaded = true;
     this._projectCardsRefreshGen = (this._projectCardsRefreshGen || 0) + 1;
-    this._noteLoginLeave();
+    if (this._noteLoginLeave) this._noteLoginLeave();
     if (this._offIdentitySync) { this._offIdentitySync(); this._offIdentitySync = null; }
     if (this._revHoldTimer) { clearTimeout(this._revHoldTimer); this._revHoldTimer = null; }
     if (this._revenueCountStop) this._revenueCountStop();

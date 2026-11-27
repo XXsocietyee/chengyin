@@ -1520,37 +1520,31 @@ Page({
   _affectedRefreshers: function (keys) {
     const hit = (prefix) => keys.some((key) => key === prefix || key.indexOf(prefix + '.') === 0 || key.indexOf(prefix + '[') === 0);
     const wholeAdvanced = keys.indexOf('advanced') >= 0;
+    const isQaTitleOnly = keys.length > 0 && keys.every((key) => key === 'advanced.qa.title' || key === 'advancedConfigError' || key === 'submitError');
+    const anyAdvanced = !isQaTitleOnly && (wholeAdvanced || keys.some((key) => key.indexOf('advanced.') === 0));
     const wholeForm = keys.indexOf('formData') >= 0;
     const sectionRoot = keys.some((key) => /^advanced\.[A-Za-z0-9_]+$/.test(key));
     const enabledOrMode = keys.some((key) => /\.enabled$/.test(key) || /\.mode$/.test(key));
-    const want = { effects: false, support: false, outcome: false, check: false, qa: false, questo: false, segments: false, clue: false, preview: true };
-    want.effects = wholeAdvanced || hit('advanced.interactionRules') || keys.some((key) => key.indexOf('.effects') >= 0)
-      || ['outcomeRules', 'check', 'pricePair', 'hiddenObject', 'sort', 'match', 'classify', 'qa', 'profile', 'branch'].some((name) => keys.indexOf('advanced.' + name) >= 0)
-      || keys.indexOf('advanced.qa.options') >= 0 || keys.indexOf('advanced.profile.questions') >= 0;
-    want.support = wholeAdvanced || wholeForm || sectionRoot || enabledOrMode
+    const previewFields = ['title', 'description', 'validationMethod', 'questionName', 'questionAnswer', 'preferenceJson',
+      'couponId', 'feedbackText', 'medalImg', 'medalName', 'audioUrl', 'sensorType', 'sensorConfig'];
+    const want = { effects: false, support: false, outcome: false, check: false, qa: false, questo: false, segments: false, clue: false, preview: false };
+    want.effects = anyAdvanced || hit('advanced.interactionRules') || keys.some((key) => key.indexOf('.effects') >= 0);
+    want.support = anyAdvanced || wholeForm || sectionRoot || enabledOrMode
       || hit('gameKey') || hit('gameSection') || hit('gameCurrent') || hit('formData.validationMethod')
-      || hit('advanced.scan') || hit('advanced.outcomeRules') || hit('advanced.interactionRules') || hit('advanced.interactionTools')
-      || hit('advanced.branch') || hit('advanced.diceRoll') || hit('advanced.coinFlip') || hit('advanced.timer')
-      || hit('advanced.timeWindow') || hit('advanced.leaderboard') || hit('advanced.multiplayer')
-      || hit('optionItems') || hit('advanced.qa.options') || hit('advanced.blindTaste.options')
-      || hit('advanced.predict.options') || hit('advanced.pricePair.items') || hit('advanced.random.items');
-    want.outcome = wholeAdvanced || wholeForm || hit('formData.validationMethod') || hit('formData.preferenceJson')
-      || hit('advanced.branch') || hit('advanced.diceRoll');
-    const checkFields = {
-      timer: ['durationSeconds'], typeIn: ['seconds', 'tries'], sort: ['maxAttempts'], pricePair: ['maxTries'],
-      qa: ['maxTries'], hiddenObject: ['maxTries'], stopwatch: ['tries', 'toleranceMs'],
-      ballShake: ['timed', 'seconds', 'goal'], quietHold: ['seconds'], shout: ['seconds'],
-      countdown: ['seconds'], compass: ['holdSeconds', 'tolerance'], reaction: ['goalMs'], estimate: ['tolerance'],
-    };
-    want.check = wholeAdvanced || hit('advanced.variants') || hit('advanced.check')
-      || Object.keys(checkFields).some((name) => keys.indexOf('advanced.' + name) >= 0 || keys.indexOf('advanced.' + name + '.enabled') >= 0
-        || checkFields[name].some((field) => hit('advanced.' + name + '.' + field)));
+      || hit('formData.preferenceJson') || hit('formData.sensorType') || hit('formData.sensorConfig')
+      || hit('optionItems');
+    want.outcome = anyAdvanced || wholeForm || hit('formData.validationMethod') || hit('formData.preferenceJson');
+    want.check = anyAdvanced;
     want.qa = wholeAdvanced || wholeForm || hit('advanced.qa') || hit('formData.originalTemplateId');
-    want.questo = wholeAdvanced || hit('advanced.hangman') || hit('advanced.qa') || hit('advanced.accusation')
-      || hit('advanced.hintLadder') || hit('advanced.answerPolicy') || hit('advanced.hintFreeUsesPerRun');
-    want.segments = wholeAdvanced || hit('gameKey') || hit('gameSection')
-      || ['qa', 'sort', 'match', 'classify'].some((name) => keys.indexOf('advanced.' + name) >= 0 || keys.indexOf('advanced.' + name + '.enabled') >= 0);
+    want.questo = anyAdvanced || isQaTitleOnly;
+    want.segments = !isQaTitleOnly && (wholeAdvanced || hit('gameKey') || hit('gameSection')
+      || ['qa', 'sort', 'match', 'classify'].some((name) => hit('advanced.' + name)));
     want.clue = hit('storyBeats');
+    want.preview = anyAdvanced || isQaTitleOnly || wholeForm
+      || previewFields.some((field) => hit('formData.' + field))
+      || hit('moduleList') || hit('availableModules') || hit('selectedCategoryIds')
+      || hit('interactionType') || hit('optionQuestion') || hit('optionItems')
+      || hit('gameKey') || hit('gameSection');
     return want;
   },
   _armPageTimer: function (name, fn, ms) {

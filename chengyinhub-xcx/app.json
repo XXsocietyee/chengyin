@@ -364,6 +364,7 @@
     "pages/member/index/index": {
       "network": "all",
       "packages": [
+        "subpackageMember",
         "subpackageA"
       ]
     },

@@ -283,9 +283,11 @@ test('聊天拉黑和清空确认落库记为真实写入，不因 confirm 被 D
 
 test('导演台对账能力是保守传递闭包：loadProjection 合法可达 receipt，retryUnknownWrite 为 over-approx 候选', () => {
   const rows = ledger().controls.filter(row => row.entry.wxml === 'pages/club/topic-detail/index.wxml')
-  assert.ok(!rows.some(row => row.control.handler === 'loadProjection'),
-    'constant blank loading failures do not expose actionable retry controls')
-  const load = { targets: targetsForHandler(pathFor('pages/club/topic-detail/index.js'), 'loadProjection') }
+  const load = rows.find(row => row.control.handler === 'loadProjection')
+    || { targets: targetsForHandler(pathFor('pages/club/topic-detail/index.js'), 'loadProjection') }
+  // 2026-11-26 p2-components: load-failure 不再铺空白占位，重试入口保留在可操作清单里
+  assert.ok(rows.some(row => row.control.handler === 'loadProjection'),
+    'load-failure keeps actionable retry control in the ledger')
   // init 存在未确认写入时 writeLocked/_unknownRequestId 为真，applyProjection 的 setData 回调
   // 会调用 onReconcileUnknownWrite → readReceipt，故 loadProjection 的 receipt 是合法传递能力。
   assert.ok(load.targets.primaryApis.includes('/api/game/session/receipt'))

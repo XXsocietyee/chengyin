@@ -8,8 +8,14 @@ const source = fs.readFileSync(
   'utf8'
 )
 
+function onLoadSlice(src) {
+  const start = src.indexOf('onLoad(options) {')
+  assert.ok(start >= 0, 'index page must expose onLoad')
+  return src.slice(start)
+}
+
 test('首页玩家分支清除旧角色留下的隐藏闸', () => {
-  const playerBranch = source.match(/if \(isMerchantView\(\)\) \{[\s\S]*?\n    \}\n([\s\S]*?)\n    \/\/ 能力模型/)
+  const playerBranch = onLoadSlice(source).match(/if \(isMerchantView\(\)\) \{[\s\S]*?\n    \}\n([\s\S]*?)\n    \/\/ 能力模型/)
   assert.ok(playerBranch, '首页 onLoad must keep an explicit player branch')
   assert.match(playerBranch[1], /setData\(\{ _needsRedirect: false \}\)/)
 })
@@ -29,7 +35,7 @@ test('身份负控：删掉玩家分支复位会判红', () => {
   )
   assert.doesNotMatch(mutated, /data 初值可能在旧角色快照下创建/)
   assert.throws(() => {
-    const playerBranch = mutated.match(/if \(isMerchantView\(\)\) \{[\s\S]*?\n    \}\n([\s\S]*?)\n    \/\/ 能力模型/)
+    const playerBranch = onLoadSlice(mutated).match(/if \(isMerchantView\(\)\) \{[\s\S]*?\n    \}\n([\s\S]*?)\n    \/\/ 能力模型/)
     assert.match(playerBranch[1], /setData\(\{ _needsRedirect: false \}\)/)
   })
 })

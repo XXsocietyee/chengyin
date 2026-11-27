@@ -828,9 +828,11 @@ Page({
       // 结束或失败都清掉在途标记,保存再跟着昵称(canSave)。
       onUploadDone(r) {
         if (that.currentProfileContext(context)) {
-          const patch = { avatarUploading: false };
-          if (!r.ok && previousSrc !== null) patch.avatarSrc = previousSrc;
-          that.setData(patch);
+          if (!r.ok && previousSrc !== null) {
+            that.setData({ avatarUploading: false, avatarSrc: previousSrc });
+          } else {
+            that.setData({ avatarUploading: false });
+          }
           that.refreshSaveState();
         }
         return false;

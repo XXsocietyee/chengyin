@@ -1,5 +1,4 @@
 const moneyFormat = require('../../../utils/money-format.js')
-const { safeDecode } = require('../../../utils/safe-decode.js')
 // 城瘾 · 俱乐部报名名册(主理人/管理员视角)
 // 列出俱乐部各团的报名人数;点开看每个票种的报名者名单。管理员只读;清退退款仅主理人。
 // 数据:/api/club/topics(各团 signupCount) + /api/club/topic-registrations(票种 + 报名者名单)
@@ -62,9 +61,13 @@ Page({
     // 预聚焦 = 到达时自动展开该团并拉它的名单(不隐藏其他团,避免看起来像丢了数据)。
     const focusTopicId = Number(options && options.topicId);
     this._focusTopicId = Number.isInteger(focusTopicId) && focusTopicId > 0 ? focusTopicId : null;
+    let clubName = '';
+    if (options.clubName) {
+      try { clubName = decodeURIComponent(options.clubName); } catch (error) { clubName = ''; }
+    }
     this.setData({
       clubId: options.clubId || null,
-      clubName: options.clubName ? safeDecode(options.clubName) : '',
+      clubName,
     });
     if (this.data.clubId) this.checkPermission();
     else this.resolveClub();

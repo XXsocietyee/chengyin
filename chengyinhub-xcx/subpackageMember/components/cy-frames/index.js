@@ -27,7 +27,7 @@ Component({
   data: { on: false, reduced: false, slots: [], pos: '', sheetW: 0, sheetH: 0 },
   lifetimes: {
     attached() { this._reset(); this._start(); },
-    detached() { this._stop(); },
+    detached() { this._gone = true; this._stop(); },
   },
   pageLifetimes: {
     // L02-118: 入场延时里切后台,回来要重新入场;否则 on 一直是 false,帧动画停在看不见的起点

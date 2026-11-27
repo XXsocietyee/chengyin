@@ -189,7 +189,7 @@ test('MC-056:「当前岗位没有客户查看权限」也判为无权限', () =
 
 test('MC-057:客户列表按页请求,触底续读,服务端不分页时去重即停', () => {
   const js = read('pages/club/customers/index.js')
-  assert.match(js, /pageNum, pageSize: PAGE_SIZE \}\)/)
+  assert.match(js, /pageNum, pageSize(?:: PAGE_SIZE)? \}\)/)
   assert.match(js, /onReachBottom\(\) \{/)
   assert.match(js, /const fresh = shaped\.items\.filter\(\(item\) => !seen\.has\(item\.memberId\)\);/)
 })

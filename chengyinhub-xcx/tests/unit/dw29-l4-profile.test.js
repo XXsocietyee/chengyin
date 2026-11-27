@@ -118,7 +118,7 @@ test('V-15 全站同步:我的/主页头、首页问候、俱乐部成员、帖�
   const home = read('pages/index/index.js')
   assert.match(home, /this\._offIdentity = identitySync\.onIdentityChange\(/)
   assert.match(home, /if \(this\._offIdentity\) \{ this\._offIdentity\(\); this\._offIdentity = null; \}/)
-  assert.match(home, /avatar: avatarSrc\(res\.data\.avatar, app\.getImgUrl && app\.getImgUrl\.bind\(app\)\)/)
+  assert.match(home, /avatarSrc\(res\.data\.avatar, app\.getImgUrl && app\.getImgUrl\.bind\(app\)\)/)
 
   const club = read('pages/club/detail/index.js')
   assert.match(club, /m && m\.avatar && app\.getImgUrl \? Object\.assign\(\{\}, m, \{ avatar: app\.getImgUrl\(m\.avatar\) \}\) : m/)

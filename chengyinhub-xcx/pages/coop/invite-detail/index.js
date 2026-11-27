@@ -166,11 +166,19 @@ Page({
     this._perkOpenOnRefresh = !!(sameIdentity && this.data.showPerkPick);
     if (!keep) this.setData({ state: 'loading', invite: null });
     // 同一身份刷新不回写 draft:请求飞行中继续打的字若被 setData 成开请求时的快照,理由会被截断。
-    const refreshPatch = { errorText: '', submitting: false, draftError: '',
-      showPerkPick: false, perkSaving: false, perkState: 'idle', perkErrorText: '',
-      reviewSheetShow: false, myReviewStars: '', reviewVerifying: false, actionReceipt: '', actionError: '' };
-    if (!sameIdentity) refreshPatch.draft = '';
-    this.setData(refreshPatch);
+    if (sameIdentity) {
+      this.setData({
+        errorText: '', submitting: false, draftError: '',
+        showPerkPick: false, perkSaving: false, perkState: 'idle', perkErrorText: '',
+        reviewSheetShow: false, myReviewStars: '', reviewVerifying: false, actionReceipt: '', actionError: '',
+      });
+    } else {
+      this.setData({
+        errorText: '', submitting: false, draftError: '', draft: '',
+        showPerkPick: false, perkSaving: false, perkState: 'idle', perkErrorText: '',
+        reviewSheetShow: false, myReviewStars: '', reviewVerifying: false, actionReceipt: '', actionError: '',
+      });
+    }
     const that = this;
     const ctx = this._captureContext();
     const done = () => { if (fromPull && typeof wx.stopPullDownRefresh === 'function') wx.stopPullDownRefresh(); };
@@ -240,26 +248,34 @@ Page({
     }
     const explainFrozenSupply = !!(this._perkOpenOnRefresh && inv.termsFrozen);
     this._perkOpenOnRefresh = false;
-    const patch = {
-      state: 'ready', invite: inv, submitting: false,
-      statusText: STATUS_LABEL[status] || '',
-      tone: TONE[status] || 'closed',
-      inputKind: kind, inputLabel: label, inputPlaceholder: ph, draftError: '',
-      actionReceipt: '',
-      actionError: explainFrozenSupply ? '条款已锁定，不能再申报供给' : '',
-      // 欠保证金时给唯一实心入口(搬走的动作不在这里重复);!legacyReadonly 与搬走的卡片闸一致
-      depositActionVisible: status === 1 && !inv.legacyReadonly && !!inv.depositDueText,
-      projectActionVisible: status === 1 && !inv.legacyReadonly
-        && !!acceptedProjectScope(inv, this.data.box) && !!parseInviteId(inv.topicId),
-      showPerkPick: false, perkTemplates: [], perkSaving: false, perkState: 'idle', perkErrorText: '',
-      reviewSheetShow: false,
-      myReviewStars: '',
-      reviewVerifying: false,
-      partnerCredit: null,
-    };
     // 同一条、同一状态的刷新不把 draft 写回输入框,飞行中的按键留在 data.draft 里。
-    if (!(options && options.keepLiveDraft)) patch.draft = draft || '';
-    this.setData(patch);
+    const keepLiveDraft = !!(options && options.keepLiveDraft);
+    const nextActionError = explainFrozenSupply ? '条款已锁定，不能再申报供给' : '';
+    const nextProjectVisible = status === 1 && !inv.legacyReadonly
+      && !!acceptedProjectScope(inv, this.data.box) && !!parseInviteId(inv.topicId);
+    if (keepLiveDraft) {
+      this.setData({
+        state: 'ready', invite: inv, submitting: false,
+        statusText: STATUS_LABEL[status] || '', tone: TONE[status] || 'closed',
+        inputKind: kind, inputLabel: label, inputPlaceholder: ph, draftError: '',
+        actionReceipt: '', actionError: nextActionError,
+        depositActionVisible: status === 1 && !inv.legacyReadonly && !!inv.depositDueText,
+        projectActionVisible: nextProjectVisible,
+        showPerkPick: false, perkTemplates: [], perkSaving: false, perkState: 'idle', perkErrorText: '',
+        reviewSheetShow: false, myReviewStars: '', reviewVerifying: false, partnerCredit: null,
+      });
+    } else {
+      this.setData({
+        state: 'ready', invite: inv, submitting: false,
+        statusText: STATUS_LABEL[status] || '', tone: TONE[status] || 'closed',
+        inputKind: kind, inputLabel: label, inputPlaceholder: ph, draftError: '', draft: draft || '',
+        actionReceipt: '', actionError: nextActionError,
+        depositActionVisible: status === 1 && !inv.legacyReadonly && !!inv.depositDueText,
+        projectActionVisible: nextProjectVisible,
+        showPerkPick: false, perkTemplates: [], perkSaving: false, perkState: 'idle', perkErrorText: '',
+        reviewSheetShow: false, myReviewStars: '', reviewVerifying: false, partnerCredit: null,
+      });
+    }
     if (status === 1 && !inv.legacyReadonly) this.loadMyReview(inv);
     this.loadPartnerCredit(inv);
   },

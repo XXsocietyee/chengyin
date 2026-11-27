@@ -131,13 +131,13 @@ test('预览层内保存成功的“返回上一页”必须离开编辑器，�
   assert.equal(result.events[0].type, 'navigateBack')
   assert.equal(result.events[0].options.delta, 1)
   const source = fs.readFileSync(path.join(ROOT, 'pages/publish/temp/index.js'), 'utf8')
-  assert.match(source, /setTimeout\(function \(\) \{ if \(current\(\)\) that\.exitPage\(\); \}, 600\)/)
+  assert.match(source, /_armPageTimer\('_exitTimer', function \(\) \{ if \(current\(\)\) that\.exitPage\(\); \}, 600\)/)
 })
 
 test('负控：成功离场误复用 goBack 时，previewVisible 会把用户留在编辑器', () => {
   const result = runEditorSuccessBack(source => source
     .replace("if (flow[key] === 'back') this.exitPage();", "if (flow[key] === 'back') this.goBack();")
-    .replace('setTimeout(function () { if (current()) that.exitPage(); }, 600);', 'setTimeout(function () { if (current()) that.goBack(); }, 600);'))
+    .replace("_armPageTimer('_exitTimer', function () { if (current()) that.exitPage(); }, 600);", "_armPageTimer('_exitTimer', function () { if (current()) that.goBack(); }, 600);"))
   assert.equal(result.events.length, 0)
   assert.equal(result.page.data.previewVisible, false)
 })

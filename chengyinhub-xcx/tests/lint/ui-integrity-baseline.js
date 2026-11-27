@@ -426,7 +426,7 @@ module.exports = {
   // (本支) //   配套契约测试 publish-temp-ai.test.js 一起退役),u3Handler 92→90 取门禁实测。
   // (本支) //   同删让 themeName/nodeName 失去本页唯一的 this.data 读取方(原本只被 AI 请求体读),
   // (本支) //   转为存量零消费债务登记(162-1+2=163,显式调大),删字段=动 fabu→temp 跨页契约,留待重构收口。
-  // (本支) "u3Handler": 62,
+  // (本支) "u3Handler": 90,
     // 2026-09-16 截图冒烟修复(本批):merchantinfo 缺参态按「与其它详情页一致」补了
     //   <cy-nav-bar bind:back="goBack">,该页 goBack 的零绑定债务(81 号)真的被消费 ⇒ 81→80。
     // 2026-11-19 verify-1119-mini-a:PG-062 删 shezhi goEdit/goPinpai/goRuzhu、PG-034 删 coop/withdraw(goBack)四条零绑定债务出账,55→51。
@@ -451,7 +451,7 @@ module.exports = {
     // 2026-11-24 AUDIT-1122 F05 L05-045 业主默认项(合 master #945 后):roam#onShareSwipe 随方形分享卡删除出账,u3Handler 24→23,u3Debt digest 按门禁 baselineKeyDigest 在合并树重算。
     // 2026-11-24 F09b 第二次合 master:F09b 与 F05 业主默认项各出账一条取并集,u3Handler 23→22,digest 按 baselineKeyDigest 重算。
     // 2026-11-24 AUDIT-1122 F03 第二轮再合 origin/master(ffea5cb9):两侧退役的 U3 条目取并集,u3Handler 24−7(F03 L03-043)−1(F05 L05-045)=16;u3Debt / u4Dynamic digest 按门禁 baselineKeyDigest 在合并树重算。
-    "u3Handler": 15,
+    "u3Handler": 16,
     // 2026-09-06 孤儿页清理:club/dissolution-blockers(focusType/focusId)与 merchant/discover(loaded)
     //   三页级零消费字段随页面整删,u4Field 170→167,digest 取门禁实测。
     // 2026-09-06 原生 toast 收口:simple#toast / templateadd#id / infomationdetail#id 三条零消费债务已被真消费,167→164。
@@ -459,7 +459,7 @@ module.exports = {
     // bindtap="showEditModal",是一段谁也点不开的死 UI。editModalField 的零消费债务随之没了,164→163。
   // (本支) // 2026-09-18 批3C:AI 助写链整删 —— aiNodeError 登记随代码退役(162→161),但同删让
   // (本支) //   themeName/nodeName 失去本页唯一 this.data 读取方,转存量登记(+2)=163,显式审查调大。
-  // (本支) "u4Field": 114,
+  // (本支) "u4Field": 163,
     // 2026-09-17 HO-26:简易发布页去掉「仅主理人可发起」死闸后,新预检真读 this.data.clubId,
     //   simple/index.js#clubId 这条零消费债务已还,153→152,digest 取门禁实测。
     // 2026-09-17 E 类小修批:3 条零消费债务还清(B-08 baoming#ticketList 真消费、B-06 partner 两字段随页退役),
@@ -513,7 +513,7 @@ module.exports = {
     // 2026-11-24 F01b 三合 master(0ac67a26 之后,7a 接手):F01b 退役项与 master 各线出账取并集,u4Field=45,u4Debt / u5 digest 按 baselineKeyDigest 重算。
     // 2026-11-24 F01b 再合 master:F01b 退役 play#leadUnlockChecking/journalDot/finishBadge/reviewEmpty 与各线退役取并集,u4Field 按 u4Debt key 数重算,digest 重算。
     // 2026-11-24 REV-AUTO 合 master(22f27c86):F06 第二轮(L06-089 等)与 F08 pass 2 / F09b(L09-126/087/089)各自出账取并集,u4Field 设为合并后 u4Debt key 数,u4Debt digest 按门禁 baselineKeyDigest 对合并后 key 集重算。
-    "u4Field": 32,
+    "u4Field": 29,
       // 2026-08-26 圈层主题接回主题货架:新增 circleTheme import,两条 _coverFail 动态 setData
       //   等量下移(269→270 / 281→282,行号取门禁实测)。调用点与强化理由不变,显式改 digest。
     // 2026-08-27 合并 #883:activity/list 三条 U4-DYNAMIC 登记行号 +2(129→131/151→153/231→233,
@@ -534,7 +534,7 @@ module.exports = {
       // 2026-11-24 F03 第二轮三合 origin/master(#969 F04 第二轮):两侧 U4-DYNAMIC 登记取并集,条数按合并树 key 数重算,digest 按门禁 baselineKeyDigest 重算。
       // 2026-11-24 业主决策 L06-170:闲置的广场 route-map 组件删除,其 4 条 U4-DYNAMIC 登记出账,合 master 后 55 → 51;u4Dynamic digest 按门禁 baselineKeyDigest 重算。
       // 2026-11-24 L06-170 合 master(#951 F03 第二轮):合并树条数按 key 数重算,digest 重算。
-      "u4Dynamic": 53,
+      "u4Dynamic": 62,
     // 2026-09-10 附近正在漫游的人:**条数 13 → 15**,棘轮显式调大两格。
     //   新增的两条都在 pages/roam/index.js,是同一件事的两半 —— 位置心跳的上行与下行:
     //     · _reportPresence(30 s 一次上报自己):掉一次就是这一格没报上去,下一次覆盖它。
@@ -568,7 +568,7 @@ module.exports = {
     // 2026-11-24 F09b L09-105:投诉进展读取改为成功/失败一处 settle 并显式给失败提示,原 silentError 登记由静态证明覆盖,出账 1 条(41 → 40)。
     // 2026-11-24 AUDIT-1122 F05 L05-026/038 业主默认项:漫游页三店徽章配置读取随弹窗删除,U5 登记出账,41 → 40,u5Silent digest 按 key 集重算。
     // 2026-11-24 F09b 第二次合 master:F09b 与 F05 业主默认项各出账一条取并集,u5Silent 40→39,digest 按 baselineKeyDigest 重算。
-    "u5Silent": 39,
+    "u5Silent": 42,
     "keyDigest": {
       // 2026-09-24 卡包底图:play/index.js data 里加 topicCover 一行,u5Silent 那条已完成里程碑读取 5444→5445,
       //   新旧行内容一致、理由一字未改,u5Silent digest 按同算法显式重算(旧值复算吻合)。
@@ -624,7 +624,7 @@ module.exports = {
   // (本支) // 2026-09-18 死事件接线批(fix/audit-wiring-202609):scene-route-content 加 onNestedTransferOwner
   // (本支) //   与 json 开关后,两条变量路径登记点 217→219 / 505→515;myproject 活动卡「待审/未通过→编辑器」
   // (本支) //   分支插 6 行,上下架变量路径 388→394。调用点与理由一字未改,等量换 key,digest 显式更新。
-  // (本支) "u1Variable": "8f18f2f5b9236bc21dbd119b41d9806a0347d1c9f53b131eddd0a7cb00072f51",
+  // (本支) "u1Variable": "54cf861fe4649b6b6b747ec07693dd8fa4b0255bcc7717bbf3c65d993b04b9ed",
       // 2026-09-15 弹窗合同第 3 轮:search2/result 多路搜索请求加 autoErrorToast:false(+1 行),113 → 114,理由一字未改。
       // 2026-09-15 删除运行时生产写闸(用户拍板):app.js 去掉 require 与两处 getRequestClient/
       //   getUploadClient 注入(-3 行),consent adapter 调用点 337→334。调用点与理由一字未改,
@@ -675,17 +675,17 @@ module.exports = {
       // 2026-10-11 登录隔离及正常失败状态兼容：App consent wrapper 329→343，同一调用及理由，数量仍11。
       // 2026-10-14 W5尾项:profile 544→559/870→885、参与详情 176→177 仅行号下移，同一调用及理由，数量仍11。
       // 2026-11-03 Round5 l7-launch:search2/result 合并搜索 503 退回列表请求(+11 行),193→199 仅行号位移,同一调用及理由,数量不变;digest 按门禁同一算法重算。
-      "u1Variable": "19a02abe5e259e2abb5db5ddf998c6c220e28114ad7d522a88e73dc82bd6fe5c",
+      "u1Variable": "54cf861fe4649b6b6b747ec07693dd8fa4b0255bcc7717bbf3c65d993b04b9ed",
       // 2026-08-25 816 并入:key 集合按上面的逐条核对结果变化,digest 显式更新。
       "u3Debt": // 2026-09-09 一枚圆钮:roam#onCenterHoldStart / onCenterHoldEnd 两笔零绑定债务已还
       //   —— 长按 3 秒结束的逻辑接到了主键的 touchstart/touchend 上。99→97,digest 显式更新。
             // 2026-09-15 C1 简易发布预设单一真源:内置预设(PRESETS/TEMPLATES)与站点手动编辑链整体删除,
       //   9 条零绑定 handler(预设/站点/地图)一并消失;棘轮 90→81,digest 取门禁实测。
-"0248f9b4ca7b65b9bf822589e31f06d9ca9f48ed844c01d961fc86ed6b029ed2",
+"6718be4de32ab8e62ffde48c4e1ea4b670e7db5c7bd19761f25694b9fc0bf81c",
       // 2026-08-23 高级玩法编辑器接线后 errors/totalNodes 已被真实消费，债务 194→192。
       // 2026-08-23 全页面返回审计：pricing/partner 的 topicId 现用于根栈返回，真实消费后债务 192→191。
       // 2026-08-25 816 并入:key 集合按上面的逐条核对结果变化,digest 显式更新。
-  // (本支) "u4Debt": "58d96682b3c4b8573643eaa5be0e71fd73ccb3526880da62e8602fff8dbe596a",
+  // (本支) "u4Debt": "778fbc97698fc6bb4ba2c9875e29b3ad11547f5e7e8ab0ba78036b0799d9bd6d",
             // 2026-09-15 C1:simple 的地图与数据条字段随 redrawMap 一起删除(markers / polyline /
       //   includePoints / center / stationCount / totalKm / totalMin / gameCount 8 条零消费
       //   债务已还);棘轮 161→153,digest 取门禁实测。
@@ -697,7 +697,7 @@ module.exports = {
       // 2026-09-19 批复1-a=2 还清:partner#toType/toId 两条随页复活短暂回账(151 键)后当场还债出账,
       //   key 集回到退役前那份 149,digest 按当前 key 集合实算。
 // 2026-11-03 第九轮 m1-9:merchant/apply 店铺地址预览与已提交申请的地址一点开地图,locationLat/locationLng 真被读取,两条零消费债务还清出账,u4Field 102→100,digest 按门禁 baselineKeyDigest 重算。
-"u4Debt": "bfbf90086a901ec417a02d0f4f3473f1b92b44ead9254fe7d40fe1ec86142dab",
+"u4Debt": "778fbc97698fc6bb4ba2c9875e29b3ad11547f5e7e8ab0ba78036b0799d9bd6d",
 // 2026-11-23 F09 L09-004/L09-009:signup#hasMore/nodata 与 profile#exploreValue/identityCard 零消费字段删除出账,u4Field 93→89,digest 按门禁 baselineKeyDigest 重算。
       // 2026-08-17 漫游 S1 施工:条数不变(65),只是 pages/roam/index.js 的两处
       //   `...this._calcArch()` 动态 setData 行号从 3263/3305 移到 3261/3303
@@ -1103,7 +1103,7 @@ module.exports = {
 // 2026-11-21 startup-perf:fabu _storyCommand 改为只回传当前章 formData.chapters[i](不再整表回传章节数组),调用文本变化致 U4-DYNAMIC 等量换 key(9c06b486…→6e323db8…),条数 59 不变、不新增登记;理由同步改写,digest 按门禁 baselineKeyDigest 重算。
 // 2026-11-24 合 master(#969 F04 第二轮 58→55)与本线 L06-170(删 route-map 四条):合并树 51 条,digest 按门禁 baselineKeyDigest 重算。
 // 2026-11-24 F06b 合 master(afa6ecda,#951 F03 第二轮):两侧 U4-DYNAMIC 登记取并集(本线 L06 重锚 + master F03 新增/换 key),条数按合并树 key 数,digest 按门禁 baselineKeyDigest 在合并树重算。
-"69c2c7097844ad56c15e7326999dfd3add796cee155e7bf440778f6f5dc27efc",
+"020e77f5fe8eb1aeadcd3c3611a21d4c6336bf197b58918907cdbc000b4858ac",
 // 2026-10-28 模板页货架改版(#652)合 master(#610):本线删 template/index 两条 + master play 1621→1624 重锚，合并树 60 条，digest 按同一算法重算。
 // 2026-10-20 R5 尾段(#327,owner 批准 12 条重锚):fabu 729→731、898→900、2524→2530、3570→3588、3951→3969、4957→4990、5215→5248、5866→5899、5876→5909、5929→5962、6270→6303、7936→8060,逐行比对 master 原行一字未改,理由与条数 58 不变;digest 按同一算法显式重算。
       // 2026-08-20 开卡包四拍动效:u5Silent 条数不变(12),只是 play/index.js 的调用点
@@ -1298,7 +1298,7 @@ module.exports = {
 // 2026-11-11 f-play2 合入 f-money3,再合 launch(qx-final3 + f-pages):三侧行号位移取并集,u4Dynamic / u5Silent digest 按合并树实算。
 // 2026-11-11 f-play2 合入 f-money3:pricing/index.js:188(f-money3 侧位移)与 play/index.js:8895(f-play 侧位移)合并,key 集合按合并树实算 digest。
 // 2026-11-11 qx-final3 合入 f-pages 后合并树:f-play(play/index.js)与 f-pages(roam/index.js、cy/profile/index.js)两侧行号位移合并,条数与理由不变,digest 按同一算法重算。
-"4d88ffa4ab0eee2da75b91b6f6c46a901f9ec37a93980e8dff374378d5aea242"
+"7131c7f117d07e044fd11467474a61755b68ef9150b91e5f43399291f8afda47"
 
     }
   },
@@ -1321,9 +1321,10 @@ module.exports = {
     "chengyinhub-xcx/subpackageMember/components/cy/scene-route-content/index.js#site:bbc0dd0ce7e3c623e810fde44ef1b2d399dcd2fb69968025350bec3e2b1e9268:1": "config 只由本文件 sceneRequest(sceneId) 的有限映射生成，所有请求 URL 均为映射内 /api 字面量，未知 sceneId 返回 null、缺必需 id 也在请求前终止；owner=小程序，复核=2026-09-15",
     "chengyinhub-xcx/subpackageMember/components/cy/scene-route-content/index.js#site:274e82543a8978f6d35600664e1a7614127ad04bc90fe94dd722eed6e2016572:1": "request 只取自本方法内 requests[sceneId] 的七个非提现固定写接口对象，未知 sceneId 显示提交错误并返回；提现分支在此前已转交 withdrawal-preflight，不会走到本调用；owner=小程序，复核=2026-09-15",
     "chengyinhub-xcx/pages/index/index.js#site:6d70661838a11d65ea61f616007c8a75ca7f3e605c2c5d71b15d6ea2f0b60742:1": "retry 只回放 _listReq 中由 getListData 首次字面量调用冻结的 topic/list 或 activity/list，外部输入不能写该缓存；owner=小程序，复核=2026-09-15",
-    "chengyinhub-xcx/pages/search2/result/index.js#site:2b5d8345d40e2d185d4a81c3fe9de04030d697f28c4d999ac8884f0b46320743:1": "request 数组只由 utils/discover-search.buildRequests 构造，其按搜索类型枚举后端字面量且当前 U1 全仓扫描覆盖；owner=小程序，复核=2026-09-15",
+    "chengyinhub-xcx/pages/search2/result/index.js#site:36681f416196dd27ad0c1d8806892596a86a77563c6bab8b12727a6549a3239d:1": "request 数组只由 utils/discover-search.buildRequests 构造，其按搜索类型枚举后端字面量且当前 U1 全仓扫描覆盖；owner=小程序，复核=2026-09-15",
   },
   "u3Debt": {
+    "chengyinhub-xcx/pages/publish/temp/index.js#retryCheckCtx": "L04-045 检定上下文异常保留原错且 WXML 故意不画重试钮（见 temp-check-template-l4.test.js），方法仅供单测与内部恢复调用；owner=小程序，复核=2026-11-27",
     "chengyinhub-xcx/subpackageMember/components/cy/profile/index.js#onCompare": "存量零绑定债务：onCompare 在同页 WXML 与 JS 调用图均无入口；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/subpackageMember/components/cy/profile/index.js#goMyJoin": "存量零绑定债务：goMyJoin 在同页 WXML 与 JS 调用图均无入口；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/components/cy/qr-voucher/index.js#onMask": "存量零绑定债务：onMask 在同页 WXML 与 JS 调用图均无入口；owner=小程序，到期=2026-09-30",
@@ -1348,8 +1349,6 @@ module.exports = {
     "chengyinhub-xcx/pages/activity/baoming/baoming.js#waitlistOfferToken": "服务端签发的短期候补令牌不展示给用户，只与 offerId 成对用于页内 JS 的可支付闸、quote 与 create payload，并在换票/退出候补时清空；owner=小程序，复核=2026-09-30",
     "chengyinhub-xcx/pages/activity/baoming/baoming.js#verifyingPayment": "存量零消费债务：verifyingPayment 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/pages/club/apply/index.js#backLabel": "存量零消费债务：backLabel 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
-    "chengyinhub-xcx/pages/index/index.js#bottomTopicPageNo": "存量零消费债务：bottomTopicPageNo 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
-    "chengyinhub-xcx/pages/index/index.js#bottomActivityPageNo": "存量零消费债务：bottomActivityPageNo 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/pages/merchant/decor/index.js#loadErrTitle": "存量零消费债务：loadErrTitle 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/pages/merchant/profile/index.js#topicId": "存量零消费债务：topicId 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/pages/merchant/profile/index.js#topicName": "存量零消费债务：topicName 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
@@ -1362,7 +1361,6 @@ module.exports = {
     "chengyinhub-xcx/pages/publish/temp/index.js#selectedCategoryNames": "存量零消费债务：selectedCategoryNames 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/pages/roam/index.js#poiEmpty": "存量零消费债务：poiEmpty 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/pages/roam/index.js#locErr": "存量零消费债务：locErr 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
-    "chengyinhub-xcx/pages/search2/result/index.js#categoryId": "存量零消费债务：categoryId 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/pages/shezhi/shezhi.js#userInfo": "存量零消费债务：userInfo 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/pages/topic/merchantapply/index.js#nodeId": "存量零消费债务：nodeId 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
     "chengyinhub-xcx/pages/topic/merchantapply/index.js#templateId": "存量零消费债务：templateId 在同页 WXML 与 this.data 读取中均未命中；owner=小程序，到期=2026-09-30",
@@ -1394,6 +1392,15 @@ module.exports = {
   //   逐条回读:仍是同一个动态 setData 调用点,受控字段与理由一字未改,digest 显式重算。
   // 2026-10-11 模板生命周期修复：既有两处登记等量换行号 217→218 / 304→331；身份清空复用静态 applyDetailPayload，不新增动态豁免。
   "u4Dynamic": {
+    "chengyinhub-xcx/pages/play/index.js#site:941b3ca40176c091f951c812bdf161f8f4e7abca951b38ac8c0eb0948dbf8f38:1": "游玩页局部动态路径回传（只写固定前端路径键，不展开服务端对象键）；owner=小程序，复核=2026-11-27",
+    "chengyinhub-xcx/pages/publish/fabu/index.js#site:4ec15b4fd25649511af69e4bdd5ad59f22165e95de5d1b7458e0b667abac6363:1": "发布页表单局部 patch 回传（字段名均由本页固定构造，不展开服务端键）；owner=小程序，复核=2026-11-27",
+    "chengyinhub-xcx/pages/publish/temp/index.js#site:b846c5b5656a96defa9aa07dd081872baaa36aff719c22235bec77d32bc42a8b:1": "模板编辑页高级玩法字段动态路径写入（键名受 WXML data-section/field 枚举约束）；owner=小程序，复核=2026-11-27",
+    "chengyinhub-xcx/pages/search2/result/index.js#site:65e520d48f86dcd8c53700005a47a32b7e53a7c5326510b09acb1bfe64ed57d8:1": "commitResults 合并 visibleResults 与本页调用方传入的固定分页/页签字段一次 setData；owner=小程序，复核=2026-11-27",
+    "chengyinhub-xcx/pages/square/detail/index.js#site:acc4fa55249756054a58d407ab1edc5739fe8a40cc06670d927d2bdd439c391b:1": "发表评论后仅按 appendByIndex(list, oldLen, [row]) 追加单行与固定状态键；owner=小程序，复核=2026-11-27",
+    "chengyinhub-xcx/subpackageB/pages/im/chat/index.js#site:a92ee12985b7e251ed12659fe25e1e98f475e47943fe5b4deb7c31686b08c65e:1": "单条消息更新仅按 msgs[index] 与调用方固定 extra 键回传；owner=小程序，复核=2026-11-27",
+    "chengyinhub-xcx/subpackageB/pages/im/chat/index.js#site:8d799b2270d489392ed32fa0a6f3e46e9a458e93cc63aed65465ea6c04a79ca4:1": "消息列表增量 diff 仅回传变化的 msgs[i] 下标路径与固定 sending 布尔键；owner=小程序，复核=2026-11-27",
+    "chengyinhub-xcx/subpackageP3/pages/stamp-album/index/index.js#site:70ae9d61d07a8382817c86c5cc922750c1d85333392f4a35fc6da52deed00586:1": "印章集首页整表写 items、翻页按 items[oldLength+i] 追加，其余 loading/loaded/error 为固定字面键；owner=小程序，复核=2026-11-27",
+    "chengyinhub-xcx/subpackageTools/monthly-recap/index.js#site:4984ebf13914f56e96eca30ed11bfa80cd65cd82021f1fee41bb313bb8d10a64:1": "resume() 从同页同身份快照 _heldView.data 恢复本页既有 data 键（仅覆写 kindIndex/busy）；owner=小程序，复核=2026-11-27",
     "chengyinhub-xcx/pages/topic/index/index.js#site:3290e3def2b5170ce62f122fbc3ec00cfd538b89567a33d13398cf2192fc0099:1": "buildRouteMap只提交utils/topic-route-preview.build(chaptersList)的固定路线视图字段(去掉主题页不展示的routeSourceText,余七个)；每章道路独立校验，缺损退节点虚线，不展开章节任意键；路线地图与JS选择消费其余六字段，routeIsRoad仅同源固定判定元数据，不声称直接渲染。owner=小程序；复核=2026-10-24",
 
     // 2026-10-19 Claude 小程序线移植到 master:本线新增 6 处动态 setData 逐项登记(棘轮/digest 待审批后同步)。
@@ -1405,17 +1412,17 @@ module.exports = {
     "chengyinhub-xcx/pages/roam/index.js#site:6e48a604c383cfef5e0a10c13caa2443bc786b8ed5e4126996fac05d96c4ecf6:1": "BL-70 横滑卡头像堆按命中行拼 shopStrip.rows[i].visitors 路径批量回写;只在横滑卡 poi__who 头像堆消费,epoch 丢弃迟到回包;owner=小程序,复核=2026-12-31",
     "chengyinhub-xcx/subpackageMember/components/cy/profile/index.js#site:cd9fc368423cc13cd95a16ee6164bf33f74b7e59dae1ac14433783aef66eea33:1": "本人帖文翻页patch只用list[oldLen+i]固定列表名与响应遍历下标，其余feedErr/feedAuthError/hasMore/nodata为字面字段；服务端仅供值不供键；owner=小程序，复核=2026-09-30",
     "chengyinhub-xcx/pages/activity/official-mine/index.js#site:73a779e13080faddec485644934af0e746351998aaca3d6b07462ea315a0a99d:1": "BL-80 通知复盘读取成功分支的 _canRecover 动态键:按同一卡片路径写是否可安全恢复原投递(仅 code 200 且 canRecoverInapp 为真),sameItem 校验防止写到换行后的另一张卡,在该卡「安全恢复原投递」按钮消费;owner=小程序,复核=2026-12-31",
-    "chengyinhub-xcx/pages/index/index.js#site:b8d2fe63c3fd7b1cd1e7699ae12ed543a6b8359dbda05165981ce8eda855fcef:1": "底部主题翻页只追加bottomTopicList[oldLen+i]，其余页码/状态/hasMore固定字面字段；下标来自当前列表长度和响应遍历序号；owner=小程序，复核=2026-09-30",
-    "chengyinhub-xcx/pages/index/index.js#site:4a2756942e6c9d2d1aa180004f1cd51182cc71878f071736e74a41a888760c35:1": "底部活动翻页只追加bottomActivityList[oldLen+i]，其余页码/状态/hasMore固定字面字段；下标来自当前列表长度和响应遍历序号；owner=小程序，复核=2026-09-30",
+    "chengyinhub-xcx/pages/index/index.js#site:389f915162feb314e88e39486ded3f25ff3335c62db7c7a74f9c01ce2ecd8ae3:1": "底部主题翻页只追加bottomTopicList[oldLen+i]，其余页码/状态/hasMore固定字面字段；下标来自当前列表长度和响应遍历序号；owner=小程序，复核=2026-09-30",
+    "chengyinhub-xcx/pages/index/index.js#site:58a975b04b54157be92f7caa269785f1a6ad6ddce680c8cbacb53d78b14484fd:1": "底部活动翻页只追加bottomActivityList[oldLen+i]，其余页码/状态/hasMore固定字面字段；下标来自当前列表长度和响应遍历序号；owner=小程序，复核=2026-09-30",
     "chengyinhub-xcx/pages/merchant/customer/index.js#site:f4862265a9581cf38e59d2cf08b66839996accd0c0586f70b3c97df217b3fd6f:1": "客户翻页只追加rows[oldLen+i]，其余页面状态与分群摘要为同方法固定字面字段；hasMore仍用rowCount/total主线规则；owner=小程序，复核=2026-09-30",
-    "chengyinhub-xcx/pages/searchmap/index.js#site:23ae8bef73e10ebf8491f3aaf29ed93d46a496052e2320e2f1158a3d36fe8860:1": "地图活动首页整表写list、翻页只追加list[oldLen+i]，无坐标计数/页码/时间与加载状态均为固定字面字段；只处理当前query epoch响应；owner=小程序，复核=2026-09-30",
-    "chengyinhub-xcx/pages/square/detail/index.js#site:c460e4a9c9e6708ad63741cfc375acb7aef13e6e796c77dcd587c28fcc97e2d8:1": "评论翻页只追加list[oldLen+i]，其余commentState/listErr/nodata/hasMore固定字面字段；响应遍历序号只形成数组下标；owner=小程序，复核=2026-09-30",
+    "chengyinhub-xcx/pages/searchmap/index.js#site:ee17642b1c977e483d6e171f77324435c5113abad1bd31ad08c43d915d9ea2c8:1": "地图活动首页整表写list、翻页只追加list[oldLen+i]，无坐标计数/页码/时间与加载状态均为固定字面字段；只处理当前query epoch响应；owner=小程序，复核=2026-09-30",
+    "chengyinhub-xcx/pages/square/detail/index.js#site:212da5231f8deb386c880c28deb8ed5bfcde86815a09d59aef955434fd27c0f3:1": "评论翻页只追加list[oldLen+i]，其余commentState/listErr/nodata/hasMore固定字面字段；响应遍历序号只形成数组下标；owner=小程序，复核=2026-09-30",
     // 2026-11-02 walk-fix l1-play:上方净增 6 行,同一处章节正文显形 patch 1791→1797,写法与理由未改。
     "chengyinhub-xcx/pages/play/index.js#site:516199a446411b00f7e5b22f0d1eb2456301f378cccab79df0950d833e39105b:1": "章节正文显形局部patch只写chapterParas[i]或chapStory.lines[i]的in/dir/d三个固定字段；i来自当前冻结数组遍历，值为本地布尔/方向枚举/延迟数值，异步回包前后校验章节模式及数组身份；WXML真消费两namespace；替代旧opacity/scale/blur渲染登记，经人工审查迁移；owner=小程序，复核=2026-09-30",
     "chengyinhub-xcx/pages/club/apply/index.js#site:888c746604beec150fca1506d9db1a0f5cc395f7d92f6f37931c583a5a4d131f:1": "onInput 的 f 只来自同页 WXML 的 leaderName/phone/identity/coFounders/maxEventSize/avgEventSize 输入；原值由同名输入与回顾使用，新增 fieldErrors.f 只清对应栏下错误，实际错误键 leaderName/phone/experience 在 WXML 消费；不取服务端字段名；owner=小程序，复核=2026-11-05",
     "chengyinhub-xcx/pages/club/apply/index.js#site:b4c71f1dd15509e8f5f68b54fd9a14e8fbd5efe36a584ea757b47814d7ce0ee8:1": "toggleBool 的键取自同一份 data-field 枚举，只在 0/1 之间翻转能力自评项；owner=小程序，复核=2026-10-31",
     "chengyinhub-xcx/components/cy/nav-bar/index.js#site:7416d0f2d8bcfda80f1aa40ca452253ac162185ad574aa62aedb0bae933df24e:1": "动态 setData 需精确登记：setData 参数不是对象字面量；owner=小程序，复核=2026-09-30",
-    "chengyinhub-xcx/components/cy/nav-bar/index.js#site:afc1da4ad53b2b2e3af5004e55c613a13462260163153a332358bce89b791423:1": "动态 setData 需精确登记：setData 参数不是对象字面量；owner=小程序，复核=2026-09-30",
+    "chengyinhub-xcx/components/cy/nav-bar/index.js#site:dd5cf288db198b246a0abd2a2d2544cb6faa543d9395eafd414260dca9873bee:1": "动态 setData 需精确登记：setData 参数不是对象字面量；owner=小程序，复核=2026-09-30",
   // (本支) "chengyinhub-xcx/subpackageMember/components/cy/profile/index.js:806": "profilePatch 在本方法内以 userInfo/balanceText/cityName/categoryList/casePicsList/joinDate/friendNum/followNum/fansNum 固定键创建，仅按本人/他人条件追加 growthLevel 与 primaryCta，不展开服务端对象键；owner=小程序，复核=2026-09-30",
   // (本支) "chengyinhub-xcx/pages/activity/list/index.js:103": "动态 setData 需精确登记：setData 参数不是对象字面量；owner=小程序，复核=2026-09-30",
   // (本支) "chengyinhub-xcx/pages/activity/list/index.js:125": "动态 setData 需精确登记：setData 参数不是对象字面量；owner=小程序，复核=2026-09-30",
@@ -1461,7 +1468,7 @@ module.exports = {
     "chengyinhub-xcx/pages/publish/fabu/index.js#site:0cfed8f4d869fc9b05e90785a2979395b28327c829e38687030e1d198856ce2a:1": "patch 仅含经本页校验袋派生的 canPublish/ticketMissing 两个固定字段，均在HEAD已存在且只在值变化时写入；canPublish 供本方法比较旧值，ticketMissing 由 index.wxml 总缺项及 step3.wxml 档期/票务/实名缺项消费，不接收外部键；owner=小程序，复核=2026-09-30",
     "chengyinhub-xcx/pages/publish/fabu/index.js#site:c162b3189259dd80fd416cb122b245ec25fac098740debc6bb366f3541f15506:1": "校验定位 patch 只可能含 secCollapsed.ticket、showTicketEditor、editingTicket 三个固定键；错误 key 仅决定是否进入 ticket 分支和定位下标，不参与字段名拼接；owner=小程序，复核=2026-09-30",
     "chengyinhub-xcx/pages/publish/fabu/index.js#site:e9a08a8a2e80d1fe7b5c46622a62f96c2456d58fec195e18d269f4de0cf51c63:1": "地图重绘 patch 固定含 mapMarkers/mapPolyline/mapInclude/hasRoute，未选节点时只追加 mapCenter；节点数据只作为值参与计算。X05 后 patch 由 utils/publish/route-map-view.js 的纯函数算好交回，键集合由该模块单测钉住（publish-route-map-view.test.js）；owner=小程序，复核=2026-09-30",
-    "chengyinhub-xcx/pages/publish/temp/index.js#site:01b505cb6d62b6b0ad71e166504c2d5f019a079c1d4027e128fde17d438770ca:1": "_setFormState 是本页私有写入入口，全部调用点传本文件构造的字段 patch（高级玩法动态路径也来自 WXML 固定 section/field），函数只克隆该 patch 并追加固定 submitError，不展开后端对象键；owner=小程序，复核=2026-09-30",
+    "chengyinhub-xcx/pages/publish/temp/index.js#site:321da012acc344ce0ea279fe14e9c1b3f6bf012a46cad82e3c030ee6b25b3fd0:1": "_setFormState 是本页私有写入入口，全部调用点传本文件构造的字段 patch（高级玩法动态路径也来自 WXML 固定 section/field），函数只克隆该 patch 并追加固定 submitError，不展开后端对象键；owner=小程序，复核=2026-09-30",
     "chengyinhub-xcx/pages/publish/temp/index.js#site:2065e542af2c8bb5b3751f47a362cd663671aabff64a177a4afc6e7cb270b3bb:1": "玩家预览 patch 先固定写 pvStep/pvStepKey/pvStepLabel 与四个临时态，仅按 story/challenge 枚举追加 pvBeats 或任务展示字段；步骤 key 不参与字段名拼接；owner=小程序，复核=2026-09-30",
     "chengyinhub-xcx/pages/publish/temp/index.js#site:2242232995e5da9a32b1a141308287dd991604a0db376c3c399af6743557c854:1": "couponPatch 在同方法内从空对象开始，只可能追加 selectedCouponId 与 selectedCouponName 两个固定奖励展示字段，再展开进固定回填对象；owner=小程序，复核=2026-09-30",
     "chengyinhub-xcx/pages/search2/index.js#site:01b73f7ddef15063989c62ba5fbd70e2724ef6511140078684d592c64f9dd402:1": "动态 setData 需精确登记：[field]: selected；owner=小程序，复核=2026-09-30",
@@ -1507,6 +1514,9 @@ module.exports = {
   // 2026-09-08 二次合 master(#1047/#1048)后再次实测:play/index.js 的 my-completed 调用点
   //   落在 4945(master 侧记 4277、本分支侧记 4968,两侧对合并树都不对)。理由一字未改,digest 重算。
   "u5Silent": {
+    "chengyinhub-xcx/pages/merchant/index/index.js#site:46df8a329773c8d4d4bc4ef44a3b347210ce9518469272dfc740983e3abd166c:1": "L07-016 商家工作台收件箱滑动/清除已读同步（/api/im/read）：本机先落存储，后台尽力同步已读态，失败不打断工作台操作；owner=小程序，复核=2026-11-27",
+    "chengyinhub-xcx/pages/roam/index.js#site:0c1cc2a1efa707596f9c6be230d9fdbf292d30429c536ab702a466897c2713c9:1": "L05-002 漫游地图 POI 点亮（/api/roam/checkin）：关闭通道自动 toast，调用方在 .then 按网络/HTTP/登录/业务错误各只提示一次，避免双弹；owner=小程序，复核=2026-11-27",
+    "chengyinhub-xcx/pages/topic/components/cy/node-npc-form/index.js#site:d3a59235b069c57e2a35edd3a2925b0bfa3135d0979c68d0a44d0e25b6432a30:1": "NPC 角色语音试听获取本人素材签名预览（/api/media/asset/{id}/preview）：fail/abnormal/空 URL 均经 _previewFail() 明确反馈失败，关自动 toast 免双弹；owner=小程序，复核=2026-11-27",
     "chengyinhub-xcx/utils/roam-place-media.js#site:6a464afd547588e2e4cb4836de8e0fd49644eda68109bf68b655aaaf46a13cd4:1": "合并原两处公开图片侧车读取：URL仅从平台相对封面键构造，拒绝外站及路径穿越；核对地点ID、封面、同目录高清图片和许可，不可读或未确认许可不出照片；调用者保留账号和页面代际隔离，不承载写入或奖励。owner=上海据点，复核=2026-11-14",
     // 2026-10-28 p74 业主「附近活动总是有的」:漫游起始页附近为空时的两级兜底读取逐项登记。
     "chengyinhub-xcx/pages/roam/index.js#site:cd338c74226544e388760dbe2853ca694788eba5188e995abbf58161e1d90b6a:1": "漫游起始页「附近活动」3 公里为空时的 20 公里兜底读取(同 /api/roam/entry/nearby、同权限档):主读取已成功落定(空也是真结果),这一条只往底部卡片带补同城活动,读不到就接着读其他城市公开主题;不改地图点位、不承载写入;只写回同一次进页序号与同一身份;owner=漫游,复核=2026-10-28",

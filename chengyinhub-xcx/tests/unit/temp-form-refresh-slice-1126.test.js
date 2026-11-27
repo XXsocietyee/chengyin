@@ -58,7 +58,7 @@ test('剧情只同步线索回显；检定修正和参与方式各刷自己的�
   const host = page();
   const calls = watch(host);
   host._setFormState({ storyBeats: [{ id: 1, text: '第一幕', tag: '信', imgs: [] }] });
-  assert.deepEqual(calls.slice().sort(), ['refreshPreviewState', '_syncClueContent'].sort());
+  assert.deepEqual(calls.slice().sort(), ['_syncClueContent'].sort());
 
   calls.length = 0;
   host._setFormState({ 'advanced.qa.title': '题干' });

@@ -25,8 +25,7 @@ function openFreshBurst() {
   freshBurstOpen = true
   freshBurst += 1
   const current = freshBurst
-  if (typeof queueMicrotask === 'function') queueMicrotask(() => closeFreshBurst(current))
-  else if (typeof Promise === 'function') Promise.resolve().then(() => closeFreshBurst(current))
+  if (typeof Promise === 'function') Promise.resolve().then(() => closeFreshBurst(current))
   else freshBurstOpen = false
   return current
 }

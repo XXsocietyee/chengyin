@@ -460,6 +460,9 @@ test('同成员隐藏不停空金额，只停落地；返回后新读到达前�
   h.def.pageLifetimes.show.call(h.ctx)
   assert.equal(h.ctx.data.state, 'ready')
   assert.equal(h.ctx.data.balance, '88.00')
+  // L09-046: 同账号已有余额从后台返回不重拉用户信息，主动刷新失败保留原金额、成功更新
+  assert.equal(h.requests.length, 1)
+  h.ctx.refresh()
   assert.equal(h.requests.length, 2)
   h.requests[1].fail()
   assert.equal(h.ctx.data.state, 'ready')

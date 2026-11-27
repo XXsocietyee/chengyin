@@ -8,7 +8,9 @@
  * - fragment:本站碎片。探店日(mode 2)完成后另有碎片翻卡,这里不重复。
  * - hold:有揭示或碎片要读 = 等玩家点「继续」;只有「对了」= 短停后自动继续。
  */
-const { stripLeadingHandMark } = require('./playkit-questo.js');
+function stripLeadingHandMark(text) {
+  return String(text == null ? '' : text).replace(/^\[手写\][ \u3000]?/, '');
+}
 
 function rightMoment(input) {
   const o = input || {};

@@ -16,7 +16,7 @@ test('BL-43: 声音可用时出现「清除声音」，走危险确认', () => {
   const body = js.slice(js.indexOf('  clearVoice() {'), js.indexOf('  resetVoiceRecording() {'))
   assert.match(body, /modal\.show\(\{[\s\S]*danger: true,[\s\S]*success: \(res\) => \{ if \(res && res\.confirm && context\.current\(\) && current\(\)\) this\._doClearVoice\(context\); \},/)
   assert.match(body, /const current = this\.voiceClearCurrent\(\);/)
-  assert.match(js, /onHide\(\) \{\n    this\._voiceClearEpoch = \(this\._voiceClearEpoch \|\| 0\) \+ 1;/)
+  assert.match(js, /onHide\(\) \{\n(?:\s*if \(this\._systemPickerOpen\) \{[\s\S]*?\n    \}\n)?    this\._voiceClearEpoch = \(this\._voiceClearEpoch \|\| 0\) \+ 1;/)
   assert.match(js, /onUnload\(\) \{\n    this\._voiceClearEpoch = \(this\._voiceClearEpoch \|\| 0\) \+ 1;/)
 })
 

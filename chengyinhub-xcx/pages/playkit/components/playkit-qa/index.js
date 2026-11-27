@@ -23,7 +23,7 @@ const motion = require('../../../../utils/motion.js');
 const mediaDenied = require('../../utils/media-denied.js');
 const cyToast = require('../../../../utils/toast.js');
 const { stripOptionKey } = require('../../utils/playkit-questo.js');
-const { stripLeadingHandMark } = require('../../utils/hand-mark.js');
+function stripLeadingHandMark(text) { return String(text == null ? '' : text).replace(/^\[手写\][ \u3000]?/, ''); }
 function qaFeedback(text) { return stripLeadingHandMark(text); }
 const letterPool = require('../../utils/letter-pool.js');
 

@@ -456,7 +456,7 @@ module.exports = { scroll: scroll, start: start, move: move, end: end };
         <view class="drow drow--hold" wx:if="{{mode!=2 && !allDone}}" bindtap="onRunToggleFromTools"
               bindtouchstart="onRunHoldStart" bindtouchend="onRunHoldEnd" bindtouchcancel="onRunHoldEnd"
               aria-role="button" aria-label="{{runState === 'running' ? '暂停这一局' : '开始这一局'}}{{runState === 'idle' ? '' : '，长按结束本次'}}" hover-class="cy-pressed" hover-stay-time="80">
-          <view class="drow__hold drow__hold--run" wx:if="{{runHoldPct > 0}}"></view>
+          <view class="drow__hold {{runHoldPct > 0 ? 'drow__hold--run' : ''}}"></view>
           <view class="dic pic {{runState === 'running' ? 'pic--pause' : 'pic--play'}}"></view>
           <view class="dcopy"><text class="dt">{{runState === 'running' ? '暂停这一局' : '开始这一局'}}</text><text class="ds" wx:if="{{runState !== 'idle'}}">{{runHoldPct > 0 ? (runHoldLeft > 0 ? '还有 ' + runHoldLeft + ' 站未完成 · 松开取消' : '松开取消') : '长按结束这一局'}}</text></view>
           <view class="darr"></view>
@@ -859,8 +859,8 @@ module.exports = { scroll: scroll, start: start, move: move, end: end };
          打开时自转一圈,平时轻微浮动,也能跟手左右转。 -->
     <view class="fx-hero__card {{hero.node.done ? 'is-done' : ''}} {{hero.faded ? 'is-faded' : ''}} {{hero.spun ? 'is-landed' : ''}}" style="{{hero.style}};--sx:{{hero.sx}}px;--ss:{{hero.ss}}">
       <view class="fx-card3d__float {{hero.spun ? 'is-settled' : ''}}">
-      <view class="fx-card3d {{hero.turned ? 'is-turned' : ''}}" style="--ry:{{hero.ry}}deg" data-ry="{{hero.ry}}"
-            bindtap="openChapStory" bindtouchstart="{{heroMotion.start}}" bindtouchmove="{{heroMotion.move}}" bindtouchend="{{heroMotion.end}}" bindtouchcancel="{{heroMotion.end}}"
+      <view class="fx-card3d {{hero.turned ? 'is-turned' : ''}}" bindtap="openChapStory" style="--ry:{{hero.ry}}deg" data-ry="{{hero.ry}}"
+            bindtouchstart="{{heroMotion.start}}" bindtouchmove="{{heroMotion.move}}" bindtouchend="{{heroMotion.end}}" bindtouchcancel="{{heroMotion.end}}"
             aria-role="button" aria-label="读这一章的剧情；左右拖可以转动卡片"
             hover-class="cy-pressed" hover-stay-time="80">
         <view class="fx-card3d__face fx-card3d__front">
@@ -1713,7 +1713,7 @@ module.exports = { scroll: scroll, start: start, move: move, end: end };
 
 <!-- 路线恢复横幅优先于活动时间提示；冲突会自动只读刷新，不重放上一次完成动作。
      2026-09-18 顶边复查:横幅从胶囊底下起(env 在模拟器/无刘海机为 0,原来的 top:0+padding 会压进胶囊行) -->
-<view class="play-timebar" wx:if="{{!loading && routeNotice}}" style="top:calc({{chrome.sheetTop}}px + 8rpx)" bindtap="retryRouteState">{{routeRefreshing ? '正在同步路线…' : routeNotice}}</view>
+<view class="play-timebar" wx:if="{{!loading && routeNotice}}" style="top:calc({{chrome.sheetTop}}px + 8rpx)" bindtap="retryRouteState" hover-class="cy-pressed" hover-stay-time="80">{{routeRefreshing ? '正在同步路线…' : routeNotice}}</view>
 <!-- 非阻断横幅:活动未开始/已结束(仍可查看足迹) -->
 <view class="play-timebar" wx:elif="{{!loading && timeBanner}}" style="top:calc({{chrome.sheetTop}}px + 8rpx)">{{timeBanner}}</view>
 <!-- 空态遮罩:缺活动信息 / 加载失败 / 未报名 / 无打卡点 -->

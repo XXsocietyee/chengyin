@@ -788,7 +788,7 @@ Page({
   _boundPlayOwner() {
     if (this._playOwner === undefined) this._playOwner = this._playMember();
     if (!this._playLoginContext) this._playLoginContext = this._capturePlayLoginContext();
-    if (this._adoptFirstLogin() && !this._themeHidden) this._reloadAfterGuestLogin();
+    if (this._adoptFirstLogin && this._adoptFirstLogin() && !this._themeHidden) this._reloadAfterGuestLogin();
     return this._playOwner;
   },
   _reloadAfterGuestLogin() {
@@ -865,7 +865,7 @@ Page({
     if (this.data.navMap) this._startHeading(); /* 地图档回到前台继续跟朝向 */
     // L01-014:访客在本页(或从本页去的登录页)第一次登录,先认作首次绑定,下面整页重读。
     // 登录若发生在隐藏期间,归属已经接上,回来仍要重读一次。
-    const firstLogin = this._adoptFirstLogin() || !!this._guestLoginNeedsReload;
+    const firstLogin = (this._adoptFirstLogin && this._adoptFirstLogin()) || !!this._guestLoginNeedsReload;
     this._guestLoginNeedsReload = false;
     // 只看账号是否已切换(卸载态由各回调自己的 _isPlayAccountCurrent 挡)
     if (this._playOwner !== undefined && this._playOwner !== this._playMember()) {
@@ -5005,7 +5005,7 @@ Page({
     });
   },
   reloadPlay() {
-    this._adoptFirstLogin();   // L01-014:错误态「重新登录」后访客首次绑定,重读不被当成换号挡掉
+    if (this._adoptFirstLogin) this._adoptFirstLogin();   // L01-014:错误态「重新登录」后访客首次绑定,重读不被当成换号挡掉
     this.setData({ loading: true, emptyTip: '', emptyKind: '' }, () => this.loadData(true));
   },
 

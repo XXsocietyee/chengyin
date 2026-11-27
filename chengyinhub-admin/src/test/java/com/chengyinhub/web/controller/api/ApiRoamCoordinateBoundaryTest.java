@@ -435,9 +435,9 @@ class ApiRoamCoordinateBoundaryTest
     {
         RateLimiter checkinLimit = ApiRoamController.class.getMethod("checkin", String.class, Double.class, Double.class, Double.class, Double.class)
                 .getAnnotation(RateLimiter.class);
-        RateLimiter poisLimit = ApiRoamController.class.getMethod("pois", Double.class, Double.class, Integer.class)
+        RateLimiter poisLimit = ApiRoamController.class.getMethod("pois", Double.class, Double.class, Double.class)
                 .getAnnotation(RateLimiter.class);
-        RateLimiter entryLimit = ApiRoamController.class.getMethod("entryNearby", Double.class, Double.class, Integer.class)
+        RateLimiter entryLimit = ApiRoamController.class.getMethod("entryNearby", Double.class, Double.class, Double.class)
                 .getAnnotation(RateLimiter.class);
         assertNotNull(checkinLimit);
         assertNotNull(poisLimit);
@@ -451,19 +451,21 @@ class ApiRoamCoordinateBoundaryTest
 
         when(roamMapper.selectPoisNear(anyDouble(), anyDouble(), anyDouble(), anyDouble(), any(), anyInt()))
                 .thenReturn(Collections.emptyList());
-        assertEquals(200, controller.pois(NEAR_LAT, NEAR_LNG, 1_000_000).get("code"));
+        assertNotEquals(200, controller.pois(NEAR_LAT, NEAR_LNG, 1_000_000d).get("code"));
+        assertEquals(200, controller.pois(NEAR_LAT, NEAR_LNG, (double) ApiRoamController.NEARBY_QUERY_RADIUS_CAP_M).get("code"));
         org.mockito.ArgumentCaptor<Double> minLat = org.mockito.ArgumentCaptor.forClass(Double.class);
         org.mockito.ArgumentCaptor<Double> maxLat = org.mockito.ArgumentCaptor.forClass(Double.class);
         verify(roamMapper).selectPoisNear(minLat.capture(), maxLat.capture(), anyDouble(), anyDouble(), any(), anyInt());
         double span = maxLat.getValue() - minLat.getValue();
         double capSpan = ApiRoamController.NEARBY_QUERY_RADIUS_CAP_M / 111320.0 * 2;
-        assertTrue(span <= capSpan + 1e-6, "1000km request must be capped, span=" + span);
+        assertTrue(span <= capSpan + 1e-6, "50km cap must be respected, span=" + span);
         assertTrue(span > 3000 / 111320.0, "capped query stays wider than the 3km default");
 
         IRoamHangoutService hangouts = mock(IRoamHangoutService.class);
         when(hangouts.nearby(anyLong(), anyDouble(), anyDouble(), anyInt())).thenReturn(Collections.emptyMap());
         ReflectionTestUtils.setField(controller, "roamHangoutService", hangouts);
-        assertEquals(200, controller.entryNearby(NEAR_LAT, NEAR_LNG, 1_000_000).get("code"));
+        assertNotEquals(200, controller.entryNearby(NEAR_LAT, NEAR_LNG, 1_000_000d).get("code"));
+        assertEquals(200, controller.entryNearby(NEAR_LAT, NEAR_LNG, (double) ApiRoamController.NEARBY_QUERY_RADIUS_CAP_M).get("code"));
         verify(hangouts).nearby(org.mockito.ArgumentMatchers.eq(PLAYER), org.mockito.ArgumentMatchers.eq(NEAR_LAT),
                 org.mockito.ArgumentMatchers.eq(NEAR_LNG), org.mockito.ArgumentMatchers.eq(ApiRoamController.NEARBY_QUERY_RADIUS_CAP_M));
     }

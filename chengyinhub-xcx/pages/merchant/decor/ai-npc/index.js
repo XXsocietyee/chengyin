@@ -548,7 +548,7 @@ Page({
     if (this.data.saving || this._pointBusy) return;
     this._pointBusy = true;
     this._systemPickerOpen = true;
-    this._pickerMember = String(app.getUserID() || '');
+    this._pickerMember = String((typeof app !== 'undefined' && app && app.getUserID && app.getUserID()) || '');
     const release = () => { this._pointBusy = false; this._systemPickerOpen = false; };
     wx.chooseLocation({
       success: (point) =>

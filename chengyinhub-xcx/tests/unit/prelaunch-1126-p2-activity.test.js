@@ -258,17 +258,21 @@ test('a launched payment failure tells the player to check the order and hides W
     assert.equal(h.payments.length, 1);
     h.payments[0].fail({ errMsg: raw });
 
+    // 收银台已拉起后的非取消失败进入对账（verifying -> unknown），绝不透出微信 errMsg 或声称「未扣款」，也不允许二次建单重复支付
     const sheet = h.page.data.resultSheet;
     const shown = [sheet.title, sheet.sub, sheet.why, h.page.data.submitError].join('\n');
-    assert.equal(sheet.kind, 'fail');
-    assert.equal(sheet.title, '这笔没有付成功');
-    assert.equal(sheet.sub, sentence);
-    assert.equal(sheet.why, '');
-    assert.equal(h.page.data.submitError, sentence);
+    assert.equal(sheet.kind, 'loading');
     assert.equal(shown.includes(raw), false);
     assert.doesNotMatch(shown, /requestPayment:fail/);
     assert.doesNotMatch(`${sheet.sub}\n${sheet.why}`, /未扣款/);
+    const verifyReq = h.requests.find((item) => item.url === '/api/registration/info');
+    assert.ok(verifyReq, '收银台非取消失败必须先查单核对，不能直接当未扣款');
+    verifyReq.success({ code: '200', data: { id: 1001, paymentStatus: 3 } });
+    assert.equal(h.page._workflow.getState(), 'unknown');
+    assert.equal(h.modals.at(-1).title, '支付结果待确认');
 
+    // 重新初始化新工作流验证取消与缺参场景
+    h.page._initWorkflow();
     h.page.handlePayment();
     const retry = h.requests.filter((item) => item.url === '/api/registration/create').at(-1);
     retry.success({

@@ -167,19 +167,28 @@ Page({
           return item;
         });
         const stillUnconfirmed = !!(unconfirmedRid && items.some((item) => item.settleUnconfirmed));
-        const patch = {
-          items: items,
-          openId: '', pickedKey: '',
-          pageState: items.length ? 'ready' : 'empty',
-        };
+        let resetConfirm = false;
         // 待答列表里已经没有这一轮,读回说明它不在可再提交的待答里
         if (unconfirmedRid && !stillUnconfirmed) {
           this._settleUnconfirmedRid = '';
           if (this.data.confirm && this.data.confirm.rid === unconfirmedRid) {
-            patch.confirm = { show: false, rid: '', key: '', label: '', content: '', unconfirmed: false };
+            resetConfirm = true;
           }
         }
-        this.setData(patch);
+        if (resetConfirm) {
+          this.setData({
+            items: items,
+            openId: '', pickedKey: '',
+            pageState: items.length ? 'ready' : 'empty',
+            confirm: { show: false, rid: '', key: '', label: '', content: '', unconfirmed: false },
+          });
+        } else {
+          this.setData({
+            items: items,
+            openId: '', pickedKey: '',
+            pageState: items.length ? 'ready' : 'empty',
+          });
+        }
       },
       fail: (res, status) => {
         if (!this._recoverAccess(res, status, epoch) && current()) {

@@ -195,7 +195,7 @@ test('N5:任务站(状态 / 检定主题)编辑器:连结果规则都结算不�
   assert.equal(view(cfg.defaultConfig(), 0, null, {}).participationOptions.find(r => r.key === 'direct').reason, '')
   const src = fs.readFileSync(path.join(ROOT, 'pages/publish/temp/index.js'), 'utf8')
   assert.match(src, /supportMatrix\.settleOutcome\(this\._supportMatrix, this\._supportContext, advanced, game\.section\)/)
-  assert.match(src, /'formData\.validationMethod': 5/)
+  assert.match(src, /patch\['formData\.validationMethod'\] = 5|'formData\.validationMethod': 5/)
 })
 
 test('N5:任务站选中服务端能结算的玩法自动落结果规则;非任务站、已有规则、结算不了的玩法不动', () => {

@@ -34,8 +34,6 @@ function qaOptions(options, resolve) {
   });
 }
 
-const { stripLeadingHandMark } = require('./hand-mark.js');
-
 /** 逐字猜词:服务端 publicProjection → 槽位。BLANK 不带字符;answer/aliases/format 本来就不在回包里。 */
 function hangmanSlots(seg) {
   return ((seg && seg.slots) || []).map((slot, idx) => {
@@ -219,5 +217,5 @@ function accusationKit(view, qaSeg, resolve) {
   };
 }
 
-module.exports = { displayImage, qaOptions, hangmanSlots, hangmanKit, qaLetterPool, hangmanStationText, stripLeadingHandMark, stripOptionKey, codePoints, hangmanPayload,
+module.exports = { displayImage, qaOptions, hangmanSlots, hangmanKit, qaLetterPool, hangmanStationText, stripOptionKey, codePoints, hangmanPayload,
   screenBlocks, accusationOutcome, accusationKit, OUTCOME_LABEL };

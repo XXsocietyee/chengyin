@@ -126,7 +126,7 @@
       <cy-skeleton wx:if="{{activityLoading}}" type="list" count="3" />
       <cy-error load-failure wx:elif="{{activityError && !activityList.length}}" title="活动列表加载失败" sub="只显示你参加过或主办的活动" retry="重试" bind:retry="loadActivityOptions" class="cy-fade-in" />
       <block wx:else>
-        <cy-inline-error wx:if="{{activityError}}" kind="network" title="有一部分活动没加载出来" sub="点重试补全你参加或主办的活动" action="重试" bind:action="loadActivityOptions" />
+        <cy-inline-error class="cy-fade-in" wx:if="{{activityError}}" kind="network" title="有一部分活动没加载出来" sub="点重试补全你参加或主办的活动" action="重试" bind:action="loadActivityOptions" />
         <cy-cell wx:for="{{activityList}}" wx:key="activityId" class="cy-fade-in"
                  title="{{item.name}}" description="{{item.sourceLabel}}"
                  data-index="{{index}}" data-activity-id="{{item.activityId}}"

@@ -62,6 +62,7 @@ Page({
     if (this._galleryIdentity && (changed || this._resumeRead)) this.load();
   },
   onHide() {
+    this._hidden = true;
     if (this._systemPickerOpen) {
       this._systemPickerOpen = false;
       this._pickerReturn = true;

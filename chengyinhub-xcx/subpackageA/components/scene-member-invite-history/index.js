@@ -355,13 +355,11 @@ Component({
         ;(this._earnT || []).forEach(clearTimeout)
       }
       this._earnT = []
-      const patch = {}
       // 入场停在「先隐着」时列表会一直看不见；数字停在中途会把累计看成更小的数，0 就是最明显的那种
-      if (this.data.pmIn) patch.pmIn = 0
-      if (this._earnTarget != null) patch.earnedTotalText = pointText(this._earnTarget) || '0'
-      if (this._balanceTarget != null) patch.balanceText = pointText(this._balanceTarget)
-      if (this.data.latest && this.data.earnStage > 0 && this.data.earnStage < 3) patch.earnStage = 3
-      if (Object.keys(patch).length) this.setData(patch)
+      if (this.data.pmIn) this.setData({ pmIn: 0 })
+      if (this._earnTarget != null) this.setData({ earnedTotalText: pointText(this._earnTarget) || '0' })
+      if (this._balanceTarget != null) this.setData({ balanceText: pointText(this._balanceTarget) })
+      if (this.data.latest && this.data.earnStage > 0 && this.data.earnStage < 3) this.setData({ earnStage: 3 })
     },
     retry() { if (this.data.authRequired) retryLogin(this, app, () => this.load(true)); else this.load(true) },
     loadMore() {

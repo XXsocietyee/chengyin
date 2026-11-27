@@ -60,7 +60,8 @@ test('SC-PRIV-03 超时/HTTP500/业务失败/回包丢失都不提示撤回成�
   h.readbacks().at(-1).success(notRevoked);
   await settle();
   assert.equal(h.sheet.data.submitting, false, '超时必须释放提交态，否则无法重试');
-  assert.deepEqual(h.toasts, ['本机漫游已停，记录待确认']);
+  assert.equal(h.sheet.data.submitError, '本机漫游已停，记录待确认');
+  assert.equal(h.toasts.includes(SUCCESS_TOAST), false);
 
   // 2) HTTP 500
   h.sheet.withdrawRoamLocationConsent();
@@ -86,7 +87,8 @@ test('SC-PRIV-03 超时/HTTP500/业务失败/回包丢失都不提示撤回成�
   await settle();
 
   assert.equal(h.toasts.includes(SUCCESS_TOAST), false, '任何失败都不得提示撤回成功');
-  assert.equal(h.toasts.length, 5);
+  assert.equal(h.toasts.length, 0);
+  assert.ok(h.sheet.data.submitError, '失败应留在按钮下方提示而非弹 toast');
   assert.equal(h.sheet.data.submitting, false);
 
   // 5) 重试:同一 requestId(服务端按幂等号回放已落库的那一行),这次回包到达
@@ -121,13 +123,15 @@ test('SC-PRIV-03 结果未知(超时/回包丢失)且回读显示仍未撤回:�
   await settle(30); // 超时
   h.readbacks().at(-1).success(notRevoked);
   await settle();
-  assert.deepEqual(h.toasts, ['本机漫游已停，记录待确认', '本机漫游已停，记录待确认']);
+  assert.deepEqual(h.toasts, []);
+  assert.equal(h.sheet.data.submitError, '本机漫游已停，记录待确认');
   assert.equal(h.sheet.data.submitting, false);
   // 回读也超时:同样按失败,不挂起
   h.sheet.withdrawRoamLocationConsent();
   h.revokes().at(-1).fail({ errMsg: 'request:fail' });
   await settle(40);
-  assert.equal(h.toasts.length, 3);
+  assert.equal(h.toasts.length, 0);
+  assert.ok(h.sheet.data.submitError);
   assert.equal(h.toasts.includes(SUCCESS_TOAST), false);
   assert.equal(h.sheet.data.submitting, false);
 });
@@ -152,5 +156,5 @@ test('SC-PRIV-03 期望:结果未知时先回读服务端最新状态,再决定�
   h.revokes().at(-1).success({ code: 500, msg: '服务繁忙' });
   await settle();
   assert.equal(h.readbacks().length, 1);
-  assert.equal(h.toasts.at(-1), '本机漫游已停，记录待确认');
+  assert.equal(h.sheet.data.submitError, '本机漫游已停，记录待确认');
 });

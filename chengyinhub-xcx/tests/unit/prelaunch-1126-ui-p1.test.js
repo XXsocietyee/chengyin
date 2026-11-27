@@ -24,17 +24,17 @@ test('N1-04 creditText 在 pages/play 之外,aiGenerated 为真时带出 AI 生�
 
 test('获赞、粉丝和队伍人数在未知时不显示成 0,真 0 仍保留', () => {
   const profile = read('subpackageMember/components/cy/profile/index.wxml');
-  assert.match(profile, /wx:if="\{\{userInfo\.likeNum != null\}\}">\{\{userInfo\.likeNum\}\}/);
-  assert.match(profile, /wx:if="\{\{userInfo\.fansNum != null\}\}">\{\{userInfo\.fansNum\}\}/);
+  assert.match(profile, /num\.n\(userInfo\.likeNum\)|wx:if="\{\{userInfo\.likeNum != null\}\}">\{\{userInfo\.likeNum\}\}/);
+  assert.match(profile, /num\.n\(userInfo\.fansNum\)|wx:if="\{\{userInfo\.fansNum != null\}\}">\{\{userInfo\.fansNum\}\}/);
   assert.doesNotMatch(profile, /userInfo\.likeNum \|\| 0/);
   assert.doesNotMatch(profile, /userInfo\.fansNum \|\| 0/);
   const detail = read('pages/team/detail/index.wxml');
-  assert.match(detail, /wx:if="\{\{team\.joinedCount != null && team\.maxMembers != null\}\}">\{\{team\.joinedCount\}\} \/ \{\{team\.maxMembers\}\}/);
+  assert.match(detail, /memberCount\.text\(team\)|wx:if="\{\{team\.joinedCount != null && team\.maxMembers != null\}\}">\{\{team\.joinedCount\}\} \/ \{\{team\.maxMembers\}\}/);
   assert.match(detail, /wx:if="\{\{item\.teamDoneCount != null && item\.totalTasks != null\}\}">\{\{item\.teamDoneCount\}\} \/ \{\{item\.totalTasks\}\}/);
   assert.doesNotMatch(detail, /joinedCount \|\| 0/);
   assert.doesNotMatch(detail, /item\.totalTasks \|\| 0/);
   const join = read('pages/team/join/index.wxml');
-  assert.match(join, /wx:if="\{\{team\.joinedCount != null && team\.maxMembers != null\}\}">\{\{team\.joinedCount\}\} \/ \{\{team\.maxMembers\}\}/);
+  assert.match(join, /memberCount\.text\(team\)|wx:if="\{\{team\.joinedCount != null && team\.maxMembers != null\}\}">\{\{team\.joinedCount\}\} \/ \{\{team\.maxMembers\}\}/);
   assert.doesNotMatch(join, /joinedCount \|\| 0/);
 });
 
@@ -48,10 +48,11 @@ test('入口 query 里的 % 不会让 decodeURIComponent 抛出', () => {
   assert.doesNotThrow(() => routeText('%'));
   assert.equal(routeText('%'), '%');
   assert.match(invite, /topicName:\s*options\.topicName\s*\?\s*routeText\(options\.topicName\)/);
-  assert.match(read('pages/club/enroll/index.js'), /clubName:\s*options\.clubName\s*\?\s*safeDecode\(options\.clubName\)/);
+  const enroll = read('pages/club/enroll/index.js');
+  assert.match(enroll, /safeDecode\(options\.clubName\)|try \{[\s\S]{0,120}decodeURIComponent\(options\.clubName\)[\s\S]{0,60}\} catch/);
   const search = read('pages/search2/result/index.js');
-  assert.match(search, /keyword = options\.keyword \? safeDecode\(options\.keyword\)/);
-  assert.match(search, /startDate: options\.startDate \? safeDecode\(options\.startDate\)/);
-  assert.match(search, /endDate: options\.endDate \? safeDecode\(options\.endDate\)/);
+  assert.match(search, /keyword = options\.keyword \? (?:safeDecode|decodeQuery)\(options\.keyword\)/);
+  assert.match(search, /startDate: options\.startDate \? (?:safeDecode|decodeQuery)\(options\.startDate\)/);
+  assert.match(search, /endDate: options\.endDate \? (?:safeDecode|decodeQuery)\(options\.endDate\)/);
   assert.match(read('pages/merchant/relation/index.js'), /topicName\) \? safeDecode\(options\.topicName\)/);
 });

@@ -46,14 +46,15 @@ Page({
   },
   restoreDraft(kept) {
     if (!kept || kept.identity !== this._identity) return;
-    const patch = {};
-    if (kept.review && !this.data.reviewPending) {
-      patch.review = kept.review;
-      patch.reviewContent = kept.reviewContent;
-      patch.reviewRating = kept.reviewRating;
+    const hasReview = !!(kept.review && !this.data.reviewPending);
+    const hasReserve = !!(kept.reserveForm && !this.data.reservePending);
+    if (hasReview && hasReserve) {
+      this.setData({ review: kept.review, reviewContent: kept.reviewContent, reviewRating: kept.reviewRating, reserveForm: kept.reserveForm });
+    } else if (hasReview) {
+      this.setData({ review: kept.review, reviewContent: kept.reviewContent, reviewRating: kept.reviewRating });
+    } else if (hasReserve) {
+      this.setData({ reserveForm: kept.reserveForm });
     }
-    if (kept.reserveForm && !this.data.reservePending) patch.reserveForm = kept.reserveForm;
-    if (Object.keys(patch).length) this.setData(patch);
   },
   onShow() {
     this._epoch = (this._epoch || 0) + 1; this._hidden = false;

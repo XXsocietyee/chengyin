@@ -333,8 +333,11 @@ Page({
     const lookOnly = this._skipShowRefresh === true;
     this._skipShowRefresh = false;
     if (this.data.missingParam) return;
-    if (!this.data.loaded && !this.data.loadError) return;
-    if (lookOnly && !this.data.loadError) return;
+    if (lookOnly) {
+      if (!this.data.loadError) return;
+    } else if (!this.data.loaded || this.data.loadError) {
+      return;
+    }
     this.fetchDetail();
     this.loadManageStats(true);
   },

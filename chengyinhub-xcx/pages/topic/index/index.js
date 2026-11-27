@@ -2681,7 +2681,7 @@ Page({
   // FOLLOWUP-A-1:举报主题,流程与动态详情 reportSquare 同一套(utils/content-report.js)
   reportTopic() {
     if (app.ensureLoginFor && !app.ensureLoginFor('report', () => this.reportTopic(), { owner: this, target: () => [this.data.id] })) return; // 2026-10-24 游客写前登录
-    if (!this.data.canReportTopic) return;
+    if (!this.data.canReport) return;
     contentReport.reportTopic(this, app, this.data.id);
   },
   reportComment(e) {
