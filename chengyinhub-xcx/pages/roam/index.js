@@ -38,7 +38,7 @@ const {
 const { readNonNegative, footprintCount, formatDistance, formatDuration, formatRoamMoment } = require('../../utils/roam-history-metrics.js');
 const { createIdleDetector } = require('../../utils/roam-idle.js');
 const { acceptRoamLocation } = require('../../utils/roam-track-filter.js');
-const { simplifyTrack, limitTrack, normalizeTrack } = require('../../utils/roam-track-simplify.js');
+const { simplifyTrack, limitTrack, normalizeTrack, DEFAULT_MAX_POINTS } = require('../../utils/roam-track-simplify.js');
 const { createRouteLine } = require('../../utils/my-route-line.js');
 const { isRecordList } = require('../../utils/response-shape.js');
 const readSession = require('../../utils/session/login-reload.js');
@@ -82,7 +82,14 @@ const { roam3dFor } = require('../../utils/map-style.js'); const mapSwitch = req
 const photoPins = require('./photo-pins.js');
 const { createMarkerIds } = require('../../utils/roam-marker-ids.js');
 const placeMap = require('../../utils/roam-place-map.js');
-const { resolvePlaceMedia } = require('../../utils/roam-place-media.js');
+const { resolvePlaceMedia, manifestPath } = require('../../utils/roam-place-media.js');
+// 种子封面要等图集许可清单。点位层先用空封面上图,清单回来再补,不让最慢的一个文件挡住整层。
+function holdSeedCover(row) {
+  if (!row || !placeMap.hasSeedTag(row)) return row;
+  const key = row.cover || row.coverImg || row.cover_img;
+  if (!manifestPath(key)) return row;
+  return Object.assign({}, row, { cover: '', coverImg: '', cover_img: '', gallery: [], galleryJson: '[]' });
+}
 // L05-020:地图条与点位卡同一种距离写法(1 公里内取整到 10 米),都交给 placeMap.distanceText
 function distLabel(m) {
   const n = Number(m);
@@ -148,6 +155,7 @@ const FOG_SCREEN_MIN_MS = 600;
 const FOG_SCREEN_DPR = 1;
 const LINE_MS = 1500;
 const END_HOLD_MS = 3000;
+const END_HOLD_PAINT_MS = 100; // L05-035:判定仍 40ms 一次,圈的 setData 大约每秒 10 次
 const ROAM_OPENING_MS = 4200;
 const ROAM_OPENING_REDUCED_MS = 220;
 const OPENING_EMOJI_GLYPHS = ['😆', '🤩', '🥳', '😉', '😂', '😇', '🤗'];
@@ -238,7 +246,6 @@ function req(url, method, data, opts) {
 //     apiOk(res)    = 后端确认成功
 //     三者皆非      = 后端明确说「没有 / 拒绝」——这才是真空态
 const FLAG_REFRESH_MS = 5 * 60 * 1000;
-const DISMISS_KEEP_M = 100; // L05-037:关掉的卡在离开约 80 米 + 20 米缓冲之前不再自动弹
 const RECOVERY_SAVE_MS = 10000; // L05-009:走路时恢复记录最多每 10 秒整份落盘一次
 /** L05-046:分享面板「谁能看到 / 能否发广场」唯一算法(原来三处各写一份,一次切换调三遍 canUseCommunity)。 */
 function shareGate(visibility, app) {
@@ -959,6 +966,8 @@ Page({
     this._sessionPhotos = [];
     this._gridHit = {};
     this._nearbyShown = false;
+    this._dismissed = {};
+    this._userCard = false;
     // P2 接真:本次会话累加器(格子/发现POI/会话id/上报队列)
     this._sessionTiles = {};
     this._sessionTileCount = 0;   // 与 _sessionTiles 同生命周期:重置一个必须重置另一个
@@ -991,6 +1000,8 @@ Page({
 
   onUnload() {
     this._unloaded = true;
+    this._supersedePresencePrivacy();
+    if (this._cancelEndHold) this._cancelEndHold(); // L05-035:长按计时器卸载即停,不等后面的收尾
     this._roamStartGen = (this._roamStartGen || 0) + 1;
     this._roamStartPending = false;
     this._shootAfterStart = false;
@@ -1023,7 +1034,6 @@ Page({
     if (this._roamOpeningTimer) clearTimeout(this._roamOpeningTimer);
     if (this._roamZoomTimer) clearTimeout(this._roamZoomTimer);
     if (this._shootAfterStartTimer) clearTimeout(this._shootAfterStartTimer);
-    if (this._cancelEndHold) this._cancelEndHold();
     if (this._shareUploadOperation) this._shareUploadOperation.abort();
     this._roamWriteGeneration = (this._roamWriteGeneration || 0) + 1;
     if (this._roamCacheUnsubscribe) this._roamCacheUnsubscribe();
@@ -1039,7 +1049,10 @@ Page({
   onAtmosDone() { if (this.data.atmosOn) this.setData({ atmosOn: false }); },
 
   onHide() {
-    this._hidden = true; this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1; this.setData({ roamPageShown: false });
+    this._hidden = true;
+    this._supersedePresencePrivacy();
+    this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1; this.setData({ roamPageShown: false });
+    if (this._cancelEndHold) this._cancelEndHold(); // L05-035:切走/锁屏都停长按圈,不能在后台把漫游结束掉
     this._roamStartGen = (this._roamStartGen || 0) + 1;
     this._roamStartPending = false;
     this._shootAfterStart = false;
@@ -1118,8 +1131,8 @@ Page({
       if (changed || this._eventMissionCode) this._loadBoundEvent(this._eventId);
     }
     // 雾遮罩的自愈:.fogscreen-guard 是 inset:0 的不透明层,guard 卡住 = 整页纯黑且 POI 点不动
-    // (onPoiTap 首行就按它拦)。页面上没有「点击重试」入口(L05-040 决定不加按钮):初始化放弃时
-    // _trySetupScreenFog 会自动再试一次;其余停在 guard:true 的路径 ⇒ 全黑、无提示、无出口。已知至少三条:①首帧既不回 bindload 也不回 binderror 的机型;
+    // (onPoiTap 首行就按它拦)。初始化或出图失败时 _offerFogRetry 会说明并再画一次;
+    // 自动那次用掉之后再失败,会给出「重试」,点下去再画。已知至少三条:①首帧既不回 bindload 也不回 binderror 的机型;
     // ②regionchange 的 begin 到了而 end 丢了(手势被来电/切后台打断);③重绘定时器被 dispose 截断。
     // ②已由 _guardScreenViewportChange 的看门狗就地兜住,这里是最后一道:tabBar 页实例常驻,
     // 切走再回来仍是那个 guard,冷启动前不自愈,所以回到本页时补一次重试(retryScreenFog 自带防重入)。
@@ -1149,13 +1162,14 @@ Page({
     // L05-002:同一时刻只发一笔点亮,连点不重复 POST。
     if (this._poiTapPending) return;
     this._poiTapPending = true;
+    // L05-002:silentError 关掉通道那一声,下面每一种结果只说一次。
     req('/api/roam/checkin', 'POST', {
       name: d.name || '',
       poiLat: String(d.latitude),
       poiLng: String(d.longitude),
       curLat: String(me.lat),
       curLng: String(me.lng),
-    }).then((res) => {
+    }, { silentError: true }).then((res) => {
       this._poiTapPending = false;
       if (this._unloaded) return;
       const r = (res && res.data) || {};
@@ -1178,12 +1192,11 @@ Page({
         }
         return;   // 3-06:不 return 的话下面兜底 toast 会立刻盖掉首亮提示
       }
-      // 其他:按失败类型各说一次(L05-002)。业务错(code 非 200 且带 msg)通道已自动 toast 过,
-      // 页面再补一句就是双弹;网络异常通道不会说(req 恒给 fail 回调),页面必须自己说。
       if (netFail(res)) { cyToast('网络异常，请重试'); return; }
       if (httpFail(res)) { cyToast(res.msg || '服务暂不可用'); return; }
       if (res && (res.code === 401 || res.code === 403)) { cyToast('登录后才能点亮'); return; }
-      if (apiOk(res)) cyToast('这个地点暂时没有可记录的信息');
+      if (apiOk(res)) { cyToast('这个地点暂时没有可记录的信息'); return; }
+      cyToast((res && res.msg) || '点亮没有成功，请重试');
     });
   },
 
@@ -1466,23 +1479,23 @@ Page({
         this.setData({ poiEmpty: false }, () => this._syncGoal());
         return;
       }
-      const list = await resolvePlaceMedia(getApp(), got.rows);
-      if (!current()) return;
-      this._poiTruncated = got.truncated;
-      this._poiFetchedAt = { lat: c.lat, lng: c.lng, radius: radiusM }; // 读成功才记;失败后 10 秒节流一过会再试
-      this.setData({ poiEmpty: !list.length }, () => this._syncGoal());
-      // BL-01:换范围会重拉,上一轮的漫游点位先摘掉(打完卡的由 _mergeSessionDonePois 保留),否则同 id 叠两份。
-      // A2.2:玩家走远后的重拉(opts.merge)按 id 去重合并,离新中心 2 倍半径外的旧点才丢。
-      const rest = (this._pois || []).filter((p) => !p._roamId || (opts && opts.merge && !list.some((n) => n && Number(n.id) === Number(p._roamId))
-        && !(placeMap.distanceFrom(c, p) > 2 * radiusM)));
-      if (!list.length) {
-        if (rest.length !== (this._pois || []).length) {
-          this._pois = this._mergeSessionDonePois(rest);
-          this._syncMarkers(); this._syncSparkCircles();
+      const paint = (list) => {
+        if (!current()) return;
+        this._poiTruncated = got.truncated;
+        this._poiFetchedAt = { lat: c.lat, lng: c.lng, radius: radiusM }; // 读成功才记;失败后 10 秒节流一过会再试
+        this.setData({ poiEmpty: !list.length }, () => this._syncGoal());
+        // BL-01:换范围会重拉,上一轮的漫游点位先摘掉(打完卡的由 _mergeSessionDonePois 保留),否则同 id 叠两份。
+        // A2.2:玩家走远后的重拉(opts.merge)按 id 去重合并,离新中心 2 倍半径外的旧点才丢。
+        const rest = (this._pois || []).filter((p) => !p._roamId || (opts && opts.merge && !list.some((n) => n && Number(n.id) === Number(p._roamId))
+          && !(placeMap.distanceFrom(c, p) > 2 * radiusM)));
+        if (!list.length) {
+          if (rest.length !== (this._pois || []).length) {
+            this._pois = this._mergeSessionDonePois(rest);
+            this._syncMarkers(); this._syncSparkCircles();
+          }
+          return;
         }
-        return;
-      }
-      const roamPois = list.filter((n) => normalizeTrack([n]).length).map((n) => {
+        const roamPois = list.filter((n) => normalizeTrack([n]).length).map((n) => {
         // 展示分类只认 roam:* 保留标签;业务身份仍按 type(1 平台地点 / 2 商家据点),不按名字猜。
         const m = presentationForPoi(n);
         const color = m.cat === 'merchant' ? '#D9D9D9' : (m.cat === 'park' ? '#A6A6A6' : BRAND); /* ds-ok 与本页演示点 catMap 的 park / merchant 同色,原生 marker 只吃字面色值 */
@@ -1512,11 +1525,15 @@ Page({
           mapAvatarKind: merchantAvatar ? 'merchant' : (npcAvatar ? 'npc' : ''),
           npcAvatar,
         };
-      });
-      // 真 POI 优先,拼在演示 POI 前(演示作兜底底色)
-      this._pois = this._mergeSessionDonePois(roamPois.concat(rest));
-      this._seenSweepHistory();
-      this._genIcons().then(() => { if (current()) { this._syncMarkers(); this._syncSparkCircles(); } });
+        });
+        // 真 POI 优先,拼在演示 POI 前(演示作兜底底色)
+        this._pois = this._mergeSessionDonePois(roamPois.concat(rest));
+        this._seenSweepHistory();
+        this._genIcons().then(() => { if (current()) { this._syncMarkers(); this._syncSparkCircles(); } });
+      };
+      // 点位先上图。种子封面等许可清单,不让最慢的一个图集文件挡住这一层。
+      paint((got.rows || []).map(holdSeedCover));
+      paint(await resolvePlaceMedia(getApp(), got.rows));
     });
   },
 
@@ -1603,7 +1620,7 @@ Page({
     this._roamPoiFinishBlocked = this._revealInFlight = false;
     if (this._revealTimer) { clearTimeout(this._revealTimer); this._revealTimer = null; }
     this._clientSessionKey = ''; this._roamSid = 0;
-    this._presencePrivacyGeneration = (this._presencePrivacyGeneration || 0) + 1;
+    this._supersedePresencePrivacy();
     this._runners = [];
     this.setData({ presenceVisible: false, runnerView: null, multiView: null });
     this._pendingTiles = []; this._pendingCollectedAt = {}; this._roamBadgePending = false; this._roamRecoveryAbandoned = false;
@@ -1616,6 +1633,8 @@ Page({
     this._recoveryReadFailed = this._revealBootstrapUnknown = false;
     this._eventId = 0; this._eventMissionCode = '';
     this._nearbyShown = false;
+    this._dismissed = {};
+    this._userCard = false;
     this._shopVisitPromise = null;
     this._exploreDayRequestToken = null; this._exploreDayCandidateId = null;
     /* C-16 账号切换/重新开始后,上一轮的浮层必须一起退场:
@@ -3358,6 +3377,7 @@ Page({
           g.scale(dpr, dpr);
           this._fogMode = 'screen';
           this._fogAutoRetried = false;
+          this._fogRetryShown = false;
           this._fogScreenCv = node;
           this._fogScreenG = g;
           this._fogScreenSize = { width, height };
@@ -3384,15 +3404,35 @@ Page({
       this._fogMode = 'blocked';
       this.setData({ fogScreenLayers: [], fogScreenReady: false, fogScreenGuard: true });
       this._finishFogSetup(false, generation);
-      // L05-040(业主默认项 B):不加按钮;遮罩卡住时 1 秒后自动再初始化一次(每次成功后重新给一次机会)
-      if (!this._fogAutoRetried) {
-        this._fogAutoRetried = true;
-        this._fogAutoRetryTimer = setTimeout(() => {
-          this._fogAutoRetryTimer = null;
-          if (generation === this._fogLifecycleGen && this._fogMode === 'blocked') this.retryScreenFog();
-        }, 1000);
-      }
+      // L05-040:失败要让人看见重试,并且这次重试必须重新把雾画上(开场屏也要画,不能空返回)
+      this._offerFogRetry(generation);
     });
+  },
+
+  _offerFogRetry(generation) {
+    if (generation !== this._fogLifecycleGen) return;
+    if (this._fogAutoRetried) {
+      if (this._fogRetryShown) return;
+      this._fogRetryShown = true;
+      try {
+        cyModal.show({
+          title: '迷雾没画上',
+          content: '再试一次会重新画上。',
+          confirmText: '重试',
+          cancelText: '取消',
+          success: (m) => { if (m && m.confirm) this.retryScreenFog(); },
+        });
+      } catch (e) { /* 弹不出来也不能挡住之后的重试 */ }
+      return;
+    }
+    this._fogAutoRetried = true;
+    try { cyToast('迷雾没画上，正在重试'); } catch (e) { /* 说不出来也要再画一次 */ }
+    this._fogAutoRetryTimer = setTimeout(() => {
+      this._fogAutoRetryTimer = null;
+      if (generation !== this._fogLifecycleGen) return;
+      if (this._fogMode !== 'blocked' && !this.data.fogScreenGuard) return;
+      this.retryScreenFog();
+    }, 1000);
   },
 
   _drawScreenFog(region) {
@@ -3454,6 +3494,7 @@ Page({
     } catch (e) {
       this._fogScreenErr = 'publish:' + (e && e.message);
       this.setData({ fogScreenGuard: true });
+      this._offerFogRetry(this._fogLifecycleGen);
     }
   },
 
@@ -3466,6 +3507,8 @@ Page({
     const found = layers.find((layer) => Number(layer.version) === version);
     if (!found) return;
     if (version === this._fogScreenVersion) {
+      this._fogAutoRetried = false;
+      this._fogRetryShown = false;
       this._fogScreenLoadMs = Math.max(0, Date.now() - Number(found.frameStartedAt || Date.now()));
       this.setData({ fogScreenLayers: [found], fogScreenReady: true, fogScreenGuard: false }, () => {
         oldLayers.forEach((layer) => { if (layer.src !== found.src) this._deleteScreenFogFile(layer.src); });
@@ -3491,11 +3534,13 @@ Page({
     this._fogScreenErr = 'image:' + ((e && e.detail && e.detail.errMsg) || 'load-failed');
     this.setData({ fogScreenGuard: true }, () => {
       if (failed) this._deleteScreenFogFile(failed.src);
+      this._offerFogRetry(generation);
     });
   },
 
   retryScreenFog() {
-    if (this.data.screen !== 'map' && this.data.screen !== 'arrive') return;
+    // 开场 4.2 秒里画布已经挂上。失败后的那一次重试若只认 map/arrive,会在 opening 上空返回,雾一直黑着。
+    if (this.data.screen !== 'opening' && this.data.screen !== 'map' && this.data.screen !== 'arrive') return;
     if (this._fogScreenSetupResolve) return;
     this.setData({ fogScreenGuard: true });
     if (this._fogMode === 'screen' && this._fogScreenG) {
@@ -3849,7 +3894,7 @@ Page({
   onGoalTap() {
     const act = this.data.goal && this.data.goal.act;
     if (act === 'gps') { this.toggleGps(); return; }
-    if (act === 'nearby') { this.setData({ nearbyBanner: { show: true } }); return; }
+    if (act === 'nearby') { this._userCard = true; this.setData({ nearbyBanner: { show: true } }); return; }
     // buildRoamGoal 的 poiEmpty 状态会产出 discover,
     // 这里复用工具面板的同一发现入口。
     if (act === 'discover') { this.goDiscover(); return; }
@@ -3964,6 +4009,8 @@ Page({
     // (直线段 points 就是终点,与旧行为一致;补出来的中间点只为画线/点亮连续,不重复计里程)。
     const seg = Array.isArray(accepted.points) && accepted.points.length ? accepted.points : [{ lat: p.lat, lng: p.lng }];
     for (let i = 0; i < seg.length; i += 1) this._track.push({ lat: seg[i].lat, lng: seg[i].lng });
+    // L05-068:活轨迹超过既有 limitTrack 预算就抽稀。最新点是尾点,抽稀会留下;地图线与分享仍读这条轨迹。
+    if (this._track.length > DEFAULT_MAX_POINTS) this._track = limitTrack(this._track);
     const last = this._reveals[this._reveals.length - 1];
     if (!last || distM(last, p) > 15) this._addReveal(p);
     this._applyMovePatch(p, prev);
@@ -4147,7 +4194,6 @@ Page({
       }
       else this._hidePaceCard();
     }
-    this._sweepDismissed(p);
     // 玩家自己点开的卡还开着:自动弹出不顶掉它
     if (this._userCard && ((card && card.show) || this.data.nearbyBanner.show)) return;
     let landmark = null;
@@ -4330,19 +4376,13 @@ Page({
 
   onNearbySwipe(e) { this.setData({ nearbyIdx: e.detail.current }); },
 
-  /* L05-037(业主默认项 A):玩家关掉的卡记下来,离开关卡处约 80 米(再加 20 米缓冲)之前不再自动弹;
-     自动弹出也不顶掉玩家自己点开的卡(_userCard)。 */
+  /* L05-037:关掉的地标卡 / 商家浮卡按地点记住。同一个地点之后的定位不再自动弹。
+     再打开只有两条路:玩家自己点(点图钉进详情,或目标层重开浮卡),或离开后走近另一个地点。 */
   _dismiss(keys) {
-    const at = this._player ? { lat: this._player.lat, lng: this._player.lng } : null;
-    if (!at) return;
     this._dismissed = this._dismissed || {};
-    keys.filter(Boolean).forEach((k) => { this._dismissed[k] = at; });
+    keys.filter(Boolean).forEach((k) => { this._dismissed[k] = true; });
   },
   _isDismissed(key) { return !!(this._dismissed && this._dismissed[key]); },
-  // 每个定位点先清掉「已离开关卡处 100 米」的记忆,回来时卡片又能自动弹
-  _sweepDismissed(p) {
-    Object.keys(this._dismissed || {}).forEach((k) => { if (distM(this._dismissed[k], p) > DISMISS_KEEP_M) delete this._dismissed[k]; });
-  },
   closeNearbyBanner() {
     this._dismiss((this.data.nearbyPois || []).map((m) => 'shop:' + (m.groupKey || m.id)));
     this._userCard = false;
@@ -4573,12 +4613,19 @@ Page({
     this._cancelEndHold();
     this._holdDelay = setTimeout(() => {
       this._holdDelay = null;
+      if (this._unloaded || this._hidden) return;
       this._endHoldStart = Date.now();
+      this._endHoldPaintAt = this._endHoldStart;
       this.setData({ endHoldPct: 0 });
       this._endHoldTimer = setInterval(() => {
-        const elapsed = Date.now() - this._endHoldStart;
+        if (this._unloaded || this._hidden) { this._cancelEndHold(); return; }
+        const now = Date.now();
+        const elapsed = now - this._endHoldStart;
         const pct = Math.min(100, Math.round((elapsed / END_HOLD_MS) * 100));
-        this.setData({ endHoldPct: pct });
+        if (pct !== this.data.endHoldPct && (elapsed >= END_HOLD_MS || now - this._endHoldPaintAt >= END_HOLD_PAINT_MS)) {
+          this._endHoldPaintAt = now;
+          this.setData({ endHoldPct: pct });
+        }
         if (elapsed >= END_HOLD_MS) {
           this._endHoldTriggered = true;
           this._cancelEndHold();
@@ -4975,14 +5022,27 @@ Page({
    * 取消/返回不能把当前漫游的结算状态串掉。
    */
 
-  /* L05-047(业主默认项 A):功能开关最多每 5 分钟或换账号时重取一次;分享面板的广场选项只在打开面板时按当时的开关算
-     (_openShareSheet),不再每次切回本页就改 share.*。后台收回广场权限时最多晚 5 分钟生效。 */
+  /* L05-047(业主默认项 A):同一账号的开关取到之后 5 分钟内仍算新鲜,再进本页不再重取。
+     第一次打开会取;这次没取到(请求失败,或没有落到当前账号)下次可以再试;换账号立刻重取。
+     分享面板的广场选项只在打开面板时按当时的开关算(_openShareSheet),不再每次切回本页就改 share.*。
+     后台收回广场权限时最多晚 5 分钟生效。 */
   _syncCommunityEntry() {
     const app = getApp();
     const owner = String(app.getUserID && app.getUserID() || '');
     if (owner === this._flagsOwner && Date.now() - this._flagsAt < FLAG_REFRESH_MS) return;
-    this._flagsOwner = owner; this._flagsAt = Date.now();
-    if (typeof app.loadFeatureFlags === 'function') app.loadFeatureFlags();
+    this._flagsOwner = owner;
+    const stamp = this._flagsAt = Date.now();
+    if (typeof app.loadFeatureFlags !== 'function') return;
+    const release = () => { if (this._flagsOwner === owner && this._flagsAt === stamp) this._flagsAt = 0; };
+    let pending;
+    try { pending = app.loadFeatureFlags(); } catch (e) { release(); return; }
+    if (!pending || typeof pending.then !== 'function') return;
+    pending.then(() => {
+      const auth = typeof app.getAuthorization === 'function' ? app.getAuthorization() : undefined;
+      const held = app._communityFeatureOwner === owner
+        && (auth === undefined || app._communityFeatureAuthorization === auth);
+      if (!held) release();
+    }, release);
   },
   _openShareSheet() {
     const app = getApp();
@@ -5486,32 +5546,34 @@ Page({
     if (this._clock) { clearInterval(this._clock); this._clock = null; }
     this._sessionClock = null;
   },
-  // L05-015/L05-033:playHud 从不渲染,原来每秒整对象 setData 一次。只保留模板真正读的 statsShown.time。
+  // L05-015/L05-033:playHud 从不渲染。用时文案是「时:分」,一分钟才变一次;
+  // 1s 时钟和每次定位都进这里,可见文案没变就不要整份重写 statsShown。
   _syncPlayHud() {
     if (!this._sessionClock) return;
-    // 时间带冒号,_rollStat 会原样透传
     const time = formatDuration(this._sessionClock.elapsedSeconds());
     this._stats.time = time;
+    const shown = this.data.statsShown && this.data.statsShown.time;
+    if (time === shown) return;
     this._rollStat('time', time);
   },
-  // L05-034:顶部条只在绑定官方活动时渲染;没绑定不建,内容没变不发。
+  // L05-034:顶部条只在绑定官方活动时渲染;没绑定不建。比较的是屏上那四段字和进度,不是对象身份。
   _syncPlayHeader() {
     const event = this.data.boundEvent;
-    if (!event) { if (this.data.playHeader) { this._playHeaderSig = ''; this.setData({ playHeader: null }); } return; }
-    const sig = [event.err, event.title, this._stats.explorePct].join('|');
-    if (sig === this._playHeaderSig && this.data.playHeader) return;
-    this._playHeaderSig = sig;
-    this.setData({
-      playHeader: buildPlayHeader({
-        section: '自由漫游',
-        modeLabel: event ? '官方活动' : '实时探索',
-        title: event ? (event.err ? '活动信息未加载' : event.title) : this._currentAddress,
-        current: this._stats.explorePct,
-        total: 100,
-        progressKind: 'percent',
-        actionLabel: event && event.err ? '重试活动' : '',
-      })
+    if (!event) { if (this.data.playHeader) this.setData({ playHeader: null }); return; }
+    const next = buildPlayHeader({
+      section: '自由漫游',
+      modeLabel: '官方活动',
+      title: event.err ? '活动信息未加载' : event.title,
+      current: this._stats.explorePct,
+      total: 100,
+      progressKind: 'percent',
+      actionLabel: event.err ? '重试活动' : '',
     });
+    const prev = this.data.playHeader;
+    if (prev && prev.eyebrow === next.eyebrow && prev.title === next.title
+      && prev.actionLabel === next.actionLabel && prev.progressText === next.progressText
+      && prev.progressPct === next.progressPct) return;
+    this.setData({ playHeader: next });
   },
 
   togglePause() {
@@ -5575,16 +5637,24 @@ Page({
     this.setData({ runnerView: null, multiView: null });
     this._syncMarkers();
   },
+  // 离开、卸载,或新的一次位置分享读/写:抬高代际并放开提交锁。旧回包看到代际变了就整段丢弃。
+  _supersedePresencePrivacy() {
+    this._presencePrivacyGeneration = (this._presencePrivacyGeneration || 0) + 1;
+    if (this.data.presenceSubmitting) this.setData({ presenceSubmitting: false });
+  },
   _syncPresencePrivacy() {
     const sid = this._roamSid;
+    this._supersedePresencePrivacy();
     const generation = this._presencePrivacyGeneration || 0;
     if (!sid) { this.setData({ presenceVisible: false }); return Promise.resolve(false); }
+    const current = () => String(this._roamSid) === String(sid) && generation === (this._presencePrivacyGeneration || 0);
     return presencePrivacy.readSharing(getApp(), sid).then(visible => {
-      if (String(this._roamSid) !== String(sid) || generation !== (this._presencePrivacyGeneration || 0)) return false;
+      if (!current()) return false;
       this.setData({ presenceVisible: visible });
       if (!visible) this._clearNearbyRunners();
       return visible;
     }).catch(() => {
+      if (!current()) return false;
       this.setData({ presenceVisible: false });
       this._clearNearbyRunners();
       return false;
@@ -5593,11 +5663,16 @@ Page({
   togglePresenceSharing() {
     if (this.data.presenceSubmitting) return;
     const apply = visible => {
-      this._presencePrivacyGeneration = (this._presencePrivacyGeneration || 0) + 1;
+      if (this._hidden || this._unloaded) return;
       const sid = this._roamSid;
+      this._presencePrivacyGeneration = (this._presencePrivacyGeneration || 0) + 1;
+      const generation = this._presencePrivacyGeneration;
       this.setData({ presenceSubmitting: true });
+      const current = () => !this._hidden && !this._unloaded
+        && String(this._roamSid || '') === String(sid || '')
+        && generation === (this._presencePrivacyGeneration || 0);
       presencePrivacy.setSharing(getApp(), sid, visible).then(saved => {
-        if (String(this._roamSid || '') !== String(sid || '')) return;
+        if (!current()) return;
         this.setData({ presenceVisible: saved });
         this._presenceAt = 0; this._runnersAt = 0;
         if (!saved) this._clearNearbyRunners();
@@ -5605,7 +5680,13 @@ Page({
           Promise.resolve(this._reportPresence(this._player)).then(() => this._fetchRunners(this._player));
         }
         cyToast(saved ? '已开启附近的人位置分享' : '已关闭附近的人位置分享');
-      }).catch(() => cyToast('位置分享没改成，请重试')).finally(() => this.setData({ presenceSubmitting: false }));   // L05-066:不把内部错误原文给玩家
+      }).catch(() => { // L05-066:不把内部错误原文给玩家
+        if (!current()) return;
+        cyToast('位置分享没改成，请重试');
+      }).finally(() => {
+        if (!current()) return;
+        this.setData({ presenceSubmitting: false });
+      });
     };
     if (this.data.presenceVisible) { apply(false); return; }
     cyModal.show({
@@ -5762,13 +5843,13 @@ Page({
       jobs.push(this._loadEntryAnyCity(seq, owner));
     }
     // V3-35 / A1.2:已上架的漫游点画在地图上;读失败保留旧图钉,新结果与旧结果按 id 合并
-    jobs.push(req('/api/roam/pois', 'GET', { lat: c.lat, lng: c.lng, radius }).then(async (res) => {
+    jobs.push(req('/api/roam/pois', 'GET', { lat: c.lat, lng: c.lng, radius }).then((res) => {
       if (stale()) return;
       const got = apiOk(res) ? placeMap.unwrapPois(res) : null;
       if (!got) return;
-      const places = await resolvePlaceMedia(getApp(), got.rows.filter(placeMap.isRoamPlace));
-      if (stale()) return;
-      this._entryPlaces = placeMap.mergePlaces(this._entryPlaces, places, c, radius);
+      const rows = got.rows.filter(placeMap.isRoamPlace);
+      this._entryPlaces = placeMap.mergePlaces(this._entryPlaces, rows.map(holdSeedCover), c, radius);
+      this._fillEntryPlaceMedia(rows, c, radius, seq, owner);
     }).catch(() => {}));
     // A1.6:三路读完只同步一次
     Promise.all(jobs.map((job) => Promise.resolve(job).catch(() => {}))).then(() => {
@@ -5779,6 +5860,14 @@ Page({
     });
   },
   _entryOrigin() { return this.data.entryLocated ? this._entryMe || null : null; },
+  // 入口地点先按坐标上图,图集许可回来再补封面。这一步不进三路读取的那一次同步。
+  _fillEntryPlaceMedia(rows, center, radius, seq, owner) {
+    resolvePlaceMedia(getApp(), rows).then((places) => {
+      if (this._unloaded || seq !== this._entrySeq || owner !== this._entryIdentity()) return;
+      this._entryPlaces = placeMap.mergePlaces(this._entryPlaces, places, center, radius);
+      this._syncEntryMap(true);
+    }).catch(() => {});
+  },
   _syncEntryMap(force) {
     const getImgUrl = imgUrl;
     const origin = this._entryOrigin();
@@ -6107,11 +6196,16 @@ Page({
     wx.getLocation({ type: 'gcj02',
       success: (r) => {
         if (this._unloaded) return;
-        lastLocation.save(r);   // L05-051:存不进缓存也照用这次定位,不让「开启定位」点了没反应
-        this._entryMe = { lat: r.latitude, lng: r.longitude };
+        // L05-051:存不进也照用这次定位。好的点留在这次,并告诉人没有保存下来。
+        const saved = lastLocation.save(r);
+        const point = { lat: r.latitude, lng: r.longitude };
+        this._entryMe = point;
         this._entryFarCards = [];
-        this.setData({ center: { lat: r.latitude, lng: r.longitude }, entryLocated: true });
+        this.setData({ center: point, entryLocated: true });
         this._loadEntryMap(this.data.center);
+        if (saved === false && lastLocation.valid(r)) {
+          try { cyToast('这个位置只在这次使用，没有保存'); } catch (e) { /* 提示失败也不丢掉这次定位 */ }
+        }
       },
       // L05-051:openSetting 只能在点按里调;异步回调里改成弹窗,由「去设置」那一下打开
       fail: () => {

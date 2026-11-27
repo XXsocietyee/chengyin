@@ -53,7 +53,8 @@ async function loadPlaces(h, metadata = document) {
   const pending = h.requests.at(-1).success({ code: 200, data: rows });
   const manifest = h.requests.at(-1);
   assert.match(manifest.url, /gallery\.json$/); assert.equal(manifest.auth, false);
-  assert.equal(h.page._pois.length, 0, 'licence has not been read: publish no photo yet');
+  assert.equal(h.page._pois.length, 1, '地点先上图,不等图集清单');
+  assert.equal(h.page._pois[0].coverImg, '', '许可没回来之前不发封面');
   manifest.success(metadata ? { code: 200, data: metadata } : { code: 404 });
   await pending;
 }

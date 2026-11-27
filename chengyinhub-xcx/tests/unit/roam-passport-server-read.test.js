@@ -107,6 +107,32 @@ test('护照真实Page只用服务端汇总，本机坏存储不阻断；失败�
   assert.equal(view.data.passportError, true); assert.deepEqual(view.data.passport.stats, [])
 })
 
+test('回到历史列表保留已经加载的后面页，换账号才从第一页重读', async () => {
+  const view = loadComponent('scene-roam-history')
+  let pending = view._load()
+  respond(requests[0], { items: [fact('9007199254740995')], hasMore: true, nextBefore: '9007199254740995' })
+  await pending
+  pending = view.loadMore()
+  respond(requests[1], { items: [fact('9007199254740994')], hasMore: true, nextBefore: '9007199254740994' })
+  await pending
+  assert.equal(view.data.list.length, 2)
+  component.pageLifetimes.hide.call(view)
+  component.pageLifetimes.show.call(view)
+  assert.equal(requests.length, 2)
+  assert.deepEqual(view.data.list.map((row) => row.sessionId), ['9007199254740995', '9007199254740994'])
+  pending = view.loadMore()
+  assert.equal(requests[2].data.before, '9007199254740994')
+  respond(requests[2], { items: [fact('9007199254740993')], hasMore: false, nextBefore: null })
+  await pending
+  assert.equal(view.data.list.length, 3)
+  actor = '8'
+  component.pageLifetimes.hide.call(view)
+  component.pageLifetimes.show.call(view)
+  assert.equal(requests.length, 4)
+  assert.equal(requests[3].data.before, undefined)
+  assert.equal(view.data.list.some((row) => row.sessionId === '9007199254740994'), false)
+})
+
 test('离页dispose、错会话回包、非法游标均不接受，无请求写入', async () => {
   const reader = createReader(app, wx)
   let pending = reader.record('10'); respond(requests[0], fact('11')); await assert.rejects(pending)

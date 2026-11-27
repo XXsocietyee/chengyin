@@ -1,4 +1,4 @@
-const { resolvePlaceMedia } = require('../../utils/roam-place-media.js');
+const { resolvePlaceMedia, manifestPath } = require('../../utils/roam-place-media.js');
 // 漫游地图 · 附近的队伍(地图组队 P 方案,Figma txQoyVyKb3aQdFCnc8qmhj 590:1014 · P1–P6)。
 // 地图只做展示层:挂票务组队(公开队伍),不能开新局(9-15 裁决,搭子局 A 下架)。
 // 数据:队伍 + 探店地点/商家 + 自由探索/活动；城市定向只在独立主题入口展示。
@@ -174,7 +174,12 @@ Page({
     teamRecovery.dispose(this);
   },
 
-  onUnload() { this._unloaded = true; teamRecovery.dispose(this); if (this._regionTimer) clearTimeout(this._regionTimer); },
+  onUnload() {
+    this._unloaded = true; teamRecovery.dispose(this); if (this._regionTimer) clearTimeout(this._regionTimer);
+    // 半屏入场、卡片展开离开后不再 setData
+    if (this._sheetInTimer) { clearTimeout(this._sheetInTimer); this._sheetInTimer = null; }
+    if (this._pcTimer) { clearTimeout(this._pcTimer); this._pcTimer = null; }
+  },
 
   goBack() {
     if (getCurrentPages().length > 1) wx.navigateBack();
@@ -564,7 +569,7 @@ Page({
     if (this._sheetInTimer) { clearTimeout(this._sheetInTimer); this._sheetInTimer = null; }
     if (this._sheetOutTimer) { this._pendingSheet = name; return; }
     this.setData({ sheet: name, sheetIn: false });
-    this._sheetInTimer = setTimeout(() => this.setData({ sheetIn: true }), this.data.reducedMotion ? 0 : 20);
+    this._sheetInTimer = setTimeout(() => { this._sheetInTimer = null; if (!this._unloaded) this.setData({ sheetIn: true }); }, this.data.reducedMotion ? 0 : 20);
   },
   closeSheet() {
     if (this._sheetInTimer) { clearTimeout(this._sheetInTimer); this._sheetInTimer = null; }
@@ -774,12 +779,21 @@ Page({
       async success(res) {
         if (that._nearbyOutcome('pois', owner, seq, res)) return;
         const got = res && res.code == 200 ? PM.unwrapPois(res) : null;
-        const rows = got && isRecordList(got.rows) ? await resolvePlaceMedia(app, got.rows) : [];
-        if (!that._nearbyCurrent('pois', owner, seq)) return;
-        that._pois = rows.map(r => Object.assign({}, r, { coverImg: PM.coverKey(r) }));
-        // A4.3:服务端按距离截断时说明一声,不再静默丢掉远处的点
-        if (got && got.truncated && !that._truncTold) { that._truncTold = true; cyToast('只显示离你最近的 ' + that._pois.length + ' 处'); }
-        that._syncLayerOptions(); that._syncMarkers();
+        const raw = got && isRecordList(got.rows) ? got.rows : [];
+        const publish = (rows) => {
+          if (!that._nearbyCurrent('pois', owner, seq)) return;
+          that._pois = rows.map(r => Object.assign({}, r, { coverImg: PM.coverKey(r) }));
+          // A4.3:服务端按距离截断时说明一声,不再静默丢掉远处的点
+          if (got && got.truncated && !that._truncTold) { that._truncTold = true; cyToast('只显示离你最近的 ' + that._pois.length + ' 处'); }
+          that._syncLayerOptions(); that._syncMarkers();
+        };
+        // 点先上图。要等许可清单的种子封面先空着,清单回来再补,不挡整层。
+        publish(raw.map((row) => {
+          const key = row && (row.cover || row.coverImg || row.cover_img);
+          return row && PM.hasSeedTag(row) && manifestPath(key)
+            ? Object.assign({}, row, { cover: '', coverImg: '', cover_img: '', gallery: [], galleryJson: '[]' }) : row;
+        }));
+        publish(raw.length ? await resolvePlaceMedia(app, raw) : []);
         that._queueIcons(() => that._nearbyCurrent('pois', owner, seq) ? that._genPoiDots() : false).then((made) => { if (made && that._nearbyCurrent('pois', owner, seq)) that._syncMarkers(); });
       },
       fail(res, status) { if (that._nearbyOutcome('pois', owner, seq, res, status)) return; that._pois = []; that._syncLayerOptions(); that._syncMarkers(); },
@@ -1076,10 +1090,10 @@ Page({
     clearTimeout(this._pcTimer);
     if (on) {
       this.setData({ poiExpand: true, pcClip: inset + 'transition: none;' });
-      this._pcTimer = setTimeout(() => this.setData({ pcClip: 'clip-path: inset(0 round 21px);' }), 30);
+      this._pcTimer = setTimeout(() => { if (!this._unloaded) this.setData({ pcClip: 'clip-path: inset(0 round 21px);' }); }, 30);
     } else {
       this.setData({ pcClip: inset });
-      this._pcTimer = setTimeout(() => this.setData({ poiExpand: false, pcClip: '' }), 420);
+      this._pcTimer = setTimeout(() => { if (!this._unloaded) this.setData({ poiExpand: false, pcClip: '' }); }, 420);
     }
   },
   closePoiCard() {

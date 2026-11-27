@@ -42,6 +42,89 @@ test('顶部条:没绑定活动不建;内容不变不重发', () => {
   assert.equal(page.writes.length, 2)
 })
 
+// L05-033/034:1s 时钟和每次定位都走 _syncStats。用时是「时:分」,同一分钟可见字不变就不写;
+// 顶部条只比屏上的字和进度,不因为又进了一次 tick 就整对象重发。
+test('时钟与定位 tick:可见文案没变就不写读数和顶部条', () => {
+  const page = load()
+  page._pois = []
+  page._stats = { shops: 0, explorePct: 3, time: '0:01', distance: '0.0' }
+  page.data.statsShown = { time: '0:01', shops: 0, explorePct: 3, distance: '0.0' }
+  page.data.boundEvent = { id: 1, title: '外滩', err: '' }
+  let sec = 65
+  page._sessionClock = { elapsedSeconds: () => sec }
+  page._syncStats()
+  assert.equal(page.writes.some(w => w.statsShown || 'playHud' in w), false, '同一分钟不写用时,也不写 playHud')
+  assert.equal(page.writes.filter(w => w.playHeader).length, 1)
+  const n = page.writes.length
+  page._syncStats(); page._syncStats(); page._syncStats()
+  assert.equal(page.writes.length, n, '定位 tick 文案不变不再 setData')
+  sec = 125
+  page._syncStats()
+  const timeWrites = page.writes.filter(w => w.statsShown)
+  assert.equal(timeWrites.length, 1)
+  assert.equal(timeWrites[0].statsShown.time, '0:02')
+  assert.equal(page.writes.filter(w => w.playHeader).length, 1, '进度文案没变不重发顶部条')
+})
+
+// L05-035:长按结束的 40ms 计时器只负责判定;圈大约每秒画 10 次。切走和卸载都要停表。
+test('长按结束:setData 大约每秒不超过 10 次,隐藏和卸载都停表', () => {
+  const intervals = []
+  const timeouts = []
+  const prev = { setInterval: global.setInterval, clearInterval: global.clearInterval, setTimeout: global.setTimeout, clearTimeout: global.clearTimeout, now: Date.now, wx: global.wx }
+  global.setTimeout = (fn, ms) => { timeouts.push({ fn, ms }); return timeouts.length }
+  global.clearTimeout = (id) => { if (timeouts[id - 1]) timeouts[id - 1].cleared = true }
+  global.setInterval = (fn, ms) => { intervals.push({ fn, ms, cleared: false }); return intervals.length }
+  global.clearInterval = (id) => { if (intervals[id - 1]) intervals[id - 1].cleared = true }
+  let now = 10000
+  Date.now = () => now
+  global.wx = { vibrateShort() {}, getStorageSync: () => undefined }
+  try {
+    const page = load()
+    page._pois = []
+    page._pendingTiles = []
+    page._arrive = () => { page.arrived = true }
+    page.onCenterHoldStart()
+    assert.equal(timeouts[0].ms, 180)
+    now += 180
+    timeouts[0].fn()
+    assert.equal(intervals[0].ms, 40)
+    const before = page.writes.filter(w => Object.prototype.hasOwnProperty.call(w, 'endHoldPct')).length
+    for (let t = 40; t <= 1000; t += 40) { now = 10000 + 180 + t; intervals[0].fn() }
+    const paints = page.writes.filter(w => Object.prototype.hasOwnProperty.call(w, 'endHoldPct')).length - before
+    assert.ok(paints <= 10, '一秒钟画了 ' + paints + ' 次')
+    assert.ok(paints >= 1)
+    assert.equal(page.arrived, undefined)
+    const tick = intervals[0].fn
+    page.onHide()
+    assert.equal(intervals[0].cleared, true)
+    assert.equal(page._endHoldTimer, null)
+    const afterHide = page.writes.length
+    now = 10000 + 180 + 3000
+    tick()
+    assert.equal(page.arrived, undefined, '隐藏后不再把漫游结束掉')
+    assert.equal(page.writes.length, afterHide)
+
+    const page2 = load()
+    page2._pendingTiles = []
+    page2._arrive = () => { page2.arrived = true }
+    page2.onCenterHoldStart()
+    now += 180
+    timeouts[1].fn()
+    const tick2 = intervals[1].fn
+    try { page2.onUnload() } catch (e) { /* 其余卸载收尾不在本用例 */ }
+    assert.equal(intervals[1].cleared, true)
+    assert.equal(page2._endHoldTimer, null)
+    const afterUnload = page2.writes.length
+    tick2()
+    assert.equal(page2.arrived, undefined)
+    assert.equal(page2.writes.length, afterUnload)
+  } finally {
+    Object.assign(global, { setInterval: prev.setInterval, clearInterval: prev.clearInterval, setTimeout: prev.setTimeout, clearTimeout: prev.clearTimeout })
+    Date.now = prev.now
+    global.wx = prev.wx
+  }
+})
+
 test('半途松开长按:取消结束,补的那记 tap 不切暂停', () => {
   const page = load()
   page.data.visit = { checkinOk: false }
@@ -75,6 +158,15 @@ test('同一位置连续定位:地标卡内容不变就不再 setData (L05-036)'
   page._checkNear(page._player)
   page._checkNear(page._player)
   assert.equal(page.writes.length, n)
+
+  const pin = { id: 'p1', name: '老洋房', lat: 31.2, lng: 121.4, address: '街' }
+  page._placeCardPoi = pin
+  page.data.placeCard = page._placeCardFor(pin)
+  const before = page.writes.length
+  page._checkNear(page._player)
+  page._player = { lat: 31.2002004, lng: 121.4 }
+  page._checkNear(page._player)
+  assert.equal(page.writes.slice(before).filter(w => 'placeCard' in w).length, 0, '地点卡字段没变不再 setData')
 })
 
 test('横滑商家卡:没有真照片就空着,不拿占位图冒充店面 (L05-022)', () => {
@@ -176,11 +268,13 @@ test('迷雾初始化放弃后自动再试一次,只试一次', () => {
   } finally { Object.assign(global, prev) }
 })
 
-// L05-037(业主默认项 A):关掉的地点卡在离开约 100 米前不再自动弹;玩家自己点开的卡不被自动弹出顶掉
-test('关掉的卡离开 100 米前不再自动弹,自动弹出不顶掉玩家点开的卡', () => {
+// L05-037:关掉的地标卡 / 商家浮卡,同一个地点的后续定位不再自动弹。
+// 玩家自己点开可以再开;离开后走近另一个地点才自动弹那一个。玩家点开的卡不被自动弹出顶掉。
+test('关掉的卡不再被同一地点的定位重新打开', () => {
   const page = load()
   const pt = (dLat) => ({ lat: 31.2 + dLat, lng: 121.4 })
   const landmark = { id: 9, name: '老洋房', cat: 'landmark', state: 'fog', lat: 31.2, lng: 121.4 }
+  const other = { id: 10, name: '钟楼', cat: 'landmark', state: 'fog', lat: 31.202, lng: 121.4 }
   page._pois = [landmark]
   page.data.visit = { active: false }; page.data.discoverReward = { show: false }
   page.data.nearbyPois = []; page.data.nearbyBanner = { show: false }
@@ -189,17 +283,59 @@ test('关掉的卡离开 100 米前不再自动弹,自动弹出不顶掉玩家�
   page._checkNear(pt(0))
   assert.equal(page.data.paceCard.show, true, '走近自动弹')
   page.closePaceCard()
-  page._player = pt(0.0003); page._checkNear(pt(0.0003))   // 约 33 米
-  assert.equal(page.data.paceCard.show, false, '关掉后附近不再自动弹')
-  page._player = pt(0.0012); page._checkNear(pt(0.0012))   // 约 133 米:离开关卡处 100 米以上
+  page._player = pt(0.0003); page._checkNear(pt(0.0003))   // 约 33 米,仍是这一处
+  assert.equal(page.data.paceCard.show, false, '关掉后下一次定位不再自动弹')
+  page._dismissed = {}
+  page._player = null
+  page.data.paceCard = { show: true, poiId: 9, title: '老洋房', body: '', demo: false }
+  page.closePaceCard()
   page._player = pt(0); page._checkNear(pt(0))
-  assert.equal(page.data.paceCard.show, true, '走远再回来又会弹')
+  assert.equal(page.data.paceCard.show, false, '没有玩家坐标时关掉也记住')
+  page._player = pt(0.0012); page._checkNear(pt(0.0012))   // 约 133 米,已经离开
+  page._player = pt(0); page._checkNear(pt(0))
+  assert.equal(page.data.paceCard.show, false, '走远再回到同一地点也不自动弹')
+  page._openPlaceDetail(landmark)
+  assert.equal(page.data.paceCard.show, true, '玩家自己点开可以再开')
+  page._checkNear(pt(0))
+  assert.equal(page.data.paceCard.show, true, '点开之后定位不把它关掉')
+  page.closePaceCard()
+  page._pois = [landmark, other]
+  page._player = { lat: 31.202, lng: 121.4 }
+  page._checkNear(page._player)
+  assert.equal(page.data.paceCard.show, true, '走近另一个地点会弹那一个')
+  assert.equal(page.data.paceCard.poiId, 10)
   // 玩家点开另一张卡(商家横滑),自动弹出不顶掉它
   page.setData({ paceCard: { show: false, title: '', body: '', demo: false } })
   page._userCard = true; page.setData({ nearbyBanner: { show: true }, nearbyPois: [{ id: 1, groupKey: 'k' }] })
+  page._player = pt(0)
   page._checkNear(pt(0))
   assert.equal(page.data.nearbyBanner.show, true)
   assert.equal(page.data.paceCard.show, false)
+})
+
+test('关掉的商家浮卡不再被同一家店的定位重新打开', () => {
+  const page = load()
+  const shop = { id: 5, name: '转角奶茶', cat: 'merchant', state: 'fog', lat: 31.2, lng: 121.4, nameKnown: true, nodeId: 5 }
+  const other = { id: 8, name: '书店', cat: 'merchant', state: 'fog', lat: 31.2015, lng: 121.4, nameKnown: true, nodeId: 8 }
+  page._pois = [shop]
+  page._player = { lat: 31.2, lng: 121.4 }
+  page.data.visit = { active: false }
+  page.data.discoverReward = { show: false }
+  page._syncGoal = () => {}
+  const prevWx = global.wx
+  global.wx = { vibrateShort() {}, getStorageSync: () => undefined }
+  try {
+    page._checkNear(page._player)
+    assert.equal(page.data.nearbyBanner.show, true)
+    page.closeNearbyBanner()
+    page._checkNear(page._player)
+    assert.equal(page.data.nearbyBanner.show, false, '同一家店的下一次定位不再打开')
+    page._pois = [shop, other]
+    page._player = { lat: 31.2015, lng: 121.4 }
+    page._checkNear(page._player)
+    assert.equal(page.data.nearbyBanner.show, true, '走近另一家店会打开')
+    assert.equal(page.data.nearbyPois[0] && page.data.nearbyPois[0].name, '书店')
+  } finally { global.wx = prevWx }
 })
 
 // L05-023:三个 key 同时在滚也只用一个计时器,每帧一次 setData

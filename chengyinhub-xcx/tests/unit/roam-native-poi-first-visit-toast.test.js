@@ -58,8 +58,14 @@ test('成功但无记录:给兜底文案', async () => {
   assert.deepEqual((await tapPoi({ code: 200, data: {} })).toasts, ['这个地点暂时没有可记录的信息'])
 })
 
-test('业务错:通道已 toast,页面不再补第二声', async () => {
-  assert.deepEqual((await tapPoi({ code: 500, msg: 'x' })).toasts, [])
+test('业务错:关掉通道自动 toast,页面只说服务端那一句', async () => {
+  const { toasts, sent } = await tapPoi({ code: 500, msg: '请先登录' })
+  assert.equal(sent[0].silentError, true)
+  assert.deepEqual(toasts, ['请先登录'])
+})
+
+test('未登录:只提示登录', async () => {
+  assert.deepEqual((await tapPoi({ code: 401, msg: '请先登录' })).toasts, ['登录后才能点亮'])
 })
 
 test('网络失败:说网络异常,不说「没有信息」', async () => {
