@@ -238,6 +238,36 @@ test('L03-083 每次打开主题详情不重复读 play-setup；保存失败后�
   assert.equal(gets().length, 2)
 })
 
+test('L03-007 主按钮刷新只评估一次专业草稿，校验袋复用同一结果', (t) => {
+  const policy = require('../../pages/publish/utils/publish/pro-editor-policy.js')
+  const page = makePage()
+  page.data.pendingMaterials = [{ _localId: 'm1' }]
+  const spy = t.mock.method(policy, 'evaluateProfessionalDraft', policy.evaluateProfessionalDraft)
+  page.refreshPrimaryActionState()
+  assert.equal(spy.mock.callCount(), 1)
+  assert.match(page.data.topicDetailSummary, /未填|已填完/)
+})
+
+test('L03-015 清空生命上限或物品容量不写入 0', () => {
+  const page = makePage()
+  page.data.formData.journeyRules = JSON.stringify({ hp: { enabled: true, init: 8, max: 10 }, luck: { enabled: true, init: 3, max: 3 } })
+  page.onRuntimeStatMax({ currentTarget: { dataset: { stat: 'hp' } }, detail: { value: '' } })
+  page.onRuntimeStatMax({ currentTarget: { dataset: { stat: 'luck' } }, detail: { value: '   ' } })
+  assert.equal(JSON.parse(page.data.formData.journeyRules).hp.max, 10)
+  assert.equal(JSON.parse(page.data.formData.journeyRules).luck.max, 3)
+  page.onRuntimeStatMax({ currentTarget: { dataset: { stat: 'hp' } }, detail: { value: '12' } })
+  assert.equal(JSON.parse(page.data.formData.journeyRules).hp.max, 12)
+
+  page.data.formData.themeRuntimeConfig = JSON.stringify({ capacity: 6, items: [] })
+  page.data.runtimeEditor = { kind: 'bag', index: 0 }
+  page.onRuntimePolicy({ currentTarget: { dataset: { field: 'capacity' } }, detail: { value: '' } })
+  assert.equal(JSON.parse(page.data.formData.themeRuntimeConfig).capacity, 6)
+  page.onRuntimePolicy({ currentTarget: { dataset: { field: 'capacity' } }, detail: { value: '8' } })
+  assert.equal(JSON.parse(page.data.formData.themeRuntimeConfig).capacity, 8)
+  page.onRuntimePolicy({ currentTarget: { dataset: { field: 'allowDiscard' } }, detail: { value: false } })
+  assert.equal(JSON.parse(page.data.formData.themeRuntimeConfig).allowDiscard, false)
+})
+
 test('L03-007 路线图与节点不变时发布模拟只跑一次，改图后重跑', t => {
   const graph = require('../../pages/publish/utils/publish/topic-route-graph.js')
   const spy = t.mock.method(graph, 'simulate', () => ({ releaseReady: true }))

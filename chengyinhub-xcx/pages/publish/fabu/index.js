@@ -6454,7 +6454,7 @@ Page({
   // 纯判定:产出 errorBag,不做 setData/toast/切Tab(供 validateForm + buildPublishCheck 共用,避免重复造规则)
   // 发布前校验 = 纯函数,见 utils/publish/publish-validation-bag.js。
   // 页面只负责把 data 切片和 4 个路线图私有方法的结果算好传进去。
-  _buildValidationBag() {
+  _buildValidationBag(editorPolicy) {
     const branchGraph = !(Number(this.data.formData.productType) === 2)
       && this.data.formData.routeMode === 'BRANCH_GRAPH';
     return require('../utils/publish/publish-validation-bag.js').buildValidationBag({
@@ -6465,6 +6465,7 @@ Page({
       completionRuleMode: this.data.completionRuleMode,
       completionRequiredCount: this.data.completionRequiredCount,
       pendingMaterials: this.data.pendingMaterials,
+      editorPolicy,
       // 这四项只在分支图模式下才需要,非该模式不白算。
       routeGraph: branchGraph ? this._routeGraph : null,
       routeNodes: branchGraph ? this._routeNodes() : [],
@@ -6524,7 +6525,7 @@ Page({
     if (missing !== d.topicDetailMissing) summaryPatch.topicDetailMissing = missing;
     if (Object.keys(summaryPatch).length) this.setData(summaryPatch);
 
-    const bag = this._buildValidationBag();
+    const bag = this._buildValidationBag(policy); // L03-007:上面那次 evaluateProfessionalDraft 的结果直接给校验袋
     const needsClub = Number(d.formData.productType) === 1 && d.myClubs.length > 0;
     const canPublish = bag.isValid() && (!needsClub || !!d.formData.clubId)
       && !templateBinding.issues(d.formData.chapters, d.formData.themeRuntimeConfig,

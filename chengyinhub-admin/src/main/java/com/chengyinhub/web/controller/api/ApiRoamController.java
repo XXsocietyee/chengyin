@@ -124,6 +124,11 @@ public class ApiRoamController extends BaseController {
 
     /** /pois 单次最多返回的点数(由近到远截断);地图一屏画不下更多,也不做整城导出口。 */
     static final int POIS_NEAR_LIMIT = 500;
+    /**
+     * 附近查询半径上限(米)。{@link IRoamHangoutService#MAX_RADIUS_M} 是 1000km 的坐标溢出护栏,
+     * 不是产品查询半径;没有更小的产品上限时,查询收在 50km。
+     */
+    static final int NEARBY_QUERY_RADIUS_CAP_M = 50_000;
 
     /**
      * 附近查询半径（米）。省略或非正整数用 3km。
@@ -140,6 +145,7 @@ public class ApiRoamController extends BaseController {
     }
 
     @Operation(summary = "附近 POI(经纬度包围盒粗筛)")
+    @RateLimiter(time = 60, count = 60, limitType = LimitType.MEMBER)
     @GetMapping("/pois")
     public AjaxResult pois(Double lat, Double lng, Double radius) {
         if (lat == null || lng == null) return error("缺少定位");
@@ -199,6 +205,7 @@ public class ApiRoamController extends BaseController {
     }
 
     @Operation(summary = "漫游入口附近活动")
+    @RateLimiter(time = 60, count = 60, limitType = LimitType.MEMBER)
     @GetMapping("/entry/nearby")
     public AjaxResult entryNearby(Double lat, Double lng, Double radius) {
         if (lat == null || lng == null) return error("缺少定位");
