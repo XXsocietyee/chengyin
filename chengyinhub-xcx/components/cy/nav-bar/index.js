@@ -32,7 +32,7 @@ Component({
   lifetimes: {
     attached() {
       // L10-165:subscribe 会立即回放一次当前值;与已渲染值相同就不 setData。
-      if (app.networkStatus) this._offNetwork = app.networkStatus.subscribe((offline) => { if (!!offline !== this.data.offline) this.setData({ offline: !!offline }); });
+      if (app.networkStatus) this._offNetwork = app.networkStatus.subscribe((offline) => { if (this._dead) return; if (!!offline !== this.data.offline) this.setData({ offline: !!offline }); });
       const mb = app.globalData.menuButtonInfo;
       if (mb && mb.left) {
         const w = cachedWindowInfo(wx);
@@ -43,12 +43,14 @@ Component({
       }
     },
     detached() {
+      this._dead = true;
       if (this._offNetwork) this._offNetwork();
     },
     ready() {
       // 实测 action 槽宽度:宽 action(如"看公开主页"胶囊)时**左右同收**,标题仍几何居中且不与 action 重叠。
       // 图标/空 action 宽度≈0 → 退回基线内距,其它页零漂移。
       this.createSelectorQuery().select('.nav__actions').boundingClientRect(rect => {
+        if (this._dead) return;
         const w = rect && rect.width ? Math.round(rect.width) : 0;
         const next = this._titleInsets(this.data.windowWidth, this.data.actionsRight, w);
         // 空/图标 action(宽≈0)算出来和 attached 时一样 ⇒ 不再无条件 setData(L10-165)

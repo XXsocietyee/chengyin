@@ -26,8 +26,8 @@ Component({
     autoBack: { type: Boolean, value: false },
     // 页面有自己的「该去的页面」(返回俱乐部 / 返回工作台):传 custom-back 并 bind:back,组件不再自己导航。
     customBack: { type: Boolean, value: false },
-    // loadFailure:加载类失败不向用户展示任何错误文案、重试或返回半屏,只保留同尺寸空白占位。
-    // 操作类失败(提交/支付/退款/取消等)、无权限、缺参不要传它,仍按原样可见。
+    // loadFailure:加载类失败仍显示调用方传入的 title/sub 和可点的 retry,不改写已有原因。
+    // 同时不弹自动返回半屏,避免重试还没点就被带走。操作失败、无权限、缺参不要靠它隐藏。
     loadFailure: { type: Boolean, value: false },
   },
   data: {
@@ -42,7 +42,7 @@ Component({
     },
     ready() {
       const d = this.properties, c = '.cy-error-';
-      if (!d.loadFailure && !d.autoBack) entryRhythm.play(this, [d.icon === 'empty-state' ? c + 'art' : d.icon && c + 'ic', c + 'title', d.sub && c + 'sub', d.retry && c + 'retry', d.secondary && c + 'secondary']);
+      if (d.loadFailure || !d.autoBack) entryRhythm.play(this, [d.icon === 'empty-state' ? c + 'art' : d.icon && c + 'ic', c + 'title', d.sub && c + 'sub', d.retry && c + 'retry', d.secondary && c + 'secondary']);
     },
   },
   observers: {

@@ -134,7 +134,7 @@ Component({
       }
       if (this.data.tone === '2077' && !this._styleVisibleAt) this._styleVisibleAt = Date.now() + 3500;
       if (this.data.scene === 'explore') { this._icons = {}; return; }
-      this._genIcons().then(() => this._rebuild());
+      this._genIcons().then(() => { if (!this._mapGone) this._rebuild(); });
     },
     // 卸载时清掉 dropIn 挂起的定时器,避免组件销毁后 setTimeout 仍触发 setData
     detached() { this._mapGone = true; clearTimeout(this._styleLoadTimer); if (this._dropTimers) { this._dropTimers.forEach((t) => clearTimeout(t)); this._dropTimers = []; } }
@@ -196,12 +196,13 @@ Component({
       this._numPending = true;
       (async () => {
         for (const k of todo) {
+          if (this._mapGone) break;
           const i = k.indexOf(':');
           try { drawNumberedMarker(cv.g, cv.S, k.slice(0, i), k.slice(i + 1)); this._numIcons[k] = await cv.save(); }
           catch (e) { this._numIcons[k] = ''; }
         }
         this._numPending = false;
-        this._rebuild();
+        if (!this._mapGone) this._rebuild();
       })();
     },
     _fit(mk) {
@@ -229,6 +230,7 @@ Component({
     },
     // 原生 map 还没铺出来时 includePoints 会被吞掉:bindupdated 渲染完再补一次(完成卡地图实测没框住)。
     _applyFit() {
+      if (this._mapGone) return;
       const pts = this._fitPts;
       if (!pts || !pts.length) return;
       try {
@@ -238,6 +240,7 @@ Component({
       } catch (e) { console.warn('fit fail'); }
     },
     _rebuild() {
+      if (this._mapGone) return;
       // S5 M2 竞态修复:dropIn 挂起的分批 setTimeout 若在此时仍未跑完,会用过时闭包快照覆盖本次
       // _rebuild 的最新结果;_rebuild 是权威态,一旦真实触发就取消所有挂起的落地定时器。
       if (this._dropTimers) { this._dropTimers.forEach((t) => clearTimeout(t)); this._dropTimers = []; }
@@ -358,6 +361,7 @@ Component({
       this.onMarkerTap({ detail: { markerId } });
     },
     onStyleReady(e) {
+      if (this._mapGone) return;
       const generation = e && e.currentTarget && e.currentTarget.dataset && Number(e.currentTarget.dataset.generation);
       const detail = e && e.detail;
       if (generation !== (this._mapGeneration || 0) || !this.data.mapInstances.length
@@ -366,6 +370,7 @@ Component({
       this.setData({ mapLoaded: true });
     },
     onUpdated(e) {
+      if (this._mapGone) return;
       const generation = e && e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.generation;
       if (!this.data.mapInstances.length || (generation != null && Number(generation) !== (this._mapGeneration || 0))) return;
       if (!this.data.mapLoaded) {
@@ -435,6 +440,7 @@ Component({
     // S5 M2 markers 依距离逐个落下(分批 setData 追加,marker 原生不能做 CSS 落下/回弹,
     // 分批逐现是最简可行的真实手段)。结束后 markers 必须等于 _rebuild() 的全量结果(回归安全)。
     dropIn() {
+      if (this._mapGone) return;
       const full = (this.data.markers || []).slice();
       if (!full.length) return;
       if (this.data.reducedMotion) {
@@ -452,6 +458,7 @@ Component({
       let acc = [];
       batches.forEach((b, idx) => {
         const t = setTimeout(() => {
+          if (this._mapGone) return;
           acc = acc.concat(b);
           // 最后一批直接落回 full,保证与 _rebuild 产物字节一致(不受排序/切片影响)
           this.setData({ markers: idx === batches.length - 1 ? full : acc.slice() });

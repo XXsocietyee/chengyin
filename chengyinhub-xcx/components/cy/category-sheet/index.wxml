@@ -15,6 +15,6 @@
   <cy-inline-error wx:elif="{{loadError}}" kind="network" title="{{loadError}}" sub="" action="重试" bind:action="getCategoryList" />
   <cy-skeleton wx:else type="list" count="4" />
   <view slot="footer">
-    <cy-btn variant="primary" bindtap="onSave">保存</cy-btn>
+    <cy-btn variant="primary" disabled="{{!loaded || !!loadError}}" bindtap="onSave">保存</cy-btn>
   </view>
 </cy-sheet>

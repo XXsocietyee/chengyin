@@ -42,6 +42,9 @@ module.exports = function morphEntrance({ shellSelector }) {
       // 起点变换的行内值(FLIP 算出来的 translate3d + scale [+ 圆角])
       _morphStyle: '',
     },
+    lifetimes: {
+      detached() { this._morphDead = true; },
+    },
     observers: {
       show(value) {
         if (!this.data.anchorSelector) return;
@@ -102,11 +105,11 @@ module.exports = function morphEntrance({ shellSelector }) {
         q.select(this.data.anchorSelector).boundingClientRect();
         q.in(this).select(shellSelector).boundingClientRect();
         q.exec((res) => {
-          // 量测是异步回合:期间已被关掉(退场在播)就不能再把面板翻到打开末态(L10-062)。
-          if (!this.data.show || this._exitPlaying) return;
+          // 量测是异步回合:期间已被关掉(退场在播)或组件已卸载,就不能再把面板翻到打开末态(L10-062)。
+          if (this._morphDead || !this.data.show || this._exitPlaying) return;
           this.setData({ _morphStyle: this._flipStyle(res && res[0], res && res[1]) });
           wx.nextTick(() => {
-            if (this.data.show && !this._exitPlaying) this.setData({ _morphOpen: true });
+            if (!this._morphDead && this.data.show && !this._exitPlaying) this.setData({ _morphOpen: true });
           });
         });
       },

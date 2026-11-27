@@ -132,6 +132,22 @@ test('L10-036 闸从没弹出过就离开:在等的调用照样结算不挂起,�
   assert.equal(declined, 0, '弹过但没有接口在等:也不记拒绝');
 });
 
+test('L10-036 弹窗开着、用户还没选就离开:取消系统授权提示,不调拒绝接口', async () => {
+  const h = harness();
+  h.pages.push(hostPage(h));
+  const callers = [h.caller()];
+  const gate = load(h, 'components/cy/privacy-gate/index.js');
+  let declined = 0;
+  const orig = h.app.declineUsageConsent; h.app.declineUsageConsent = function () { declined++; return orig.apply(this, arguments); };
+  assert.equal(h.app.getUsageConsent().granted(), false, '前提:本机同意仍未落下');
+  gate.observers.show.call(gate, true);
+  gate.lifetimes.detached.call(gate);
+  assert.deepEqual(callers[0], [{ event: 'disagree', reason: 'gate_detached' }]);
+  assert.equal(declined, 0, '用户没表态不得调拒绝接口');
+  assert.equal(h.requests.length, 0, '离开不得补一条拒绝留痕');
+  assert.equal(h.app._usageDeclined, undefined, '未作答不得写成已拒绝');
+});
+
 test('SC-PRIV-04 回退路由页:并发调用方只压一次隐私页;系统返回(onUnload)全部按 disagree 结算', async () => {
   const h = harness();
   h.pages.push({ route: 'pages/legacy/no-gate' });

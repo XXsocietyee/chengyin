@@ -115,6 +115,7 @@ Component(withNativeBackGuard({
       });
     },
     detached() {
+      this._dead = true;
       if (this._dragOutTimer) { clearTimeout(this._dragOutTimer); this._dragOutTimer = null; }
     },
   },
@@ -163,6 +164,7 @@ Component(withNativeBackGuard({
       if (this._dragOutTimer) clearTimeout(this._dragOutTimer);
       this._dragOutTimer = setTimeout(() => {
         this._dragOutTimer = null;
+        if (this._dead) return;
         if (this.data.show && !this.data._closing) {
           this.setData({ _dragOut: false, _gestureCmd: this.data._gestureCmd + 1 });
         }
@@ -191,6 +193,7 @@ Component(withNativeBackGuard({
       const w = wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync();
       const H = (w && (w.windowHeight || w.screenHeight)) || 0;
       this.createSelectorQuery().select('.sh__panel').boundingClientRect((r) => {
+        if (this._dead) return;
         if (!r || !r.height || !H) { done('half'); return; }
         // +1px 容差:贴着档位线的面板算进这一档
         done(r.height <= H * LEVEL_RATIO.peek + 1 ? 'peek' : (r.height <= H * LEVEL_RATIO.half + 1 ? 'half' : 'full'));

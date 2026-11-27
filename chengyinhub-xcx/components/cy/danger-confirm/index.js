@@ -25,6 +25,17 @@
  *   宁可什么都不发生,也不能绕过确认直接删。
  */
 const { getDangerAction } = require('../../../utils/danger-actions.js');
+const { safeUserMessage } = require('../../../utils/transport/safe-user-message.js');
+
+// 页面有的失败路径把 error.message / res.msg 原样传进来。Java 栈、SQL、微信 errMsg
+// 和引擎异常不能进结果卡;正常的一句中文业务说明照常显示。
+function shownFailure(text) {
+  const raw = typeof text === 'string' ? text : '';
+  if (/\b(?:TypeError|ReferenceError|SyntaxError|URIError|RangeError)\b|Cannot read propert|is not a function|malformed URI|URI malformed/i.test(raw)) {
+    return '请稍后重试';
+  }
+  return safeUserMessage(text, '请稍后重试');
+}
 
 Component({
   properties: {
@@ -82,7 +93,7 @@ Component({
 
     /** 执行失败:留在原地给重试,别把用户踢走让他猜删没删掉。 */
     failed(text) {
-      this.setData({ stage: 'error', busy: false, errorText: text || '请稍后重试' });
+      this.setData({ stage: 'error', busy: false, errorText: shownFailure(text) });
     },
 
     /** 直接收起(页面自己要跳走时用)。 */

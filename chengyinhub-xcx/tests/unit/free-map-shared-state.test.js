@@ -45,6 +45,24 @@ test('explore 场景 _rebuild 不再算 markers/circles', () => {
   assert.equal(writes.filter((w) => 'markers' in w).length, 0);
 });
 
+test('卸载后重建和落地批次不再 setData', async () => {
+  const { c, writes } = instance({
+    markers: [
+      { id: 1, latitude: 31.23, longitude: 121.47 },
+      { id: 2, latitude: 31.24, longitude: 121.48 },
+      { id: 3, latitude: 31.25, longitude: 121.49 },
+      { id: 4, latitude: 31.30, longitude: 121.55 },
+    ],
+  });
+  c._icons = { actionable: 'x' };
+  c.dropIn();
+  def.lifetimes.detached.call(c);
+  writes.length = 0;
+  c._rebuild();
+  await new Promise((resolve) => setTimeout(resolve, 280));
+  assert.equal(writes.length, 0);
+});
+
 test('放大/缩小、回中只写内部 _scale/_center;调用方再设属性会同步回来', () => {
   const { c } = instance({ player: { lat: 30, lng: 120 } });
   c.zoomIn();

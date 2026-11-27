@@ -86,3 +86,26 @@ test('左对齐标题紧跟返回热区，并避开右侧胶囊与操作', () =>
   }
   assert.equal(titleInsets(320, 96, 120, 'left').showTitle, false)
 })
+
+test('卸载后量到的操作槽不再 setData', () => {
+  const abs = path.join(ROOT, 'components/cy/nav-bar/index.js')
+  let captured = null
+  global.Component = (options) => { captured = options }
+  global.getApp = () => ({ globalData: {} })
+  global.wx = { getWindowInfo: () => ({ windowWidth: 375 }) }
+  delete require.cache[require.resolve(abs)]
+  require(abs)
+  const writes = []
+  const vm = {
+    _dead: false,
+    data: { windowWidth: 375, actionsRight: 96, titleLeft: 96, titleRight: 96, showTitle: true, titleAlign: 'center' },
+    setData(patch) { writes.push(patch); Object.assign(this.data, patch) },
+    createSelectorQuery() {
+      const q = { select() { return q }, boundingClientRect(cb) { q._cb = cb; return q }, exec() { q._cb({ width: 120 }) } }
+      return q
+    },
+  }
+  captured.lifetimes.detached.call(vm)
+  captured.lifetimes.ready.call(vm)
+  assert.equal(writes.length, 0)
+})
