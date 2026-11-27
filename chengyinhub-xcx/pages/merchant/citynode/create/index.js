@@ -34,6 +34,16 @@ function requestErrorText(res, fallback) {
   return res && typeof res.msg === 'string' && res.msg.trim() ? res.msg.trim() : fallback;
 }
 
+function pendingPlacementId(res) {
+  const applications = res && (res.code === '200' || res.code === 200) && res.data && Array.isArray(res.data.applications)
+    ? res.data.applications
+    : [];
+  const found = applications.find(function (item) {
+    return !!item && item.auditStatus === 0 && /^[1-9]\d*$/.test(String(item && item.id));
+  });
+  return found ? found.id : null;
+}
+
 Page({
   data: {
     accessErrorIsDenied: false,
@@ -392,22 +402,48 @@ Page({
     const p = this.data.picked;
     const that = this;
     let accepted = false;
+    function acceptApplication(applicationId) {
+      accepted = true;
+      that.setData({ submittedApplicationId: applicationId, submitError: '', readbackError: '' });
+      that.stampStep(2);
+      that.refreshNodeTimeline();
+      that.setDraftDirty(false);
+      toast.success('投放申请已提交');
+      that.readBackAndReturn(applicationId);
+    }
     this.setData({ submitting: true, submitError: '', readbackError: '' });
     app.sendRequest({
       url: '/api/merchant/city-node/save', method: 'POST', hideLoading: true, silentError: true,
       data: { templateId: this.data.tpl.id, lat: p.lat, lng: p.lng, radius: this.data.radius, name: p.name, address: p.address },
       success(res) {
         if (res && (res.code === '200' || res.code === 200)) {
-          accepted = true;
           const rawId = res.data && typeof res.data === 'object' ? res.data.id : res.data;
           // L07-048:回执里没有正整数 id 也算「已提交」(挡住重复提交),回读不到就直接回列表
           const applicationId = /^[1-9]\d*$/.test(String(rawId)) ? rawId : 'submitted';
-          that.setData({ submittedApplicationId: applicationId, submitError: '', readbackError: '' });
-          that.stampStep(2);
-          that.refreshNodeTimeline();
-          that.setDraftDirty(false);
-          toast.success('投放申请已提交');
-          that.readBackAndReturn(applicationId);
+          acceptApplication(applicationId);
+        } else if (res && res.msg === '已有待审核投放申请') {
+          // 超时后重提：服务端已有待审。先占住 accepted，避免本次 complete 把 submitting 放开后再 save 一次。
+          accepted = true;
+          app.sendRequest({
+            url: '/api/merchant/city-node/list', method: 'POST', hideLoading: true, silentError: true,
+            success(listRes) {
+              const applicationId = pendingPlacementId(listRes);
+              if (!applicationId) {
+                that.setSubmitError(requestErrorText(res, '投放申请提交失败'));
+                that.setData({ submitting: false });
+                return;
+              }
+              acceptApplication(applicationId);
+            },
+            fail() {
+              that.setSubmitError(requestErrorText(res, '投放申请提交失败'));
+              that.setData({ submitting: false });
+            },
+            successStatusAbnormal() {
+              that.setSubmitError(requestErrorText(res, '投放申请提交失败'));
+              that.setData({ submitting: false });
+            }
+          });
         } else {
           that.setSubmitError(requestErrorText(res, '投放申请提交失败'));
         }

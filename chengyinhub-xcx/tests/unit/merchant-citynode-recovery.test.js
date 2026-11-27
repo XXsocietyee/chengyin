@@ -347,3 +347,78 @@ test('提交成功回执缺 id 时挡住重复提交并直接回列表', () => {
     env.restore()
   }
 })
+
+const DUPLICATE_PLACEMENT = '已有待审核投放申请'
+
+function readyNodeDraft(env) {
+  const draft = { lat: 30.1, lng: 120.2, name: '山岚咖啡', address: '湖滨路 1 号' }
+  env.page.setData({
+    tpl: { id: 9, title: '暗号' },
+    picked: draft,
+    addressConfirmed: true,
+    canSubmit: true,
+    dirty: true,
+  })
+  return draft
+}
+
+test('超时后服务端已有待审投放时，把待审申请当成已提交', () => {
+  const env = mountPage('pages/merchant/citynode/create/index.js')
+  try {
+    const draft = readyNodeDraft(env)
+    env.page.submitNode()
+    env.requests[0].success({ code: 500, msg: DUPLICATE_PLACEMENT })
+    env.requests[0].complete()
+    assert.equal(env.requests[1].url, '/api/merchant/city-node/list')
+    env.page.submitNode()
+    assert.equal(env.requests.filter((item) => item.url === '/api/merchant/city-node/save').length, 1)
+
+    env.requests[1].success({
+      code: 200,
+      data: {
+        applications: [
+          { id: 12, auditStatus: 1 },
+          { id: 'nope', auditStatus: 0 },
+          { id: 88, auditStatus: 0 },
+        ],
+      },
+    })
+    assert.equal(env.page.data.submittedApplicationId, 88)
+    assert.equal(env.page.data.dirty, false)
+    assert.equal(env.page.data.submitError, '')
+    assert.deepEqual(env.page.data.picked, draft)
+    assert.equal(env.toasts.some((item) => item.title === '投放申请已提交'), true)
+
+    env.page.submitNode()
+    assert.equal(env.requests.filter((item) => item.url === '/api/merchant/city-node/save').length, 1)
+  } finally {
+    env.restore()
+  }
+})
+
+test('已有待审但列表失败或没有待审行时，保留原错误和草稿并可再交', () => {
+  const settlements = [
+    (request) => request.fail({ errMsg: 'request:fail timeout' }),
+    (request) => request.success({ code: 200, data: { applications: [{ id: 88, auditStatus: 1 }] } }),
+    (request) => request.success({ code: 500, msg: '列表挂了' }),
+  ]
+  for (const settle of settlements) {
+    const env = mountPage('pages/merchant/citynode/create/index.js')
+    try {
+      const draft = readyNodeDraft(env)
+      env.page.submitNode()
+      env.requests[0].success({ code: 500, msg: DUPLICATE_PLACEMENT })
+      env.requests[0].complete()
+      settle(env.requests[1])
+      assert.equal(env.page.data.submitError, DUPLICATE_PLACEMENT)
+      assert.equal(env.page.data.dirty, true)
+      assert.equal(env.page.data.submittedApplicationId, null)
+      assert.deepEqual(env.page.data.picked, draft)
+
+      env.page.retrySubmit()
+      assert.equal(env.requests.filter((item) => item.url === '/api/merchant/city-node/save').length, 2)
+    } finally {
+      env.restore()
+    }
+  }
+})

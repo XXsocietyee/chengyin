@@ -683,6 +683,29 @@ Page({
       businessLicense: d.businessLicense,
       derivatives: d.derivatives.join(',')
     };
+    // 回执只留这次提交的店名和电话。身份证号不进页面、不进回执。
+    function finishSubmitted() {
+      if (submitEpoch !== that._submitEpoch || !that.isIdentityTicketCurrent(identityTicket)) return;
+      if (that._recruitSlot) {
+        try { wx.setStorageSync(RECRUIT_SLOT_RETURN_KEY, { topicId: that._recruitSlot.topicId, chapterId: that._recruitSlot.chapterId, memberId: currentIdentityKey() }); } catch (e) { /* 存不下不影响提交结果 */ }
+      }
+      that.setData({
+        submitting: false,
+        submitError: '',
+        submitErrorKind: '',
+        submissionReceipt: { name: payload.name, phone: payload.phone },
+        step: 5,
+        mode: 'form'
+      });
+    }
+    function keepSubmitFailure(source) {
+      if (submitEpoch !== that._submitEpoch || !that.isIdentityTicketCurrent(identityTicket)) return;
+      that.setData({
+        submitting: false,
+        submitError: displayText(source && source.msg) || '提交未完成，请稍后重试',
+        submitErrorKind: 'data'
+      });
+    }
     app.sendRequest({
       url: '/api/merchant/merchant_registration', method: 'POST',
       data: JSON.stringify(payload),
@@ -692,23 +715,27 @@ Page({
       success: function (res) {
         if (submitEpoch !== that._submitEpoch || !that.isIdentityTicketCurrent(identityTicket)) return;
         if (res.code == '200') {
-          if (that._recruitSlot) {
-            try { wx.setStorageSync(RECRUIT_SLOT_RETURN_KEY, { topicId: that._recruitSlot.topicId, chapterId: that._recruitSlot.chapterId, memberId: currentIdentityKey() }); } catch (e) { /* 存不下不影响提交结果 */ }
-          }
-          that.setData({
-            submitting: false,
-            submitError: '',
-            submitErrorKind: '',
-            submissionReceipt: { name: payload.name, phone: payload.phone },
-            step: 5,
-            mode: 'form'
+          finishSubmitted();
+        } else if (payload.id === null && res && res.msg === '已提交过商家入驻申请，请勿重复提交') {
+          // 超时后重提：服务端已有商家行。读到申请才算交出去，读不到仍停在这句失败上。
+          app.sendRequest({
+            url: '/api/merchant/info',
+            method: 'POST',
+            hideLoading: true,
+            autoErrorToast: false,
+            success: function (info) {
+              if (submitEpoch !== that._submitEpoch || !that.isIdentityTicketCurrent(identityTicket)) return;
+              var resolved = merchantIdentity.resolveApplicationResponse(info);
+              if (resolved && resolved.kind === 'application') finishSubmitted();
+              else keepSubmitFailure(res);
+            },
+            fail: function () {
+              if (submitEpoch !== that._submitEpoch || !that.isIdentityTicketCurrent(identityTicket)) return;
+              keepSubmitFailure(res);
+            }
           });
         } else {
-          that.setData({
-            submitting: false,
-            submitError: displayText(res && res.msg) || '提交未完成，请稍后重试',
-            submitErrorKind: 'data'
-          });
+          keepSubmitFailure(res);
         }
       },
       fail: function (error) {
