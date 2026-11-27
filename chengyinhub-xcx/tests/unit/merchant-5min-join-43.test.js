@@ -140,7 +140,7 @@ test('§4.3 (2) 商家入驻支持 4 字段轻量合作档（免营业执照与 
       if (req.endsWith('merchant-industry.js')) return require(path.join(ROOT, 'pages/merchant/utils/merchant-industry.js'));
       if (req.endsWith('motion-preference.js')) return require(path.join(ROOT, 'utils/motion-preference.js'));
       if (req.endsWith('wizard-morph.js') || req.endsWith('publisher-identity.js')) {
-        const rel = req.endsWith('wizard-morph.js') ? 'utils/wizard-morph.js' : 'utils/publisher-identity.js';
+        const rel = req.endsWith('wizard-morph.js') ? 'pages/merchant/utils/wizard-morph.js' : 'utils/publisher-identity.js';
         const src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
         const mod = { exports: {} };
         const ctx = Object.assign({}, sandbox, { module: mod, exports: mod.exports });

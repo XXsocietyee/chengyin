@@ -140,6 +140,7 @@ const TITLELESS_SOLID_NAV = new Set([
   'pages/merchant/customer/detail/index',   // Figma 71:279 标题就是客户名(.cd-name 28px),与头像同排;顶栏只留返回
   'pages/club/detail/index',                // 页内 .profile-name 大标题承接俱乐部名
   'pages/topic/index/index',                // hero 封面区自带主题名,无独立标题位
+  'pages/activity/detail/index',            // PR #948 沉浸头图自带活动名,无独立标题位
   'subpackageMember/coupon-qr/index',           // 标题语义在 cy-qr-voucher 卡内,叠 page-title 会与码卡打架
   'subpackageRoam/citynode-code/index',         // 同上,标题语义在 cy-qr-voucher 卡内
   // 创建流程第0页(价值主张):标题就是页面正中那句两行主张(.ti-copy),

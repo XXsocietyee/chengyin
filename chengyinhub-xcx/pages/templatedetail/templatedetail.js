@@ -319,7 +319,7 @@ Page({
     const id = this.data.id;
     const modal = require('../../utils/modal.js');
     const toast = require('../../utils/toast.js');
-    const reportSheet = require('../../utils/community-report-sheet.js');
+    const reportSheet = require('./utils/community-report-sheet.js');
     if (app.ensureLoginFor && !app.ensureLoginFor('report', () => this._runTemplateReport(submit), { owner: this, target: () => [id] })) return;
     const owner = String(app.getUserID() || '');
     const current = () => !this._unloaded && !this._disposed && owner === String(app.getUserID() || '');
@@ -367,8 +367,8 @@ Page({
       success: cb.success, fail: () => { cb.done(); if (cb.current()) toast('网络异常，请重试'); }
     }));
   },
-  onReportReasonSelect(e) { require('../../utils/community-report-sheet.js').select(this, e); },
-  onReportReasonCancel() { require('../../utils/community-report-sheet.js').cancel(this); },
+  onReportReasonSelect(e) { require('./utils/community-report-sheet.js').select(this, e); },
+  onReportReasonCancel() { require('./utils/community-report-sheet.js').cancel(this); },
 
   getData() {
     var that = this;

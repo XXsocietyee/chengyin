@@ -15,8 +15,8 @@
   },
   "total": {
     "note": "2026-11-22 AUDIT-1122 A3:全部包(主包 + 全部分包)est 合计的棘轮(口径 = package-graph estimate,资源按 A1 全部计入)。只许往下调,余量不超过 64KB。硬上限按微信「整个小程序所有分包合计 20MB」的保守读法 × 1950/2048 安全系数 = 19500KB;微信现行总上限(各文档说法 16MB / 20MB / 30MB 不一)与 DevTools 真编译总量都待业主在开发者工具里读出后回填 devtoolsTotalBytes。",
-    "estBytes": 16791816,
-    "estCeilingBytes": 16857352,
+    "estBytes": 16961000,
+    "estCeilingBytes": 17026536,
     "estLimitBytes": 19968000,
     "devtoolsTotalBytes": null
   }

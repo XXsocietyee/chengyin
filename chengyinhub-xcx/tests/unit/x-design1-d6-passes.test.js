@@ -18,9 +18,10 @@ test('D6:兑换码行只在服务端开关(redeemEnabled)打开时出', () => {
   assert.match(rows[0], /wx:if="\{\{redeemEnabled\}\}"/)
 })
 
-test('D6:主题库入口仍只在商店页 ready 且服务端开放(member)时出,orders/gifts 分支不串到商店页', () => {
+test('D6:主题库入口仍只在商店页 ready 且服务端开放(member)时出,orders/gifts 分支不串到商店页与错误态', () => {
   assert.match(wxml, /<block wx:if="\{\{tab === 'shop' && state === 'ready'\}\}">\s*<view class="mk-row mk-row--go" wx:if="\{\{member\}\}"/)
-  assert.match(wxml, /<block wx:elif="\{\{tab === 'orders'\}\}">/)
+  assert.match(wxml, /<block wx:elif="\{\{state === 'ready' && tab === 'orders'\}\}">/)
+  assert.match(wxml, /<block wx:elif="\{\{state === 'ready'\}\}">/)
 })
 
 test('D6:页面不再请求 /api/workshop/capabilities,也没有无人消费的 workshopReason', () => {
