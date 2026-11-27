@@ -266,7 +266,7 @@
       </view>
     </view>
 
-    <!-- P-42(2026-10-28 业主确认「删」):页面末尾那行举报一并删掉 -->
+    <view wx:if="{{!(isMyScope && info.canEdit === true)}}" class="ugc-report ugc-report--block" bindtap="reportTemplate" aria-role="button" aria-label="举报">举报</view>
 
     <view class="xb-scroll-pad"></view>
   </scroll-view>
@@ -311,5 +311,7 @@
     </view>
     </view>
   </cy-sheet>
+  <cy-option-sheet show="{{reportReasonShow}}" title="选择举报原因" items="{{reportReasonItems}}"
+    confirm-text="提交举报" bind:select="onReportReasonSelect" bind:cancel="onReportReasonCancel" />
 </view>
 </view>

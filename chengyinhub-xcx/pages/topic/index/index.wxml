@@ -278,7 +278,7 @@
           </view>
         </view>
 
-        <!-- V-23 业主 2026-10-29「举报也不展示」:详情正文不再放「举报这个主题」行;本页没有自绘 ⋯ 菜单,举报处理逻辑(reportTopic)保留待业主定入口 -->
+        <!-- 2026-11-26 拍板:微信要求用户发布内容有举报入口。不放头图，评价区下方一行文字。 -->
         <!-- v13 评价:标题 + 一张深灰卡;没人评价时整张卡就是写评价入口(原「投票」同一个 voteClick) -->
         <view class="det6">
           <view class="det-type">评价</view>
@@ -304,6 +304,7 @@
                     </view>
                     <view class="col2">
                       <cy-icon wx:for="{{ item.rating }}" wx:key="*this" name="star-filled" size="24" />
+                      <text class="ugc-report" catchtap="reportComment" data-id="{{item.id}}" aria-role="button">举报</text>
                     </view>
                   </view>
                   <view class="item-desc">
@@ -314,6 +315,7 @@
             </view>
           </block>
         </view>
+        <view wx:if="{{canReport}}" class="ugc-report ugc-report--block" bindtap="reportTopic" aria-role="button" aria-label="举报">举报</view>
         <!-- 业主 2026-10-22:详情页没有底栏(v13);价格按钮滚出顶栏后停到右下角。
              自玩主题另有拼场场次时,留一行进场次选择,不让这条路断掉。 -->
         <view class="topic-audio" wx:if="{{is_join == 0 && info.selfPlay == 1 && info.activityList.length}}" bindtap="bmClick" aria-role="button" aria-label="查看场次" hover-class="cy-pressed" hover-stay-time="80"><cy-icon name="calendar" size="36" /><text>查看场次</text><cy-icon name="chevron-right" size="28" /></view>

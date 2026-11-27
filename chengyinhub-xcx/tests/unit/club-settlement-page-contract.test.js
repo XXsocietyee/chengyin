@@ -257,8 +257,8 @@ test('提现改弹平台客服微信:不跳银行卡表单、不自己发提现�
   assert.equal(navs.length, 0, '不得再跳银行卡表单页')
   assert.equal(modals.length, 1, '必须弹客服微信确认层(单测里以 wx.showModal 回落呈现)')
   assert.equal(modals[0].title, '联系平台客服提现')
-  assert.ok(modals[0].content.includes(withdrawCs.WITHDRAW_CS_WECHAT_ID), '弹窗正文必须显示客服微信号')
-  assert.ok(modals[0].content.includes(withdrawCs.WITHDRAW_CS_TIP), '弹窗正文必须带线下处理说明')
+  assert.equal(modals[0].content, withdrawCs.WITHDRAW_CS_TIP)
+  assert.doesNotMatch(modals[0].content, /\d{8,}|客服微信号/)
 })
 
 test('负控:本页若自己打 /withdraw,合同必须判红', () => {

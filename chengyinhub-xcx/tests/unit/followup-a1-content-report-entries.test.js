@@ -116,12 +116,13 @@ test('FOLLOWUP-A-1 主题:后端拒绝 / 网络失败都如实 toast', async () 
 
 // 2026-10-28 P-42 业主(v8 review 页明确「删掉玩法详情页最底下的『举报这个玩法』」):
 // 玩法详情页不再有举报入口,原因弹层与两个提交处理器一并撤掉;主题详情 / 动态详情的举报不受影响(上面几条)。
-test('FOLLOWUP-A-1 玩法详情:P-42 后不再提供举报入口、原因弹层与提交处理器', () => {
+test('2026-11-26 玩法详情恢复举报,走模板举报接口和原因弹层', () => {
   const wxml = read('pages/templatedetail/templatedetail.wxml').replace(/<!--[\s\S]*?-->/g, '');
   const js = read('pages/templatedetail/templatedetail.js');
-  assert.doesNotMatch(wxml, /举报|reportReasonShow|xb-report/);
-  assert.doesNotMatch(js, /reportTemplate|reportPersonalTemplate|reportKind|\/api\/template\/(?:personal-)?report/);
-  assert.equal(JSON.parse(read('pages/templatedetail/templatedetail.json')).usingComponents['cy-option-sheet'], undefined);
+  assert.match(wxml, /bindtap="reportTemplate"/);
+  assert.match(wxml, /reportReasonShow/);
+  assert.match(js, /contentReport\.reportTemplate\(this, app, this\.data\.id, this\.data\.scope === 'my'\)/);
+  assert.equal(JSON.parse(read('pages/templatedetail/templatedetail.json')).usingComponents['cy-option-sheet'], '/components/cy/option-sheet/index');
 });
 
 test('FOLLOWUP-A-1 平台举报原因拉不到 → 如实 toast,不提交', () => {

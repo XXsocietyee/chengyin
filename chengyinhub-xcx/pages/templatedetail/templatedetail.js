@@ -194,7 +194,9 @@ Page({
     // 详情回包前保持默认文案,goPrimary 在 canEdit 未确认时不进编辑页。
     primaryLabel: '应用',
     // V-11(2026-10-29 业主):每个模板都给「详情 / 能力」两个 tab(机制型官方模板也有能力页);常量只在初始数据里给一次
-    tplTabs: [TAB_DETAILS, TAB_CAPABILITIES]
+    tplTabs: [TAB_DETAILS, TAB_CAPABILITIES],
+    reportReasonShow: false,
+    reportReasonItems: []
   },
 
   onLoad(options) {
@@ -310,6 +312,15 @@ Page({
       });
     });
   },
+
+  reportTemplate() {
+    if (this.data.loading || this.data.loadError || !this.data.id) return;
+    if (this.data.isMyScope && this.data.info && this.data.info.canEdit === true) return;
+    const contentReport = require('../topic/utils/content-report.js');
+    contentReport.reportTemplate(this, app, this.data.id, this.data.scope === 'my');
+  },
+  onReportReasonSelect(e) { require('../../utils/community-report-sheet.js').select(this, e); },
+  onReportReasonCancel() { require('../../utils/community-report-sheet.js').cancel(this); },
 
   getData() {
     var that = this;

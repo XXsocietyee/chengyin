@@ -742,6 +742,7 @@ page {
   line-height: 1.5;
 }
 
+.ugc-report--block { display: block; margin: 24rpx 32rpx 0; text-align: right; font-size: var(--cy-font-caption); line-height: 1.4; color: var(--xb-muted); }
 .xb-notice-txt {
   margin-top: var(--cy-space-1);
   font-size: var(--cy-font-caption);
