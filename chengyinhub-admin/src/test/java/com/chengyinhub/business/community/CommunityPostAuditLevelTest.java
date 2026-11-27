@@ -256,7 +256,7 @@ class CommunityPostAuditLevelTest {
         hit.put("version", 2);
         hit.put("previous_lifecycle", "PUBLISHED");
         when(mapper.selectActiveReportLaneRemoval(7L)).thenReturn(hit);
-        when(mapper.reverseEnforcement(70L, 2, any())).thenReturn(1);
+        when(mapper.reverseEnforcement(eq(70L), eq(2), any())).thenReturn(1);
         when(mapper.selectActivePostEnforcementTypes(eq(7L), any())).thenReturn(Collections.emptyList());
         when(mapper.selectEnforcementRestoreLifecycle(7L)).thenReturn("PUBLISHED");
         when(mapper.reconcilePostEnforcementCas(eq(7L), eq(4), eq("PUBLISHED"), eq(1), eq(1), eq(1), any())).thenReturn(1);

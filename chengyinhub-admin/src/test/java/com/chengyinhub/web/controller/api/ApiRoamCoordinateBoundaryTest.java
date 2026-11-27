@@ -335,8 +335,8 @@ class ApiRoamCoordinateBoundaryTest
         for (double radius : bad) {
             AjaxResult entry = controller.entryNearby(NEAR_LAT, NEAR_LNG, radius);
             AjaxResult hang = hangout.nearby(NEAR_LAT, NEAR_LNG, radius);
-            assertNotEquals(200, entry.get("code"), radius);
-            assertNotEquals(200, hang.get("code"), radius);
+            assertNotEquals(200, entry.get("code"), "非法半径不得查询:" + radius);
+            assertNotEquals(200, hang.get("code"), "非法半径不得查询:" + radius);
             assertEquals("查询半径无效", entry.get("msg"));
             assertEquals("查询半径无效", hang.get("msg"));
         }
@@ -346,10 +346,13 @@ class ApiRoamCoordinateBoundaryTest
         assertEquals("查询半径不能超过50公里", hangOver.get("msg"));
         verifyNoInteractions(service);
 
+        java.util.Map<String, Object> nearbyResp = new java.util.HashMap<>();
+        nearbyResp.put("items", Collections.emptyList());
+        nearbyResp.put("radius", 3_000);
         when(service.nearby(eq(PLAYER), eq(NEAR_LAT), eq(NEAR_LNG), eq(3_000)))
-                .thenReturn(java.util.Map.of("items", java.util.List.of(), "radius", 3_000));
+                .thenReturn(nearbyResp);
         when(service.nearby(eq(0L), eq(NEAR_LAT), eq(NEAR_LNG), eq(3_000)))
-                .thenReturn(java.util.Map.of("items", java.util.List.of(), "radius", 3_000));
+                .thenReturn(nearbyResp);
         AjaxResult entry = controller.entryNearby(NEAR_LAT, NEAR_LNG, null);
         AjaxResult hang = hangout.nearby(NEAR_LAT, NEAR_LNG, null);
         assertEquals(200, entry.get("code"));
