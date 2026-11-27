@@ -18,6 +18,7 @@ import com.chengyinhub.business.service.IPlayTeamService;
 import com.chengyinhub.business.service.IPlayerWxacodeService;
 import com.chengyinhub.business.service.IUmsMemberService;
 import com.chengyinhub.business.service.IWxContentSecurityService;
+import com.chengyinhub.business.service.support.ActivityPlayEntitlement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,6 +68,9 @@ public class PlayTeamServiceImpl implements IPlayTeamService {
     private IAuditTaskService auditTaskService;
     @Autowired
     private IPlayerWxacodeService playerWxacodeService;
+    /** 入队资格。未注入时仍只认本人已付报名，避免旧测试夹具被静默放行。 */
+    @Autowired(required = false)
+    private ActivityPlayEntitlement activityPlayEntitlement;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -220,7 +224,7 @@ public class PlayTeamServiceImpl implements IPlayTeamService {
         }
         // 与公开申请同口径:邀请码也换不来入场资格,只认本场次(owner_type=2)已支付报名;
         // 自玩通行证 owner_type=1 不经过场次,不能入队。
-        if (teamMapper.hasPaidRegistration(memberId, 2, observed.getOwnerId()) <= 0) {
+        if (!holdsSessionTicket(memberId, observed.getOwnerId())) {
             throw new TeamRejection("TICKET_REQUIRED", "持有这一场的票才能加入");
         }
         // 名额真源只有这条条件 UPDATE；不以任何先查结果决定是否还有空位。
@@ -265,7 +269,7 @@ public class PlayTeamServiceImpl implements IPlayTeamService {
         if (targetMemberId == null || blockMapper.existsBetween(leaderMemberId, targetMemberId) > 0) {
             throw new TeamRejection("APPLY_BLOCKED", "暂时无法加入该队伍");
         }
-        if (teamMapper.hasPaidRegistration(targetMemberId, 2, team.getOwnerId()) <= 0) {
+        if (!holdsSessionTicket(targetMemberId, team.getOwnerId())) {
             throw new TeamRejection("TICKET_REQUIRED", "对方已不再持有这一场的票");
         }
         // requireLeader 已对队伍行加 FOR UPDATE:并发同意在此串行,名额仍以 reserveSlot 条件更新为准。
@@ -430,7 +434,7 @@ public class PlayTeamServiceImpl implements IPlayTeamService {
             throw new TeamRejection("APPLY_BLOCKED", "暂时无法加入该队伍");
         }
         // 只认本场次(owner_type=2)已支付报名;自玩通行证 owner_type=1 不经过场次,不能入队。
-        if (teamMapper.hasPaidRegistration(memberId, 2, team.getOwnerId()) <= 0) {
+        if (!holdsSessionTicket(memberId, team.getOwnerId())) {
             throw new TeamRejection("TICKET_REQUIRED", "持有这一场的票才能申请加入");
         }
         if (message != null) {
@@ -628,7 +632,7 @@ public class PlayTeamServiceImpl implements IPlayTeamService {
             if (blockMapper.existsBetween(team.getLeaderMemberId(), viewerMemberId) > 0) {
                 shared.add("APPLY_BLOCKED");
             }
-            if (teamMapper.hasPaidRegistration(viewerMemberId, 2, team.getOwnerId()) <= 0) {
+            if (!holdsSessionTicket(viewerMemberId, team.getOwnerId())) {
                 shared.add("TICKET_REQUIRED");
             }
         }
@@ -739,6 +743,12 @@ public class PlayTeamServiceImpl implements IPlayTeamService {
             return "th." + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         }
         return null;
+    }
+
+    /** 入队闸：本人已付报名，或已领取席位 / 礼品 / 码授权。建队仍只认本人已付报名。 */
+    private boolean holdsSessionTicket(Long memberId, Long activityId) {
+        if (activityPlayEntitlement != null) return activityPlayEntitlement.holds(memberId, activityId);
+        return teamMapper.hasPaidRegistration(memberId, 2, activityId) > 0;
     }
 
     private boolean inviteAvailable(PlayTeam team) {

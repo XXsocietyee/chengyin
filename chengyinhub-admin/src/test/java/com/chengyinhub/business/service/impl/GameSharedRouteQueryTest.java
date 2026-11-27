@@ -8,6 +8,7 @@ import com.chengyinhub.business.mapper.CmsActivityMapper;
 import com.chengyinhub.business.mapper.GameSessionRuntimeMapper;
 import com.chengyinhub.business.mapper.PlayTeamMapper;
 import com.chengyinhub.business.service.GameSessionException;
+import com.chengyinhub.business.service.support.ActivityPlayEntitlement;
 import com.chengyinhub.business.service.support.AdvancedGameClock;
 import com.chengyinhub.business.service.support.TopicRouteEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -123,6 +124,28 @@ class GameSharedRouteQueryTest {
         verify(mapper).selectSessionByActivity(70L); verify(activities).selectCmsActivityById(70L);
         verify(teams).hasPaidRegistration(7L, 2, 70L);
         verifyNoMoreInteractions(mapper, teams, activities);
+    }
+
+    @Test void claimedSeatEntitlementOpensTeamScopeRouteWithoutOwnPaidRegistration() {
+        ActivityPlayEntitlement entitlement = mock(ActivityPlayEntitlement.class);
+        when(entitlement.holds(7L, 70L)).thenReturn(true);
+        when(teams.hasPaidRegistration(7L, 2, 70L)).thenReturn(0);
+        ReflectionTestUtils.setField(runtime, "activityPlayEntitlement", entitlement);
+        TopicRouteState view = runtime.querySharedRouteState(7L, 80L, 70L);
+        assertEquals(50L, view.getSessionId());
+        assertEquals("ACTIVE", view.getStatus());
+        verify(entitlement).holds(7L, 70L);
+        verify(teams, never()).hasPaidRegistration(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test void missingPlayEntitlementStillBlocksTeamScopeRoute() {
+        ActivityPlayEntitlement entitlement = mock(ActivityPlayEntitlement.class);
+        when(entitlement.holds(7L, 70L)).thenReturn(false);
+        ReflectionTestUtils.setField(runtime, "activityPlayEntitlement", entitlement);
+        GameSessionException denied = assertThrows(GameSessionException.class, () -> runtime.querySharedRouteState(7L, 80L, 70L));
+        assertEquals("GAME_FORBIDDEN_SCOPE", denied.getErrorCode());
+        verify(teams, never()).hasPaidRegistration(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(mapper, never()).selectActiveTeamId(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test void currentTeamIsRequiredBeforeAnySharedLedgerRead() {

@@ -61,6 +61,8 @@ function fitText(g, text, maxW) { let t = String(text || ''); if (g.measureText(
 Component({
   properties: {
     show: { type: Boolean, value: false },
+    // 默认仍是「发给微信好友」。席位页在下一席的码还没备好时传 false,主按钮改成普通按钮,不会打开分享。
+    shareReady: { type: Boolean, value: true },
     // { kind: activity | theme | medal | shop | invite, id, title, meta, cover, date, when, stops: [],
     //   invite 另有 inviter(邀请人昵称)、seatsLeft(剩余席位数,没有就不写)、art(宿主 cy-illus 的 data URI,可缺)、qr(宿主已有的码图,给了就不再取主题码) }
     card: { type: Object, value: {} },

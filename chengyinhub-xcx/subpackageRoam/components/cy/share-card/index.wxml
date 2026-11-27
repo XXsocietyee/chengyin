@@ -51,7 +51,8 @@
   </view>
 
   <view class="sc-acts">
-    <button class="sc-primary" open-type="share" data-share-kind="card" aria-label="发给微信好友" hover-class="cy-pressed" hover-stay-time="80">发给微信好友</button>
+    <button wx:if="{{shareReady}}" class="sc-primary" open-type="share" data-share-kind="card" aria-label="发给微信好友" hover-class="cy-pressed" hover-stay-time="80">发给微信好友</button>
+    <button wx:else class="sc-primary" aria-label="正在准备下一席" hover-class="cy-pressed" hover-stay-time="80">正在准备下一席</button>
     <scroll-view class="sc-ch" scroll-x enhanced show-scrollbar="{{false}}"><view class="sc-ch-row">
       <view class="sc-ch-i" wx:for="{{channels}}" wx:key="key" data-key="{{item.key}}" bindtap="onChannel" aria-role="button" aria-label="{{item.label}}" hover-class="cy-pressed" hover-stay-time="80">
         <view class="sc-ch-c"><cy-icon name="{{item.icon}}" size="52" /></view><text>{{item.label}}</text>

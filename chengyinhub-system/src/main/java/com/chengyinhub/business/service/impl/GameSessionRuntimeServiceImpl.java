@@ -113,6 +113,9 @@ public class GameSessionRuntimeServiceImpl implements IGameSessionRuntimeService
     /** 付费内含席位受让人事实（只读）；与礼品分开，合并点仍在 CurrentPlayRegistration。 */
     @org.springframework.beans.factory.annotation.Autowired
     private com.chengyinhub.business.service.IRegistrationSeatRecipientEligibility seatRecipientEligibility;
+    /** TEAM 范围路线的入场资格。未注入时仍只认本人已付报名。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.chengyinhub.business.service.support.ActivityPlayEntitlement activityPlayEntitlement;
 
     // 2026-09-06 现场事件(Figma D8):俱乐部在现场需要能暂停一个出问题的站点、
     // 恢复它,以及把一条提交打回重交。
@@ -682,7 +685,7 @@ public class GameSessionRuntimeServiceImpl implements IGameSessionRuntimeService
 
     private GameSharedRunControl sharedRunControl() {
         return new GameSharedRunControl(runtimeMapper, playTeamMapper, objectMapper, clock,
-                manualEvaluationTime, cooperationEngine, survivalEngine, taskEngine);
+                manualEvaluationTime, cooperationEngine, survivalEngine, taskEngine, activityPlayEntitlement);
     }
 
     @Override

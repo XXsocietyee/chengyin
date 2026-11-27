@@ -124,6 +124,7 @@ public class RegistrationSeatInvitationServiceImpl implements IRegistrationSeatI
                 invitations.selectActiveByRegistrationForUpdate(scope.current.getId());
         int seatCount = seatCount(scope.current);
         int invitable = seatCount - 1;
+        // 每个空席一条待领取邀请。已占用席位留在 active 里，剩下的空席仍可再发，不是整单只许一条。
         if (active.size() >= invitable) throw conflict("该订单已无可用邀请席位");
         int seatNo = chooseSeat(active, invitable, requestedSeat);
 
@@ -484,6 +485,7 @@ public class RegistrationSeatInvitationServiceImpl implements IRegistrationSeatI
             throw conflict("该会员已领取本单另一个内含席位");
         }
 
+        // 只领取这一席。同单其它空席上尚未领取的邀请继续有效，不因这一次领取失效。
         if (invitations.claim(row.getId(), callerMemberId, now) != 1) {
             throw conflict("邀请状态已变化，请刷新后重试");
         }

@@ -18,7 +18,7 @@ const INVITE_KEY = 'journey-seat-invite:';
 Page({
   data: { state: 'loading', stateKind: 'loading', stateTitle: '加载中', stateCta: '',
     actionError: '',
-    lobby: null, head: null, me: null, tiles: [], inviteShow: false, inviteCard: null, playUrl: '', privacyGateShow: false,
+    lobby: null, head: null, me: null, tiles: [], inviteShow: false, inviteShareReady: true, inviteCard: null, playUrl: '', privacyGateShow: false,
     transfer: { show: false, no: 0, name: '', phone: '', nameError: '', phoneError: '', busy: false, error: '' } },
 
   showPrivacyGate() { this.setData({ privacyGateShow: true }); },
@@ -28,6 +28,10 @@ Page({
     this._registrationId = view.isId(options && options.registrationId) ? String(options.registrationId) : '';
     if (!this._registrationId) { this.setData({ state: 'missing', stateKind: 'missing-param', stateTitle: '链接已失效', stateCta: '返回' }); return; }
     this.load();
+  },
+
+  onShow() {
+    if (this._registrationId) this.load();
   },
 
   _pending() { try { return wx.getStorageSync(INVITE_KEY + this._registrationId) || ''; } catch (e) { return ''; } },
@@ -55,9 +59,9 @@ Page({
       // L09-058:邀请对应的席位已不在「等待领取」(被领 / 过期 / 撤销)⇒ 旧邀请令牌作废,不再拿去分享
       if (this._invite) {
         const invited = (seats && seats.seats || []).find(seat => seat.invitationId === String(this._invite.invitationId));
-        if (!invited || invited.state !== 'INVITED') { this._invite = null; this._inviteToken = ''; }
+        if (!invited || invited.state !== 'INVITED') { this._invite = null; this._inviteToken = ''; this._tokenShared = false; }
       }
-      this.setData({ state: 'ready', lobby: lobby.lobbyView(seats, res.data, this.data.me), playUrl: lobby.playUrl(seats) });
+      this.setData({ state: 'ready', lobby: lobby.lobbyView(seats, res.data, this.data.me), playUrl: lobby.playUrl(seats), inviteShareReady: this._inviteShareReady() });
       if (!this._extrasRead) { this._extrasRead = true; this._loadExtras(seats); }
     });
   },
@@ -94,7 +98,9 @@ Page({
     const head = this.data.head || {};
     const me = this.data.me || {};
     const s = this._summary || {};
-    this.setData({ inviteShow: true, inviteCard: {
+    // 已经发出去的邀请占着那个席位。还有空席时另开一条，不把同一枚码再交给下一位。
+    if (this._spentInvitedToken() && this._freeSeatsRemain()) this._dropSharedInvite();
+    this.setData({ inviteShow: true, inviteShareReady: this._unusedInviteToken(), inviteCard: {
       kind: 'invite', id: String(s.topicId || ''), title: head.name || '一起来玩', cover: head.cover || '',
       inviter: me.name || '', seatsLeft: l.openCount, art: illus.layers('envelope').fg
     } });
@@ -114,7 +120,7 @@ Page({
     const requestId = this._pendingId || this._pending() || view.newRequestId('seatinv');
     this._setPending(requestId);
     this._busy = true; // 只防连点,不渲染
-    this.setData({ actionError: '' });
+    this.setData({ actionError: '', inviteShareReady: this._inviteShareReady() });
     api.seatInvite(app, this._registrationId, requestId).then(res => {
       this._busy = false;
       if (res.netFail || res.code === 'fail' || Number(res.code) >= 500) {
@@ -125,6 +131,8 @@ Page({
       if (!api.ok(res) || !res.data || !res.data.token) { this.setData({ actionError: res.msg || '邀请失败' }); this.load(); return; }
       this._invite = res.data;
       this._inviteToken = res.data.token; // 只给分享路径用,不渲染
+      this._tokenShared = false;
+      this._markInviteShareReady();
       this.load();
     });
   },
@@ -141,7 +149,7 @@ Page({
       api.seatCancel(app, id, requestId).then(res => {
         this._busy = false;
         if (!api.ok(res) && !res.netFail) this.setData({ actionError: res.msg || '撤销失败' });
-        if (this._invite && String(this._invite.invitationId) === String(id)) { this._invite = null; this._inviteToken = ''; }
+        if (this._invite && String(this._invite.invitationId) === String(id)) { this._invite = null; this._inviteToken = ''; this._tokenShared = false; this._markInviteShareReady(); }
         this.load();
       });
     } });
@@ -178,16 +186,77 @@ Page({
     });
   },
 
-  onShareAppMessage() {
+  _freeSeatsRemain() {
+    const lobby = this.data.lobby;
+    return !!(lobby && lobby.canInvite && Number(lobby.openCount) > 0);
+  },
+  _inviteSeat() {
+    if (!this._invite || !this._invite.invitationId) return null;
+    const id = String(this._invite.invitationId);
+    return ((this._seats && this._seats.seats) || []).find(seat => String(seat.invitationId) === id) || null;
+  },
+  // 这枚码对应的席位已经是「等待领取」,并且已经分享过一次。还有空席时不能再发它。
+  _spentInvitedToken() {
+    const seat = this._inviteSeat();
+    return !!(this._tokenShared && this._inviteToken && seat && seat.state === 'INVITED');
+  },
+  _unusedInviteToken() {
+    return !!(this._inviteToken && !this._tokenShared);
+  },
+  // 半屏开着且没有未使用的席位码(含下一席请求还在飞)时,主按钮不能是分享。
+  _inviteShareReady() {
+    return !this.data.inviteShow || this._unusedInviteToken();
+  },
+  _markInviteShareReady() {
+    this.setData({ inviteShareReady: this._inviteShareReady() });
+  },
+  _dropSharedInvite() {
+    this._invite = null;
+    this._inviteToken = '';
+    this._tokenShared = false;
+    // 与清掉令牌同一次 setData。微信会同步写回 this.data,下一次点击读到的已是普通按钮。
+    this._markInviteShareReady();
+  },
+  _topicShare() {
     const s = this._summary || {};
-    // L09-058:还没有有效邀请令牌(右上角菜单分享、令牌已被领走)⇒ 分享主题页,不发一条领不了的席位链接
-    if (!this._inviteToken) {
-      return { title: '一起来玩', path: s.topicId ? '/pages/topic/index/index?id=' + s.topicId : '/pages/index/index' };
-    }
+    return { title: '一起来玩', path: s.topicId ? '/pages/topic/index/index?id=' + s.topicId : '/pages/index/index' };
+  },
+  _inviteShare(token) {
+    const s = this._summary || {};
     const target = Number(s.ownerType) === 2 ? 'aid=' + s.ownerId + '&tid=' + (s.topicId || '') : 'tid=' + (s.topicId || '');
     return {
       title: '一起来玩',
-      path: '/subpackageJourney/pages/landing/index?k=s&t=' + encodeURIComponent(this._inviteToken) + '&' + target
+      path: '/subpackageJourney/pages/landing/index?k=s&t=' + encodeURIComponent(token) + '&' + target
     };
+  },
+
+  onShareAppMessage() {
+    // 已经分享过、席位仍在等待领取：还有空席就作废这枚码，给下一位另开一条。
+    if (this._spentInvitedToken() && this._freeSeatsRemain()) {
+      this._dropSharedInvite();
+      if (!this._busy) this.onInvite();
+    }
+    const token = this._inviteToken;
+    if (token && this._freeSeatsRemain()) {
+      // 这次分享用掉当前空席的码。下一席另发，不把同一枚再交给下一位。
+      this._tokenShared = true;
+      this._dropSharedInvite();
+      if (!this._busy) this.onInvite();
+    } else if (token && this._inviteSeat() && this._inviteSeat().state === 'INVITED') {
+      this._tokenShared = true;
+      this._markInviteShareReady();
+    } else if (!token && this._freeSeatsRemain() && !this._busy) {
+      this.onInvite();
+    }
+    // L09-058:半屏关着、还没有有效邀请令牌(右上角菜单、令牌已被领走)⇒ 分享主题页,不发一条领不了的席位链接。
+    // 半屏还开着且没有未使用的码:不能把主题页交给下一位。主按钮此时也不是 open-type=share。
+    if (!token) {
+      if (this.data.inviteShow) {
+        this._markInviteShareReady();
+        return;
+      }
+      return this._topicShare();
+    }
+    return this._inviteShare(token);
   }
 });

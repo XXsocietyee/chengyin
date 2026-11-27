@@ -53,9 +53,12 @@ test('分享层版式:整色卡 + 封面 / 插画 + 弧 + 徽标 + 两行标题;
   assert.match(wxml, /class="sc-badge"><image class="sc-badge-img" src="\/images\/cy_logo_mark\.png"/)
   assert.match(wxml, /wx:else src="\/subpackageRoam\/components\/cy\/share-card\/route-art\.png"/)
   assert.ok(fs.existsSync(path.join(ROOT, 'subpackageRoam/components/cy/share-card/route-art.png')))
-  // 主按钮只有一颗,仍是 open-type=share(宿主页 onShareAppMessage 用 data-share-kind 区分)
+  // 默认仍是一颗 open-type=share。shareReady 缺省为真,别的宿主不用改。
+  // 传假时主按钮是普通按钮「正在准备下一席」,没有 open-type=share,点了不会拉起分享。
   assert.equal((wxml.match(/open-type="share"/g) || []).length, 1)
-  assert.match(wxml, /<button class="sc-primary" open-type="share" data-share-kind="card" aria-label="发给微信好友"/)
+  assert.match(wxml, /<button wx:if="\{\{shareReady\}\}" class="sc-primary" open-type="share" data-share-kind="card" aria-label="发给微信好友"/)
+  assert.match(wxml, /<button wx:else class="sc-primary" aria-label="正在准备下一席"[^>]*>正在准备下一席<\/button>/)
+  assert.doesNotMatch(wxml, /<button wx:else class="sc-primary"[^>]*open-type="share"/)
   assert.match(wxss, /\.sc-big \{[^}]*-webkit-line-clamp: 2;/)
   assert.match(wxss, /\.sc-primary \{[^}]*border-radius: var\(--cy-comp-btn-radius\)/)
   // 动效只用 transform / opacity,并尊重减弱动态
@@ -68,6 +71,7 @@ test('分享层版式:整色卡 + 封面 / 插画 + 弧 + 徽标 + 两行标题;
   assert.match(wxml, /class="sc \{\{scIn === 1 \? 'sc--pre' : ''\}\}"/)
   // 导出图与预览同一椭圆弧与徽标
   const js = read('subpackageRoam/components/cy/share-card/index.js')
+  assert.match(js, /shareReady: \{ type: Boolean, value: true \}/)
   assert.match(js, /g\.ellipse\(mx, 905, 600, 365, 0, 0, Math\.PI \* 2\)/)
   assert.match(js, /if \(logo\) g\.drawImage\(logo,/)
 })

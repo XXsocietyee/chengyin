@@ -16,6 +16,7 @@ import com.chengyinhub.business.domain.JourneyRules;
 import com.chengyinhub.business.service.support.GameplayRuntimeConfig;
 import com.chengyinhub.business.service.support.GameplayCooperationEngine;
 import com.chengyinhub.business.service.support.GameplaySurvivalEngine;
+import com.chengyinhub.business.service.support.ActivityPlayEntitlement;
 import com.chengyinhub.business.service.support.GameplayTaskEngine;
 import com.chengyinhub.common.core.text.Convert;
 import com.chengyinhub.common.utils.StringUtils;
@@ -53,13 +54,16 @@ final class GameSharedRunControl {
     private final GameplayCooperationEngine cooperationEngine;
     private final GameplaySurvivalEngine survivalEngine;
     private final GameplayTaskEngine taskEngine;
+    private final ActivityPlayEntitlement playEntitlement;
 
     GameSharedRunControl(GameSessionRuntimeMapper runtimeMapper, PlayTeamMapper playTeamMapper,
             ObjectMapper objectMapper, AdvancedGameClock clock, ThreadLocal<Date> manualEvaluationTime,
-            GameplayCooperationEngine cooperationEngine, GameplaySurvivalEngine survivalEngine, GameplayTaskEngine taskEngine) {
+            GameplayCooperationEngine cooperationEngine, GameplaySurvivalEngine survivalEngine, GameplayTaskEngine taskEngine,
+            ActivityPlayEntitlement playEntitlement) {
         this.runtimeMapper = runtimeMapper; this.playTeamMapper = playTeamMapper;
         this.objectMapper = objectMapper; this.clock = clock; this.manualEvaluationTime = manualEvaluationTime;
         this.cooperationEngine = cooperationEngine; this.survivalEngine = survivalEngine; this.taskEngine = taskEngine;
+        this.playEntitlement = playEntitlement;
     }
     static final Set<String> RUN_CONTROL_ACTIONS = new HashSet<>(Arrays.asList(
             "RUN_PAUSE", "RUN_RESUME", "RUN_INTERRUPT", "RUN_CANCEL", "LOCATION_REBIND", "TEAM_EXIT", "STAFF_TEAM_EXIT",
@@ -505,8 +509,14 @@ final class GameSharedRunControl {
 
     private Date evaluationTime() { Date imported = manualEvaluationTime.get(); return imported == null ? clock.now() : imported; }
 
+    /** TEAM 范围路线入场：已注入资格时认席位/礼品/码授权，否则仍只认本人已付报名。 */
+    private boolean holdsActivityPlay(Long memberId, Long activityId) {
+        if (playEntitlement != null) return playEntitlement.holds(memberId, activityId);
+        return playTeamMapper.hasPaidRegistration(memberId, 2, activityId) >= 1;
+    }
+
     Long requirePlayerTeam(GameActorContext actor, CmsActivity activity) {
-        if (playTeamMapper.hasPaidRegistration(actor.getMemberId(), 2, activity.getId()) < 1) {
+        if (!holdsActivityPlay(actor.getMemberId(), activity.getId())) {
             throw error("GAME_FORBIDDEN_SCOPE", "仅本场有效报名玩家可参与");
         }
         Long teamId = runtimeMapper.selectActiveTeamId(activity.getId(), actor.getMemberId());
