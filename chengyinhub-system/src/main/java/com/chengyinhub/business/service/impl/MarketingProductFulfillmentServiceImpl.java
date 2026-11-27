@@ -1,9 +1,11 @@
 package com.chengyinhub.business.service.impl;
 
+import com.chengyinhub.business.domain.CmsActivity;
 import com.chengyinhub.business.domain.CmsRegistration;
 import com.chengyinhub.business.domain.CmsTopic;
 import com.chengyinhub.business.domain.MarketingProductOrder;
 import com.chengyinhub.business.domain.dto.WechatVerifiedPaymentFact;
+import com.chengyinhub.business.mapper.CmsActivityMapper;
 import com.chengyinhub.business.mapper.CmsRegistrationMapper;
 import com.chengyinhub.business.mapper.CmsTopicMapper;
 import com.chengyinhub.business.mapper.MarketingProductOrderMapper;
@@ -79,6 +81,10 @@ public class MarketingProductFulfillmentServiceImpl implements IMarketingProduct
 
     @Autowired
     private CmsTopicMapper cmsTopicMapper;
+
+    /** 探索票要对上主题已有的那一场活动。没有这一场就不造。 */
+    @Autowired(required = false)
+    private CmsActivityMapper cmsActivityMapper;
 
     @Autowired
     private MarketingProductOrderMapper productOrderMapper;
@@ -910,10 +916,19 @@ public class MarketingProductFulfillmentServiceImpl implements IMarketingProduct
         CmsRegistration row = new CmsRegistration();
         row.setRegistrationNo(generateRegistrationNo());
         row.setParentOrderNo(parentOrderNo);
-        row.setOwnerType(1L);
-        row.setOwnerId(line.topicId);
+        // ③ 与 createRegistration 一样落在活动上。主题恰好有一场未删除活动时才知道是哪一场；
+        // 没有或多场都不猜、不新建活动。商品和礼品都走这一行。
+        CmsActivity activity = line.exploreCapacity ? concreteActivity(line.topicId) : null;
+        if (activity != null) {
+            row.setOwnerType(2L);
+            row.setOwnerId(activity.getId());
+            row.setActivityTitle(activity.getName() != null ? activity.getName() : topic.getName());
+        } else {
+            row.setOwnerType(1L);
+            row.setOwnerId(line.topicId);
+            row.setActivityTitle(topic.getName());
+        }
         row.setTopicId(line.topicId);
-        row.setActivityTitle(topic.getName());
         row.setMemberId(command.memberId);
         row.setRealName(null);
         row.setPhone(null);
@@ -956,6 +971,27 @@ public class MarketingProductFulfillmentServiceImpl implements IMarketingProduct
         row.setCreateBy(String.valueOf(command.memberId));
         row.setCreateTime(new Date());
         return row;
+    }
+
+    /**
+     * 主题下恰好一场未删除、且 topicId 对得上的活动。零场、多场、对不上都不返回，调用方不得另造一场。
+     */
+    private CmsActivity concreteActivity(long topicId) {
+        if (cmsActivityMapper == null || topicId <= 0) {
+            return null;
+        }
+        List<Long> ids = cmsActivityMapper.selectActiveActivityIdsByTopicId(topicId);
+        if (ids == null || ids.size() != 1 || ids.get(0) == null || ids.get(0) <= 0) {
+            return null;
+        }
+        CmsActivity activity = cmsActivityMapper.selectCmsActivityById(ids.get(0));
+        if (activity == null || activity.getId() == null || Integer.valueOf(2).equals(activity.getDelFlag())) {
+            return null;
+        }
+        if (!Long.valueOf(topicId).equals(activity.getTopicId())) {
+            return null;
+        }
+        return activity;
     }
 
     private Long pointsOf(FulfillmentCommand command) {

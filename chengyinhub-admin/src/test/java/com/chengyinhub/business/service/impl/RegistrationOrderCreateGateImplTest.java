@@ -5,6 +5,7 @@ import com.chengyinhub.business.domain.CmsTopic;
 import com.chengyinhub.business.domain.MemberCapability;
 import com.chengyinhub.business.domain.dto.RegistrationQuoteResult;
 import com.chengyinhub.business.domain.dto.RegistrationRequest;
+import com.chengyinhub.business.platformpass.SelfPlayXpayProperties;
 import com.chengyinhub.business.service.ICapabilityService;
 import com.chengyinhub.business.service.ICmsActivityService;
 import com.chengyinhub.business.service.ICmsRegistrationService;
@@ -115,6 +116,80 @@ class RegistrationOrderCreateGateImplTest {
         RegistrationCheckoutException ex = assertThrows(RegistrationCheckoutException.class,
                 () -> gate().validate(7L, topicRequest(100L)));
         assertEquals(503, ex.getCode());
+    }
+
+    @Test
+    void paidTopicRejectsExplicitIosWhileXpayOff() {
+        when(topicService.selectCmsTopicById(100L)).thenReturn(topicWithPrice(new BigDecimal("19.90")));
+        when(wechatPayService.isReady()).thenReturn(true);
+        RegistrationRequest request = topicRequest(100L);
+        request.setClientPlatform("ios");
+
+        RegistrationCheckoutException ex = assertThrows(RegistrationCheckoutException.class,
+                () -> gate().validate(7L, request));
+        assertEquals(403, ex.getCode());
+        assertEquals("iOS 暂不支持购买该票种", ex.getMessage());
+
+        // 带报价签名且虚拟支付未映射该价位时同样拒绝
+        stubQuote(quote("MATCH", new BigDecimal("19.90")));
+        request.setQuoteSign("MATCH");
+        RegistrationOrderCreateGateImpl gateWithUnmappedXpay = gate();
+        SelfPlayXpayProperties unmapped = new SelfPlayXpayProperties();
+        unmapped.setEnabled(true);
+        unmapped.setGoods("2990=goods_2990");
+        ReflectionTestUtils.setField(gateWithUnmappedXpay, "selfPlayXpay", unmapped);
+        RegistrationCheckoutException unmappedEx = assertThrows(RegistrationCheckoutException.class,
+                () -> gateWithUnmappedXpay.validate(7L, request));
+        assertEquals(403, unmappedEx.getCode());
+    }
+
+    @Test
+    void paidTopicAllowsIosWhenSelfPlayXpayReadyWithAndWithoutQuoteSign() {
+        when(topicService.selectCmsTopicById(100L)).thenReturn(topicWithPrice(new BigDecimal("19.90")));
+        when(wechatPayService.isReady()).thenReturn(true);
+        stubQuote(quote("MATCH", new BigDecimal("19.90")));
+
+        SelfPlayXpayProperties xpay = new SelfPlayXpayProperties();
+        xpay.setEnabled(true);
+        xpay.setGoods("1990=goods_1990");
+        RegistrationOrderCreateGateImpl gate = gate();
+        ReflectionTestUtils.setField(gate, "selfPlayXpay", xpay);
+
+        RegistrationRequest withoutSign = topicRequest(100L);
+        withoutSign.setClientPlatform("ios");
+        assertDoesNotThrow(() -> gate.validate(7L, withoutSign));
+
+        RegistrationRequest withSign = topicRequest(100L);
+        withSign.setClientPlatform("iPhone");
+        withSign.setQuoteSign("MATCH");
+        assertDoesNotThrow(() -> gate.validate(7L, withSign));
+    }
+
+    @Test
+    void paidTopicAllowsAndroidWhileXpayOff() {
+        when(topicService.selectCmsTopicById(100L)).thenReturn(topicWithPrice(new BigDecimal("19.90")));
+        when(wechatPayService.isReady()).thenReturn(true);
+        stubQuote(quote("MATCH", new BigDecimal("19.90")));
+
+        RegistrationRequest request = topicRequest(100L);
+        request.setClientPlatform("android");
+        request.setQuoteSign("MATCH");
+
+        assertDoesNotThrow(() -> gate().validate(7L, request));
+    }
+
+    @Test
+    void paidOfflineActivityAllowsExplicitIosJsapiWhileXpayOff() {
+        stubQuote(quote("MATCH", new BigDecimal("30.00")));
+        when(wechatPayService.isReady()).thenReturn(true);
+
+        RegistrationRequest iosReq = activityRequest("MATCH");
+        iosReq.setClientPlatform("iPhone");
+        assertDoesNotThrow(() -> gate().validate(7L, iosReq));
+
+        RegistrationRequest lowerIosReq = activityRequest("MATCH");
+        lowerIosReq.setClientPlatform("ios");
+        assertDoesNotThrow(() -> gate().validate(7L, lowerIosReq));
     }
 
     @Test

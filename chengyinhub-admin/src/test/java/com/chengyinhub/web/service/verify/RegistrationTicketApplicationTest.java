@@ -120,4 +120,12 @@ class RegistrationTicketApplicationTest {
         AjaxResult denied = AjaxResult.error("请先登录"); when(owner.issueDynCode(0L, 31L, 2)).thenReturn(denied);
         assertSame(denied, controller.issueDynCode(31L, 2)); verify(owner).issueDynCode(0L, 31L, 2);
     }
+    @Test void explorePassWithoutAnActivityDoesNotIssueACodeOrInventAnActivity() {
+        order.setOwnerType(1L); order.setOwnerId(80L); order.setPurchaseKind(3); order.setOrderNum(1L);
+        AjaxResult response = application.issueDynCode(51L, 31L, null);
+        assertEquals("探索票所属活动不可用", response.get("msg"));
+        assertNull(response.get("data"));
+        verifyNoInteractions(activities);
+        verify(qr, never()).generateInlineQrcode(anyString(), anyInt(), anyInt());
+    }
 }

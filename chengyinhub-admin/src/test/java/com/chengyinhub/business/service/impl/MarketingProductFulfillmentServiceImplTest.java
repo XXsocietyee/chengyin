@@ -1,8 +1,10 @@
 package com.chengyinhub.business.service.impl;
 
+import com.chengyinhub.business.domain.CmsActivity;
 import com.chengyinhub.business.domain.CmsRegistration;
 import com.chengyinhub.business.domain.CmsTopic;
 import com.chengyinhub.business.domain.MarketingProductOrder;
+import com.chengyinhub.business.mapper.CmsActivityMapper;
 import com.chengyinhub.business.mapper.CmsRegistrationMapper;
 import com.chengyinhub.business.mapper.CmsTopicMapper;
 import com.chengyinhub.business.mapper.MarketingProductOrderMapper;
@@ -66,6 +68,99 @@ class MarketingProductFulfillmentServiceImplTest {
     private static final long TOPIC_B = 502L;
     private static final long TOPIC_C = 503L;
     private static final long PRODUCT_ID = 77L;
+
+    @Test
+    void exploreGrantUsesTheOnlyActivityOfTheTopic() {
+        Fixture fixture = fixture();
+        CmsActivityMapper activities = mock(CmsActivityMapper.class);
+        CmsActivity activity = new CmsActivity();
+        activity.setId(8801L);
+        activity.setTopicId(TOPIC_A);
+        activity.setName("周末场");
+        activity.setDelFlag(0);
+        when(activities.selectActiveActivityIdsByTopicId(TOPIC_A)).thenReturn(Collections.singletonList(8801L));
+        when(activities.selectCmsActivityById(8801L)).thenReturn(activity);
+        ReflectionTestUtils.setField(fixture.service, "cmsActivityMapper", activities);
+        List<CmsRegistration> rows = fixture.captureInserts();
+
+        fixture.service.grant(command(line(TOPIC_A, "100.00", "60.00")));
+
+        assertEquals(1, rows.size());
+        assertEquals(Long.valueOf(2L), rows.get(0).getOwnerType());
+        assertEquals(Long.valueOf(8801L), rows.get(0).getOwnerId());
+        assertEquals(Long.valueOf(TOPIC_A), rows.get(0).getTopicId());
+        assertEquals(Integer.valueOf(com.chengyinhub.common.constant.PurchaseKind.EXPLORE_PASS), rows.get(0).getPurchaseKind());
+        assertEquals("周末场", rows.get(0).getActivityTitle());
+        verify(activities, never()).insertCmsActivity(any());
+    }
+
+    @Test
+    void exploreGrantWithoutOneActivityStaysOnTheTopic() {
+        Fixture fixture = fixture();
+        CmsActivityMapper activities = mock(CmsActivityMapper.class);
+        when(activities.selectActiveActivityIdsByTopicId(TOPIC_A)).thenReturn(Collections.emptyList());
+        ReflectionTestUtils.setField(fixture.service, "cmsActivityMapper", activities);
+        List<CmsRegistration> rows = fixture.captureInserts();
+
+        fixture.service.grant(command(line(TOPIC_A, "100.00", "60.00")));
+
+        assertEquals(Long.valueOf(1L), rows.get(0).getOwnerType());
+        assertEquals(Long.valueOf(TOPIC_A), rows.get(0).getOwnerId());
+        verify(activities, never()).selectCmsActivityById(anyLong());
+        verify(activities, never()).insertCmsActivity(any());
+    }
+
+    @Test
+    void exploreGrantDoesNotGuessAmongSeveralActivities() {
+        Fixture fixture = fixture();
+        CmsActivityMapper activities = mock(CmsActivityMapper.class);
+        when(activities.selectActiveActivityIdsByTopicId(TOPIC_A)).thenReturn(Arrays.asList(1L, 2L));
+        ReflectionTestUtils.setField(fixture.service, "cmsActivityMapper", activities);
+        List<CmsRegistration> rows = fixture.captureInserts();
+
+        fixture.service.grant(command(line(TOPIC_A, "100.00", "60.00")));
+
+        assertEquals(Long.valueOf(1L), rows.get(0).getOwnerType());
+        assertEquals(Long.valueOf(TOPIC_A), rows.get(0).getOwnerId());
+        verify(activities, never()).selectCmsActivityById(anyLong());
+        verify(activities, never()).insertCmsActivity(any());
+    }
+
+    @Test
+    void exploreGrantIgnoresAnActivityThatIsNotThisTopic() {
+        Fixture fixture = fixture();
+        CmsActivityMapper activities = mock(CmsActivityMapper.class);
+        CmsActivity activity = new CmsActivity();
+        activity.setId(8801L);
+        activity.setTopicId(TOPIC_B);
+        activity.setDelFlag(0);
+        when(activities.selectActiveActivityIdsByTopicId(TOPIC_A)).thenReturn(Collections.singletonList(8801L));
+        when(activities.selectCmsActivityById(8801L)).thenReturn(activity);
+        ReflectionTestUtils.setField(fixture.service, "cmsActivityMapper", activities);
+        List<CmsRegistration> rows = fixture.captureInserts();
+
+        fixture.service.grant(command(line(TOPIC_A, "100.00", "60.00")));
+
+        assertEquals(Long.valueOf(1L), rows.get(0).getOwnerType());
+        assertEquals(Long.valueOf(TOPIC_A), rows.get(0).getOwnerId());
+        verify(activities, never()).insertCmsActivity(any());
+    }
+
+    @Test
+    void selfPlayGrantStaysOnTheTopicEvenWhenAnActivityExists() {
+        Fixture fixture = fixture();
+        CmsActivityMapper activities = mock(CmsActivityMapper.class);
+        ReflectionTestUtils.setField(fixture.service, "cmsActivityMapper", activities);
+        List<CmsRegistration> rows = fixture.captureInserts();
+
+        fixture.service.grant(command(plainLine(TOPIC_A, "100.00", "60.00")));
+
+        assertEquals(Long.valueOf(1L), rows.get(0).getOwnerType());
+        assertEquals(Long.valueOf(TOPIC_A), rows.get(0).getOwnerId());
+        assertEquals(Integer.valueOf(com.chengyinhub.common.constant.PurchaseKind.SELF_PLAY_PASS), rows.get(0).getPurchaseKind());
+        verify(activities, never()).selectActiveActivityIdsByTopicId(anyLong());
+        verify(activities, never()).insertCmsActivity(any());
+    }
 
     @Test
     void apportionedPayableIsKeptPerRowAndChannelTotalSitsOnFirstRowOnly() {

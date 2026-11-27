@@ -90,8 +90,9 @@ public class ApiMarketingProductController extends BaseController {
     @Operation(summary = "现金预下单（需现金通道已启用且 MKO 路由已合入）")
     @PostMapping("/orders/{orderNo}/pay")
     public AjaxResult pay(@PathVariable String orderNo,
-                          @RequestParam(required = false) String payChannel) {
-        return success(purchaseService.prepareCashPayment(requireAppMemberId(), orderNo, payChannel));
+                          @RequestParam(required = false) String payChannel,
+                          @RequestParam(required = false) String clientPlatform) {
+        return success(purchaseService.prepareCashPayment(requireAppMemberId(), orderNo, payChannel, clientPlatform));
     }
 
     @Operation(summary = "取消待支付现金单")

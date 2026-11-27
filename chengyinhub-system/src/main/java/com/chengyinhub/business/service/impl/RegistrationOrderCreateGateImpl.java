@@ -15,8 +15,10 @@ import com.chengyinhub.business.service.ICmsRegistrationService;
 import com.chengyinhub.business.service.ICmsTopicService;
 import com.chengyinhub.business.service.IMerchantBusinessStatusService;
 import com.chengyinhub.business.service.IRegistrationOrderCreateGate;
+import com.chengyinhub.business.platformpass.SelfPlayXpayProperties;
 import com.chengyinhub.business.service.IWechatPayService;
 import com.chengyinhub.business.service.RegistrationCheckoutException;
+import com.chengyinhub.business.service.support.PaymentPlatformGuard;
 import com.chengyinhub.common.utils.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -46,6 +48,8 @@ public class RegistrationOrderCreateGateImpl implements IRegistrationOrderCreate
     private UmsMemberMapper umsMemberMapper;
     @Autowired
     private UmsMemberAddressMapper umsMemberAddressMapper;
+    @Autowired(required = false)
+    private SelfPlayXpayProperties selfPlayXpay;
 
     @Override
     public void validate(Long memberId, RegistrationRequest request) {
@@ -53,8 +57,18 @@ public class RegistrationOrderCreateGateImpl implements IRegistrationOrderCreate
         validatePurchaseProfile(memberId, request.getRealName());
         if (Integer.valueOf(1).equals(request.getOwnerType())) {
             CmsTopic topic = topicService.selectCmsTopicById(request.getOwnerId());
-            if (topic != null && positive(topic.getSelfPlayPrice()) && !wechatPayService.isReady()) {
-                throw new RegistrationCheckoutException(503, "支付服务暂不可用，请稍后再试");
+            if (topic != null && positive(topic.getSelfPlayPrice())) {
+                if (!wechatPayService.isReady()) {
+                    throw new RegistrationCheckoutException(503, "支付服务暂不可用，请稍后再试");
+                }
+                BigDecimal payAmount = topic.getSelfPlayPrice();
+                if (StringUtils.isNotBlank(request.getQuoteSign())) {
+                    RegistrationQuoteResult current = validateQuote(memberId, request);
+                    payAmount = current == null ? null : current.getPayAmount();
+                }
+                if (positive(payAmount)) {
+                    rejectIosVirtual(request.getClientPlatform(), selfPlayReady(payAmount));
+                }
             }
             return;
         }
@@ -96,7 +110,7 @@ public class RegistrationOrderCreateGateImpl implements IRegistrationOrderCreate
         throw new RegistrationCheckoutException(400, "请先补全参与人姓名，再购买");
     }
 
-    private void validateQuote(Long memberId, RegistrationRequest request) {
+    private RegistrationQuoteResult validateQuote(Long memberId, RegistrationRequest request) {
         if (StringUtils.isBlank(request.getQuoteSign())) {
             throw new RegistrationCheckoutException(400, "缺少报价签名，请重新进入报名页");
         }
@@ -109,6 +123,26 @@ public class RegistrationOrderCreateGateImpl implements IRegistrationOrderCreate
         if (positive(current.getPayAmount()) && !wechatPayService.isReady()) {
             throw new RegistrationCheckoutException(503, "支付服务暂不可用，请稍后再试");
         }
+        return current;
+    }
+
+    private void rejectIosVirtual(String platform, boolean xpayReady) {
+        try {
+            PaymentPlatformGuard.rejectIosVirtualJsapi(platform, xpayReady);
+        } catch (PaymentPlatformGuard.IosVirtualPayRejected rejected) {
+            throw new RegistrationCheckoutException(403, rejected.getMessage());
+        }
+    }
+
+    private boolean selfPlayReady(BigDecimal price) {
+        if (selfPlayXpay == null || !selfPlayXpay.isEnabled() || price == null) return false;
+        long fen;
+        try {
+            fen = price.movePointRight(2).longValueExact();
+        } catch (ArithmeticException invalid) {
+            return false;
+        }
+        return selfPlayXpay.goodsIdFor(fen) != null;
     }
 
     /** 报名标的(主题/活动)是否归属某个俱乐部:主题看 cms_topic.club_id,活动看 cms_activity.club_id。 */

@@ -1458,7 +1458,10 @@ Page({
           marketingSign: marketingSign || null,
           requestId: requestId,
           waitlistOfferId: waitlistOfferId || null,
-          waitlistOfferToken: waitlistOfferToken || null
+          waitlistOfferToken: waitlistOfferToken || null,
+          clientPlatform: (function () {
+            try { return wx.getSystemInfoSync().platform || ''; } catch (e) { return ''; }
+          })()
         };
         if (childAge != null) data.childAge = childAge; // F12 亲子票儿童年龄
         // 3-5 票源归因:只有「捕获到的那一期」== 「正在下单的这一期」才带标记。
@@ -1972,15 +1975,16 @@ Page({
         that.cancelPendingOrder({ openOrderWhenStuck: true });
       },
       onPayFail: function (res) {
-        const message = (res && res.errMsg) || '支付失败，请重试';
+        const launched = !!(res && res.paymentLaunched);
+        const message = launched
+          ? '支付结果未确认，请到订单查看，勿重复支付'
+          : ((res && res.errMsg) || '支付失败，请重试');
         cyLoading.hide();
         that.setData({
           isPaying: false, verifyingPayment: false, submitError: message,
-          // 面板负责「说清楚发生了什么」并自愈;重试出口是页内那条 submitError,
-          // 它一直留在页上 —— 恢复动作不能放进会自己消失的面板里。
-          // 原来这里还会再 app.tips 一次,和面板+页内错误就是同一句话说三遍,故去掉。
-          resultSheet: { show: true, kind: 'fail', title: '这笔没有付成功', sub: '未扣款，可重试',
-            meta: '', pill: '', why: message, primaryText: '', secondaryText: '', duration: SUCCESS_HOLD_MS },
+          resultSheet: { show: true, kind: 'fail', title: '这笔没有付成功',
+            sub: launched ? '支付结果未确认，请到订单查看，勿重复支付' : '未扣款，可重试',
+            meta: '', pill: '', why: launched ? '' : message, primaryText: '', secondaryText: '', duration: SUCCESS_HOLD_MS },
         }, () => that.refreshPaymentState());
         that.cancelPendingOrder({ stayOnPage: true });
       },
