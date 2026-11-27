@@ -79,6 +79,20 @@ const INVOICE_METHODS = {
       waitForInitialSession(this, app, function () { this._hidden = true; this.onShow(); });
       return;
     }
+    if (app._featureFlagsLoading && app._featureFlagsPromise && typeof app._featureFlagsPromise.then === 'function') {
+      const waitEpoch = this._epoch;
+      const waitIdentity = this._identity;
+      app._featureFlagsPromise.then(() => {
+        if (this._unloaded || this._hidden || waitEpoch !== this._epoch || waitIdentity !== this.identity()) return;
+        if (app.globalData && app.globalData.features && app.globalData.features.userInvoice === false) {
+          this.off();
+          return;
+        }
+        this._workflow = createVerificationWorkflow({ storage: wx, requestIdentity: true, getOwner: () => this.owner() });
+        this.invoiceLoad();
+      });
+      return;
+    }
     if (app.globalData && app.globalData.features && app.globalData.features.userInvoice === false) {
       this.off();
       return;

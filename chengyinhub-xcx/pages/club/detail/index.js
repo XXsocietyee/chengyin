@@ -775,10 +775,14 @@ Page({
     const myNickname = (app.getNickname && app.getNickname()) || '';
     if (myNickname !== this.data.myNickname) this.setData({ myNickname });
     const me = (app.getUserID && app.getUserID()) || null;   // j6 N2:别处登录 / 退出后回来,登录态以 app 为准
-    if (String(me || '') !== String(this.data.myMemberId || '')) this.setData({ myMemberId: me });
+    const memberChanged = String(me || '') !== String(this.data.myMemberId || '');
+    if (memberChanged) this.setData({ myMemberId: me });
     if (!this._hasShown) { this._hasShown = true; return; }
     if (this._skipShowRefresh) { this._skipShowRefresh = false; return; }
-    if (this.data.clubId && this.data.club) {
+    if (memberChanged && me && (this.data.loginRequired || !this.data.club)) {
+      if (this.data.clubId) this.loadAll();
+      else this.resolveOwnerEntry();
+    } else if (this.data.clubId && this.data.club) {
       if (this.canGovern() || this.data.canUseManageTab) this.loadAll();
       else if (this.data.club.isJoined) this.refreshMemberRelationship();
     }
@@ -1864,7 +1868,11 @@ Page({
     app.sendRequest({
       url: '/api/club/post/delete', method: 'POST', data: jsonBody({ id: id }), header: jsonHeader(),
       success(res) {
-        if (res.code == '200') { if (dc) dc.done(); that.loadPosts(); }
+        if (res.code == '200') {
+          if (dc) dc.done();
+          if (app.globalData) app.globalData.squareListDirtyVersion = (app.globalData.squareListDirtyVersion || 0) + 1;
+          that.loadPosts();
+        }
         else if (dc) dc.failed(res.msg || '删除失败');
       },
       fail() { if (dc) dc.failed('网络异常，请重试'); },
@@ -1877,7 +1885,14 @@ Page({
       title: '举报动态', content: '确认举报？平台将尽快处理。', confirmText: '举报',
       success(r) {
         if (!r.confirm) return;
-        app.sendRequest({ url: '/api/club/post/report', method: 'POST', data: jsonBody({ id: id }), header: jsonHeader(), success(res) { cyToast(res.msg || '已举报'); }, fail() { cyToast('网络异常，请重试'); } });
+        app.sendRequest({
+          url: '/api/club/post/report', method: 'POST', data: jsonBody({ id: id }), header: jsonHeader(),
+          success(res) {
+            if (res && (res.code == '200' || res.code === 200)) cyToast(res.msg || '已举报');
+            else cyToast((res && res.msg) || '举报失败，请重试');
+          },
+          fail() { cyToast('网络异常，请重试'); }
+        });
       }
     });
   },
@@ -1993,7 +2008,7 @@ Page({
         }
         that.setData({ postRefState: 'ready', postRefOptions: buildPostRefOptions(res.data) });
       },
-      fail() { that.setData({ postRefState: 'error', postRefErrorText: '网络异常，获取失败你的游玩记录' }); },
+      fail() { that.setData({ postRefState: 'error', postRefErrorText: '网络异常，游玩记录读取失败' }); },
     });
   },
 
@@ -2566,7 +2581,7 @@ Page({
       // 拍板 2026-10-22:需审核的团留言必填、最多 60 字(后端同闸)。空着点提交不发请求,重新弹出。
       modal.show({
         title: '申请加入', content: '给主理人说一句吧，比如你是谁、想跟哪种局（必填，60 字内）。',
-        editable: true, placeholderText: '朋友推荐来的，想跟一次夜行',
+        editable: true, maxlength: 60, placeholderText: '朋友推荐来的，想跟一次夜行',
         confirmText: '提交申请',
         validate: joinMessageError,
         success(r) {

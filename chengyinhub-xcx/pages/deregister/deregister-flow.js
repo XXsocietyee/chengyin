@@ -58,6 +58,7 @@ function initialData() {
   return {
     status: 'LOADING',
     statusError: '',
+    smsCountdown: 0,
     verificationMethod: 'UNAVAILABLE',
     blockers: [],
     executeAfter: '',
@@ -216,7 +217,20 @@ const methods = {
             if (token !== this._smsToken) return;
             if (isOk(smsRes)) {
               this._smsSentAt = Date.now();
-              this.setData({ phone, phoneMasked: phone.slice(-4), smsSending: false, smsSent: true, smsError: '' });
+              this.setData({ phone, phoneMasked: phone.slice(-4), smsSending: false, smsSent: true, smsCountdown: 60, smsError: '' });
+              if (this._smsTimer) clearInterval(this._smsTimer);
+              this._smsTimer = setInterval(() => {
+                if (this._detached || this._unloaded) { clearInterval(this._smsTimer); this._smsTimer = null; return; }
+                const left = Math.max(0, Math.ceil((60000 - (Date.now() - (this._smsSentAt || 0))) / 1000));
+                if (left <= 0) {
+                  clearInterval(this._smsTimer);
+                  this._smsTimer = null;
+                  this.setData({ smsCountdown: 0 });
+                } else if (left !== this.data.smsCountdown) {
+                  this.setData({ smsCountdown: left });
+                }
+              }, 1000);
+              if (this._smsTimer && typeof this._smsTimer.unref === 'function') this._smsTimer.unref();
               return;
             }
             this.setData({ smsSending: false, smsSent: false, smsError: (smsRes && smsRes.msg) || '验证码发送失败，请重试' });
@@ -230,8 +244,35 @@ const methods = {
     });
   },
 
-  apply() {
+  onApplyDisabledTap() {
+    if (this.data.submitting || this.data.status !== 'ELIGIBLE') return;
+    if (!this.data.confirmed) {
+      this.setData({ applyError: '请先勾选确认已阅读并理解注销后果' });
+      return;
+    }
+    if (this.data.verificationMethod === 'SMS' && !(this.data.smscode || '').trim()) {
+      this.setData({ applyError: '请先输入短信验证码' });
+    }
+  },
+
+  apply(event) {
     if (this.data.submitting || this.data.status !== 'ELIGIBLE' || this._hidden || this._detached || this._unloaded) return;
+    if (event && event.type === 'tap' && !event._confirmed) {
+      if (!this.data.confirmed) { this.onApplyDisabledTap(); return; }
+      if (this.data.verificationMethod === 'SMS' && !(this.data.smscode || '').trim()) { this.onApplyDisabledTap(); return; }
+      const that = this;
+      modal.show({
+        danger: true,
+        title: '确认申请注销账号？',
+        content: '提交后账号立即退出并进入冷静期，冷静期结束后账号及数据将无法恢复',
+        confirmText: '确认注销',
+        cancelText: '再想想',
+        success(r) {
+          if (r && r.confirm) that.apply({ _confirmed: true });
+        },
+      });
+      return;
+    }
     const smscode = (this.data.smscode || '').trim();
     if (!this.data.confirmed) {
       this.setData({ applyError: '请先确认已阅读并理解注销后果' });

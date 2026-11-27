@@ -69,6 +69,7 @@ const playAccuracy = require('./utils/play-accuracy.js');       // 到达定位�
 const trialUnlockUtil = require('./utils/trial-unlock.js');
 const productOrder = require('../../utils/commerce/product-order.js');
 const xpayPay = require('../../utils/checkout/selfplay-xpay-pay.js');
+const { createRegistrationPaymentVerifier } = require('../../utils/checkout/registration-payment-verifier.js');
 const arrivalPolicy = require('./utils/arrival-radius.js'); const { ARRIVAL_RADIUS_METERS, ARRIVAL_START_RADIUS_TEXT } = arrivalPolicy; // 到达判定 v2 合同(开局 300m,精度放宽至多 200m);50m 只点亮「我已到达」,不自动到达
 const START_ACCURACY_LOW_TEXT = '定位不准，再试一次';
 const {
@@ -1183,6 +1184,7 @@ Page({
     // 长按结束的进度定时只有 touchend 会清;卸载若正好压在按住那一拍上,不清就是卸载后还 setData。
     this._cancelRunHold();
     this._stopStandClock();
+    if (this._scoreCountTimer) { clearInterval(this._scoreCountTimer); this._scoreCountTimer = null; }
   },
   // 游玩定位只在前台持有；回前台沿用本页同意，暂停或通关后不恢复。
   onHide() {
@@ -10643,6 +10645,8 @@ Page({
       if (!that._trialReqId) {
         that._trialReqId = 'trial_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
       }
+      let clientPlatform = '';
+      try { clientPlatform = (wx.getSystemInfoSync && wx.getSystemInfoSync().platform) || ''; } catch (e) { clientPlatform = ''; }
       const body = {
         ownerType: 1,
         ownerId: Number(topicId),
@@ -10650,6 +10654,7 @@ Page({
         phone: profile.phone,
         isUsePoint: 0,
         requestId: that._trialReqId,
+        clientPlatform,
       };
       app.sendRequest({
         url: '/api/registration/create', method: 'POST', hideLoading: true, autoErrorToast: false,
@@ -10666,23 +10671,40 @@ Page({
             that._completeTrialUnlock();
             return;
           }
+          const verifyRegistrationPayment = createRegistrationPaymentVerifier(app);
+          const verifyAndUnlock = (orderData, isXpay) => {
+            const regId = orderData && (orderData.registrationId || orderData.id);
+            if (!regId) { fail('缺少订单编号，请到订单查看'); return; }
+            const onVerified = (vr) => {
+              if (vr && vr.ok) {
+                that._trialReqId = null;
+                that._completeTrialUnlock();
+                return;
+              }
+              fail((vr && vr.status === 'unknown')
+                ? '支付结果待确认，请稍后到我的订单查看'
+                : ((vr && vr.errMsg) || '支付尚未确认，请稍后在订单中查看'));
+            };
+            if (isXpay) xpayPay.verify(app, verifyRegistrationPayment, orderData, onVerified);
+            else verifyRegistrationPayment({ registrationId: regId }, onVerified);
+          };
           if (xpayPay.needsSigning(d)) {
             xpayPay.signIntent(app, wx, d.registrationId, (signed) => {
-              if (!signed || !signed.ok) { fail((signed && signed.msg) || '支付参数获取失败'); return; }
+              if (!signed || !signed.ok) { fail((signed && signed.msg) || '未能发起支付，请重试'); return; }
               const payData = Object.assign({}, d, signed.data);
-              xpayPay.requestPayment(wx, payData, {
-                onSuccess: () => { that._trialReqId = null; that._completeTrialUnlock(); },
-                onCancel: () => fail('已取消支付'),
-                onFail: (err) => fail((err && err.errMsg) || '支付失败，请重试'),
+              xpayPay.pay(app, wx, payData, (payRes) => {
+                if (payRes && payRes.ok) { verifyAndUnlock(payData, true); return; }
+                if (payRes && payRes.cancelled) { fail('已取消支付，待支付订单将在 30 分钟内保留'); return; }
+                fail((payRes && payRes.errMsg) || '支付失败，请重试');
               });
             });
             return;
           }
           const invokePay = (params) => {
             wx.requestPayment(Object.assign({}, params, {
-              success() { that._trialReqId = null; that._completeTrialUnlock(); },
+              success() { verifyAndUnlock(d, false); },
               fail(err) {
-                if (/cancel/.test(String((err && err.errMsg) || ''))) { fail('已取消支付'); return; }
+                if (/cancel/.test(String((err && err.errMsg) || ''))) { fail('已取消支付，待支付订单将在 30 分钟内保留'); return; }
                 fail('支付未完成，请重试');
               },
             }));
@@ -10693,7 +10715,7 @@ Page({
             data: { id: d.registrationId },
             success(payRes) {
               const p = payRes && String(payRes.code) === '200' && payRes.data && payRes.data.payParams;
-              if (!p) { fail((payRes && payRes.msg) || '支付参数获取失败'); return; }
+              if (!p) { fail((payRes && payRes.msg) || '未能发起支付，请重试'); return; }
               invokePay(p);
             },
             fail() { fail('支付发起失败，请重试'); },
@@ -10759,8 +10781,11 @@ Page({
       that._trialSubmitting = false;
       that.setData({ 'trialUnlock.loading': false, 'trialUnlock.error': msg || '支付未完成，请重试' });
     };
+    let seatPlatform = '';
+    try { seatPlatform = (wx.getSystemInfoSync && wx.getSystemInfoSync().platform) || ''; } catch (e) { seatPlatform = ''; }
     app.sendRequest({
-      url: '/api/marketing/product/orders/' + encodeURIComponent(orderNo) + '/pay',
+      url: '/api/marketing/product/orders/' + encodeURIComponent(orderNo) + '/pay'
+        + (seatPlatform ? ('?clientPlatform=' + encodeURIComponent(seatPlatform)) : ''),
       method: 'POST', hideLoading: true, autoErrorToast: false,
       success(res) {
         const p = res && String(res.code) === '200' && res.data && res.data.payParams;

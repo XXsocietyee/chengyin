@@ -453,6 +453,9 @@
   "permission": {
     "scope.userLocation": {
       "desc": "用于确定首页城市、到点打卡判定与漫游足迹记录"
+    },
+    "scope.userLocationBackground": {
+      "desc": "用于在城市探索和漫游切到后台时持续记录路线足迹与到站提醒"
     }
   },
   "darkmode": false,
@@ -491,7 +494,7 @@
       },
       {
         "pagePath": "pages/talent/list/index",
-        "text": "俱乐部",
+        "text": "发现",
         "iconPath": "images/icon_f4.png",
         "selectedIconPath": "images/icon_f04d.png"
       },

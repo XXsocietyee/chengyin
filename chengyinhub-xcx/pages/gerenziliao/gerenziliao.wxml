@@ -91,7 +91,7 @@
      cy-footer-bar 自带 z-index: var(--cy-z-nav)=90 + 安全区 + 页边距,且低于 cy-sheet(800),
      所以本页四个编辑面板照常压在它上面。 -->
 <cy-footer-bar>
-  <cy-btn variant="primary" loading="{{saving}}" disabled="{{!canSave || saving}}" bindtap="saveInfo"
+  <cy-btn variant="primary" loading="{{saving}}" disabled="{{!canSave || saving}}" bindtap="saveInfo" bind:disabledtap="onSaveDisabledTap"
           accessibility-label="{{saving ? '正在保存个人资料' : '保存个人资料'}}">{{saving ? '保存中…' : '保存'}}</cy-btn>
 </cy-footer-bar>
 

@@ -67,7 +67,7 @@
     <cy-inline-error class="submit-inline-error" wx:if="{{submit === 'unknown'}}" kind="data" title="这次申请结果未确认" sub="确认前请勿重复提交" action="{{requestId ? '查询结果' : ''}}" bind:action="queryResult" />
     <cy-inline-error class="submit-inline-error" wx:elif="{{submit === 'max'}}" kind="data" title="一次最多合并 50 笔订单" action="重新选择" bind:action="reselect" />
     <cy-inline-error class="submit-inline-error" wx:elif="{{submit === 'failed'}}" kind="data" title="申请未提交" sub="{{submitSub}}" action="重新选择" bind:action="reselect" />
-    <cy-btn variant="primary" style="width:686rpx;margin:var(--cy-space-4) auto 0;display:block" loading="{{writing}}" disabled="{{!!submit || !title || !selectedCount}}" bindtap="apply">提交申请</cy-btn>
+    <cy-btn variant="primary" style="width:686rpx;margin:var(--cy-space-4) auto 0;display:block" loading="{{writing}}" disabled="{{!!submit || !title || !selectedCount}}" bindtap="apply" bind:disabledtap="onApplyDisabledTap">提交申请</cy-btn>
   </view>
 </block>
 

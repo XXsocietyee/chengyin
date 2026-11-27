@@ -201,12 +201,14 @@ App({
     var authorization = that.getAuthorization();
     var epoch = that._featureFlagsEpoch = (that._featureFlagsEpoch || 0) + 1;
     that._communityFeatureOwner = null;
+    that._featureFlagsLoading = true;
     that.globalData.features = Object.assign({}, that.globalData.features,
       { communityPostRead: false, communityPostWrite: false, userInvoice: false });
-    return new Promise(function (resolve) {
+    var promise = new Promise(function (resolve) {
       var finish = function (res) {
         var current = epoch === that._featureFlagsEpoch
           && owner === String(that.getUserID() || '') && authorization === that.getAuthorization();
+        if (epoch === that._featureFlagsEpoch) that._featureFlagsLoading = false;
         if (current && res && res.code == 200 && res.data && typeof res.data === 'object' && !Array.isArray(res.data)) {
           that.globalData.features = Object.assign({}, that.globalData.features, res.data,
             { communityPostRead: res.data.communityPostRead === true, communityPostWrite: res.data.communityPostWrite === true, userInvoice: res.data.userInvoice === true });
@@ -221,6 +223,8 @@ App({
           successStatusAbnormal: function () { finish(null); } });
       } catch (error) { finish(null); }
     });
+    that._featureFlagsPromise = promise;
+    return promise;
   },
   canUseCommunity: function (write) {
     return this._communityFeatureOwner === String(this.getUserID() || '')
@@ -501,10 +505,11 @@ App({
       return;
     }
     this._privacyNavigationPending = true;
+    this._privacyFallbackPage = current || null;
     // SC-PRIV-04:回退页打不开(如页面栈满)时,把全部待决调用方按 disagree 各结算一次,不让它们永久挂起。
     wx.navigateTo({
       url: '/pages/privacy/index',
-      fail: function () { this.resolvePrivacyAuthorization({ event: 'disagree' }); }.bind(this),
+      fail: function () { this._privacyFallbackPage = null; this.resolvePrivacyAuthorization({ event: 'disagree' }); }.bind(this),
       complete: function () { this._privacyNavigationPending = false; }.bind(this)
     });
   },

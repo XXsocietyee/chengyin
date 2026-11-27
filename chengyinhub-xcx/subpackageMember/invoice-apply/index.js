@@ -124,6 +124,11 @@ Page({
   },
   manageTitles() { this.setData({ sheet: false }); this.go({ currentTarget: { dataset: { page: 'titles' } } }); },
   addTitle() { this.go({ currentTarget: { dataset: { page: 'edit' } } }); },
+  onApplyDisabledTap() {
+    if (this.data.writing || this.data.submit) return;
+    if (!this.data.title) { cyToast('请先选择或新增发票抬头'); return; }
+    if (!this.data.selectedCount) { cyToast('请至少选择 1 笔可开票订单'); }
+  },
   apply() {
     if (this.locked() || this.data.submit) return;
     const titleId = this._titleId, orderIds = this._chosen.slice();
@@ -138,6 +143,7 @@ Page({
       if (result.status === 'success') {
         this.clearContext(result.value.requestId); this._chosen = [];
         this.setData({ pending: false, requestId: '', submit: '' });
+        cyToast('开票申请已提交');
         backToList(); return;
       }
       if (result.status === 'failed') {

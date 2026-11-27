@@ -22,7 +22,8 @@ Page({
   onShow() {
     this._navigating = false
     const who = (app.getUserID && app.getUserID()) || ''
-    if (this._loadedOnce && (who !== this._loadedFor || Date.now() - (this._loadedAt || 0) > 30000)) this.load(true)
+    if ((this.data.state === 'login' && who)
+        || (this._loadedOnce && (who !== this._loadedFor || Date.now() - (this._loadedAt || 0) > 30000))) this.load(this.data.state !== 'login')
   },
   onPullDownRefresh() { this.load(false, true) },
   retry() { this.load() },

@@ -86,6 +86,11 @@ function summarizeOrderState(row, now) {
 
   const registrationStatus = Number(value.registrationStatus);
   if (registrationStatus === 1) {
+    const expireTs = toTimestamp(value.payExpireTime);
+    const currentNow = typeof now === 'number' ? now : orderClockNow(value);
+    if (!Number.isNaN(expireTs) && expireTs > 0 && currentNow >= expireTs) {
+      return { key: 'expired', text: '已过期', refundText: '超时未支付，订单已关闭' };
+    }
     return { key: 'pending_payment', text: '待支付', refundText: '完成支付后可使用' };
   }
   if (registrationStatus === 3) {
@@ -178,4 +183,21 @@ function passUntilText(expiresAt) {
   return last ? '可玩至 ' + last.month + ' 月 ' + last.day + ' 日' : '';
 }
 
-module.exports = { passUntilText, summarizeOrderState, canRequestOrderRefund, formatRefundDeadline, orderClockNow, exploreProgressOf, isSelfPlayPass, endOf };
+function formatPayCountdown(payExpireTime, now) {
+  const expireTs = toTimestamp(payExpireTime);
+  if (Number.isNaN(expireTs) || !(expireTs > 0)) return null;
+  const current = typeof now === 'number' && Number.isFinite(now) ? now : Date.now();
+  const remainingMs = Math.max(0, expireTs - current);
+  if (remainingMs <= 0) {
+    return { remainingMs: 0, text: '00:00', urgent: true, expired: true };
+  }
+  const totalSec = Math.ceil(remainingMs / 1000);
+  const hours = Math.floor(totalSec / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+  const pad2 = function (n) { return String(n).padStart(2, '0'); };
+  const text = hours > 0 ? (pad2(hours) + ':' + pad2(mins) + ':' + pad2(secs)) : (pad2(mins) + ':' + pad2(secs));
+  return { remainingMs, text, urgent: remainingMs < 5 * 60 * 1000, expired: false };
+}
+
+module.exports = { passUntilText, summarizeOrderState, canRequestOrderRefund, formatRefundDeadline, orderClockNow, exploreProgressOf, isSelfPlayPass, endOf, formatPayCountdown };

@@ -200,6 +200,7 @@ Page({
         if (!res || ![200, '200'].includes(res.code) || !row || Array.isArray(row)
             || exactRegistrationId(row.id) !== fid || ![1, '1', 2, '2'].includes(row.ownerType)
             || ![2, '2'].includes(row.registrationStatus)
+            || ![2, '2'].includes(row.paymentStatus)
             || (row.memberId != null && String(row.memberId) !== owner)) { missing(); return; }
         const key = row.ownerType === 1 || row.ownerType === '1' ? '_topic' : '_activity';
         const branch = this[key] || { list: [] };
@@ -374,6 +375,7 @@ Page({
     if (((this.data.ticketList || [])[index] || {}).wSeat) return; // DEC-F12 B:同伴席位的入场码属于购票人原单,这里不出
     const flipped = !this.data.flipped;
     this.setData({ flipped });
+    try { require('../../utils/motion.js').haptic({ type: 'light', reducedMotion: this.data.reduced }); } catch (e) {}
     const item = (this.data.ticketList || [])[index];
     if (!flipped || !item || item.topicCompleted === true) return;
     if (String(item.id) !== this._qrFor || !(this._qrExpiresAt > Date.now() + QR_REFRESH_LEAD_MS)) this._loadQr(item);
@@ -431,9 +433,21 @@ Page({
     if ((this._activity || {}).state === 'error') this.retryActivity();
   },
 
-  /* 登录引导「登录」:重登成功后重拉失败的支线 */
+  /* 登录引导「登录」:重登成功后同步当前账号归属并全量重拉两路票、同伴席位与队伍 */
   loginWallet() {
-    retryLogin(this, app, this.retryWallet);
+    retryLogin(this, app, function () {
+      if (this._unloaded) return;
+      this._walletOwner = walletOwner();
+      this._refreshOnShow = false;
+      this._topic = { list: [], state: 'loading', err: '' };
+      this._activity = { list: [], state: 'loading', err: '' };
+      this._myTeams = {};
+      this.setData({ currentSwiperTicket: 0, currentTeam: null, meAvatar: (app.getAvatar && app.getAvatar()) || '' });
+      this.getActivityList();
+      this.getTopicList();
+      this.getSeatTickets();
+      this.loadMyTeams();
+    });
   },
 
   /* 我的队伍。票夹一次拉全量,再按 ownerType:ownerId 落到具体那张票上 ——

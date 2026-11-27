@@ -13,6 +13,7 @@
      (见 tokens.wxss --cy-comp-card-highlight / --cy-comp-card-shadow-day)。
      §5 禁的是「用一圈线画出边界」,不禁「用光影表达层级」。 */
   box-shadow: inset 0 1rpx 0 0 var(--cy-comp-card-highlight), var(--cy-comp-card-shadow-day);
+  transition: var(--cy-tr-press);
 }
 
 .cy-card--media { border-radius: var(--cy-radius-2xl); }

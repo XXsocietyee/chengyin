@@ -527,7 +527,23 @@ Page({
     wx.navigateTo({ url: url + '&scope=MERCHANT' });
   },
 
-  onShow() { merchantTheme.merchantPageShow(); },
+  onShow() {
+    merchantTheme.merchantPageShow();
+    const uid = String(app.getUserID && app.getUserID() || '');
+    if (this.data.guestLogin && uid) {
+      this.setData({ viewerId: uid, guestLogin: false });
+      this.enterRelation(false);
+      return;
+    }
+    const dirtyVer = Number((app.globalData && app.globalData.squareListDirtyVersion) || 0);
+    if (this._seenSquareDirtyVersion !== undefined && dirtyVer !== this._seenSquareDirtyVersion) {
+      this._seenSquareDirtyVersion = dirtyVer;
+      if (this.data.activeTab === 'feed') this.loadFeed();
+      else this.setData({ feedState: 'idle' });
+    } else if (this._seenSquareDirtyVersion === undefined) {
+      this._seenSquareDirtyVersion = dirtyVer;
+    }
+  },
   onHide() { merchantTheme.merchantPageRestore(); },
   onUnload() {
     this._destroyed = true;

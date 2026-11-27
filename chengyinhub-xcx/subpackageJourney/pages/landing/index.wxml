@@ -60,4 +60,6 @@
       <view class="ob-secondary" bindtap="onBrowse" aria-role="button" aria-label="先逛逛" hover-class="cy-pressed" hover-stay-time="80">先逛逛</view>
     </view>
   </block>
+  <cy-toast id="cy-toast" />
+  <cy-modal-host id="cy-modal-host" />
 </view>

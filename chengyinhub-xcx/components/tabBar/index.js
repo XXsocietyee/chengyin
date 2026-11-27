@@ -1,5 +1,6 @@
 // 商家端一级导航(与 C 端两套配置;商家页均非原生 tabBar,统一用 reLaunch 跳转、按 activeKey 高亮)
 const toast = require('../../utils/toast.js');
+const motion = require('../../utils/motion.js');
 const reducedMotionBehavior = require('../../behaviors/reduced-motion.js');
 
 // 2026-08-20 图标换 SVG 重绘版:旧 icon_f1~f5 PNG 画成超椭圆大圆角(「tab 栏太圆」的根源在图标不在栏)。
@@ -19,7 +20,7 @@ const CONSUMER_LIST = [
   { pagePath: "/pages/index/index",        text: "首页",   iconPath: "/images/icon_tab_home.svg", selectedIconPath: "/images/icon_tab_home_on.svg" },
   { pagePath: "/pages/roam/index",         text: "漫游",   iconPath: "/images/icon_tab_roam.svg", selectedIconPath: "/images/icon_tab_roam_on.svg" },
   { pagePath: "/pages/template/index",     text: "发布",   iconPath: "/images/icon_tab_template.svg", selectedIconPath: "/images/icon_tab_template_on.svg" },
-  { pagePath: "/pages/talent/list/index",  text: "俱乐部", iconPath: "/images/icon_tab_club.svg", selectedIconPath: "/images/icon_tab_club_on.svg" },
+  { pagePath: "/pages/talent/list/index",  text: "发现",   iconPath: "/images/icon_tab_club.svg", selectedIconPath: "/images/icon_tab_club_on.svg" },
   { pagePath: "/pages/member/index/index", text: "我的",   iconPath: "/images/icon_tab_mine.svg", selectedIconPath: "/images/icon_tab_mine_on.svg" }
 ];
 
@@ -151,6 +152,7 @@ Component({
       const url = this.data.list[index].pagePath;
       // L10-053:点当前已选中的 tab 不再 reLaunch 同一页(商家模式会整页重建)。
       if (Number(index) === Number(this.data.active)) return;
+      if (motion && typeof motion.haptic === 'function') motion.haptic({ type: 'light', reducedMotion: this.data.reducedMotion });
 
       // 商家页均非原生 tabBar 且路径带 query,须用 reLaunch;C 端保持 switchTab
       if (this.data.mode === 'merchant') {

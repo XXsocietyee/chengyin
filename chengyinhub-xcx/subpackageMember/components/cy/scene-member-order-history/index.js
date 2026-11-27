@@ -17,7 +17,7 @@ const { isUnknownHttpStatus } = require('../../../../utils/transport/failure-env
 // 页面壳与场景弹窗的差别只有一处:打开订单详情时往哪走(见 openDetail 的 open 事件)。
 const app = getApp()
 const policy = require('../../../../utils/identity/identity-policy.js')
-const { summarizeOrderState, canRequestOrderRefund, formatRefundDeadline, isSelfPlayPass, passUntilText } = require('../../../../utils/order-status.js')
+const { summarizeOrderState, canRequestOrderRefund, formatRefundDeadline, isSelfPlayPass, passUntilText, orderClockNow, formatPayCountdown } = require('../../../../utils/order-status.js')
 const { resolveActualPaidAmount, isFreeOrder } = require('../../../../utils/order-actual-pay.js')
 const refundAmount = require('../../../utils/order-refund-amount.js')
 const { createCheckoutWorkflow, hasCompletePaymentParams, isCompletedZeroAmountOrder } = require('../../../../utils/checkout/checkout-workflow.js')
@@ -120,6 +120,7 @@ Component({
       this.getList()
     },
     detached() {
+      this._stopPayCountdown()
       if (this._finishCancelPrompt) this._finishCancelPrompt()
       if (this._finishCancellation) this._finishCancellation()
       this._cancelDisposed = true
@@ -144,9 +145,61 @@ Component({
       this.setData({ page_no: 1, errorMsg: '' })
       this.getList(true, true)
     },
-    hide() { this._hidden = true },
+    hide() { this._hidden = true; this._stopPayCountdown() },
   },
   methods: {
+    _stopPayCountdown() {
+      if (this._payCountdownTimer) { clearInterval(this._payCountdownTimer); this._payCountdownTimer = null }
+    },
+    _applyPayCountdown(row, now) {
+      if (!row || row.orderStateKey !== 'pending_payment' || !row.payExpireTime) {
+        row.payCountdownText = ''
+        row.payCountdownUrgent = false
+        return false
+      }
+      const cd = formatPayCountdown(row.payExpireTime, now)
+      if (!cd) {
+        row.payCountdownText = ''
+        row.payCountdownUrgent = false
+        return false
+      }
+      if (cd.expired) {
+        row.orderStateKey = 'expired'
+        row.orderStateText = '已过期'
+        row.payCountdownText = ''
+        row.payCountdownUrgent = false
+        return 'expired'
+      }
+      row.payCountdownText = cd.text
+      row.payCountdownUrgent = cd.urgent
+      return 'active'
+    },
+    _syncPayCountdownTimer() {
+      this._stopPayCountdown()
+      if (this._detached || this._hidden) return
+      const rows = this._allRows || []
+      const hasPending = rows.some((r) => r && r.orderStateKey === 'pending_payment' && r.payExpireTime)
+      if (!hasPending) return
+      this._payCountdownTimer = setInterval(() => {
+        if (this._detached || this._hidden) { this._stopPayCountdown(); return }
+        const now = Date.now() + (this._clockOffsetMs || 0)
+        let stillActive = false
+        let anyExpired = false
+        const all = this._allRows || []
+        for (let i = 0; i < all.length; i += 1) {
+          const r = all[i]
+          if (!r || r.orderStateKey !== 'pending_payment' || !r.payExpireTime) continue
+          const st = this._applyPayCountdown(r, now)
+          if (st === 'active') stillActive = true
+          else if (st === 'expired') anyExpired = true
+        }
+        const list = filterOrderTab(all, this.data.activeTab)
+        this.setData({ list })
+        if (!stillActive) this._stopPayCountdown()
+        if (anyExpired && !this._listFetchInFlight) this.getList(false, true)
+      }, 1000)
+      if (this._payCountdownTimer && typeof this._payCountdownTimer.unref === 'function') this._payCountdownTimer.unref()
+    },
     _syncPaymentAccount() {
       const owner = String(app.getUserID && app.getUserID() || '')
       if (this._paymentOwner === owner) return
@@ -238,10 +291,15 @@ Component({
               }
               // 第十二轮 k7 N6:自玩通行证只有一个有效日期(可玩至几号),不摆主题的起止日
               if (item.cmsTopic && isSelfPlayPass(item) && item.expiresAt) item.cmsTopic.timeRangeFormatted = passUntilText(item.expiresAt)
-              const summary = summarizeOrderState(item)
+              const rowNow = orderClockNow(item)
+              if (item.serverNow && Number.isFinite(Number(item.serverNow))) {
+                that._clockOffsetMs = Number(item.serverNow) - Date.now()
+              }
+              const summary = summarizeOrderState(item, rowNow)
               item.orderStateKey = summary.key
               item.orderStateText = summary.text
               item.refundStateText = summary.refundText
+              that._applyPayCountdown(item, rowNow)
               // RUN-43:实付款只写现金(微信实付),积分抵扣不计入;存量无拆分行按回落链兜底
               item.actualPaidAmount = resolveActualPaidAmount(item)
               item.pendingPayAmount = item.payableAmount === null || item.payableAmount === undefined || item.payableAmount === '' ? null : Number(item.payableAmount)
@@ -260,6 +318,7 @@ Component({
               list,
               hasOrders: that._allRows.length > 0,
             })
+            that._syncPayCountdownTimer()
             that._hasMore = Number.isFinite(total) && pageSize > 0 && rows.length >= pageSize && that._allRows.length < total
           } else {
             that.setData({ errorMsg: app.getRequestErrorMessage(res, '订单加载失败') })
@@ -339,7 +398,8 @@ Component({
     _syncCancellationAccount() {
       const member = app.getUserID && app.getUserID()
       if (this._cancelMemberId !== undefined && this._cancelMemberId !== member) {
-        if (this._finishCancelPrompt) this._finishCancelPrompt()
+        this._stopPayCountdown()
+      if (this._finishCancelPrompt) this._finishCancelPrompt()
         if (this._finishCancellation) this._finishCancellation()
         this._cancelGeneration = (this._cancelGeneration || 0) + 1
       }

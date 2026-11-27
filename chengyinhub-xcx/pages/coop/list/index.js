@@ -618,6 +618,7 @@ Page({
     if (!this._beginAction(actionKey)) return;
     modal.show({
       danger: true, title: '拒绝邀约', editable: true, placeholderText: '请填写原因', confirmText: '拒绝', cancelText: '再想想',
+      validate(v) { return String(v || '').trim() ? '' : '请填写拒绝原因'; },
       success(r) {
         if (!r.confirm) { that._finishAction(actionKey, '', ''); return; }
         const reason = String(r.content || '').trim();

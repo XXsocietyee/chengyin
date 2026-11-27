@@ -507,9 +507,10 @@ Page({
     if (this.data.submitting) return;
     const that = this;
     modal.show({
-      title: '取消合作', editable: true,
+      danger: true, title: '取消合作', editable: true,
       content: '锁价开卖前可取消；锁价后需联系客服协商。',
-      placeholderText: '请填写取消理由(必填)', confirmText: '提交取消', cancelText: '再想想',
+      placeholderText: '请填写取消理由（必填）', confirmText: '提交取消', cancelText: '再想想',
+      validate(v) { return String(v || '').trim() ? '' : '请填写取消理由'; },
       success(r) {
         if (!that._isCurrent(ctx)) return;
         if (!r.confirm) return;

@@ -28,7 +28,7 @@
       <view class="add_li_right">
         <!-- 第十二轮 k8 N12:手机号只认绑定的微信手机号(业主定稿),绑过就只读显示那一个 -->
         <input wx:if="{{boundPhone && !ownPhone}}" type="number" disabled value="{{boundPhone}}" />
-        <input wx:else type="number" placeholder="输入手机号" placeholder-class="fld-ph"
+        <input wx:else type="number" placeholder="输入手机号" maxlength="11" placeholder-class="fld-ph"
                value="{{form.mobilePhone}}" bindinput="onInputChange" data-field="mobilePhone" />
       </view>
     </view>

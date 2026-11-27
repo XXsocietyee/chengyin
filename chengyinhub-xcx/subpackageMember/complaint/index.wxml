@@ -59,8 +59,8 @@
       </view>
 
       <view class="cp-field {{reason ? 'cp-field--filled' : ''}}">
-        <text class="cp-label">投诉内容<text class="cp-req">*</text></text>
-        <textarea class="cp-textarea" aria-label="投诉内容" placeholder="请详细描述遇到的问题…"
+        <text class="cp-label">投诉内容<text class="cp-req">*</text><text class="cp-count"> {{reason.length || 0}}/500</text></text>
+        <textarea class="cp-textarea" aria-label="投诉内容" placeholder="请详细描述遇到的问题（至少 5 字）…"
                   placeholder-class="cp-ph" value="{{reason}}" bindinput="onReasonInput" maxlength="500" />
       </view>
 
@@ -73,7 +73,7 @@
         <cy-inline-error wx:if="{{submitError}}" class="cp-submit-error" kind="{{submitErrorKind}}"
                          title="投诉没有提交" sub="{{submitError}}" action="重试" bind:action="submit" />
         <cy-btn variant="primary" class="cp-submit {{submitError ? 'cp-submit--after-error' : ''}}"
-                loading="{{submitting}}" disabled="{{!canSubmit}}" bindtap="submit">提交投诉</cy-btn>
+                loading="{{submitting}}" disabled="{{!canSubmit}}" bindtap="submit" bind:disabledtap="onSubmitDisabledTap">提交投诉</cy-btn>
       </view>
     </block>
     </block>

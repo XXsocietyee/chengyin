@@ -180,7 +180,14 @@ Page({
 
   retryConversations() { this.loadConversations(false); },
   loginConversations() {
-    retryLogin(this, app, function () { if (!this._disposed) this.loadConversations(false); });
+    retryLogin(this, app, function () {
+      if (this._disposed) return;
+      this._syncViewTheme();
+      this._syncCommunityEntry();
+      this.loadConversations(false);
+      this.loadInvites();
+      this.loadMerchantEntry();
+    });
   },
 
   // 合作邀请与 IM 会话是两套数据源:读不到只在列表上方局部报错,不影响会话。

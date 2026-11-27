@@ -274,7 +274,9 @@ Page({
             if (res.code == '200' || res.code === 200) {
               cyToast.success('已停发「' + item.name + '」');
               that.setData({ tpShow: false, currentCoupon: {} });
+              if (app.globalData) app.globalData.merchantWorkbenchStale = true;
               that.getList();
+              if (typeof that.loadSummary === 'function') that.loadSummary();
             } else {
               cyToast.error((res && res.msg) || '停发失败，请稍后重试');
             }

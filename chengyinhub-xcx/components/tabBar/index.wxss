@@ -69,7 +69,10 @@
   height: 64rpx;
   filter: none;
   opacity: 0.6;
-  transition: opacity 0.2s ease;
+  transition: transform var(--cy-motion-press) var(--cy-ease-spring), opacity var(--cy-motion-fast) var(--cy-ease-out);
+}
+.tabbar .list .ul .li:active .tabbar__icon {
+  transform: scale(0.9);
 }
 
 /* 选中:统一品牌紫。2026-09-18 用户走查 UI-03 拍板 —— 底栏选中态全站一个紫

@@ -69,7 +69,7 @@
     <view class="reg-opt" bindtap="pickMerchant" hover-class="cy-pressed" hover-stay-time="80">
       <view class="reg-ic shop"><image src="/images/icon_shop.svg" mode="aspectFit" /></view>
       <view class="reg-opt-body">
-        <view class="reg-opt-t">商家</view>
+        <view class="reg-opt-t">成为商家</view>
       </view>
       <cy-icon class="reg-arrow" name="arrow-right" size="28" />
     </view>

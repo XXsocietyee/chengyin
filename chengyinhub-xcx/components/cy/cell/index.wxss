@@ -11,6 +11,7 @@
   min-height: var(--cy-comp-cell-min-h);
   padding: 0 var(--cy-comp-cell-pad-x);
   box-sizing: border-box;
+  transition: background-color var(--cy-motion-press) var(--cy-ease-out);
 }
 .cell--twoline { min-height: 128rpx; }
 

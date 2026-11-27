@@ -30,7 +30,7 @@
     <view class="add_li" wx:if="{{draft.titleType === 'COMPANY'}}">
       <view class="add_li_left">税号<text class="req" aria-hidden="true">*</text></view>
       <view class="add_li_right">
-        <input type="text" placeholder="{{draft.id ? '重新填写完整税号' : '输入税号'}}" placeholder-class="fld-ph" maxlength="20" disabled="{{titlePending || writing}}"
+        <input type="text" placeholder="{{draft.id ? '重新填写完整税号（15–20位）' : '输入 15–20 位税号'}}" placeholder-class="fld-ph" maxlength="20" disabled="{{titlePending || writing}}"
                value="{{draft.taxNo}}" bindinput="input" data-field="taxNo" />
       </view>
     </view>
@@ -49,6 +49,6 @@
 </view>
 
 <cy-footer-bar wx:if="{{formReady && !login && !unavailable}}">
-  <cy-btn variant="primary" loading="{{writing}}" disabled="{{!canSubmit || titlePending}}" bindtap="saveTitle">保存</cy-btn>
+  <cy-btn variant="primary" loading="{{writing}}" disabled="{{!canSubmit || titlePending}}" bindtap="saveTitle" bind:disabledtap="onSaveDisabledTap">保存</cy-btn>
 </cy-footer-bar>
 </view>

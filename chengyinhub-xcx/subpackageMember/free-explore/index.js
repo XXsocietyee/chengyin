@@ -232,8 +232,9 @@ Page({
       try { quote = bundle.cancellationQuote(res.data, this._owner, this._registrationId, id, useWaiver); }
       catch (error) { this._confirming = false; this.setData({ error: error.message }); return; }
       if (!quote.canCancel) { this._confirming = false; this.setData({ error: '当前不可取消' }); return; }
-      modal.show({ title: useWaiver ? '使用本月豁免取消预约？' : '确认取消预约？',
+      modal.show({ danger: true, title: useWaiver ? '使用本月豁免取消预约？' : '确认取消预约？',
         content: quote.message,
+        confirmText: '取消预约', cancelText: '先保留',
         success: result => {
           if (!this.current(epoch)) return;
           this._confirming = false;

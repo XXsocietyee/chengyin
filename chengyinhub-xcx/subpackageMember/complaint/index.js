@@ -294,6 +294,18 @@ Page({
     if (canSubmit !== d.canSubmit) this.setData({ canSubmit });
   },
 
+  onSubmitDisabledTap() {
+    if (this.data.submitting) return;
+    const d = this.data;
+    if (d.topicIndex < 0 || !d.topics[d.topicIndex]) {
+      toast('请先选择要投诉的活动');
+      return;
+    }
+    if ((d.reason || '').trim().length < 5) {
+      toast('请填写至少 5 字的投诉内容');
+    }
+  },
+
   submit() {
     if (this._syncReadOwner() || !this._ensureReadSession()) return;
     if (this.data.submitting) return;

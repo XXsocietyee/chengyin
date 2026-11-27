@@ -1774,6 +1774,7 @@ Component({
         followSubmitting: false,
         followReceipt: nextFollow === 1
       });
+      if (app.globalData) app.globalData.squareListDirtyVersion = (app.globalData.squareListDirtyVersion || 0) + 1;
       cyToast(nextFollow ? '关注成功' : '已取消关注');
     });
   },

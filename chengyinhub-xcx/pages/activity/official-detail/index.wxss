@@ -39,8 +39,8 @@ page { min-height: 100vh; background: var(--cy-color-bg-page); }
 /* F22:事实栏底是主题浅/暗表面(--cy-color-bg-surface-strong),文字必须用主题文字 token ——
    原来借首页深色区的 --cy-color-home-upcoming-text(白)压浅灰表面,肉眼难辨。 */
 .od-facts { width: 100%; height: 164rpx; background: var(--cy-color-bg-surface-strong); color: var(--cy-color-text-primary); white-space: nowrap; }
-.od-facts-inner { display: inline-flex; height: 100%; }
-.od-fact { position: relative; box-sizing: border-box; width: 208rpx; height: 100%; padding: 18rpx 12rpx 14rpx; text-align: center; }
+.od-facts-inner { display: inline-flex; min-width: 100%; height: 100%; }
+.od-fact { position: relative; box-sizing: border-box; flex: 1 0 176rpx; min-width: 176rpx; height: 100%; padding: 18rpx 10rpx 14rpx; text-align: center; }
 .od-fact + .od-fact::before { content: ""; position: absolute; left: 0; top: 50rpx; width: 1rpx; height: 64rpx; background: var(--cy-color-text-disabled); }
 .od-fact-label, .od-fact-value, .od-fact-sub { display: block; overflow: hidden; text-overflow: ellipsis; }
 .od-fact-label, .od-fact-sub { color: var(--cy-color-text-secondary); font-size: var(--cy-font-caption); line-height: 28rpx; }

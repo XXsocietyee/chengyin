@@ -123,6 +123,7 @@ Component({
       const liking = !(this.data.post && this.data.post.isLiked == 1);
       clearTimeout(this._likePopTimer); clearTimeout(this._likeGoTimer);
       if (this.data.reducedMotion) { this.triggerEvent('like', Object.assign(this.eventDetail(), { type: 1 })); return; }
+      if (liking) { try { require('../../../utils/motion.js').haptic({ type: 'light', reducedMotion: this.data.reducedMotion }); } catch (e) {} }
       // 两段过渡:先摆到起点(无过渡),下一帧放开;数字从下面(取消从上面)滚进来
       this.setData({ likePop: liking, burst: liking ? 'is-start' : '', likeRoll: liking ? 'is-up' : 'is-down' });
       this._likeGoTimer = setTimeout(() => this.setData({ burst: liking ? 'is-go' : '', likeRoll: (liking ? 'is-up' : 'is-down') + ' is-roll' }), 34);

@@ -165,7 +165,7 @@
     <cy-error wx:if="{{saveErrorText}}" title="保存失败" sub="{{saveErrorText}}" retry="重新保存" bind:retry="save"
               secondary="继续编辑" bind:secondary="dismissSaveError" />
     <!-- loading 接的是 js 里早就有的 saving —— 在途状态本来就在,只是没告诉用户 -->
-    <cy-btn wx:else variant="{{canSave && !draftAvailable && !draftBlocked ? 'primary' : 'disabled'}}" loading="{{saving}}" bindtap="save">保存修改</cy-btn>
+    <cy-btn wx:else variant="{{canSave && !draftAvailable && !draftBlocked ? 'primary' : 'disabled'}}" loading="{{saving}}" bindtap="save" bind:disabledtap="save">保存修改</cy-btn>
     <!-- 解散钮已挪进表单末尾的「危险操作」区块 —— 后果说明要和按钮同屏,底栏放不下。 -->
   </view>
 </view>

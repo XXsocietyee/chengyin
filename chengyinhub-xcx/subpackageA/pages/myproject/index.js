@@ -130,8 +130,10 @@ Page({
     // 本地身份只决定入口显不显示;能不能发由发布页 guardPublisherRole 回读权威接口判定,
     // 这里与它同口径:俱乐部线认 role === 'club',商家线认 canManageProjects。
     const merchantScope = options.scope === 'MERCHANT';
+    const isMerchantViewer = merchantScope || (typeof roleGuard.isMerchantView === 'function' && roleGuard.isMerchantView());
     this.setData({
       operationScope: merchantScope ? 'MERCHANT' : '',
+      isMerchantViewer,
       canPublishActivity: hasSession() && !merchantScope && roleGuard.role() === 'club',
     });
     if (!hasSession()) {
@@ -923,7 +925,8 @@ Page({
     const current = currentRead(this);
     const same = () => current() && epoch === that._auditEpoch && that.data.auditSheet.show;
     modal.show({
-      title: '申诉', editable: true, multiline: true, confirmText: '提交申诉', content: sheet.draftReason || '',
+      title: '申诉', editable: true, multiline: true, maxlength: 500, confirmText: '提交申诉',
+      value: sheet.draftReason || '', content: '',
       placeholderText: '写清你认为处理有误的理由（500 字内），每条内容只能申诉一次',
       validate: auditTimeline.validateReason,
       success(r) {

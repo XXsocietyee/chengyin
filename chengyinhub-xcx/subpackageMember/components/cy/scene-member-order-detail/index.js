@@ -2,7 +2,7 @@ const modal = require('../../../../utils/modal.js'); const pageMotion = require(
 const cyLoading = require('../../../../utils/loading.js');
 const toast = require('../../../../utils/toast.js');
 const app = getApp();
-const { summarizeOrderState, canRequestOrderRefund, formatRefundDeadline, isSelfPlayPass, passUntilText } = require('../../../../utils/order-status.js');
+const { summarizeOrderState, canRequestOrderRefund, formatRefundDeadline, isSelfPlayPass, passUntilText, orderClockNow, formatPayCountdown } = require('../../../../utils/order-status.js');
 const { isFreeOrder, resolveActualPaidAmount } = require('../../../../utils/order-actual-pay.js');
 const cancellationFeedback = require('../../../../utils/cancellation-feedback.js');
 const subscribe = require('../../../../utils/subscribe.js');
@@ -344,7 +344,9 @@ Component({
       // 批5 探店日完局面;非探店日单恒 show:false
       completion: emptyCompletion(),
       // 10-28 原型 C「发票」段;state: can | ing | issued | paused | blocked
-      invoiceRow: { show: false }
+      invoiceRow: { show: false },
+      payCountdownText: '',
+      payCountdownUrgent: false
     },
   lifetimes: {
     attached() {
@@ -352,6 +354,7 @@ Component({
       this._setOrderId(this.data.orderId)
     },
     detached() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1;
+      this._stopPayCountdown()
       if (this._finishCancelPrompt) this._finishCancelPrompt()
       if (this._finishCancellation) this._finishCancellation()
       this._attached = false
@@ -365,13 +368,45 @@ Component({
     },
   },
   pageLifetimes: {
-    hide() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1; },
+    hide() { this._loginContinuationEpoch = (this._loginContinuationEpoch || 0) + 1; this._stopPayCountdown(); },
     show() {
       // 失败面板正在 2s 回列表:此时重拉会把面板切回 loading、计时从头来,原因一闪就没
       if (this._orderId && !/^failed_/.test(this.data.loadState)) this.getData(this._orderId, true)
     },
   },
   methods: {
+    _stopPayCountdown() {
+      if (this._payCountdownTimer) { clearInterval(this._payCountdownTimer); this._payCountdownTimer = null; }
+    },
+    _startPayCountdown(payExpireTime, serverNow) {
+      this._stopPayCountdown();
+      if (!payExpireTime || !this._attached) {
+        if (this.data.payCountdownText) this.setData({ payCountdownText: '', payCountdownUrgent: false });
+        return;
+      }
+      const offsetMs = Number.isFinite(Number(serverNow)) && Number(serverNow) > 0 ? (Number(serverNow) - Date.now()) : 0;
+      const tick = () => {
+        if (!this._attached) { this._stopPayCountdown(); return; }
+        const cd = formatPayCountdown(payExpireTime, Date.now() + offsetMs);
+        if (!cd || cd.expired) {
+          this._stopPayCountdown();
+          this.setData({ payCountdownText: '', payCountdownUrgent: false, 'stateNotice.sub': '超时未支付，订单已关闭' });
+          this.triggerEvent('orderchanged', { id: this._orderId });
+          if (this._orderId && !this._orderFetchInFlight) this.getData(this._orderId);
+          return;
+        }
+        this.setData({
+          payCountdownText: cd.text,
+          payCountdownUrgent: cd.urgent,
+          'stateNotice.sub': '请在 ' + cd.text + ' 内完成支付，逾期自动关闭',
+        });
+      };
+      tick();
+      if (this._attached && this.data.payCountdownText) {
+        this._payCountdownTimer = setInterval(tick, 1000);
+        if (this._payCountdownTimer && typeof this._payCountdownTimer.unref === 'function') this._payCountdownTimer.unref();
+      }
+    },
     _setOrderId(value) {
       const id = String(value || '')
       const valid = /^[1-9]\d*$/.test(id)
@@ -772,6 +807,7 @@ Component({
           that.setData({ paying: false });
           cyLoading.hide();
           toast.success('支付成功');
+          if (typeof that.triggerEvent === 'function') that.triggerEvent('orderchanged', { id: that._orderId || info.id });
           that.getData(that._orderId);
         },
         onPayVerifying: function () {
@@ -781,6 +817,7 @@ Component({
           that.setData({ paying: false });
           cyLoading.hide();
           toast.success('支付成功');
+          if (typeof that.triggerEvent === 'function') that.triggerEvent('orderchanged', { id: that._orderId || info.id });
           that.getData(that._orderId);
         },
         onPayCancel: function () {
@@ -1183,6 +1220,12 @@ Component({
               ticketPriceIsTotal: ticketPriceIsTotal,
               loadState: 'ready', loadErrorText: '', loadFailureVisible: false
             });
+            if (info.orderStateKey === 'pending_payment' && info.payExpireTime) {
+              that._startPayCountdown(info.payExpireTime, info.serverNow);
+            } else {
+              that._stopPayCountdown();
+              if (that.data.payCountdownText) that.setData({ payCountdownText: '', payCountdownUrgent: false });
+            }
             that._cancelSubmittedId = null; // L09-019:新数据已到,按它的 canRequestRefund 决定能否再取消
             // L09-020
             // 回到详情(show 刷新)时,只有付款 / 报名 / 状态 / 核销 / 发票这几项事实变了才重读通关明细、权益与可开票列表;

@@ -98,6 +98,13 @@
   font-weight: 600;
   color: #fff; /* ds-ok: 同上 */
 }
+.hero-pill__cd {
+  font-family: var(--cy-font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+.hero-pill__cd--urgent {
+  color: var(--cy-danger);
+}
 .hero-pill--warning { color: var(--cy-color-status-warning); }
 .hero-pill--success { color: var(--cy-color-status-success); }
 .hero-pill--info    { color: var(--cy-color-status-info); }

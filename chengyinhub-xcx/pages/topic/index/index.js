@@ -277,6 +277,11 @@ Page({
     if (this.data.reducedMotion !== reducedMotion) this.setData({ reducedMotion }); this._navigating = false; // 返回时兜底清跳转锁
     this._startKenBurns();
     if (this.data.selfPlayCheckoutShow) this._fillCheckoutProfile(); // 从参与人信息/个人资料回来(R11 j3 F8)
+    if (this._hasShown && this.data.id && !this._unloaded && !(this._workflow && this._workflow.isBusy())
+        && !(this.data.reveal && this.data.reveal.show)) {
+      this.getData();
+    }
+    this._hasShown = true;
     setTimeout(() => this.calculateScreenHeights(), 100);
   },
 
@@ -1980,6 +1985,7 @@ Page({
         that._selfPlaySubmitting = false;
         that._trackBuy('pay_cancel', { reason: 'user_cancel' });
         toast('已取消支付');
+        if (that.data.selfPlayCheckoutShow) that.setData({ checkoutError: '已取消支付，待支付订单将在 30 分钟内保留，可在「我的订单」继续支付或取消' });
       },
       onPayFail: function (res) {
         loading.hide();

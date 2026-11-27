@@ -425,6 +425,7 @@ public class RegistrationQueryApplication {
         CmsRegistration registration = new CmsRegistration();
         if(ownerType<3){
             registration.setRegistrationStatus(2);
+            registration.setPaymentStatus(2);
             registration.setOwnerType(ownerType);
         }else{
             // status 可空:投诉页等只传 owner_type=3 不传 status,等同文档「0全部」;

@@ -556,6 +556,19 @@ Page({
 
   async revokeMerchantConsent() {
     if (this.data.consentBusy) return
+    const merchantName = (this.data.node && this.data.node.name) || '当前门店'
+    const confirmed = await new Promise((resolve) => {
+      cyModal.show({
+        danger: true,
+        title: '撤回门店授权？',
+        content: `撤回后「${merchantName}」名单将不再显示你的到店信息，再次核销需重新授权。`,
+        confirmText: '确认撤回',
+        cancelText: '取消',
+        success: (r) => resolve(!!(r && r.confirm)),
+        fail: () => resolve(false),
+      })
+    })
+    if (!confirmed || this.data.consentBusy) return
     const ok = await this._writeAndReadbackConsent('REVOKE')
     if (ok) this.setData({ feedback: '已撤回当前门店授权，门店名单将不再显示你' })
   },

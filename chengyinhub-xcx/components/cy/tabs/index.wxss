@@ -111,7 +111,7 @@
 .cy-tabs--wide .cy-tabs__item--on .cy-tabs__label::after {
   display: none;
 }
-.cy-tabs--wide .cy-tabs__item--on::after {
+.cy-tabs--wide .cy-tabs__item::after {
   content: "";
   position: absolute;
   left: 0;
@@ -121,6 +121,13 @@
   height: var(--cy-legacy-4);
   border-radius: 3rpx; /* ds-ok */
   background: var(--cy-tabs-accent, var(--cy-text-title));
+  opacity: 0;
+  transform: scaleX(0.35);
+  transition: opacity var(--cy-motion-fast) var(--cy-ease-out), transform var(--cy-motion-fast) var(--cy-ease-spring);
+}
+.cy-tabs--wide .cy-tabs__item--on::after {
+  opacity: 1;
+  transform: scaleX(1);
 }
 /* segmented 分段:胶囊底,选中实心反色字 */
 .cy-tabs--segmented {
@@ -133,6 +140,7 @@
 .cy-tabs--segmented .cy-tabs__item {
   height: var(--cy-legacy-72);
   border-radius: var(--cy-radius-pill);
+  transition: background-color var(--cy-motion-crossfade) var(--cy-ease-standard), color var(--cy-motion-crossfade) var(--cy-ease-standard);
 }
 /* 选中态原为品牌紫实底,与 DS §2.1"主 CTA 用反色中性,不用品牌紫"的约束冲突,改用同一套
    反色中性(chip 变体同款 token),不再新起一套选中色。 */
@@ -304,4 +312,6 @@
 /* motion-1118:时长/缓动收回 token(原字面 .25s / .45s 过冲 / .3s 默认 ease);减动效时三处一起停,不只停图标。 */
 .cy-tabs--icon.cy-tabs--reduced-motion .cy-tabs__item,
 .cy-tabs--icon.cy-tabs--reduced-motion .cy-tabs__item::after,
-.cy-tabs--icon.cy-tabs--reduced-motion .cy-tabs__icon { transition: none; }
+.cy-tabs--icon.cy-tabs--reduced-motion .cy-tabs__icon,
+.cy-tabs--wide.cy-tabs--reduced-motion .cy-tabs__item::after,
+.cy-tabs--segmented.cy-tabs--reduced-motion .cy-tabs__item { transition: none; }

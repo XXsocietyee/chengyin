@@ -85,16 +85,21 @@ function createRequireLogin(deps) {
         return JSON.stringify(values.map(value => value == null ? '' : String(value)));
       };
       const original = target();
-      return () => {
+      const check = (allowPrivacyDelta) => {
         try {
           const currentPages = getPages();
+          const delta = allowPrivacyDelta ? 1 : 0;
+          const ownerDelta = owner ? ((owner._loginContinuationEpoch || 0) - epoch) : 0;
+          const pageDelta = page ? ((page._loginContinuationEpoch || 0) - pageEpoch) : 0;
           return (!pages || !!page && !!currentPages && currentPages[currentPages.length - 1] === page)
             && (!owner || !(owner._unloaded || owner._destroyed || owner._disposed || owner._attached === false)
-              && (owner._loginContinuationEpoch || 0) === epoch)
-            && (!page || (page._loginContinuationEpoch || 0) === pageEpoch)
+              && ownerDelta >= 0 && ownerDelta <= delta)
+            && (!page || (pageDelta >= 0 && pageDelta <= delta))
             && target() === original;
         } catch (e) { return false; }
       };
+      check._page = page;
+      return check;
     } catch (e) { return () => false; }
   }
 
@@ -140,9 +145,32 @@ function createRequireLogin(deps) {
     const current = continuation(options);
     if (!current()) return Promise.resolve(false);
     return loginResult(options).then(function (result) {
-      const ok = !!result.ok && result.current() && current();
-      if (ok && typeof action === 'function') action();
-      return ok;
+      if (!result.ok || !result.current()) return false;
+      const app = getAppRef();
+      const viaPrivacy = !!(app && current._page && app._privacyFallbackPage === current._page);
+      if (viaPrivacy) app._privacyFallbackPage = null;
+      const runIfCurrent = function () {
+        const ok = result.current() && current(viaPrivacy);
+        if (ok && typeof action === 'function') action();
+        return ok;
+      };
+      if (!viaPrivacy || runIfCurrent()) return viaPrivacy ? true : runIfCurrent();
+      // 隐私授权回退页可能仍在 navigateBack 退栈动画中：短轮询等待回到原页后再续接原操作
+      return new Promise(function (resolve) {
+        let tries = 0;
+        const poll = function () {
+          tries += 1;
+          if (!result.current()) { resolve(false); return; }
+          if (current(true)) {
+            if (typeof action === 'function') action();
+            resolve(true);
+            return;
+          }
+          if (tries >= 15) { resolve(false); return; }
+          setTimeout(poll, 40);
+        };
+        setTimeout(poll, 40);
+      });
     });
   }
 

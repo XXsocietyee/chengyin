@@ -195,7 +195,8 @@
     "condition": false,
     "swc": false,
     "disableSWC": true,
-    "ignoreUploadUnusedFiles": true
+    "ignoreUploadUnusedFiles": true,
+    "urlCheck": true
   },
   "condition": {},
   "editorSetting": {

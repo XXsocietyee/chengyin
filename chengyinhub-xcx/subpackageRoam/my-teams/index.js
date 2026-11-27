@@ -209,7 +209,7 @@ Page({
     const row = this.data.openRows[Number(e.currentTarget.dataset.index)];
     if (!row || this.data.busy) return;
     if (row.joined) { this._go(TEAM_PAGE + '?teamId=' + encodeURIComponent(row.teamId)); return; }
-    if (!app.ensureLoginFor('team', () => { if (!this._unloaded) this.onShow(); })) return;
+    if (!app.ensureLoginFor('team', () => { if (!this._unloaded) this.openLobbyTeam(e); })) return;
     const that = this;
     const teamId = teamOperation.teamId(row.teamId);
     if (!teamId) { cyToast('队伍标识无效，请刷新'); return; }

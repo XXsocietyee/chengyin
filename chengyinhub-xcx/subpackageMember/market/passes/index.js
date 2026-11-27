@@ -174,7 +174,12 @@ Page({
     if (key !== 'shop' && app.ensureLoginFor && !app.ensureLoginFor('登录后查看自己的订单和礼品',
       () => this.onTab(e), { owner: this, target: () => [this._privateTabIntent] })) return
     if (key && key !== this.data.tab) this.setData({ tab: key })
-    if (this._readOwner !== session.identity(app)) this.load()
+    if (this._readOwner !== session.identity(app)) {
+      this.load()
+      this.loadMember()
+      this.loadPoints()
+      this.loadRedeem()
+    }
   },
   openProduct(e) {
     const id = e && e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.id

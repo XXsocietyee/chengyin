@@ -79,7 +79,7 @@
 
       <view class="orderbox_li_bot">
         <!-- OR-021:待付款取应付(payableAmount),空值不渲染金额;已付走实付口径。金额统一走 money.amount -->
-        <view class="orderbox_li_bot_left" wx:if="{{item.registrationStatus==1 ? item.pendingPayAmount !== null : true}}">{{item.registrationStatus==1 ? '待付款' : '实付款'}}：<text class="moh-amount">{{money.amount(item.registrationStatus==1 ? item.pendingPayAmount : item.actualPaidAmount)}}</text></view>
+        <view class="orderbox_li_bot_left" wx:if="{{item.registrationStatus==1 ? item.pendingPayAmount !== null : true}}">{{item.registrationStatus==1 ? '待付款' : '实付款'}}：<text class="moh-amount">{{money.amount(item.registrationStatus==1 ? item.pendingPayAmount : item.actualPaidAmount)}}</text><text class="moh-countdown {{item.payCountdownUrgent ? 'moh-countdown--urgent' : ''}}" wx:if="{{item.orderStateKey==='pending_payment' && item.payCountdownText}}">剩 {{item.payCountdownText}}</text></view>
         <view class="orderbox_li_bot_left" wx:else></view>
         <view class="orderbox_li_bot_right" wx:if="{{item.registrationStatus==1 && item.orderStateKey==='pending_payment'}}">
           <view class="orderbut1" catchtap="cancelOrder" data-id="{{item.id}}" data-index="{{index}}" data-status="{{item.registrationStatus}}" aria-role="button" aria-label="{{cancellingId==item.id ? '正在取消订单' : '取消订单'}}" aria-disabled="{{cancellingId!=0}}" hover-class="{{cancellingId!=0 ? 'none' : 'cy-pressed'}}" hover-stay-time="80" hover-stop-propagation="true"><view class="orderbut__visual">{{cancellingId==item.id ? '处理中' : '取消订单'}}</view></view>

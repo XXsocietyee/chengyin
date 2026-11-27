@@ -197,7 +197,10 @@ Page({
       this.setData({ nicknameState: 'invalid', nicknameHint: issue });
       return;
     }
-    if (state === 'taken' || state === 'invalid') return;
+    if (state === 'taken' || state === 'invalid') {
+      toast(this.data.nicknameHint || (state === 'taken' ? '该昵称已被占用，请更换' : '昵称格式不正确'));
+      return;
+    }
     this.resetNicknameCheck();
     this.setData({
       popDavid4: false,
@@ -683,6 +686,16 @@ Page({
     });
   },
 
+  onSaveDisabledTap: function () {
+    if (this.data.saving) return;
+    const u = this.data.userInfo || {};
+    if (!String(u.name || '').trim()) { toast('请先填写昵称'); return; }
+    if (this.data.nicknameState === 'taken' || this.data.nicknameState === 'invalid') {
+      toast(this.data.nicknameHint || '请先修改昵称后再保存');
+      return;
+    }
+    toast('资料暂未修改');
+  },
   saveInfo: function () {
     const context = this.profileContext();
     if (this._unloaded || this._hidden) return;

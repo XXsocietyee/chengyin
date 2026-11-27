@@ -64,7 +64,11 @@
   .cy-tabs--shared-slab .cy-tabs__slab,
   .cy-tabs--icon .cy-tabs__item,
   .cy-tabs--icon .cy-tabs__icon,
-  .cy-tabs--icon .cy-tabs__item::after {
+  .cy-tabs--icon .cy-tabs__item::after,
+  .cy-tabs--wide .cy-tabs__item::after,
+  .cy-tabs--segmented .cy-tabs__item,
+  .cy-card,
+  .cell {
     animation: none !important;
     transition: none !important;
   }

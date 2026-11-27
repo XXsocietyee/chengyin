@@ -33,7 +33,7 @@
       <view class="li" id="field-name">
         <view class="item-tit">活动标题<text>*</text></view>
         <view class="item-cont {{focusField === 'name' ? 'is-focused' : ''}} {{errors.name ? 'is-error' : ''}}">
-          <input type="text" placeholder="活动标题" placeholder-class="fld-ph" value="{{formData.name}}" bindinput="onInputChange" bindfocus="onFieldFocus" bindblur="onFieldBlur" data-field="name" />
+          <input type="text" maxlength="60" placeholder="活动标题" placeholder-class="fld-ph" value="{{formData.name}}" bindinput="onInputChange" bindfocus="onFieldFocus" bindblur="onFieldBlur" data-field="name" />
         </view>
         <cy-inline-error class="form-inline-error" kind="field" wx:if="{{errors.name}}" title="{{errors.name}}" />
       </view>
@@ -90,7 +90,7 @@
       <view class="li li2" id="field-description">
         <view class="item-tit">活动说明<text>*</text></view>
         <view class="item-cont item-cont2 {{focusField === 'description' ? 'is-focused' : ''}} {{errors.description ? 'is-error' : ''}}">
-          <textarea style="width: 100%;" value="{{formData.description}}" auto-height placeholder="活动说明" placeholder-class="fld-ph" bindinput="onInputChange" bindfocus="onFieldFocus" bindblur="onFieldBlur" data-field="description" />
+          <textarea style="width: 100%;" maxlength="2000" value="{{formData.description}}" auto-height placeholder="活动说明" placeholder-class="fld-ph" bindinput="onInputChange" bindfocus="onFieldFocus" bindblur="onFieldBlur" data-field="description" />
         </view>
         <cy-inline-error class="form-inline-error" kind="field" wx:if="{{errors.description}}" title="{{errors.description}}" />
       </view>

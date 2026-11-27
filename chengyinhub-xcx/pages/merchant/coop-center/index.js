@@ -103,6 +103,12 @@ Page({
   onShow() {
     merchantTheme.merchantPageShow();
     this.setData({ flyClass: readReducedMotion() ? '' : 'cy-fly-in' });
+    if (this._hasShown) this.loadAvailable();
+    this._hasShown = true;
+  },
+  onPullDownRefresh() {
+    this.loadAvailable();
+    setTimeout(() => wx.stopPullDownRefresh(), 400);
   },
   onHide() {
     merchantTheme.merchantPageRestore();

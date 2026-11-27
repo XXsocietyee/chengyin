@@ -41,4 +41,5 @@
       <cy-btn variant="primary" bindtap="copySignUrl">{{account.state === 'NEED_SIGN' ? '复制签约链接' : '复制验证链接'}}</cy-btn>
     </view>
   </view>
+  <cy-modal-host id="cy-modal-host" />
 </view>

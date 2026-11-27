@@ -4297,7 +4297,7 @@ Page({
     if (key === 'support' || key === 'quit') {
       cyModal.show({
         title: key === 'quit' ? '申请退出' : '联系客服',
-        content: '在「我的 → 帮助与客服」里发起，带上这条路线的名字，客服会确认后处理。',
+        content: '在「我的 → 设置 → 关于我们 → 联系我们」里发起，带上这条路线的名字，客服会确认后处理。',
         showCancel: false, confirmText: '知道了',
       });
       return;

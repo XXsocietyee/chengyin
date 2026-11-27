@@ -19,7 +19,7 @@
       <!-- 2026-08-06 用户定:两颗并排，不同意在左、同意在右(iOS 惯例:确认动作靠右) -->
       <view class="privacy-actions">
         <cy-btn variant="secondary" disabled="{{submitting}}" aria-disabled="{{submitting}}" class="privacy-action" bindtap="disagreePrivacy">暂不同意</cy-btn>
-        <button class="privacy-agree" open-type="agreePrivacyAuthorization" bindagreeprivacyauthorization="agreePrivacy" loading="{{submitting}}" disabled="{{submitting || !serviceAgreed}}" aria-disabled="{{submitting || !serviceAgreed}}">同意并继续</button>
+        <button class="privacy-agree" open-type="agreePrivacyAuthorization" bindagreeprivacyauthorization="agreePrivacy" loading="{{submitting}}" disabled="{{submitting || !serviceAgreed}}" aria-disabled="{{submitting || !serviceAgreed}}" hover-class="{{submitting || !serviceAgreed ? 'none' : 'cy-pressed'}}" hover-stay-time="80">同意并继续</button>
       </view>
     </block>
     <block wx:else>

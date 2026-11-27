@@ -1,3 +1,4 @@
+@import '../../../style/merchant-light-scope.wxss';
 /* 俱乐部 · 活动详情(Figma H1–H6,393px 画板 · 本仓换算 1px = 2rpx,见 --cy-space-4 = 32rpx = 16px)
  *
  * 本页的尺寸全部从 Figma 实测。设计里有几个值落在全局 type/radius 阶之外(19px/15px/13px/12.5px/

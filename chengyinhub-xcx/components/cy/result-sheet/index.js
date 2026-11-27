@@ -13,6 +13,7 @@
  * 成功(短暂停留后照常走 close)/ 失败(留在面板内可重试)。
  */
 const reducedMotionBehavior = require('../../../behaviors/reduced-motion.js');
+const motion = require('../../../utils/motion.js');
 
 Component({
   behaviors: [reducedMotionBehavior],
@@ -62,8 +63,13 @@ Component({
     },
     _schedule() {
       this._clear();
-      if (!this.data.show) return;
+      if (!this.data.show) { this._hapticKey = ''; return; }
       if (this.data.kind === 'loading') return;   // 在途状态没有终点,不自愈
+      const hk = this.data.kind + '|' + (this.data.title || '');
+      if (this._hapticKey !== hk) {
+        this._hapticKey = hk;
+        motion.haptic({ type: this.data.kind === 'fail' ? 'heavy' : 'medium', reducedMotion: this.data.reducedMotion });
+      }
       if (this.data.primaryText) return;          // 面板在等人选,别抢答
       if (this.data.consentState === 'saved') {
         this._timer = setTimeout(() => {

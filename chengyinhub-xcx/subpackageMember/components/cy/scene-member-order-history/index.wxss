@@ -38,6 +38,8 @@
 /* 类别 tag 左、状态词右,同一行 */
 .moh-head{display: flex; align-items: center; gap: var(--cy-space-2); min-height: 40rpx;}
 .moh-head .moh-state{margin-left: auto; flex: none; font-size: var(--cy-font-caption); font-weight: 600; white-space: nowrap;}
+.moh-countdown{flex: none; margin-left: var(--cy-space-1-5); padding: 2rpx var(--cy-space-1-5); border-radius: var(--cy-radius-pill); background: var(--cy-bg-subtle); color: var(--cy-gold); font-family: var(--cy-font-numeric); font-variant-numeric: tabular-nums; font-size: var(--cy-font-micro); font-weight: 600; white-space: nowrap;}
+.moh-countdown--urgent{color: var(--cy-danger);}
 .order-mode-line{display:flex; align-items:center; gap:var(--cy-legacy-10); min-width:0;}
 .order-mode-tag{flex:none; height:34rpx; line-height:34rpx; padding:0 var(--cy-space-1-5); border-radius: var(--cy-radius-pill); background:var(--cy-bg-subtle); color:var(--cy-info); font-size:var(--cy-font-caption); font-weight:800;}
 .order-mode-tag.green{background:var(--cy-bg-subtle); color:var(--cy-success);}

@@ -50,5 +50,5 @@
   <template is="qr-voucher-body" data="{{show, reducedMotion, surface, state, qr, code, errorText, retryText, showLogo, countdown, desc, secondaryText}}" />
 </block>
 <cy-scene-sheet wx:else show="{{show}}" variant="full" theme="player" title="{{title || '出示核销码'}}" mask-closable="{{maskClosable}}" reduced-motion="{{reducedMotion}}" z-index="{{zIndex}}" bind:requestclose="onClose">
-  <template is="qr-voucher-body" data="{{show, reducedMotion, surface, state, qr, code, errorText, retryText, showLogo, countdown, desc, secondaryText}}" />
+  <template is="qr-voucher-body" data="{{show: true, reducedMotion, surface, state, qr, code, errorText, retryText, showLogo, countdown, desc, secondaryText}}" />
 </cy-scene-sheet>

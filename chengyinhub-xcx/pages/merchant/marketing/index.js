@@ -193,8 +193,10 @@ Page({
       this._skipNextShowReload = false;
       return;
     }
-    // L07-030:切 tab 回来仍重验身份;营销首页 60s 内读过就不再串行重读
-    this._keepHomeOnce = !!this.data.marketingLoaded && Date.now() - (this._homeLoadedAt || 0) < 60000;
+    const stale = !!(app.globalData && app.globalData.merchantWorkbenchStale === true);
+    if (stale) app.globalData.merchantWorkbenchStale = false;
+    // L07-030:切 tab 回来仍重验身份;营销首页 60s 内读过且无写操作脏标记才跳过重读
+    this._keepHomeOnce = !stale && !!this.data.marketingLoaded && Date.now() - (this._homeLoadedAt || 0) < 60000;
     this.retryAll();
   },
 

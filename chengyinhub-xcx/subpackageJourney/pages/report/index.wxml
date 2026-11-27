@@ -98,4 +98,6 @@
       </block>
     </view>
   </cy-sheet>
+  <cy-toast id="cy-toast" />
+  <cy-modal-host id="cy-modal-host" />
 </view>

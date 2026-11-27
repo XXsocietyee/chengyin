@@ -31,4 +31,6 @@
     </view>
     <cy-empty wx:if="{{!promo.hasRecords}}" kind="empty" title="暂无可核实记录" size="sm" />
   </block>
+  <cy-toast id="cy-toast" />
+  <cy-modal-host id="cy-modal-host" />
 </view>

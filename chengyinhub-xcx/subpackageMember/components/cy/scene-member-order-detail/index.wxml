@@ -24,7 +24,7 @@
       <view class="hero-amt">{{money.amount2(cnt.f(info.actualPaidAmount, odK))}}</view>
       <view class="hero-title ep1">{{productTitle}}</view>
       <view class="hero-when" wx:if="{{whenText}}">{{whenText}}</view>
-      <view class="hero-pill hero-pill--{{statusTone}}" wx:if="{{info.statusText}}">{{info.statusText}}</view>
+      <view class="hero-pill hero-pill--{{statusTone}}" wx:if="{{info.statusText}}">{{info.statusText}}<text wx:if="{{payCountdownText}}" class="hero-pill__cd {{payCountdownUrgent ? 'hero-pill__cd--urgent' : ''}}"> · 剩 {{payCountdownText}}</text></view>
     </view>
   </view>
 

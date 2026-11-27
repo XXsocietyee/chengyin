@@ -298,7 +298,7 @@ Page({
     this.clearTimers();
     this._clearRenderedCredential();
     this._retryAt = 0;
-    this.setData({ countdown: 0, qrState: 'error', errMsg: msg || '优惠券出示码暂不可用，请联系管理员', pollError: '' });
+    this.setData({ countdown: 0, qrState: 'error', errMsg: msg || '优惠券出示码暂不可用，请联系门店或客服', pollError: '' });
   },
 
   onRefreshFail(msg) {

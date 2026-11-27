@@ -69,7 +69,7 @@ Page({
     const key = e.detail.key;
     if (!key || key === this.data.activeTopTab) return;
     pageMotion.enter(this, key === 'feed' ? 'pmFeed' : 'pmClubs'); this.setData({ activeTopTab: key }); // 2026-10-23:切标签卡片依次浮上来
-    if (key === 'feed' && this.data.feedState === 'idle') this.loadFeed();
+    if (key === 'feed' && (this.data.feedState === 'idle' || (this.data.feedLoginRequired && app.getUserID && app.getUserID()))) this.loadFeed();
   },
 
   /**
@@ -83,6 +83,8 @@ Page({
     const ctx = { requestId: (this._feedRequestId || 0) + 1, hasSnapshot: hasSnapshot, loadMore: false };
     this._feedRequestId = ctx.requestId;
     this._feedCtx = ctx;
+    this._feedOwner = String(app.getUserID && app.getUserID() || '');
+    this._seenSquareDirtyVersion = Number((app.globalData && app.globalData.squareListDirtyVersion) || 0);
     this._feedLoading = true;
     this.setData({
       feedState: hasSnapshot ? 'refreshing' : 'loading',
@@ -112,6 +114,7 @@ Page({
     if (this.data.isMerchantViewer) { if (this.data.storeCard) this.setData({ storeCard: null }); return; }
     if (this._storeCardRead) return;
     this._storeCardRead = true;
+    this._storeCardOwner = String(app.getUserID && app.getUserID() || '');
     const that = this;
     app.sendRequest({ url: '/api/marketing/product/list', method: 'GET', data: { limit: 50 }, hideLoading: true, autoErrorToast: false,
       success: function (res) { if (!that._unloaded) that.setData({ storeCard: res && String(res.code) === '200' ? storeCard(res.data) : null }); },
@@ -127,6 +130,8 @@ Page({
     const that = this;
     const ctx = { requestId: this._feedRequestId, hasSnapshot: true, loadMore: true };
     this._feedCtx = ctx;
+    this._feedOwner = String(app.getUserID && app.getUserID() || '');
+    this._seenSquareDirtyVersion = Number((app.globalData && app.globalData.squareListDirtyVersion) || 0);
     this._feedLoading = true;
     this._feedMerger.take(FEED_PAGE_SIZE).then(function (page) {
       if (!that._feedCurrent(ctx)) return;
@@ -383,11 +388,21 @@ Page({
     if (isMerchantViewer !== this.data.isMerchantViewer) this.detectMerchant();
     if (isMerchantViewer) merchantTheme.merchantPageShow();
     else merchantTheme.merchantPageRestore();
+    const viewerId = String(app.getUserID && app.getUserID() || '');
+    const dirtyVer = Number((app.globalData && app.globalData.squareListDirtyVersion) || 0);
+    const feedDirty = this._seenSquareDirtyVersion !== undefined && dirtyVer !== this._seenSquareDirtyVersion;
+    const feedOwnerChanged = this._feedOwner !== undefined && this._feedOwner !== viewerId;
     if (discoverNav.consumeDiscoverFeed(app)) {
       if (this.data.activeTopTab !== 'feed') { pageMotion.enter(this, 'pmFeed'); this.setData({ activeTopTab: 'feed' }); }
       if (!this._feedLoading) this.loadFeed();
+    } else if (this.data.feedState !== 'idle' && (feedDirty || feedOwnerChanged || (this.data.feedLoginRequired && viewerId))) {
+      if (this.data.activeTopTab === 'feed') {
+        if (!this._feedLoading) this.loadFeed();
+      } else {
+        this._seenSquareDirtyVersion = dirtyVer;
+        this.setData({ feedState: 'idle', feedLoginRequired: false });
+      }
     }
-    else if (this.data.feedLoginRequired && app.getUserID() && this.data.activeTopTab === 'feed' && !this._feedLoading) this.loadFeed();
     if (this._skipInitialShow) this._skipInitialShow = false;
     else this.loadClubHome();
     this.loadImUnread();

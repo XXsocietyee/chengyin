@@ -115,7 +115,8 @@ Page({
     const row = this.data.rows.find(r => r.id === id);
     if (!row || !row.canNoShow || this.data.busyId) return;
     modal.show({
-      title: '记为未到店？', content: row.timeText + ' 的预约将扣除这次权益，不产生核销与分成，记录后不能撤销。',
+      danger: true, title: '记为未到店？', content: row.timeText + ' 的预约将扣除这次权益，不产生核销与分成，记录后不能撤销。',
+      confirmText: '记为未到店', cancelText: '取消',
       success: (r) => {
         if (!r.confirm || this._unloaded || this.data.busyId) return;
         this.setData({ busyId: id });

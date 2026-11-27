@@ -443,6 +443,7 @@ Page({
         if (res.code == "200") {
           const nextFollowState = intendedFollow;
           that.setData({ 'info.isFollowTheUser': nextFollowState });
+          if (app.globalData) app.globalData.squareListDirtyVersion = (app.globalData.squareListDirtyVersion || 0) + 1;
 
           toast(nextFollowState ? '关注成功' : '已取消关注');
         } else {

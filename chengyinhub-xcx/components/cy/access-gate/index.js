@@ -31,7 +31,12 @@ Component({
   },
   pageLifetimes: {
     hide() { this._hidden = true; },
-    show() { this._hidden = false; if (this._readSessionChanged) { this._readSessionChanged = false; this.check(); } },
+    show() {
+      this._hidden = false;
+      const nowOwner = String(app.getUserID && app.getUserID() || '');
+      const recoveredLogin = this.data.state === 'login' && !!nowOwner && nowOwner !== '0';
+      if (this._readSessionChanged || recoveredLogin) { this._readSessionChanged = false; this.check(); }
+    },
   },
   methods: {
     check() {

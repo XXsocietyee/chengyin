@@ -62,7 +62,16 @@ Page({
   input(e) {
     if (this.locked()) return;
     const field = e.currentTarget.dataset.field;
-    if (['titleName', 'taxNo'].includes(field)) this.patch({ [field]: String(e.detail.value || '') });
+    if (field === 'titleName') this.patch({ titleName: String(e.detail.value || '') });
+    else if (field === 'taxNo') this.patch({ taxNo: String(e.detail.value || '').replace(/\s+/g, '').toUpperCase() });
+  },
+  onSaveDisabledTap() {
+    if (this.data.writing || this.data.titlePending) return;
+    const d = this.data.draft || {};
+    if (!String(d.titleName || '').trim()) { this.setData({ saveError: '请输入抬头名称' }); return; }
+    if (d.titleType === 'COMPANY' && !TAX_NO.test(String(d.taxNo || '').trim().toUpperCase())) {
+      this.setData({ saveError: '税号需为 15–20 位数字或大写字母' });
+    }
   },
   titleType(e) {
     if (this.locked()) return;
@@ -94,6 +103,7 @@ Page({
     if (this._titleRetry) this._titleRetry.destroy();
     this._titleRetry = null;
     this.setData({ titlePending: false, titleRequestId: '', writing: false, draft: draft(), canSubmit: false });
+    cyToast('发票抬头已保存');
     if (getCurrentPages().length > 1) wx.navigateBack({ delta: 1 });
     else wx.redirectTo({ url: '/subpackageMember/invoice-titles/index' });
   },

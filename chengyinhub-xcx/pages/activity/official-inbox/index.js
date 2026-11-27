@@ -159,11 +159,12 @@ Page({
       actionError: '',
     });
     modal.show({
+      danger: !isAccept,
       title: isAccept ? (organizerInvite ? '接受主办邀约' : '接受本场职责') : (action === 'decline' ? '拒绝本场邀约' : '退出本场职责'),
       content: organizerInvite
         ? (isAccept ? '接受后会成为本场唯一主办，或成为已接受的候任主办等待受控转交。' : '拒绝会保留在活动审计中。')
         : (isAccept ? '接受后会计入活动履约覆盖。' : '该决定会留在活动审计中，并重新计算履约缺口。'),
-      confirmText: isAccept ? '确认接受' : '确认',
+      confirmText: isAccept ? '确认接受' : (action === 'decline' ? '确认拒绝' : '确认退出'),
       success: (result) => {
         if (!result.confirm) {
           this._clearActionBusy();

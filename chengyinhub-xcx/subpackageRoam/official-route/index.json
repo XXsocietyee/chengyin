@@ -1,9 +1,10 @@
 {
   "navigationStyle": "custom",
-  "navigationBarTitleText": "线路详情",
+  "navigationBarTitleText": "路线详情",
   "navigationBarTextStyle": "white",
   "backgroundColor": "#000000",
   "usingComponents": {
+    "cy-btn": "/components/cy/btn/index",
     "cy-nav-bar": "/components/cy/nav-bar/index",
     "cy-page-title": "/components/cy/page-title/index",
     "cy-skeleton": "/components/cy/skeleton/index",
