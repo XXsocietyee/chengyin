@@ -377,6 +377,70 @@ test('L01-096 带队「出发」在途时连点只发一次 POST,回包后可再
   assert.equal(h.requests.filter(r => r.url === '/api/club/lead/start').length, 2);
 });
 
+test('L01-149 入场码在途时连点只发一次出码,回包后可再开', async () => {
+  const h = load();
+  h.app.getSession = () => ({ getRevision: () => 1 });
+  const page = realPage(h.definition, { regId: 9, ticket: { show: true } }, ['ensureTicket', '_boundPlayOwner', '_playMember', '_capturePlayLoginContext', '_isPlayAccountCurrent']);
+  page._boundPlayOwner();
+  page.ensureTicket(); page.ensureTicket();
+  const issued = () => h.requests.filter(r => r.url === '/api/verify/dyncode/issue');
+  assert.equal(issued().length, 1);
+  issued()[0].success({ code: 200, data: { code: 'ABC', qrcodeUrl: 'u', expiresAt: 1 } });
+  await tick();
+  page.ensureTicket();
+  assert.equal(issued().length, 2);
+});
+
+test('L01-150 分身开场离开后不再 setData、不再重开呼吸;前台仍会开', () => {
+  const h = load();
+  const page = realPage(h.definition, { hero: { node: { nodeId: 1, npcName: '阿宁', name: '店' } }, nodes: [] }, ['openShopNpc']);
+  const set = page.setData;
+  const patches = [];
+  page.setData = function (patch, done) { patches.push(patch); set.call(this, patch); if (done) done(); };
+  const saved = global.setTimeout;
+  let openTimer;
+  global.setTimeout = (fn) => { openTimer = fn; return 1; };
+  try { page.openShopNpc(); } finally { global.setTimeout = saved; }
+  let starts = 0;
+  page._startNpcFigure = () => { starts++; };
+  patches.length = 0;
+  page._playDisposed = true;
+  openTimer();
+  assert.equal(starts, 0);
+  assert.deepEqual(patches, []);
+  page._playDisposed = false;
+  page._themeHidden = true;
+  openTimer();
+  assert.equal(starts, 0);
+  assert.deepEqual(patches, [{ 'shopNpc.open': true }]);
+  page._themeHidden = false;
+  openTimer();
+  assert.equal(starts, 1);
+});
+
+test('L01-150 画布查询回来时已离开就不开呼吸,前台仍跑循环', () => {
+  let exec;
+  const chain = { in() { return chain; }, select() { return chain; }, fields() { return chain; }, exec(fn) { exec = fn; } };
+  const rafs = [];
+  const ctx = new Proxy({}, { get: () => () => {}, set: () => true });
+  const node = { getContext: () => ctx, requestAnimationFrame(fn) { rafs.push(fn); return rafs.length; }, width: 0, height: 0 };
+  const h = load({ createSelectorQuery: () => chain, getWindowInfo: () => ({ pixelRatio: 2 }) });
+  const page = realPage(h.definition, { shopNpc: { show: true }, reducedMotion: false }, ['_startNpcFigure']);
+  page._themeHidden = true;
+  page._startNpcFigure();
+  exec([{ node, width: 40, height: 80 }]);
+  assert.equal(rafs.length, 0);
+  page._themeHidden = false;
+  page._playDisposed = true;
+  page._startNpcFigure();
+  exec([{ node, width: 40, height: 80 }]);
+  assert.equal(rafs.length, 0);
+  page._playDisposed = false;
+  page._startNpcFigure();
+  exec([{ node, width: 40, height: 80 }]);
+  assert.equal(rafs.length, 1);
+});
+
 test('L01-097 章节结束在途时连点不重复发,失败后可重试', async () => {
   const h = load();
   const page = realPage(h.definition, { chapter: { id: 1 }, nodes: [], nextNode: null }, ['continueChapterStory', '_boundPlayOwner', '_playMember',

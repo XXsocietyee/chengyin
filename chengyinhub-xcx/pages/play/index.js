@@ -2268,7 +2268,16 @@ Page({
         greeting: authored || (hi + '，我是' + v.npcName + '，欢迎来到' + (v.name || '我们店铺')),
         started: false, msgs: [], input: '', thinking: false, thinkPhase: 0, nodeId: v.nodeId, recording: false, voiceId: 0,
       },
-    }, () => { this._npcRy = 0; this._npcTimer = setTimeout(() => { this.setData({ 'shopNpc.open': true }); this._startNpcFigure(); }, 30); });
+    }, () => {
+      this._npcRy = 0;
+      // L01-150:开场这一拍若已经卸载,不再 setData;已经进后台也不把 L01-079 停掉的呼吸重新拉起来
+      this._npcTimer = setTimeout(() => {
+        this._npcTimer = 0;
+        if (this._playDisposed || !this.data.shopNpc || !this.data.shopNpc.show) return;
+        this.setData({ 'shopNpc.open': true });
+        if (!this._themeHidden) this._startNpcFigure();
+      }, 30);
+    });
   },
 
   /** 画那个人形。几何由 utils/npc-figure 生成(纯函数,可单测),这里只负责上色与绘制 ——
@@ -2276,6 +2285,8 @@ Page({
   _startNpcFigure() {
     const that = this;
     wx.createSelectorQuery().in(this).select('#npcFig').fields({ node: true, size: true }).exec((res) => {
+      // L01-150:查询回来时人已经离开,这一帧不再开呼吸(前台仍照常画)
+      if (that._playDisposed || that._themeHidden || !that.data.shopNpc || !that.data.shopNpc.show) return;
       const item = res && res[0];
       if (!item || !item.node) return;
       const cv = item.node, ctx = cv.getContext('2d');
@@ -2313,7 +2324,7 @@ Page({
       if (that.data.reducedMotion) { draw(that._npcRy || 0, 0); return; }   // 降低动态:不跑循环,转身由 onNpcTouchMove 直接重画
       const t0 = Date.now();
       const loop = () => {
-        if (!that.data.shopNpc.show) return;
+        if (!that.data.shopNpc.show || that._themeHidden || that._playDisposed) return;
         draw(that._npcRy || 0, Math.sin((Date.now() - t0) / 1400) * 5);   // 呼吸式浮动
         that._rafNpcFig = cv.requestAnimationFrame(loop);
       };
@@ -8081,15 +8092,20 @@ Page({
     if (!this._isPlayAccountCurrent() || this.data.isPreview || this.data.isMock) return;             // 预览/mock 不出码
     const regId = this.data.regId;
     if (!regId) { this._explainMissingEntryQr(); return; }
+    // L01-149:序号只丢掉过期回包,挡不住连点的第二次 POST。后一次失败会把先签发的码盖成「生成失败」。
+    if (this._ticketIssuing) return;
     const owner = this._boundPlayOwner(), sessionKey = this._sessionKey();
     const login = captureLogin(app, wx);
     if (!loginCurrent(app, wx, login)) return;
+    this._ticketIssuing = true;
     const sequence = this._ticketIssueSequence = (this._ticketIssueSequence || 0) + 1;
     const current = () => loginCurrent(app, wx, login) && this._isPlayAccountCurrent() && owner === this._playOwner
       && !this.data.isPreview && !this.data.isMock && this.data.regId === regId
       && sequence === this._ticketIssueSequence && sessionKey === this._sessionKey();
+    const release = () => { if (sequence === that._ticketIssueSequence) that._ticketIssuing = false; };
     this.setData({ ticket: { show: this.data.ticket.show, url: '', code: '', loading: true, expiresAt: 0 } });
     req('/api/verify/dyncode/issue', 'POST', { registrationId: regId }).then((res) => {
+      release();
       if (!current()) return;
       if (String(res.code) === '200' && res.data) {
         if (seatChoice(res.data, regId)) {
