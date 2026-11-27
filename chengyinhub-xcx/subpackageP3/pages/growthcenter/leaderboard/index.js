@@ -198,7 +198,8 @@ Page({
   toRow(it, index) {
     const rawName = it.nickname ? String(it.nickname).trim() : ''
     const tail = it.memberId != null && it.memberId !== '' ? String(it.memberId).slice(-4) : ''
-    const name = !rawName ? '探索者' : (rawName === '城瘾用户' && tail ? '城瘾用户 · ' + tail : rawName)
+    const rankNum = it.rank != null ? it.rank : (index >= 0 ? index + 1 : '')
+    const name = !rawName ? '探索者' : (rawName === '城瘾用户' ? (tail ? '城瘾用户 · ' + tail : (rankNum ? '城瘾用户 #' + rankNum : rawName)) : rawName)
     return {
       rank: it.rank,
       memberId: it.memberId,

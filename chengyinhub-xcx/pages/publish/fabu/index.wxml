@@ -20,7 +20,9 @@
   <view class="slopes-back" style="top: {{chrome.actionTop}}px;" bindtap="goBack" aria-role="button" aria-label="返回上一页" hover-class="cy-pressed" hover-stay-time="80">
     <view class="slopes-back__ico"></view>
   </view>
-  <cy-empty wx:if="{{creatorLoginRequired}}" title="登录后创建主题" cta="去登录" bind:cta="onCreatorLogin" />
+  <view wx:if="{{creatorLoginRequired}}" class="pd-edit-gate" style="padding-top: calc({{chrome.contentTop}}px + var(--cy-space-4));">
+    <cy-empty fill size="lg" title="登录后创建主题" cta="去登录" bind:cta="onCreatorLogin" />
+  </view>
   <block wx:else>
   <!-- 顶边复查(2026-09-18):--cy-safe-top 的 env 在模拟器/无刘海机为 0,padding 顶会把内容压进胶囊行 ⇒ 改胶囊实测 contentTop -->
   <view class="pd-edit-gate" wx:if="{{editingTopicId && !editLoaded}}" style="padding-top:calc({{chrome.contentTop}}px + var(--cy-space-4))">
